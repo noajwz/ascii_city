@@ -644,6 +644,19 @@ zero drift.
 
 ## Testing it
 
+```bash
+python3 tests/checks.py       # everything that needs no terminal; takes a minute
+python3 tests/pty_checks.py   # ordinary play, driven through a real pty
+```
+
+Both exit 0 or 1, so `&&` them. No test framework and nothing to install — `tests/harness.py`
+imports the module with its colours stubbed and the other two are plain scripts.
+
+**Add to them.** Nearly every bug in this thing was found by measuring rather than looking, and
+almost all of them came back as a regression test: stars drawn inside buildings, a sign that
+swung out into the road, a cheat that took you to where a rave sometimes happens, a pier that
+quietly spanned the river. The suite is the reason those stayed fixed.
+
 Stub the module globals `init_colors()` would have set (`PALETTES`, `NEON`, `STAR`, `CURB`, `RAIN`,
 `BULB`, …) with plain integers and call `render_street(View(x, z, yaw, w, h), now)` directly — it
 returns a grid of characters to print or assert on, no terminal needed. That covers geometry,

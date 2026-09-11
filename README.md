@@ -47,6 +47,15 @@ the city is infinite, identical every time you walk back to it, and held in no m
 The cheat menu teleports you to anything worth looking at — it searches the city for what is
 already there rather than spawning it, so the rare things stay exactly as rare as they were.
 
+## Tests
+
+```bash
+python3 tests/checks.py && python3 tests/pty_checks.py
+```
+
+A few hundred assertions, no framework and nothing to install. The first renders frames and counts
+what landed where; the second forks a pty and actually plays the thing.
+
 ## Notes
 
 `CLAUDE.md` is the long version: how the renderer works, why particular decisions were made, and
