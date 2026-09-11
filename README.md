@@ -1,5 +1,7 @@
 # ascii_city
 
+Inspired by [Grow Now! Games](https://youtu.be/3YtygAx_C6A).
+
 An endless, procedurally generated city you can walk around in your terminal.
 
 ```bash
