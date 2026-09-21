@@ -142,9 +142,9 @@ for _, name, kind in ac.CHEAT_PLACES:
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
-    if kind in ("bank", "pier"):
+    if kind in ("bank", "pier", "lake"):
         # probe() measures how far you could walk, and the whole point of these
-        # two is that they face water. Checked below on their own terms.
+        # is that they face water. Checked below on their own terms.
         continue
     x, z, yaw = ac.find_place(x0, z0, kind)
     if ac.probe(x, z, yaw, 120.0) < 5.0:
@@ -908,6 +908,73 @@ ac.FIREFLY = ac.EYES = 1
 while ac.weather_name() != "auto":
     ac.cycle_weather()
 
+# The lake: water you can see across and not stand in, a path round it that
+# every trail reaching the shore joins, and the sky lying in it.
+li, lj = ac.lake_centre(wi, wj)
+lake = [(i, j) for i in range(li - 12, li + 13) for j in range(lj - 8, lj + 9)
+        if ac.lake_at(i, j)]
+check("there is a lake in the woods", len(lake) > 100, "%d cells" % len(lake))
+check("and it is water", all(ac.is_open(i, j) for i, j in lake)
+      and not any(ac.can_stand((i + 0.5) * ac.CELL, (j + 0.5) * ac.CELL)
+                  for i, j in lake))
+shore = [(i, j) for i in range(li - 14, li + 15) for j in range(lj - 10, lj + 11)
+         if ac.woods_at(i, j) and 0 <= ac.lake_dist(i, j) < 2.2]
+check("with a path all the way round it", shore and all(s in seen for s in shore),
+      "%d shore cells, all reached from the hollow" % len(shore))
+pond = ac.find_place(x0, z0, "lake")
+pi = int((pond[0] + math.sin(pond[2]) * 6) / ac.CELL + ac.BIG) - ac.BIG
+pj = int((pond[1] + math.cos(pond[2]) * 6) / ac.CELL + ac.BIG) - ac.BIG
+check("the lake cheat stands you on the shore facing the water",
+      ac.can_stand(pond[0], pond[1]) and ac.lake_at(pi, pj))
+while ac.weather_name() != "dry":
+    ac.cycle_weather()
+clear = max(range(80), key=lambda k: ac.night(k * ac.NIGHT_LENGTH + 100)["clarity"]
+            * (0 if ac.night(k * ac.NIGHT_LENGTH + 100)["alien"] else 1))
+tc = clear * ac.NIGHT_LENGTH + 100
+pv = ac.View(pond[0], pond[1], pond[2], 108, 26)
+real_reflect = ac.reflect_river
+ac.reflect_river = lambda *a: None
+plain, _, _ = ac.render_street(pv, tc)
+ac.reflect_river = real_reflect
+grid, _, _ = ac.render_street(pv, tc)
+stars = sum(1 for (y, sx) in pv.water if grid[y][sx] != plain[y][sx])
+check("and on a clear night the stars are in it", stars > 10,
+      "%d reflected cells" % stars)
+
+# The one who is awake: there when the rig is on, pale where the crowd is
+# dark, and he has something to say if you stand next to him.
+jx, jz = ac.jack_spot(hi, hj)
+ac.force_rave(700.0)
+ac.MOON_DIM, ac.BARK = 961, 962
+blits = []
+ac.blit_sprite = lambda ch, co, v, w, art, *a: (blits.append((art, a[-1])),
+                                              real_blit(ch, co, v, w, art, *a))
+jv = ac.View(jx, jz - 6.0, 0.0, 110, 30)
+dark_frame = next(700.0 + k * 0.02 for k in range(60)
+                  if ac.rave_light(700.0 + k * 0.02,
+                                   (ac._mix(hi, hj, 977) & 255) / 255.0 * 6.0,
+                                   0.5) is None)
+ac.render_street(jv, dark_frame)
+jack = [c for a, c in blits if a is ac.JACK]
+crowd_c = {c for a, c in blits if a is ac.ZOMB_UP or a is ac.ZOMB_DOWN}
+check("Jack is at the edge of the hollow", len(jack) == 1)
+check("and he is the one who is not dark",
+      jack and jack[0] == 961 and crowd_c == {962})
+check("and has something to say", "music" in ac.rave_hint(jv, dark_frame))
+check("but not from across the hollow",
+      "music" not in ac.rave_hint(ac.View(hx, hz + 30, 0.0, 110, 30), dark_frame))
+ac.blit_sprite = real_blit
+ac.MOON_DIM = ac.BARK = 1
+ac._forced_rave = None
+del blits[:]
+ac.blit_sprite = lambda ch, co, v, w, art, *a: (blits.append(art),
+                                              real_blit(ch, co, v, w, art, *a))
+ac.render_street(jv, t_off)
+ac.blit_sprite = real_blit
+check("and when there is no rave, he is not there", ac.JACK not in blits)
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
+
 # The menu has to deliver the rave, not the hollow it sometimes happens in.
 ac._forced_rave = None
 odds = sum(1 for k in range(2000) if ac.rave_window(k * 7.3 + 11.0) is not None)
@@ -945,7 +1012,7 @@ for dx, dz, want in ((0, -30, "N"), (0, 30, "S"), (-30, 0, "E"), (30, 0, "W"),
 check("the hint points at the music from every side", not wrong,
       ", ".join(wrong) or "including from behind")
 check("it says how far too",
-      "close" in ac.rave_hint(ac.View(cx, cz - 12, 0.0, 88, 22), 500.0)
+      "close" in ac.rave_hint(ac.View(cx, cz - 20, 0.0, 88, 22), 500.0)
       and "way off" in ac.rave_hint(ac.View(cx, cz - 200, 0.0, 88, 22), 500.0)
       and "far off" in ac.rave_hint(ac.View(cx, cz - 500, 0.0, 88, 22), 500.0))
 check("and says nothing when there is no rig going",
@@ -1480,7 +1547,7 @@ check("and breaks up as it comes towards you", shallow > deep,
 # was most of the screen: only windows, neon and bulbs may cross, and past
 # the first rows they are streaks, not letters.
 bad = [grid[y][sx] for (y, sx) in mirrored
-       if not (grid[y][sx].isalnum() or grid[y][sx] in "*+@:")]
+       if not (grid[y][sx].isalnum() or grid[y][sx] in "*+@:.'")]  # .' are stars
 check("the reflection carries lights, not walls", not bad,
       "%d structural glyphs: %r" % (len(bad), "".join(sorted(set(bad)))))
 streaks = sum(1 for (y, sx) in mirrored if grid[y][sx] == ":")

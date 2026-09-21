@@ -417,6 +417,20 @@ in the next cell over, and only if that cell is open; inside the tree's own cell
 its own eyes, which is how the first version showed none at all. Nothing is ever drawn attached
 to them. Rain puts the fireflies out.
 
+**The lake** lies off towards one end of the wood, away from the hollow — two different places to
+end up, and between them is where you get lost. `lake_at()` is the second kind of water in the
+city, and it cost almost nothing: `water_at()` is river-or-lake, and `is_open()`, `dry_at()` and the
+ground pass ask that instead of `river_at()`. Everything else the river has — `v.water`, the mist,
+the reflection — works off the cells that were drawn as water and never asks which water it is.
+Any trail that reaches the shore joins the **shore path** that runs round it, because a trail that
+simply ran into the lake would end in it. The gulls stay the river's.
+
+The reflection pass reflects **the sky now, not only the facades** — it used to start at the
+roofline, and over a lake ringed with trees that left nothing to mirror but black. Above the
+roofline anything drawn is a light (stars, the moon, the beams on the strange night), and a canopy
+lit by the rig counts as one too; on the facades it is still only the lights that cross. `e` in the
+menu stands you on the shore.
+
 ## The rave in the hollow
 
 The Samurai Jack episode is the reference — *Jack and the Rave* — and the thing taken from it is
@@ -436,6 +450,13 @@ hollow stand the ones still on their way, hoods up, facing it, not moving (`draw
 The rig's palette is `RAVE_TONES` — magenta, purple, green, cyan — never the full neon rainbow,
 which is the club's. `rave_light()` is 168 BPM with no colour wash between kicks, just dark. On the
 alien night it takes the sky's beat instead.
+
+**And the one who is awake.** Jack stands at the near edge of the hollow, off to one side of the
+path in, with his back to the altar and facing whoever comes down the path — topknot, white gi, the
+sword at his hip. Everything about him is the crowd inverted: pale (`MOON_DIM`) where they are
+dark, still where they move, and no light in his eyes between the kicks. Stand within seven units
+and the HUD gives you his line instead of the bearing. He is only there while the rig is on; he
+came for it.
 
 **Rare and unreachable are different things, and the menu has to reach it.** `x` calls
 `force_rave()` and stands you at the edge of the hollow facing the altar; the HUD gives a bearing
