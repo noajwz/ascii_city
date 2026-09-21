@@ -1580,5 +1580,45 @@ check("and nowhere else does",
 while ac.weather_name() != "auto":
     ac.cycle_weather()
 
+# --- a painted sign reads left to right on all four faces ----------------
+# `u` runs with +z on an x-facing wall and with +x on a z-facing one however
+# you are standing, so on the two faces whose outward normal is -x or +z the
+# letters came out in the wrong order and OPEN read as NEPO. Invisible to
+# every other test here, because a row of windows reads the same either way
+# round - it was found by looking at a screenshot.
+import collections
+
+order = collections.Counter()
+frame = {}
+real_column = ac.draw_wall_column
+
+
+def spy_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, *a, **k):
+    out = real_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, *a, **k)
+    if out[3] is not None:
+        frame.setdefault((b["seed"], face), []).append((sx, out[3]))
+    return out
+
+
+ac.draw_wall_column = spy_column
+sx0, sz0 = ac.start_position()
+for n in range(200):
+    frame.clear()
+    ac.render_street(ac.View(sx0 + (n % 20) * 37.0, sz0 - (n // 20) * 43.0,
+                             (n * 0.7) % 6.28, 120, 30), 300.0 + n)
+    for (_, face), pts in frame.items():
+        ks = [k for _, k in sorted(set(pts))]
+        if len(ks) >= 3:
+            order[(face, ks == sorted(ks))] += 1
+ac.draw_wall_column = real_column
+
+right = sum(n for (_, fwd), n in order.items() if fwd)
+wrong = sum(n for (_, fwd), n in order.items() if not fwd)
+check("painted signs read left to right", wrong == 0,
+      "%d signs, %d mirrored" % (right + wrong, wrong))
+check("on every one of the four faces",
+      all((f, True) in order for f in range(4)),
+      "faces seen: %s" % sorted({f for f, _ in order}))
+
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
