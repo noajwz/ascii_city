@@ -1434,6 +1434,8 @@ check("the river wanders rather than running straight",
 # out about half the width of the straights.
 flat, steep = [], []
 for i in range(0, 1600):
+    if ac.grand_avenue(i) and abs(i - ac.grand_avenue(i)[0]) < 3 * ac.BAY_REACH:
+        continue                        # the bay is meant to be wide
     lo, hi = ac.river_span(i)
     slope = abs(ac.river_centre(i + 1) - ac.river_centre(i - 1)) * 0.5
     across = (hi - lo) / math.sqrt(1.0 + slope * slope)
@@ -1621,6 +1623,59 @@ check("from across the water the wheel is a ring of lights", len(rims[0]) > 25,
 check("and it turns", rims[0] != rims[1] != rims[2])
 wet_cells = sum(1 for (y, x) in fv.water if grid[y][x] not in " ~-")
 check("and lies on the water", wet_cells > 15, "%d cells of reflection" % wet_cells)
+
+# The big bridge: one per stretch, on an avenue, over a bay the river opens
+# into for it, with towers you can see from a long way off.
+deck = ac.find_place(x0, z0, "grand")
+gi_ = int(deck[0] / ac.CELL + ac.BIG) - ac.BIG
+gspan = ac.grand_avenue(gi_)
+check("there is a big bridge, on an avenue", gspan is not None and ac.grand_at(gi_)
+      and ac.road_span(gspan[0], ac.XP, 91) is not None)
+glo, ghi = ac.river_span(gspan[0] + 1)
+clo, chi = ac.river_span(gspan[0] + 60)
+check("and the river opens into a bay under it", (ghi - glo) > 1.5 * (chi - clo),
+      "%.0f units across against %.0f" % ((ghi - glo) * ac.CELL, (chi - clo) * ac.CELL))
+check("which is a crossing", all(ac.bridge_at(gspan[0] + 1, j)
+                                 for j in range(int(glo) + 1, int(ghi))))
+check("with no piers in it", not any(ac.pier_at(i, j) for i in range(gspan[0] - 30, gspan[0] + 30)
+                                     for j in range(int(glo) - 2, int(ghi) + 2)))
+check("and nobody leaning on it", ac.leaner_at(gspan[0]) is None)
+check("the cheat stands you on the deck", ac.can_stand(deck[0], deck[1])
+      and ac.bridge_at(gi_, int(deck[1] / ac.CELL + ac.BIG) - ac.BIG))
+ac.EMBER_HOT, ac.BULB, ac.ROU_RED = 991, 992, 993
+mx_ = (gspan[0] + gspan[1] * 0.5) * ac.CELL
+dv = ac.View(mx_, (glo + ghi) * 0.5 * ac.CELL + 12.0, math.pi, 120, 34)
+_, dcol, _ = ac.render_street(dv, 300.0)
+tower = sum(1 for r in dcol for a in r if a == 991)
+lights = sum(1 for r in dcol for a in r if a == 992)
+check("from the deck you see the towers", tower > 40, "%d cells of orange" % tower)
+check("and the lights along the cables", lights > 20, "%d bulbs" % lights)
+av = ac.View(mx_, (int(ghi) + 50.5) * ac.CELL, math.pi, 120, 34)
+_, acol, _ = ac.render_street(av, 300.0)
+far = sum(1 for r in acol for a in r if a == 991)
+check("and it stands over the end of the avenue from 250 units back", far > 10,
+      "%d cells" % far)
+tops = set()
+for k in range(4):
+    _, acol, _ = ac.render_street(av, 300.0 + k * 0.45)
+    tops.add(sum(1 for r in acol for a in r if a == 993))
+check("and the tower lights blink", len(tops) > 1 and 0 in tops, "%s" % sorted(tops))
+ac.EMBER_HOT = ac.BULB = ac.ROU_RED = 1
+seen = {(gspan[0] + 1, int(ghi) + 1)}
+q = _dq(list(seen))
+across = False
+while q and not across:
+    i, j = q.popleft()
+    if j <= int(glo) - 1 and not ac.river_at(i, j):
+        across = True
+        break
+    for a, b in ((i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)):
+        if (a, b) in seen or abs(a - gspan[0]) > 6 or b < int(glo) - 3 or b > int(ghi) + 3:
+            continue
+        if ac.can_stand((a + 0.5) * ac.CELL, (b + 0.5) * ac.CELL):
+            seen.add((a, b))
+            q.append((a, b))
+check("and you can walk over it to the far bank", across)
 
 # The bridge: lamps along it, a festoon between them, and no crane.
 ac.BULB, ac.EMBER_HOT = 941, 942

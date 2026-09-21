@@ -137,6 +137,19 @@ FAIR_LONG = 11         # cells of bank it takes up, along the river
 FAIR_DEEP = 4          # and back from the water
 WHEEL_R = 10.0         # the wheel's radius in world units
 WHEEL_RPM = 1.3
+
+# --- the big bridge ---
+# Once in a long way along the river it opens into a bay, and a suspension
+# bridge crosses it: two towers standing in the water, the main cables slung
+# over them, and a string of lights the whole way along each cable, which is
+# the thing anyone would recognise it by at night.
+GRAND_GAP = 600        # cells along the river between one and the next
+BAY_WIDEN = 2.2        # how much wider the channel gets under it, on top of itself
+BAY_REACH = 16.0       # over how many cells either side it opens out
+TOWER_H = 32.0         # world units
+TOWER_OUT = 2.5        # the legs stand this far outside the deck's edges
+CABLE_SAG = 9.0        # the main cable's height at mid-span
+GRAND_SEEN = 340.0     # how far off it is drawn from
 CASINO_REACH = 2.3     # how close to the door you have to get to be inside
 CASINO_AGAIN = 1.6     # seconds before it deals you another one
 
@@ -816,17 +829,50 @@ def river_centre(i):
             + 3.0 * math.sin(i / 11.0 + 0.4))
 
 
+_grand_cache = {}
+
+
+def grand_avenue(i):
+    """(first cell, width) of the avenue the big bridge is on, for the stretch
+    of river this cell is in. The nearest avenue to a hashed spot that has not
+    been built over - so there is always exactly one per stretch."""
+    k = i // GRAND_GAP
+    hit = _grand_cache.get(k)
+    if hit is None:
+        want = k * GRAND_GAP + 120 + _mix(k, 0, 1307) % (GRAND_GAP - 240)
+        hit = None
+        for step in range(0, 20):
+            a = want // XP + (step + 1) // 2 * (1 if step % 2 else -1)
+            span = road_span(a * XP + 1, XP, 91)
+            if span is not None:
+                hit = span
+                break
+        _grand_cache[k] = hit
+    return hit
+
+
+def grand_at(i):
+    """Is this column the big bridge's avenue."""
+    span = grand_avenue(i)
+    return span is not None and span[0] <= i < span[0] + span[1]
+
+
 def river_span(i):
     """(near bank, far bank) in cells, for this step along the channel.
 
     Widened by the slope of the meander: the band is measured straight across,
     so on a steep bend it is a slanted strip and the channel would pinch to
     half its width exactly where it turns - which is the one place a river gets
-    wider, not narrower."""
+    wider, not narrower. And opened out into a bay under the big bridge, which
+    wants water worth spanning."""
     mid = river_centre(i)
     slope = (river_centre(i + 1) - river_centre(i - 1)) * 0.5
     half = ((RIVER_HALF + 1.1 * math.sin(i / 17.0 + 2.2))
             * math.sqrt(1.0 + slope * slope))
+    span = grand_avenue(i)
+    if span is not None:
+        d = (i - (span[0] + span[1] * 0.5)) / BAY_REACH
+        half *= 1.0 + BAY_WIDEN * math.exp(-d * d)
     return mid - half, mid + half
 
 
@@ -854,6 +900,9 @@ def pier_at(i, j):
     inside the street."""
     if not river_at(i, j) or _mix(i // PIER_WIDE, 0, 457) % 19:
         return False
+    span = grand_avenue(i)
+    if span is not None and abs(i - span[0]) < BAY_REACH * 2:
+        return False                    # the bay is the bridge's
     lo, hi = river_span(i)
     # Never more than half way over. The channel narrows to under five cells on
     # some stretches, and a fixed seven-cell pier there quietly spans it - you
@@ -879,7 +928,7 @@ def bridge_at(i, j):
 
     A footbridge: railings, warm lamps, a string of lights between them."""
     return (river_at(i, j) and _is_road(i, XP, 91)
-            and _mix(i // XP, 0, 719) % BRIDGE_ODDS == 0)
+            and (_mix(i // XP, 0, 719) % BRIDGE_ODDS == 0 or grand_at(i)))
 
 
 def carnival_col(i):
@@ -3641,6 +3690,92 @@ def draw_carnival(ch, co, v, walls, c, now, wet):
                     CURB)
 
 
+def _cable_y(zf, za, zt1, zt2, zb):
+    """Height of the main cable at zf: up from the anchorage to the first
+    tower, down into the sag and up to the second, down to the far anchorage.
+    Three parabolas that meet at the tower tops."""
+    if zf < zt1:
+        t = (zf - za) / max(1e-6, zt1 - za)
+        return 1.5 + (TOWER_H - 1.5) * t * t
+    if zf > zt2:
+        t = (zb - zf) / max(1e-6, zb - zt2)
+        return 1.5 + (TOWER_H - 1.5) * t * t
+    zm = (zt1 + zt2) * 0.5
+    t = (zf - zm) / max(1e-6, zt2 - zm)
+    return CABLE_SAG + (TOWER_H - CABLE_SAG) * t * t
+
+
+def draw_grand_bridge(ch, co, v, walls, i, j, now, wet):
+    """The big one. Two towers in the water, the cables over them, the
+    suspenders down to the deck, and lights along every cable.
+
+    Everything is world points. The towers are a pair of legs with the cross
+    bracing between them that makes a suspension tower read as one, in the
+    orange those bridges are painted; the cables are dim and it is the bulbs
+    on them that draw the curve, which is what you actually see of one at
+    night. A red light on each tower top, blinking, for the aircraft."""
+    xa, xb, z0, z1 = bridge_edges(i)
+    xa, xb = xa - TOWER_OUT, xb + TOWER_OUT     # the deck passes between the legs
+    za, zb = z0 - 0.5 * CELL, z1 + 0.5 * CELL           # the anchorages
+    zt1, zt2 = za + (zb - za) * 0.27, za + (zb - za) * 0.73
+    blink = int(now * 1.1) % 2 == 0
+
+    for x in (xa, xb):
+        # The main cable, a bulb every few units along it.
+        zf = za
+        while zf <= zb:
+            y = _cable_y(zf, za, zt1, zt2, zb)
+            slope = _cable_y(zf + 0.5, za, zt1, zt2, zb) - y
+            glyph = "-" if abs(slope) < 0.18 else ("\\" if slope > 0 else "/")
+            put_point(ch, co, v, walls, x, y, zf, glyph, EMBER)
+            zf += 0.6
+        zf = za + 1.0
+        while zf < zb:
+            put_lit(ch, co, v, walls, x, _cable_y(zf, za, zt1, zt2, zb) + 0.3,
+                    zf, "o", BULB, max(wet, 0.3), now)
+            zf += 2.1
+        # Suspenders, from the cable down to the deck.
+        zf = za + 1.6
+        while zf < zb:
+            top = _cable_y(zf, za, zt1, zt2, zb)
+            y = 1.0
+            while y < top - 0.4:
+                put_point(ch, co, v, walls, x, y, zf, "|", CONCRETE)
+                y += 1.1
+            zf += 2.4
+        # The railing along the deck, at the deck's own edge.
+        zf = z0
+        while zf <= z1:
+            put_point(ch, co, v, walls, x - TOWER_OUT if x == xa else x + TOWER_OUT,
+                      0.95, zf, "-", CURB)
+            zf += 0.75
+
+    # The towers.
+    for zt in (zt1, zt2):
+        for x in (xa, xb):
+            y = 0.0
+            while y <= TOWER_H:
+                put_point(ch, co, v, walls, x, y, zt, "|", EMBER_HOT)
+                y += 0.55
+        for y in (6.0, 13.0, 20.0, 27.0, TOWER_H):
+            x = xa
+            while x <= xb:
+                put_point(ch, co, v, walls, x, y, zt, "=", EMBER_HOT)
+                x += 0.8
+        for x in (xa, xb):
+            put_point(ch, co, v, walls, x, TOWER_H + 0.7, zt,
+                      "*" if blink else ".", ROU_RED if blink else CONCRETE)
+
+    # Lamps down the deck, both sides, and the way the footbridge does it.
+    zf = z0 + 2.0
+    while zf < z1:
+        for x in (xa, xb):
+            for h in (1.4, 2.2, 3.0):
+                put_point(ch, co, v, walls, x, h, zf, "|", CONCRETE)
+            put_lit(ch, co, v, walls, x, 3.5, zf, "o", BULB, max(wet, 0.3), now)
+        zf += 9.0
+
+
 BRIDGE_LAMP_GAP = 6.0    # world units between lamp posts along the parapet
 BRIDGE_SEEN = 230.0      # how far off the end lamps are drawn from
 LEANER_ODDS = 3          # one bridge in this many has somebody on it
@@ -3657,7 +3792,7 @@ def bridge_edges(i):
 def leaner_at(i):
     """Where somebody is leaning on this bridge's railing, or None."""
     m = _mix(i, 0, 733)
-    if m % LEANER_ODDS:
+    if m % LEANER_ODDS or grand_at(i):
         return None
     xa, xb, z0, z1 = bridge_edges(i)
     x = xa if (m >> 4) & 1 else xb
@@ -3780,8 +3915,9 @@ def near_bridges(v, reach):
         # One per crossing, not one per cell of it.
         for k in range(i - 3, i + 1):
             if bridge_at(k, int(mid)) and not bridge_at(k - 1, int(mid)):
-                seen.add(i)
-                yield k, int(mid)
+                if k not in seen:
+                    seen.add(k)
+                    yield k, int(mid)
                 break
 
 
@@ -4428,10 +4564,15 @@ def render_street(v, now):
     reflect_river(ch, co, v, walls, now, wet)
     for i, j in near_yokocho(v, 55.0):
         draw_lantern_string(ch, co, v, walls, i, j, now)
+    for i, j in near_bridges(v, GRAND_SEEN):
+        if grand_at(i):
+            draw_grand_bridge(ch, co, v, walls, i, j, now, wet)
     for i, j in near_bridges(v, BRIDGE_SEEN):
-        draw_bridge_ends(ch, co, v, walls, i, j, now, wet)
+        if not grand_at(i):
+            draw_bridge_ends(ch, co, v, walls, i, j, now, wet)
     for i, j in near_bridges(v, 85.0):
-        draw_bridge(ch, co, v, walls, i, j, now, wet)
+        if not grand_at(i):
+            draw_bridge(ch, co, v, walls, i, j, now, wet)
     draw_river_mist(ch, co, v, walls, now, wet)
     if woods_depth(int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG) > -8.0:
         draw_woods_life(ch, co, v, walls, now, wet)
@@ -4743,10 +4884,16 @@ CHEAT_PLACES = [
     ("e", "the lake", "lake"),
     ("t", "the riverbank", "bank"),
     ("i", "the carnival", "carnival"),
+    ("u", "the big bridge", "grand"),
     ("j", "end of a pier", "pier"),
     ("b", "a bridge", "bridge"),
     ("B", "someone leaning", "leaner"),
 ]
+
+
+# The river and the woods: listed under the parts of town, not with the city.
+OUT_OF_TOWN = {"woods", "rave", "lake", "bank", "pier", "bridge", "leaner",
+               "carnival", "grand"}
 
 
 def _rings(ci, cj, limit):
@@ -4909,6 +5056,21 @@ def _water_spot(x, z, kind):
     looking back at the city, which is the view it exists for; a bridge
     stands you on the road up to it with the lamps in front of you."""
     ci = int(x / CELL + BIG) - BIG
+    if kind == "grand":
+        # On the deck at the near end, looking across: the cables rising to
+        # the towers either side of you, which is the view it exists for.
+        for k in range(-1, 3):
+            span = grand_avenue(ci + k * GRAND_GAP)
+            if span is None:
+                continue
+            gi = span[0] + span[1] // 2
+            _, hi = river_span(gi)
+            px, pz = (gi + 0.5) * CELL, (int(hi) - 0.5) * CELL
+            if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+                continue
+            if can_stand(px, pz):
+                return px, pz, math.pi
+        return None
     if kind == "carnival":
         # On the fairground, near the water, looking down the length of it.
         for k in range(-1, 3):
@@ -5034,7 +5196,7 @@ def find_place(x, z, kind):
         return _doorway(x, z, 909, "club")
     if kind in ("woods", "rave", "lake"):
         return _woods_spot(x, z, kind)
-    if kind in ("bank", "pier", "bridge", "leaner", "carnival"):
+    if kind in ("bank", "pier", "bridge", "leaner", "carnival", "grand"):
         return _water_spot(x, z, kind)
     if kind.startswith("@"):
         return _district_spot(x, z, int(kind[1:]))
@@ -5062,16 +5224,19 @@ def draw_cheats(ch, co, note):
     """The panel, drawn over the live frame rather than instead of it, so that
     what you change to the weather happens in front of you.
 
-    Two columns: there are as many parts of town to jump to as there are things
-    to jump to, and one list of twenty would be taller than most terminals."""
+    Two columns, three groups: the city on the left with the weather under
+    it, the parts of town on the right with the river and the woods under
+    them. One list of everything would be taller than most terminals."""
     height, width = len(ch), len(ch[0])
     left = [("", "CHEATS")]
-    left += [(k, name) for k, name, _ in CHEAT_PLACES]
+    left += [(k, name) for k, name, kind in CHEAT_PLACES if kind not in OUT_OF_TOWN]
     left += [("", ""), ("w", "weather: " + weather_name()),
              ("L", "strike now"), ("n", "next night"),
              ("A", "a strange night")]
     right = [("", "PARTS OF TOWN")]
     right += [(d["key"], d["name"]) for d in DISTRICTS]
+    right += [("", ""), ("", "OUT OF TOWN")]
+    right += [(k, name) for k, name, kind in CHEAT_PLACES if kind in OUT_OF_TOWN]
     right += [("", ""), ("`", "close")]
 
     col = 20

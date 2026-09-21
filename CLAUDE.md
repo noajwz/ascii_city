@@ -357,6 +357,33 @@ ring against the buildings behind it. Everything else on the ground is a billboa
 with riders going round it on their own, four stalls in four colours, a string of bulbs the length
 of the ground sagging between the poles, and a few people looking up. `i` in the menu.
 
+## The big bridge
+
+Once every `GRAND_GAP` cells along the river the channel opens into a **bay** and a suspension
+bridge crosses it. `grand_avenue()` picks the avenue — the nearest one to a hashed spot that has
+not been built over, so there is exactly one per stretch — and `river_span()` widens the channel
+under it by a Gaussian bulge (`BAY_WIDEN`, `BAY_REACH`): a suspension bridge over a 35-unit
+channel is a footbridge with pretensions, and 90 units is water worth spanning. No piers in the
+bay; the bay is the bridge's. The crossing is forced (`bridge_at()` says yes for the grand avenue
+whatever `BRIDGE_ODDS` said), and there is a test that you can walk over it to the far bank.
+
+`draw_grand_bridge()` is all world points. Two towers standing in the water at 27% and 73% of the
+span, each a pair of legs with the portal bracing between them that makes a suspension tower read
+as one, in `EMBER_HOT` — the orange those bridges are painted; a red light on each top, blinking.
+The legs stand `TOWER_OUT` outside the deck's edges, because the deck passes *between* the legs of
+a real one, and with the legs on the deck edge the whole thing was squeezed into the avenue's
+fifteen units. The main cables are three parabolas meeting at the tower tops (`_cable_y()`), drawn
+dim, and it is the **bulbs along them** that draw the curve — which is what you actually see of
+one at night, and the thing anyone would recognise it by. Suspenders every couple of units down to
+the deck, lamps along it. It is drawn from `GRAND_SEEN` (340 units), because the towers are what
+you see first.
+
+**Where you can see it from is limited, and that is the city's doing, not the bridge's.** The
+bank is not a promenade — buildings run right down to the water — so from beside the bridge you
+are looking through a block. The views that exist are the avenue approach, where the tower stands
+over the end of the street like a gate, and the deck itself, which is where `u` in the menu puts
+you: the bracing across the sky ahead, the cables coming down either side, the far bank beyond.
+
 ## The bridges
 
 The crossings were building sites for a while — hoardings, a hazard board, a crane — as a
@@ -723,7 +750,9 @@ weather, time, a mode — give it a key that sets it, the way `w` and `L` do. Bo
 Adding the feature and leaving the menu alone is an unfinished job.
 
 `` ` `` opens a panel over the live view — over, not instead of, so that weather you change happens
-in front of you. Letters belong to the panel while it is up; the arrow keys do not, so you can still
+in front of you. Two columns, three groups: the city on the left with the weather under it, the
+parts of town on the right with **OUT OF TOWN** — the river and the woods, `OUT_OF_TOWN` — under
+them; a single list of everything outgrew a 30-row terminal. Letters belong to the panel while it is up; the arrow keys do not, so you can still
 walk about with it open.
 
 **It generates nothing.** The city is a pure function of its coordinates, so `find_place()` searches
