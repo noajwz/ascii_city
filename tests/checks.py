@@ -873,6 +873,22 @@ check("with one on, the light goes up into the leaves", lit[0] > 150,
       "%d canopy cells lit" % lit[0])
 check("there is a crowd in the hollow", lit[1] > 20, "%d of them" % lit[1])
 check("facing an altar", lit[2])
+ac.ROU_GREEN, ac.ROU_RED = 971, 972
+del blits[:]
+ac.render_street(ac.View(spot[0], spot[1], spot[2], 88, 22), t_on)
+ac.ROU_GREEN = ac.ROU_RED = 1
+aku = [a for a in blits if a in (ac.AKU_BODY, ac.AKU_FACE, ac.AKU_BROW, ac.AKU_WHITE)]
+check("with Aku on the decks", len(aku) == 4, "%d layers of him" % len(aku))
+face = []
+ac.blit_sprite = lambda ch, co, v, w, art, *a: (face.append(a[-1]) if art is ac.AKU_FACE
+                                              else None,
+                                              real_blit(ch, co, v, w, art, *a))
+ac.ROU_GREEN = 971
+ac.render_street(ac.View(spot[0], spot[1], spot[2], 88, 22), t_on)
+ac.ROU_GREEN = 1
+check("and his face is green", face == [971])
+ac.blit_sprite = lambda ch, co, v, w, art, *a: (blits.append(art),
+                                              real_blit(ch, co, v, w, art, *a))
 check("with none on, the woods are just woods",
       dark[0] < 60 and dark[1] == 0 and not dark[2],
       "%d canopy, %d people" % (dark[0], dark[1]))

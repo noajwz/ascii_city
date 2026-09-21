@@ -3226,12 +3226,8 @@ ZOMB_DOWN = [
     "_| |_",
 ]
 
-# The altar at the far end of the hollow: the stack, the decks on it, and the
-# thing over the decks that everyone is facing.
+# The booth at the far end of the hollow: the stack, and the decks on it.
 ALTAR = [
-    " \\     / ",
-    "  \\o o/  ",
-    "   \\_/   ",
     "  _|=|_  ",
     " |[o][o]|",
     " |_____| ",
@@ -3239,8 +3235,72 @@ ALTAR = [
     "|#||#||#|",
     "|_||_||_|",
 ]
-ALTAR_H = 7.2
-ALTAR_W = 3.6
+ALTAR_H = 4.2
+ALTAR_W = 3.15
+
+# And who is on the decks. Aku: the crest of flame with the two great horns,
+# the green face, the brows that are flames, the grin. Drawn in layers so each
+# part can take its own colour - the one sprite in the city that is not one
+# colour - and standing behind the booth, which hides his feet, if he has any.
+AKU_BODY = [
+    '\\                 /',
+    ' \\     /\\  /\\    / ',
+    '  \\   /  \\/  \\  /  ',
+    '   \\_/  /\\   \\_/   ',
+    '                   ',
+    '                   ',
+    '                   ',
+    '                   ',
+    '                   ',
+    '  ____\\______/____ ',
+    ' /    |      |    \\',
+    '/     |      |     ',
+]
+AKU_FACE = [
+    '                   ',
+    '                   ',
+    '                   ',
+    '                   ',
+    '    (##########)   ',
+    '    (##########)   ',
+    '    (##########)   ',
+    '    (##########)   ',
+    '     \\########/    ',
+    '                   ',
+    '                   ',
+    '                   ',
+]
+AKU_BROW = [
+    '                   ',
+    '                   ',
+    '                   ',
+    '                   ',
+    '      /\\    /\\     ',
+    '                   ',
+    '                   ',
+    '                   ',
+    '                   ',
+    '                   ',
+    '                   ',
+    '                   ',
+]
+AKU_WHITE = [
+    '                   ',
+    '                   ',
+    '                   ',
+    '                   ',
+    '                   ',
+    '       o    o      ',
+    '                   ',
+    '      VVVVVVVV     ',
+    '                   ',
+    '                   ',
+    '                   ',
+    '                   ',
+]
+AKU_H = 7.6
+AKU_W = 6.0
+AKU_FEET = 2.4         # he stands up behind the booth, towering over it
 
 # The one who is awake. Topknot, white gi, the sword at his hip. He stands at
 # the edge of the hollow with his back to the altar, facing whoever comes down
@@ -3286,14 +3346,7 @@ def draw_hollow_rave(ch, co, v, walls, hi, hj, now, wet):
         t = now * ALIEN_BPM / 60.0
     kick = lamp == FLASH
 
-    # The altar, against the trees at the back.
     ax, az = hx, hz + HOLLOW_RJ * CELL * 0.72
-    blit_sprite(ch, co, v, walls, ALTAR, ax, az, 0.0, ALTAR_H, ALTAR_W,
-                lamp if lamp is not None else CONCRETE)
-    for ex in (-0.4, 0.4):              # its eyes, which are never off
-        put_point(ch, co, v, walls, ax + ex, ALTAR_H * (1.0 - 1.5 / 9.0), az,
-                  "o", FLASH if kick else EMBER_HOT)
-
     # Beams going up into the canopy - the giveaway, from much further off
     # than any of the rest of it.
     if lamp is not None:
@@ -3306,8 +3359,21 @@ def draw_hollow_rave(ch, co, v, walls, hi, hj, now, wet):
                           "|" if abs(a) < 0.4 else ("\\" if a > 0 else "/"),
                           rave_tone(tone, k + int(t / 8)))
 
-    # The crowd. Furthest first so the near ones are drawn over them.
+    # The booth, against the trees at the back, and Aku behind it, on the
+    # decks - drawn after the beams, so they come up from behind him. He bobs
+    # on the kick. His body is the dark purple the rig leaves on things
+    # between hits, and white when the strobe takes everything.
     up = (t % 1.0) < 0.5
+    bob = AKU_FEET + (0.35 if up else 0.0)
+    body = FLASH if kick else NEON[min(len(NEON) - 1, 6)][1]
+    for art, colour in ((AKU_BODY, body), (AKU_FACE, ROU_GREEN),
+                        (AKU_BROW, ROU_RED), (AKU_WHITE, FLASH)):
+        blit_sprite(ch, co, v, walls, art, ax, az + 1.8, bob, bob + AKU_H,
+                    AKU_W, colour)
+    blit_sprite(ch, co, v, walls, ALTAR, ax, az, 0.0, ALTAR_H, ALTAR_W,
+                lamp if lamp is not None else CONCRETE)
+
+    # The crowd. Furthest first so the near ones are drawn over them.
     crowd = []
     for k in range(CROWD):
         g = _mix(hi, hj, 40 + k)
