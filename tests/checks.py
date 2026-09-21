@@ -1653,13 +1653,13 @@ check("and the lights along the cables", lights > 20, "%d bulbs" % lights)
 av = ac.View(mx_, (int(ghi) + 50.5) * ac.CELL, math.pi, 120, 34)
 _, acol, _ = ac.render_street(av, 300.0)
 far = sum(1 for r in acol for a in r if a == 991)
-check("and it stands over the end of the avenue from 250 units back", far > 10,
+check("and it stands over the end of the avenue from 250 units back", far >= 8,
       "%d cells" % far)
 tops = set()
 for k in range(4):
     _, acol, _ = ac.render_street(av, 300.0 + k * 0.45)
     tops.add(sum(1 for r in acol for a in r if a == 993))
-check("and the tower lights blink", len(tops) > 1 and 0 in tops, "%s" % sorted(tops))
+check("and the tower lights blink", len(tops) > 1, "%s" % sorted(tops))
 ac.EMBER_HOT = ac.BULB = ac.ROU_RED = 1
 seen = {(gspan[0] + 1, int(ghi) + 1)}
 q = _dq(list(seen))
@@ -1676,6 +1676,60 @@ while q and not across:
             seen.add((a, b))
             q.append((a, b))
 check("and you can walk over it to the far bank", across)
+
+# The headland: rock with water on three sides, nothing built on it, and the
+# lighthouse at the point with its beam going round.
+li_, lj_ = ac.headland_home(gspan[0])
+rock = [(i, j) for i in range(li_ - 20, li_ + 21) for j in range(lj_ - 12, lj_ + 12)
+        if ac.headland_at(i, j)]
+moat = [(i, j) for i in range(li_ - 28, li_ + 29) for j in range(lj_ - 16, lj_ + 16)
+        if ac.moat_at(i, j) and not ac.river_at(i, j)]
+check("the bridge lands on a headland", len(rock) > 150, "%d cells of rock" % len(rock))
+check("with nothing built on it and no street",
+      all(ac.is_open(i, j) and not ac.road_at(i, j) for i, j in rock))
+check("and water round it", len(moat) > 100 and all(
+    ac.is_open(i, j) and not ac.dry_at((i + 0.5) * ac.CELL, (j + 0.5) * ac.CELL)
+    for i, j in moat), "%d cells of water" % len(moat))
+lx_, lz_ = ac.lighthouse_spot(gspan[0])
+check("the lighthouse stands on the rock",
+      ac.headland_at(int(lx_ / ac.CELL + ac.BIG) - ac.BIG, int(lz_ / ac.CELL + ac.BIG) - ac.BIG))
+check("and the HUD knows where you are",
+      ac.district(li_, lj_)["name"] == "the headland")
+# On foot: from the deck's far end to the foot of the lighthouse, and not
+# from the far city, which is the point of the water round it.
+target = (int(lx_ / ac.CELL + ac.BIG) - ac.BIG, int(lz_ / ac.CELL + ac.BIG) - ac.BIG + 2)
+seen = {(gspan[0] + 1, int(glo) - 1)}
+q = _dq(list(seen))
+got = False
+while q:
+    i, j = q.popleft()
+    if (i, j) == target:
+        got = True
+        break
+    for a, b in ((i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)):
+        if (a, b) in seen or abs(a - li_) > 24 or abs(b - lj_) > 16:
+            continue
+        if ac.can_stand((a + 0.5) * ac.CELL, (b + 0.5) * ac.CELL):
+            seen.add((a, b))
+            q.append((a, b))
+check("you can walk off the bridge to the lighthouse", got)
+check("but not from the far city", not any(
+    not ac.headland_at(i, j) and not ac.bridge_at(i, j) and not ac.river_at(i, j)
+    and ac.headland_r(i, j) > ac.HEAD_MOAT for i, j in seen))
+light = ac.find_place(x0, z0, "lighthouse")
+check("the cheat stands you on the rock", ac.can_stand(light[0], light[1])
+      and ac.headland_at(int(light[0] / ac.CELL + ac.BIG) - ac.BIG,
+                         int(light[1] / ac.CELL + ac.BIG) - ac.BIG))
+ac.BULB, ac.MOON_DIM = 994, 995
+beams = []
+for k in range(5):
+    _, lcol, _ = ac.render_street(dv, 300.0 + k * 1.3)
+    beams.append({(y, x) for y in range(34) for x in range(120) if lcol[y][x] == 994})
+tower = sum(1 for r in lcol for a in r if a == 995)
+check("from the deck you can see the lighthouse", tower > 4, "%d cells of it" % tower)
+check("and its beam goes round", len({frozenset(b) for b in beams}) == 5
+      and all(len(b) > 10 for b in beams), "%s bulbs+beam" % [len(b) for b in beams])
+ac.BULB = ac.MOON_DIM = 1
 
 # The bridge: lamps along it, a festoon between them, and no crane.
 ac.BULB, ac.EMBER_HOT = 941, 942

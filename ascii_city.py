@@ -150,6 +150,17 @@ TOWER_H = 32.0         # world units
 TOWER_OUT = 2.5        # the legs stand this far outside the deck's edges
 CABLE_SAG = 9.0        # the main cable's height at mid-span
 GRAND_SEEN = 340.0     # how far off it is drawn from
+
+# --- and what it lands on ---
+# The far side of the bay is not the city. A rocky headland with water round
+# three sides of it, nothing built on it, and a lighthouse at the point whose
+# beam goes round over the bay, the bridge and the town every few seconds.
+HEAD_RI = 16.0         # the headland's radii, in cells
+HEAD_RJ = 8.0
+HEAD_MOAT = 1.5        # the water round it reaches this far out, in radii
+LIGHT_H = 21.0         # the lighthouse, in world units
+BEAM_TURN = 7.0        # seconds for the beam to go round once
+BEAM_REACH = 150.0
 CASINO_REACH = 2.3     # how close to the door you have to get to be inside
 CASINO_AGAIN = 1.6     # seconds before it deals you another one
 
@@ -257,8 +268,15 @@ def district_at(i, j):
     return hit
 
 
+HEADLAND = dict(WOODS, name="the headland", park=False)
+
+
 def district(i, j):
-    return WOODS if woods_at(i, j) else DISTRICTS[district_at(i, j)]
+    if woods_at(i, j):
+        return WOODS
+    if headland_at(i, j):
+        return HEADLAND
+    return DISTRICTS[district_at(i, j)]
 
 # Chinatown's signs, if the terminal can draw them. Two or three characters
 # each, which is what fits a vertical sign and what they actually say: bar,
@@ -857,6 +875,47 @@ def grand_at(i):
     return span is not None and span[0] <= i < span[0] + span[1]
 
 
+def headland_home(i):
+    """(li, lj) the centre of the headland at the far end of the big bridge in
+    this stretch, in cells, or None."""
+    span = grand_avenue(i)
+    if span is None:
+        return None
+    li = span[0] + span[1] // 2
+    lo, _ = river_span(li)              # the bay's bank, not the channel's
+    return li, int(lo) - 6
+
+
+def headland_r(i, j):
+    """Distance from the headland's centre in units of its own radius: under
+    one is rock, up to HEAD_MOAT is the water round it."""
+    home = headland_home(i)
+    if home is None:
+        return 9.0
+    li, lj = home
+    di, dj = i - li, j - lj
+    a = math.atan2(dj, di)
+    wob = 1.0 + 0.10 * math.sin(a * 4.0 + li) + 0.06 * math.sin(a * 7.0 + lj)
+    return math.sqrt((di / (HEAD_RI * wob)) ** 2 + (dj / (HEAD_RJ * wob)) ** 2)
+
+
+def headland_at(i, j):
+    return headland_r(i, j) < 1.0 and not river_at(i, j)
+
+
+def moat_at(i, j):
+    return 1.0 <= headland_r(i, j) < HEAD_MOAT
+
+
+def lighthouse_spot(i):
+    """Where the lighthouse stands: at the point, in world units."""
+    home = headland_home(i)
+    if home is None:
+        return None
+    li, lj = home
+    return (li + 0.5) * CELL, (lj - 3.5) * CELL
+
+
 def river_span(i):
     """(near bank, far bank) in cells, for this step along the channel.
 
@@ -1140,7 +1199,7 @@ def lake_at(i, j):
 
 def water_at(i, j):
     """Anything you can see across but not stand on."""
-    return river_at(i, j) or lake_at(i, j)
+    return river_at(i, j) or lake_at(i, j) or moat_at(i, j)
 
 
 def nearest_hollow(x, z):
@@ -1254,7 +1313,7 @@ def road_at(i, j):
 
     No street runs through the woods: the avenue stops at the trees and a gate
     in the ring trail is what continues it."""
-    if woods_at(i, j):
+    if woods_at(i, j) or headland_at(i, j):
         return False
     return _is_road(i, XP, 91) or _is_road(j, ZP, 137)
 
@@ -1266,8 +1325,8 @@ def is_open(i, j):
         _evict(_open_cache, 60000)
         if water_at(i, j):
             hit = True          # you can see across it; standing is elsewhere
-        elif fair_at(i, j):
-            hit = True          # the fairground: nothing is built on it
+        elif fair_at(i, j) or headland_at(i, j):
+            hit = True          # the fairground, the headland: nothing built
         elif woods_at(i, j):
             # Trails, the hollow, and otherwise trees thick enough that the
             # open cells do not join up: off a trail you get a few cells in and
@@ -2783,6 +2842,7 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 trail = woods and trail_at(i, j)
                 fair = (not wet_cell and not solid and not road_at(i, j)
                         and fair_at(i, j))
+                rock = not wet_cell and not solid and headland_at(i, j)
                 hollow = (woods and v.hollow is not None
                           and hollow_at(i, j))
                 lane = None
@@ -2868,6 +2928,11 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 if h % 5:
                     continue
                 glyph, attr = ",", GOLD_DIM                   # sawdust
+            elif rock:
+                h = _mix(int(x * 3.0), int(z * 3.0), 23)
+                if h % 6:
+                    continue
+                glyph, attr = ("^" if h % 5 == 0 else "."), CONCRETE
             elif green:
                 h = _mix(int(x * 3.0), int(z * 3.0), 23)
                 if h % 3:
@@ -3776,6 +3841,77 @@ def draw_grand_bridge(ch, co, v, walls, i, j, now, wet):
         zf += 9.0
 
 
+BENCH = [
+    "_______",
+    "|_____|",
+    "|     |",
+]
+
+
+def near_lighthouses(v, reach):
+    ci = int(v.x / CELL + BIG) - BIG
+    for k in range(-1, 2):
+        spot = lighthouse_spot(ci + k * GRAND_GAP)
+        if spot is None:
+            continue
+        rx, rz = spot[0] - v.x, spot[1] - v.z
+        if rx * v.dx + rz * v.dz < -CELL or rx * rx + rz * rz > reach * reach:
+            continue
+        yield spot
+
+
+def draw_lighthouse(ch, co, v, walls, lx, lz, now, wet):
+    """The tower, the lantern room, and the beam going round.
+
+    The tower is a stack of rings in world space, white with red bands, so it
+    tapers and stays round from wherever you see it. The beam is the thing: a
+    line of points from the lantern out over the water, sweeping a full turn
+    every BEAM_TURN seconds, bright near the lamp and fading with distance -
+    and it goes over the bridge, the bay and the town without asking any of
+    them, which is the point of one."""
+    for k in range(int(LIGHT_H / 0.55)):
+        y = k * 0.55
+        r = 1.6 - 0.6 * y / LIGHT_H
+        band = int(y / 3.5) % 2 == 0
+        for a in range(8):
+            ang = a * math.tau / 8.0
+            put_point(ch, co, v, walls, lx + math.cos(ang) * r, y,
+                      lz + math.sin(ang) * r, "|" if a % 2 else "#",
+                      ROU_RED if band else MOON_DIM)
+    # The lantern room and its roof.
+    for a in range(8):
+        ang = a * math.tau / 8.0
+        put_point(ch, co, v, walls, lx + math.cos(ang) * 1.2, LIGHT_H + 0.6,
+                  lz + math.sin(ang) * 1.2, "=", CONCRETE)
+        put_point(ch, co, v, walls, lx + math.cos(ang) * 0.6, LIGHT_H + 2.0,
+                  lz + math.sin(ang) * 0.6, "^", CONCRETE)
+    put_lit(ch, co, v, walls, lx, LIGHT_H + 1.0, lz, "O", FLASH, max(wet, 0.4), now)
+
+    # The beam, and a fainter one the other way, the way a real lens throws.
+    turn = now * math.tau / BEAM_TURN
+    for side, far, attr in ((1.0, BEAM_REACH, BULB), (-1.0, BEAM_REACH * 0.5,
+                                                      BULB_DIM)):
+        dx, dz = math.cos(turn) * side, math.sin(turn) * side
+        glyph = ("-" if abs(dx) > 0.85 else "|" if abs(dz) > 0.85
+                 else "\\" if dx * dz > 0 else "/")
+        d = 2.5
+        while d < far:
+            px, pz = lx + dx * d, lz + dz * d
+            put_point(ch, co, v, walls, px, LIGHT_H + 1.0 - 0.012 * d, pz, glyph,
+                      attr if d < far * 0.6 else BULB_DIM)
+            # And where it passes over water, it lies on the water.
+            if d > 8.0 and water_at(int(px / CELL + BIG) - BIG,
+                                    int(pz / CELL + BIG) - BIG):
+                put_point(ch, co, v, walls, px, 0.06, pz, ":", attr)
+            d += 1.0 + d * 0.03
+
+    # A bench at the point, facing the water, and a lamp by it.
+    blit_sprite(ch, co, v, walls, BENCH, lx + 4.0, lz - 2.5, 0.0, 0.9, 1.6, CURB)
+    for h in (1.0, 2.0, 2.8):
+        put_point(ch, co, v, walls, lx + 6.5, h, lz - 2.5, "|", CONCRETE)
+    put_lit(ch, co, v, walls, lx + 6.5, 3.3, lz - 2.5, "o", BULB, max(wet, 0.3), now)
+
+
 BRIDGE_LAMP_GAP = 6.0    # world units between lamp posts along the parapet
 BRIDGE_SEEN = 230.0      # how far off the end lamps are drawn from
 LEANER_ODDS = 3          # one bridge in this many has somebody on it
@@ -4567,6 +4703,8 @@ def render_street(v, now):
     for i, j in near_bridges(v, GRAND_SEEN):
         if grand_at(i):
             draw_grand_bridge(ch, co, v, walls, i, j, now, wet)
+    for lx, lz in near_lighthouses(v, 420.0):
+        draw_lighthouse(ch, co, v, walls, lx, lz, now, wet)
     for i, j in near_bridges(v, BRIDGE_SEEN):
         if not grand_at(i):
             draw_bridge_ends(ch, co, v, walls, i, j, now, wet)
@@ -4885,6 +5023,7 @@ CHEAT_PLACES = [
     ("t", "the riverbank", "bank"),
     ("i", "the carnival", "carnival"),
     ("u", "the big bridge", "grand"),
+    ("h", "the lighthouse", "lighthouse"),
     ("j", "end of a pier", "pier"),
     ("b", "a bridge", "bridge"),
     ("B", "someone leaning", "leaner"),
@@ -4893,7 +5032,7 @@ CHEAT_PLACES = [
 
 # The river and the woods: listed under the parts of town, not with the city.
 OUT_OF_TOWN = {"woods", "rave", "lake", "bank", "pier", "bridge", "leaner",
-               "carnival", "grand"}
+               "carnival", "grand", "lighthouse"}
 
 
 def _rings(ci, cj, limit):
@@ -5056,6 +5195,20 @@ def _water_spot(x, z, kind):
     looking back at the city, which is the view it exists for; a bridge
     stands you on the road up to it with the lamps in front of you."""
     ci = int(x / CELL + BIG) - BIG
+    if kind == "lighthouse":
+        # Where the bridge lands on the headland, looking out to the point.
+        for k in range(-1, 3):
+            home = headland_home(ci + k * GRAND_GAP)
+            if home is None:
+                continue
+            li, lj = home
+            for back in range(0, 8):
+                px, pz = (li + 0.5) * CELL, (lj + 4 - back + 0.5) * CELL
+                if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+                    break
+                if can_stand(px, pz) and headland_at(li, lj + 4 - back):
+                    return px, pz, math.pi
+        return None
     if kind == "grand":
         # On the deck at the near end, looking across: the cables rising to
         # the towers either side of you, which is the view it exists for.
@@ -5196,7 +5349,8 @@ def find_place(x, z, kind):
         return _doorway(x, z, 909, "club")
     if kind in ("woods", "rave", "lake"):
         return _woods_spot(x, z, kind)
-    if kind in ("bank", "pier", "bridge", "leaner", "carnival", "grand"):
+    if kind in ("bank", "pier", "bridge", "leaner", "carnival", "grand",
+                "lighthouse"):
         return _water_spot(x, z, kind)
     if kind.startswith("@"):
         return _district_spot(x, z, int(kind[1:]))

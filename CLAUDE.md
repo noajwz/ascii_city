@@ -384,6 +384,27 @@ are looking through a block. The views that exist are the avenue approach, where
 over the end of the street like a gate, and the deck itself, which is where `u` in the menu puts
 you: the bracing across the sky ahead, the cables coming down either side, the far bank beyond.
 
+## The headland, and the lighthouse
+
+The far side of the bay is not the city. `headland_home()` puts a rocky promontory at the bridge's
+far landing — centred six cells beyond the **bay's** bank, not the channel's, which was the first
+bug: the centre sat in the water. `headland_at()` is rock: open ground with nothing built on it, no
+street, `the headland` on the HUD. `moat_at()` is the water round the other three sides, the third
+kind of water in the city and, like the lake, free — `water_at()` is river-or-lake-or-moat and
+nothing downstream asks which. The far city's avenue stops at the moat, so the only way onto the
+rock is over the bridge, and there is a test for both directions: you can walk off the deck to the
+foot of the lighthouse, and you cannot walk there from the far bank.
+
+`draw_lighthouse()` is world points: a stack of rings, white with red bands, so it tapers and stays
+round from wherever you see it; the lantern room on top with a light that is never off; a bench
+at the point and a lamp by it. The **beam** is the reason the headland exists — a line of points
+from the lantern out to `BEAM_REACH`, with a fainter one thrown the other way the way a real lens
+does, going round once every `BEAM_TURN` seconds. It goes over the bridge, the bay and the town
+without asking any of them, and where it passes over water it is drawn on the water too: a beam
+that only exists in the air reads as a stick. Drawn from 420 units, further than the bridge,
+because a moving light is the first thing the eye finds. `h` in the menu puts you at the landing
+looking out to the point.
+
 ## The bridges
 
 The crossings were building sites for a while — hoardings, a hazard board, a crane — as a
