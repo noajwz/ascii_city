@@ -1731,6 +1731,74 @@ check("and its beam goes round", len({frozenset(b) for b in beams}) == 5
       and all(len(b) > 10 for b in beams), "%s bulbs+beam" % [len(b) for b in beams])
 ac.BULB = ac.MOON_DIM = 1
 
+# The promenade: two stretches in three of the near bank are a walk, open
+# and standable, with a rail and lamps; the bank cheat puts you on it.
+stretches = [s for s in range(-40, 40)]
+with_prom = sum(1 for s in stretches
+                if ac.prom_at(s * ac.PROM_STRETCH + 3,
+                              int(ac.river_span(s * ac.PROM_STRETCH + 3)[1]) + 1))
+check("most of the near bank is a promenade", 0.5 < with_prom / 80.0 < 0.8,
+      "%d of 80 stretches" % with_prom)
+walk = [(i, j) for i in range(-200, 200)
+        for j in (int(ac.river_span(i)[1]) + 1, int(ac.river_span(i)[1]) + 2)
+        if ac.prom_at(i, j)]
+check("and it is open ground you can stand on", walk and all(
+    ac.is_open(i, j) and ac.can_stand((i + 0.5) * ac.CELL, (j + 0.5) * ac.CELL)
+    for i, j in walk if not ac.road_at(i, j)))
+bank2 = ac.find_place(x0, z0, "bank")
+check("the bank cheat stands you on it",
+      ac.prom_at(int(bank2[0] / ac.CELL + ac.BIG) - ac.BIG,
+                 int(bank2[1] / ac.CELL + ac.BIG) - ac.BIG))
+ac.BULB = 981
+_, pcol, _ = ac.render_street(ac.View(bank2[0], bank2[1], math.pi / 2, 120, 32), 300.0)
+lamps = sum(1 for r in pcol for a in r if a == 981)
+check("with lamps along it", lamps >= 3, "%d lit" % lamps)
+ac.BULB = 1
+
+# The ferry crosses the bay and back, and waits at each end; the rowing
+# boats drift down the channel. All of it a function of time.
+fpos = [ac.ferry_spot(t_, gspan[0]) for t_ in (0.0, 40.0, 80.0, 100.0, 140.0)]
+check("the ferry crosses the bay", fpos[0][2] == 0.0 and fpos[2][2] == 1.0
+      and 0.0 < fpos[1][2] < 1.0 and 0.0 < fpos[4][2] < 1.0,
+      "%s" % [round(f[2], 2) for f in fpos])
+check("and stays on the water", all(
+    ac.river_at(int(f[0] / ac.CELL + ac.BIG) - ac.BIG, int(f[1] / ac.CELL + ac.BIG) - ac.BIG)
+    for f in fpos[1:3]))
+boats = [list(ac.near_rowboats(ac.View(x0, z0, 0.0, 110, 30), t_, 3000.0))
+         for t_ in (300.0, 330.0)]
+check("there are rowing boats", len(boats[0]) >= 2, "%d in 6000 units" % len(boats[0]))
+check("on the river", all(ac.river_at(int(x / ac.CELL + ac.BIG) - ac.BIG,
+                                      int(z / ac.CELL + ac.BIG) - ac.BIG)
+                          for x, z in boats[0]))
+check("and they drift", boats[0][0][0] != boats[1][0][0])
+
+# The lantern night: rare, reachable from the menu, and the water is lights.
+ac._night_skip = 0.0
+lantern_nights = sum(1 for k in range(600) if ac.night(k * ac.NIGHT_LENGTH + 100)["lanterns"])
+check("one night in a dozen has lanterns on the river",
+      0.04 < lantern_nights / 600.0 < 0.14, "%d of 600" % lantern_nights)
+check("never the alien night", not any(
+    ac.night(k * ac.NIGHT_LENGTH + 100)["lanterns"] and ac.night(k * ac.NIGHT_LENGTH + 100)["alien"]
+    for k in range(600)))
+while ac.weather_name() != "dry":
+    ac.cycle_weather()
+ac.EMBER_HOT, ac.GOLD, ac.BULB = 982, 983, 984
+bv2 = ac.View(bank2[0], bank2[1], math.pi, 120, 32)
+_, pcol, _ = ac.render_street(bv2, 300.0)
+plain_warm = sum(1 for y in range(bv2.horizon + 1, 32) for x in range(120)
+                 if pcol[y][x] in (982, 983, 984))
+check("the menu finds one", ac.skip_to_lanterns(300.0) and ac.night(300.0)["lanterns"])
+bv2 = ac.View(bank2[0], bank2[1], math.pi, 120, 32)
+_, pcol, _ = ac.render_street(bv2, 300.0)
+lit_warm = sum(1 for y in range(bv2.horizon + 1, 32) for x in range(120)
+               if pcol[y][x] in (982, 983, 984))
+check("and on it the river is lights", lit_warm > plain_warm + 40,
+      "%d warm cells on the water against %d" % (lit_warm, plain_warm))
+ac.EMBER_HOT = ac.GOLD = ac.BULB = 1
+ac._night_skip = 0.0
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
+
 # The bridge: lamps along it, a festoon between them, and no crane.
 ac.BULB, ac.EMBER_HOT = 941, 942
 bridge = ac._water_spot(x0, z0, "bridge")
@@ -1840,10 +1908,10 @@ for i in range(-400, 400):
             continue
         if ac.DISTRICTS[ac.district_at(i, j)]["name"] != "docks":
             continue
-        if any(ac.river_at(i + a, j + b)
+        if any(ac.quay_at(i + a, j + b)
                for a, b in ((-1, 0), (1, 0), (0, -1), (0, 1))):
             cranes += 1
-check("the docks have cranes on the water", cranes > 5,
+check("the docks have cranes on the quay", cranes > 5,
       "%d quaysides in a 4000x900 unit patch" % cranes)
 check("and nowhere else does",
       all(ac.DISTRICTS[ac.district_at(i, j)]["name"] == "docks"

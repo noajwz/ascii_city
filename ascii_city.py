@@ -161,6 +161,20 @@ HEAD_MOAT = 1.5        # the water round it reaches this far out, in radii
 LIGHT_H = 21.0         # the lighthouse, in world units
 BEAM_TURN = 7.0        # seconds for the beam to go round once
 BEAM_REACH = 150.0
+
+# --- the promenade, and what is on the water ---
+# Along most of the near bank the buildings stop short of the water and
+# leave a walk: a railing, lamps, benches, people leaning. It is where the
+# river gets looked at from. And on the water, small things - a ferry
+# crossing the bay, a rowing boat with a lantern drifting down - and on one
+# night in a dozen, lanterns by the hundred going down with the current.
+PROM_STRETCH = 40      # cells; two stretches in three have a promenade
+PROM_DEEP = 2          # cells back from the water it takes up
+FERRY_PERIOD = 160.0   # seconds for a crossing there and back
+ROWBOAT_GAP = 260      # cells along the river between one boat and the next
+ROWBOAT_DRIFT = 0.7    # world units a second, with the current
+LANTERN_ODDS = 12      # one night in this many has lanterns on the river
+LANTERN_DRIFT = 0.9
 CASINO_REACH = 2.3     # how close to the door you have to get to be inside
 CASINO_AGAIN = 1.6     # seconds before it deals you another one
 
@@ -990,6 +1004,15 @@ def bridge_at(i, j):
             and (_mix(i // XP, 0, 719) % BRIDGE_ODDS == 0 or grand_at(i)))
 
 
+def prom_at(i, j):
+    """The promenade: open bank on the near side, two cells deep, along two
+    stretches in three."""
+    if _mix(i // PROM_STRETCH, 0, 1401) % 3 == 0:
+        return False
+    _, hi = river_span(i)
+    return int(hi) + 1 <= j <= int(hi) + PROM_DEEP
+
+
 def carnival_col(i):
     """The first cell along the river of the carnival in this stretch."""
     k = i // CARNIVAL_GAP
@@ -1325,8 +1348,8 @@ def is_open(i, j):
         _evict(_open_cache, 60000)
         if water_at(i, j):
             hit = True          # you can see across it; standing is elsewhere
-        elif fair_at(i, j) or headland_at(i, j):
-            hit = True          # the fairground, the headland: nothing built
+        elif fair_at(i, j) or headland_at(i, j) or prom_at(i, j):
+            hit = True          # fairground, headland, promenade: nothing built
         elif woods_at(i, j):
             # Trails, the hollow, and otherwise trees thick enough that the
             # open cells do not join up: off a trail you get a few cells in and
@@ -2559,8 +2582,14 @@ def draw_river_mist(ch, co, v, walls, now, wet):
             co[y][sx] = HAZE
 
 
+def quay_at(i, j):
+    """Water, or the promenade - which on the docks' stretch is a quay, and
+    a crane reaches over it to the water."""
+    return river_at(i, j) or prom_at(i, j)
+
+
 def near_dock_cranes(v, reach):
-    """Docks lots standing on the water, which is where a crane goes.
+    """Docks lots standing on the quay, which is where a crane goes.
 
     Every one of them, with no extra thinning: the docks are 7% of the city and
     the river is a narrow band, so their overlap is already rare - one lot in
@@ -2574,7 +2603,7 @@ def near_dock_cranes(v, reach):
                 continue
             if DISTRICTS[district_at(i, j)]["name"] != "docks":
                 continue
-            if not any(river_at(i + a, j + b)
+            if not any(quay_at(i + a, j + b)
                        for a, b in ((-1, 0), (1, 0), (0, -1), (0, 1))):
                 continue
             rx = (i + 0.5) * CELL - v.x
@@ -3848,6 +3877,147 @@ BENCH = [
 ]
 
 
+FERRY = [
+    "      __|__      ",
+    "  ___|o o o|___  ",
+    " |o o o o o o o| ",
+    "\\_______________/",
+]
+
+ROWBOAT = [
+    "  o  ",
+    "\\_|_/",
+]
+
+
+def near_promenades(v, reach):
+    """Each promenade stretch in front of you, as its first column."""
+    ci = int(v.x / CELL + BIG) - BIG
+    n = int(reach / CELL) + PROM_STRETCH
+    seen = set()
+    for i in range(ci - n, ci + n + 1):
+        s = i // PROM_STRETCH
+        if s in seen or not prom_at(i, int(river_span(i)[1]) + 1):
+            continue
+        seen.add(s)
+        yield s * PROM_STRETCH
+
+
+def draw_promenade(ch, co, v, walls, s, now, wet):
+    """The railing along the water, lamps, benches, and people at the rail.
+
+    Everything follows the bank cell by cell, because the bank meanders and a
+    straight railing would walk into the river and out again."""
+    ci = int(v.x / CELL + BIG) - BIG
+    for i in range(max(s, ci - 22), min(s + PROM_STRETCH, ci + 23)):
+        _, hi = river_span(i)
+        ze = (int(hi) + 1) * CELL + 0.4                # the water's edge
+        x0 = i * CELL
+        if (x0 - v.x) * v.dx + (ze - v.z) * v.dz < -CELL * 2:
+            continue
+        for k in range(4):
+            x = x0 + k * 1.25
+            put_point(ch, co, v, walls, x, 0.95, ze, "-", CURB)
+            if k % 2 == 0:
+                put_point(ch, co, v, walls, x, 0.5, ze, "|", CURB)
+        m = _mix(i, 0, 1409)
+        if i % 3 == 0:
+            for h in (1.2, 2.1, 3.0):
+                put_point(ch, co, v, walls, x0 + 2.5, h, ze + 1.4, "|", CONCRETE)
+            put_lit(ch, co, v, walls, x0 + 2.5, 3.4, ze + 1.4, "o", BULB,
+                    max(wet, 0.3), now)
+        elif i % 3 == 1 and m % 2:
+            blit_sprite(ch, co, v, walls, BENCH, x0 + 2.5, ze + 4.0, 0.0, 0.9,
+                        1.6, CURB)
+        if m % 7 == 0:
+            blit_sprite(ch, co, v, walls, LEANER, x0 + 1.0 + (m >> 4 & 3),
+                        ze + 0.9, 0.0, 1.75, 0.95, CURB)
+
+
+def ferry_spot(now, c):
+    """Where the ferry is: it crosses the bay beside the big bridge, near
+    bank to far bank and back, and waits a while at each end."""
+    span = grand_avenue(c)
+    if span is None:
+        return None
+    i = span[0] + span[1] + 9
+    lo, hi = river_span(i)
+    t = (now / FERRY_PERIOD) % 1.0
+    # 0..0.1 waiting, 0.1..0.5 over, 0.5..0.6 waiting, 0.6..1 back.
+    if t < 0.1:
+        f = 0.0
+    elif t < 0.5:
+        f = (t - 0.1) / 0.4
+    elif t < 0.6:
+        f = 1.0
+    else:
+        f = 1.0 - (t - 0.6) / 0.4
+    f = 0.5 - 0.5 * math.cos(f * math.pi)          # eases off and on
+    za, zb = (int(hi) + 0.4) * CELL, (int(lo) + 0.9) * CELL
+    return (i + 0.5) * CELL, za + (zb - za) * f, f
+
+
+def draw_ferry(ch, co, v, walls, x, z, moving, now, wet):
+    blit_sprite(ch, co, v, walls, FERRY, x, z, 0.0, 3.2, 6.5, CONCRETE)
+    put_lit(ch, co, v, walls, x, 3.5, z, "*", BULB, max(wet, 0.4), now)
+    for k in range(1, 7):
+        put_lit(ch, co, v, walls, x - 2.6 + k * 0.85, 1.7, z, "o", BULB_DIM,
+                max(wet, 0.3), now)
+    if 0.0 < moving < 1.0:
+        for k in range(1, 7):
+            put_point(ch, co, v, walls, x + (k % 2 - 0.5) * 1.6, 0.12,
+                      z + (k * 1.7 if moving < 0.5 else -k * 1.7), "~", RAIN_FAR)
+
+
+def near_rowboats(v, now, reach):
+    """A rowing boat every so often, drifting down with the current and a
+    lantern in it. Position is a function of time, nothing is stored."""
+    drift = (now * ROWBOAT_DRIFT) % (ROWBOAT_GAP * CELL)
+    base = int((v.x - reach - drift) / (ROWBOAT_GAP * CELL)) - 1
+    for n in range(base, base + int(2 * reach / (ROWBOAT_GAP * CELL)) + 3):
+        x = n * ROWBOAT_GAP * CELL + drift
+        if abs(x - v.x) > reach:
+            continue
+        i = int(x / CELL + BIG) - BIG
+        lo, hi = river_span(i)
+        side = 0.35 if _mix(n, 0, 1423) & 1 else 0.65
+        z = (lo + (hi - lo) * side) * CELL
+        if (x - v.x) * v.dx + (z - v.z) * v.dz < -CELL:
+            continue
+        yield x, z
+
+
+def draw_rowboat(ch, co, v, walls, x, z, now, wet):
+    bob = 0.1 * math.sin(now * 1.4 + x)
+    blit_sprite(ch, co, v, walls, ROWBOAT, x, z, bob, bob + 1.1, 2.4, CURB)
+    put_lit(ch, co, v, walls, x + 0.9, bob + 0.8, z, "o", EMBER_HOT,
+            max(wet, 0.5), now)
+
+
+def draw_river_lanterns(ch, co, v, walls, now, wet):
+    """Lanterns by the hundred going down the river with the current.
+
+    On the night for it. A lattice along the channel, two or three a cell,
+    each on its own little bob, the whole field sliding downstream at the
+    current's pace - and every one a light, so the reflection pass carries
+    them and the water is more light than water."""
+    n = int(85.0 / CELL) + 1
+    ci = int((v.x - now * LANTERN_DRIFT) / CELL + BIG) - BIG
+    for a in range(ci - n, ci + n + 1):
+        m = _mix(a, 0, 1427)
+        x = a * CELL + now * LANTERN_DRIFT
+        i = int(x / CELL + BIG) - BIG
+        lo, hi = river_span(i)
+        for k in range(4 + m % 3):
+            s = (m >> (2 + 5 * k)) & 127
+            z = (lo + 0.6 + (hi - lo - 1.2) * (s / 127.0)) * CELL
+            z += 0.6 * math.sin(now * 0.4 + s)
+            if (x - v.x) * v.dx + (z - v.z) * v.dz < NEAR_Z:
+                continue
+            put_lit(ch, co, v, walls, x + 0.3 * math.sin(now * 0.7 + s), 0.18, z,
+                    "o", (EMBER_HOT, GOLD, BULB)[s % 3], max(wet, 0.5), now)
+
+
 def near_lighthouses(v, reach):
     ci = int(v.x / CELL + BIG) - BIG
     for k in range(-1, 2):
@@ -4352,6 +4522,16 @@ def skip_to_alien(now):
     return False
 
 
+def skip_to_lanterns(now):
+    """Straight to the next night with lanterns on the river."""
+    global _night_skip
+    for _ in range(LANTERN_ODDS * 8):
+        _night_skip += NIGHT_LENGTH
+        if night(now)["lanterns"]:
+            return True
+    return False
+
+
 def skip_night():
     """On to the next one. Waiting eleven minutes to see whether the next sky
     is any different is not a way to look at anything."""
@@ -4388,6 +4568,7 @@ def night(now):
             "mist": ((m >> 27) & 7) / 7.0,         # how much comes off the water
             "mother": ((m >> 13) & 255) / 255.0,   # when the big one crosses
             "lands": ((m >> 2) & 255) / 255.0,     # and when one beam stops
+            "lanterns": (m >> 19) % LANTERN_ODDS == 0 and (m >> 24) % ALIEN_ODDS,
         }
         if got["alien"]:
             # Whatever the weather was going to be up there, the sky is lit by
@@ -4697,7 +4878,20 @@ def render_street(v, now):
         draw_buoy(ch, co, v, walls, bx, bz, bm, now, wet)
     for c_ in near_carnivals(v, 170.0):
         draw_carnival(ch, co, v, walls, c_, now, wet)
+    for s_ in near_promenades(v, 110.0):
+        draw_promenade(ch, co, v, walls, s_, now, wet)
+    for bx, bz in near_rowboats(v, now, 120.0):
+        draw_rowboat(ch, co, v, walls, bx, bz, now, wet)
+    ci_ = int(v.x / CELL + BIG) - BIG
+    for k_ in range(-1, 2):
+        fs = ferry_spot(now, ci_ + k_ * GRAND_GAP)
+        if fs is not None and (fs[0] - v.x) ** 2 + (fs[1] - v.z) ** 2 < 220.0 ** 2:
+            draw_ferry(ch, co, v, walls, fs[0], fs[1], fs[2], now, wet)
     reflect_river(ch, co, v, walls, now, wet)
+    if night(now)["lanterns"] and v.water:
+        # After the reflection, or the far bank's windows lying on the water
+        # are painted over the lanterns floating on it.
+        draw_river_lanterns(ch, co, v, walls, now, wet)
     for i, j in near_yokocho(v, 55.0):
         draw_lantern_string(ch, co, v, walls, i, j, now)
     for i, j in near_bridges(v, GRAND_SEEN):
@@ -5267,10 +5461,14 @@ def _water_spot(x, z, kind):
                 if can_stand(px, pz):
                     return px, pz, math.pi
             continue
-        # The bank: the first dry cell out from the water, facing it.
-        for out in range(1, 8):
+        # The bank: on the promenade, at the rail, facing the water.
+        if not prom_at(i, int(hi) + 1):
+            continue
+        for out in (1, 2):
             j = int(hi) + out
             px, pz = (i + 0.5) * CELL, (j + 0.5) * CELL
+            if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+                break
             if not river_at(i, j) and can_stand(px, pz):
                 return px, pz, math.pi
     return None
@@ -5386,7 +5584,7 @@ def draw_cheats(ch, co, note):
     left += [(k, name) for k, name, kind in CHEAT_PLACES if kind not in OUT_OF_TOWN]
     left += [("", ""), ("w", "weather: " + weather_name()),
              ("L", "strike now"), ("n", "next night"),
-             ("A", "a strange night")]
+             ("A", "a strange night"), ("z", "a lantern night")]
     right = [("", "PARTS OF TOWN")]
     right += [(d["key"], d["name"]) for d in DISTRICTS]
     right += [("", ""), ("", "OUT OF TOWN")]
@@ -5594,6 +5792,9 @@ def main(stdscr):
                 elif key == ord("A"):
                     note = ("the sky is busy tonight"
                             if skip_to_alien(now) else "no such night near")
+                elif key == ord("z"):
+                    note = ("lanterns on the river tonight"
+                            if skip_to_lanterns(now) else "no such night near")
                 elif key == ord("n"):
                     skip_night()
                     nt = night(now)
