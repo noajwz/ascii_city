@@ -339,6 +339,24 @@ the city and the river a narrow band, so their overlap is already about one lot 
 Thinning that again (the first attempt used one in five) leaves no cranes at all, which is how it
 was caught.
 
+## The carnival on the bank
+
+A small fairground every `CARNIVAL_GAP` cells along the river, on the near bank: `fair_at()` is a
+strip of open ground nothing is built on — `is_open()` says yes before the district gets a say, the
+way it does for water — and `carnival_spots()` lays the wheel, the carousel and the stalls out
+along it at the depth of the bank's *middle* column, so the meander cannot put one of them in the
+river. There is a test that they all stand on dry ground.
+
+**The wheel is world points, not a sprite**, and its plane faces the water. A ring of 56 bulbs
+chasing round it in the neon colours, eight spokes, eight cabins that hang from the rim and stay
+upright as it turns, an A-frame under the hub. From the far bank and the pier you see the whole
+circle and, because the bulbs are `o`, the reflection pass carries it onto the water; from the
+bank you are on it comes up edge-on as you walk towards it, which is how a real one does. It is
+big on purpose — radius 10, twenty-odd units tall — because at radius 7 it was a squat little
+ring against the buildings behind it. Everything else on the ground is a billboard: the carousel
+with riders going round it on their own, four stalls in four colours, a string of bulbs the length
+of the ground sagging between the poles, and a few people looking up. `i` in the menu.
+
 ## The bridges
 
 The crossings were building sites for a while — hoardings, a hazard board, a crane — as a

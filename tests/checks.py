@@ -1581,6 +1581,47 @@ check("the pier deck at your feet is not noise", loud < 12,
       "%d '=' in the nearest six rows" % loud)
 check("but it is planked", any(g == "-" for g in feet))
 
+# The carnival: a strip of open bank nothing is built on, a wheel that turns
+# with its lights going round, and it lies on the water.
+fair = ac.find_place(x0, z0, "carnival")
+fc = ac.carnival_col(int(fair[0] / ac.CELL))
+(wx, wz), (cx, cz), stalls, zb = ac.carnival_spots(fc)
+ground = [(i, j) for i in range(fc - 2, fc + ac.FAIR_LONG + 2)
+          for j in range(int(ac.river_span(i)[1]) - 1, int(ac.river_span(i)[1]) + 7)
+          if ac.fair_at(i, j)]
+check("there is a fairground on the bank", len(ground) >= ac.FAIR_LONG * ac.FAIR_DEEP,
+      "%d cells" % len(ground))
+check("and nothing is built on it", all(ac.is_open(i, j) and not ac.river_at(i, j)
+                                        for i, j in ground))
+check("everything on it stands on dry ground",
+      all(ac.dry_at(x, z) for x, z in [(wx, wz), (cx, cz)] + stalls))
+check("the cheat stands you on it", ac.can_stand(fair[0], fair[1])
+      and ac.fair_at(int(fair[0] / ac.CELL), int(fair[1] / ac.CELL)))
+check("and one carnival is a long way from the next",
+      ac.carnival_col(fc + ac.CARNIVAL_GAP) - fc > 100)
+wi_ = int(wx / ac.CELL)
+far_lo = ac.river_span(wi_)[0]
+facing = None
+for di in range(-6, 7):
+    for dj in range(1, 9):
+        fx_, fz_ = (wi_ + di + 0.5) * ac.CELL, (int(far_lo) - dj + 0.5) * ac.CELL
+        if ac.can_stand(fx_, fz_) and not ac.river_at(wi_ + di, int(far_lo) - dj):
+            d = (fx_ - wx) ** 2 + (fz_ - wz) ** 2
+            if facing is None or d < facing[0]:
+                facing = (d, fx_, fz_)
+_, fx_, fz_ = facing
+fv = ac.View(fx_, fz_, math.atan2(wx - fx_, wz - fz_), 110, 30)
+rims = []
+for k in range(3):
+    grid, colour, _ = ac.render_street(fv, 300.0 + k * 4.0)
+    rims.append({(y, x) for y in range(30) for x in range(110)
+                 if grid[y][x] == "o" and colour[y][x] in {n[0] for n in ac.NEON}})
+check("from across the water the wheel is a ring of lights", len(rims[0]) > 25,
+      "%d bulbs" % len(rims[0]))
+check("and it turns", rims[0] != rims[1] != rims[2])
+wet_cells = sum(1 for (y, x) in fv.water if grid[y][x] not in " ~-")
+check("and lies on the water", wet_cells > 15, "%d cells of reflection" % wet_cells)
+
 # The bridge: lamps along it, a festoon between them, and no crane.
 ac.BULB, ac.EMBER_HOT = 941, 942
 bridge = ac._water_spot(x0, z0, "bridge")
