@@ -709,6 +709,14 @@ random source in this file that is deliberately **not** seeded from position —
 hash of where you are so the city is the same city every time, but a wheel you could predict is not
 a wheel.
 
+**The slot machine** stands to the right of the table when the room is at least 78 columns wide,
+and the wheel gives up a little of its radius to make room. `Slot` is honest the way `Spin` is —
+the result is drawn first from `SLOT_WEIGHTS` (a 7 is rare, a `%` is not) and the reels are then
+shown stopping on it, left to right, `SLOT_STAGGER` apart. `p` pulls it; left alone it pulls
+itself after `SLOT_IDLE` seconds, the way the wheel deals you another. The one trap: `9` in the
+menu puts you in the casino but leaves the panel open, and with the panel open `p` is the park.
+Close the panel first; that was the first pty run's "nothing happened".
+
 ## Inside the club
 
 `render_rave()` is the club's answer to the casino room, and it runs off `club_light()` and the same

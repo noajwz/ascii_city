@@ -174,6 +174,44 @@ for k in range(12):
         fails += ac.find_place(sx, sz, kind) is None
 check("nothing is unfindable from anywhere", fails == 0, "%d misses in 96" % fails)
 
+# --- the slot machine ----------------------------------------------------
+# Honest the way the wheel is: the result is drawn first from the weights,
+# and the reels stop on it, one after another.
+slot = ac.Slot()
+counts = [0] * len(ac.SLOT_SYMBOLS)
+for _ in range(3000):
+    slot.pull(0.0)
+    for s in slot.result:
+        counts[s] += 1
+total = float(sum(counts))
+want = [w / float(sum(ac.SLOT_WEIGHTS)) for w in ac.SLOT_WEIGHTS]
+check("the reels land by their weights",
+      all(abs(counts[k] / total - want[k]) < 0.03 for k in range(len(counts))),
+      " ".join("%s:%.2f" % (s, counts[k] / total) for k, s in enumerate(ac.SLOT_SYMBOLS)))
+slot.pull(500.0)
+order = [slot.stopped(k, 500.0 + ac.SLOT_SPIN + 0.1 + ac.SLOT_STAGGER * k) for k in range(3)]
+later = [slot.stopped(k, 500.0 + ac.SLOT_SPIN - 0.1 + ac.SLOT_STAGGER * k) for k in range(3)]
+check("and stop left to right", order == [True] * 3 and later == [False] * 3)
+settled = 500.0 + slot.stop_at(2) + 0.1
+check("the payline shows the result",
+      [slot.reel_at(k, settled)[1] for k in range(3)]
+      == [ac.SLOT_SYMBOLS[s] for s in slot.result])
+check("and a spinning reel does not stand still",
+      slot.reel_at(0, 500.3) != slot.reel_at(0, 500.5))
+slot.result = [0, 0, 0]
+check("three sevens is the jackpot", slot.payout(settled) == "JACKPOT")
+slot.result = [2, 5, 2]
+check("and two of a kind a pair", slot.payout(settled) == "PAIR")
+ac.curses.A_REVERSE = 0
+spin = ac.Spin(500.0, "ROYALE")
+room, _ = ac.render_casino_room(spin, 110, 30, settled, slot)
+text = "\n".join("".join(r) for r in room)
+check("the machine stands in the room", "L U C K Y" in text and "PAIR" in text)
+room, _ = ac.render_casino_room(spin, 60, 24, settled, slot)
+check("and stays out of a narrow one", "L U C K Y" not in "\n".join("".join(r) for r in room))
+check("it goes idle after a while", slot.idle(settled + ac.SLOT_HOLD + 0.1)
+      and not slot.idle(settled))
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")

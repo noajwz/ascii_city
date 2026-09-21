@@ -5034,6 +5034,91 @@ class Spin:
         return now - self.t0 >= SPIN_TIME + HOLD_TIME
 
 
+# The slot machine by the table. Three reels, one payline, and the odds are
+# in the weights: a 7 is rare, a cherry is not. Honest the same way the wheel
+# is - the result is drawn first, the reels are then shown stopping on it.
+SLOT_SYMBOLS = ["7", "$", "@", "*", "&", "%"]
+SLOT_WEIGHTS = [1, 2, 3, 4, 5, 6]
+SLOT_SPIN = 1.3        # seconds before the first reel stops
+SLOT_STAGGER = 0.65    # and between one reel stopping and the next
+SLOT_HOLD = 3.0        # how long the result stays up before it goes idle
+SLOT_IDLE = 9.0        # seconds idle before it pulls itself, like the wheel
+
+
+class Slot:
+    """One machine. pull() draws a result and starts the reels; reel_at()
+    says what is showing in a reel this instant, and the payline is the
+    middle row."""
+
+    def __init__(self):
+        self.t0 = None
+        self.result = None
+        self.pulls = 0
+
+    def pull(self, now):
+        picks = _spin_rng.choices(range(len(SLOT_SYMBOLS)), SLOT_WEIGHTS, k=3)
+        self.result = picks
+        self.t0 = now
+        self.pulls += 1
+
+    def stop_at(self, k):
+        return SLOT_SPIN + k * SLOT_STAGGER
+
+    def stopped(self, k, now):
+        return self.t0 is not None and now - self.t0 >= self.stop_at(k)
+
+    def settled(self, now):
+        return self.stopped(2, now)
+
+    def idle(self, now):
+        return self.t0 is None or now - self.t0 >= self.stop_at(2) + SLOT_HOLD
+
+    def reel_at(self, k, now):
+        """The three symbols showing in reel k, top to bottom."""
+        if self.t0 is None:
+            base = int(now * 0.7) + k * 2          # the attract crawl, idle
+        elif self.stopped(k, now):
+            base = self.result[k] - 1
+        else:
+            base = int((now - self.t0) * (14.0 + k * 3)) + k * 5
+        n = len(SLOT_SYMBOLS)
+        return [SLOT_SYMBOLS[(base + r) % n] for r in range(3)]
+
+    def payout(self, now):
+        """What the payline says once it has stopped, or None."""
+        if not self.settled(now):
+            return None
+        a, b, c = self.result
+        if a == b == c:
+            return "JACKPOT" if a == 0 else "THREE OF A KIND"
+        if a == b or b == c or a == c:
+            return "PAIR"
+        return "NO LUCK"
+
+
+def draw_slot(ch, co, slot, x0, y0, now):
+    """The cabinet: 17 columns by 9 rows, reels in the middle, the payline
+    marked, the verdict underneath."""
+    frame = [".---------------.", "|   L U C K Y   |", "|===============|",
+             None, None, None, "|===============|", None, "'---------------'"]
+    for r, line in enumerate(frame):
+        if line is not None:
+            _text(ch, co, y0 + r, x0, line, GOLD_DIM)
+    reels = [slot.reel_at(k, now) for k in range(3)]
+    for r in range(3):
+        row = " ".join("[%s]" % reels[k][r] for k in range(3))
+        pay = r == 1
+        _text(ch, co, y0 + 3 + r, x0, ">" if pay else "|", GOLD if pay else GOLD_DIM)
+        _text(ch, co, y0 + 3 + r, x0 + 3, row, ROU_RED if pay else CONCRETE)
+        _text(ch, co, y0 + 3 + r, x0 + 16, "<" if pay else "|",
+              GOLD if pay else GOLD_DIM)
+    say = slot.payout(now) or ("p pulls" if slot.idle(now) else "")
+    win = say in ("JACKPOT", "THREE OF A KIND", "PAIR")
+    flash = win and int(now * 6) % 2 == 0
+    _text(ch, co, y0 + 7, x0, "|" + say.center(15) + "|",
+          FLASH if flash else GOLD if win else GOLD_DIM)
+
+
 def venue_at(x, z):
     """The club or casino you are standing in the doorway of, as (kind, dict),
     or None.
@@ -5089,7 +5174,7 @@ def _big(ch, co, y, x, s, attr):
             col += 2
 
 
-def render_casino_room(spin, width, height, now):
+def render_casino_room(spin, width, height, now, slot=None):
     """Inside.
 
     The wheel is the middle of a room rather than the whole screen: a ceiling
@@ -5125,6 +5210,12 @@ def render_casino_room(spin, width, height, now):
     cy = (band_top + band_bot) / 2.0
     rx = min(width * 0.36, 42.0)
     ry = min((band_bot - band_top) / 2.0 - 0.5, 10.0)
+    # The slot machine stands to the right of the table when there is room
+    # for it beside the wheel; the wheel gives up a little of its radius.
+    machine = roomy and slot is not None and width >= 78
+    if machine:
+        rx = min(rx, width / 2.0 - 22.0)
+        draw_slot(ch, co, slot, width - 19, band_top + 1, now)
 
     if rx < 12 or ry < 3.5:
         say = ("%s: %d" % (spin.name, spin.result) if spin.settled(now)
@@ -5740,7 +5831,8 @@ ARROWS = (curses.KEY_LEFT, curses.KEY_RIGHT, curses.KEY_UP, curses.KEY_DOWN)
 
 SKYLINE_HUD = " x=%-6d %s  tab view  arrows/hl walk  HL run  space wander  ` cheats "
 STREET_HUD = " %d,%d %s, %s%s  ws walk  ad turn  ,. step  tab view  ` cheats "
-ROULETTE_HUD = " inside the %s casino at %d,%d  -  s walks back out  -  q quit "
+ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p pulls the slot"
+                "  -  s walks out  -  q quit ")
 RAVE_HUD = " inside the club at %d,%d  -  s walks back out  -  q quit "
 
 
@@ -5762,6 +5854,8 @@ def main(stdscr):
     steer = 0.0                 # the autopilot's heading, eased not snapped
     blocked = False             # did the last step run into something
     wheel = None                # the roulette, while you stand in a casino
+    slot = Slot()               # and the machine beside it
+    slot_idle_since = 0.0
     wheel_at = 0.0
     cheats = False              # is the cheat panel up
     note = ""                   # and what did it last do
@@ -5837,6 +5931,9 @@ def main(stdscr):
                 sky_v = fwd = side = spin = 0.0
             elif key == ord(" "):
                 autopilot = not autopilot
+            elif wheel is not None and key in (ord("p"), ord("P")):
+                if slot.idle(now):
+                    slot.pull(now)
             elif street:
                 if key in (curses.KEY_UP, ord("w"), ord("W")):
                     fwd = WALK * (RUN_MULTIPLIER if key == ord("W") else 1.0)
@@ -5915,7 +6012,11 @@ def main(stdscr):
         # --- draw ------------------------------------------------------
         height, width = stdscr.getmaxyx()
         if wheel is not None:
-            ch, co = render_casino_room(wheel, width, height, now)
+            if slot.idle(now) and now - slot_idle_since > SLOT_IDLE:
+                slot.pull(now)            # it deals you one, like the wheel
+            if not slot.idle(now):
+                slot_idle_since = now
+            ch, co = render_casino_room(wheel, width, height, now, slot)
             hud = ROULETTE_HUD % (wheel.name, cam_x, cam_z)
         elif venue is not None and venue[0] == "club":
             ch, co = render_rave(venue[1], width, height, now)
