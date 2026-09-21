@@ -792,6 +792,9 @@ the wrong window and will tell you a working feature is broken. That test earned
 immediately: `spin` was already the yaw rate in `main()`, and the wheel shadowing it was invisible
 to every headless check.
 
-A complete frame — render, `addch` loop and `refresh` — costs about 11 ms at 240x70 in a downpour
-against a 33 ms budget. If that ever slips, the levers in order are `near_lots()` reach,
-`RAIN_REACH` and `MAX_VIEW`.
+A complete frame — render, `addch` loop and `refresh` — costs about 18 ms at 240x70 on a street
+against a 33 ms budget, and about 30 on the riverbank, which is the worst view there is: open
+ground means ground *points* outnumber cells fifty to one, and `draw_ground()` is per point. The
+kerb test used to ask `is_open()` of the four neighbours per point and that alone was 46 ms on the
+bank; it is asked once per cell now. If it ever slips again, the levers in order are the per-point
+`_mix()` texture hashes in `draw_ground()`, `near_lots()` reach, `RAIN_REACH` and `MAX_VIEW`.

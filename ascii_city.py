@@ -2715,6 +2715,14 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 li, lj = i, j
                 solid = not is_open(i, j)
                 x0, y0 = i * CELL, j * CELL
+                # Which neighbours are walls, asked once per cell rather than
+                # once per point: on open ground - the riverbank, a fairground
+                # - the points outnumber the cells fifty to one, and this was
+                # most of the frame.
+                wall_w = not is_open(i - 1, j)
+                wall_e = not is_open(i + 1, j)
+                wall_n = not is_open(i, j - 1)
+                wall_s = not is_open(i, j + 1)
                 # Only the wider streets are marked, and never through a
                 # junction - which is also how it works outside.
                 wet_cell = water_at(i, j)
@@ -2746,13 +2754,13 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
             fx_ = x - x0
             fz_ = z - y0
             edge = 1e9
-            if fx_ < PAVE and not is_open(i - 1, j):
+            if fx_ < PAVE and wall_w:
                 edge = fx_
-            elif CELL - fx_ < PAVE and not is_open(i + 1, j):
+            elif CELL - fx_ < PAVE and wall_e:
                 edge = CELL - fx_
-            if fz_ < edge and fz_ < PAVE and not is_open(i, j - 1):
+            if fz_ < edge and fz_ < PAVE and wall_n:
                 edge = fz_
-            elif CELL - fz_ < edge and CELL - fz_ < PAVE and not is_open(i, j + 1):
+            elif CELL - fz_ < edge and CELL - fz_ < PAVE and wall_s:
                 edge = CELL - fz_
 
             g = glow.get(((int(x / GLOW_CELL + BIG) - BIG) * 65536)
