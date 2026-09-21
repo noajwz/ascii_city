@@ -10,13 +10,13 @@ python3 ascii_city.py
 
 Stdlib-only Python — `curses` and some arithmetic, no dependencies, no build step.
 
-```
-   |=| |0X|  BAR          .    *        '     .
-   |8| |X8|   ___                  .      '
-     o       |o o|    ,-.                         .
-  ___|\______|___|___(- -)___________
-     /\        ,,    /|\      ,,
-```
+![A Chinatown street at night](docs/street.svg)
+
+*A street in Chinatown — hung signs, lanterns, somebody smoking outside.*
+
+![The city seen from across the river](docs/waterfront.svg)
+
+*The waterfront on a clear night, with the milky way up.*
 
 ## What is in it
 
@@ -57,6 +57,9 @@ python3 tests/checks.py && python3 tests/pty_checks.py
 
 A few hundred assertions, no framework and nothing to install. The first renders frames and counts
 what landed where; the second forks a pty and actually plays the thing.
+
+The screenshots above are generated the same way — `python3 tools/screenshot.py` renders a frame and
+writes it out as text in an SVG, in the colours the renderer actually picked.
 
 ## Notes
 

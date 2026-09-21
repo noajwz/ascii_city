@@ -111,6 +111,12 @@ there is no fisheye to correct at the edges.
   `draw_hung_sign()` lays its letters out **in rows, not world units** — spacing them by a true
   height makes two of them round onto the same row as the sign recedes, and a HOTEL with the T
   missing is worse than one slightly the wrong size.
+- **A painted sign has to be read left to right on screen, and `u` does not run that way.**
+  `cast()` measures `u` with +z along an x-facing wall and +x along a z-facing one whichever
+  side you stand on, which is right for two faces and mirrored for the other two — OPEN read as
+  NEPO on every building whose front faced -x or +z, and nothing else on the facade noticed,
+  because a row of windows reads the same both ways. `sign_u()` flips it for those faces, and it
+  was found by looking at a screenshot, not by any test: the test came afterwards.
 - A projecting sign hangs **perpendicular to the wall**, and its two edges are projected as world
   points rather than stepped out in screen columns. Framing it in screen space makes it a billboard
   that turns to face you wherever you stand, so walking along the pavement swings it out into the
