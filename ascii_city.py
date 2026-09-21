@@ -114,7 +114,7 @@ CLUB_BPM = 134.0
 WOODS_TILE = 480       # cells from one woods to the next
 WOODS_HALF_I = 70      # half its size along x, in cells - 700 units across
 WOODS_HALF_J = 42      # and along z
-WOODS_OPEN = 46        # percent of the wood you can walk through, off the trails
+WOODS_OPEN = 54        # percent of the wood you can walk through, off the trails
 HOLLOW_RI = 4.6        # the hollow in the middle: radii, in cells
 HOLLOW_RJ = 3.4
 CROWD = 34             # how many are in it when the rig is on
@@ -986,7 +986,7 @@ def hollow_at(i, j):
 
 
 def trail_at(i, j):
-    """The paths through the woods, one cell wide and wandering.
+    """The paths through the woods, two or three cells wide and wandering.
 
     Three the long way, two across, a ring just inside the edge that the
     others run into, and one straight path down into the hollow. Every road
@@ -996,7 +996,7 @@ def trail_at(i, j):
     depth = woods_depth(i, j)
     if depth <= 0.0:
         return False
-    if depth < 3.0:
+    if depth < 3.5:
         if depth > 1.0:
             return True                              # the ring
         return _is_road(i, XP, 91) or _is_road(j, ZP, 137)   # a gate
@@ -1006,16 +1006,16 @@ def trail_at(i, j):
         m = _mix(ci, n, 1213)
         f = (off + 6.0 * math.sin(di / 23.0 + (m & 7))
              + 3.0 * math.sin(di / 8.0 + ((m >> 3) & 7)))
-        if abs(dj - f) < 1.0:
+        if abs(dj - f) < 1.5:
             return True
     for n, off in enumerate((-30, 28)):
         m = _mix(cj, n, 1217)
         f = (off + 5.0 * math.sin(dj / 17.0 + (m & 7))
              + 2.5 * math.sin(dj / 6.0 + ((m >> 3) & 7)))
-        if abs(di - f) < 1.0:
+        if abs(di - f) < 1.5:
             return True
     hi, hj = hollow_centre(ci, cj)
-    return i == hi and hj - HOLLOW_RJ - 14 <= j <= hj
+    return abs(i - hi) <= 1 and hj - HOLLOW_RJ - 14 <= j <= hj
 
 
 def nearest_hollow(x, z):

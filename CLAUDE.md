@@ -397,10 +397,13 @@ about the city moves.
 trees; what continues it is a **gate** in `trail_at()` — the cells where a road meets the edge are
 open through to a **ring trail** that runs a couple of cells inside the edge all the way round.
 Three long trails and two cross trails wander through the interior and run into the ring, and a
-straight path goes down into the hollow. Off the trails the wood is `WOODS_OPEN` percent open,
-which is below the percolation threshold on purpose: you get a few cells in and have to turn round,
-which is what being lost in a wood is. There is a test that every gate reaches the hollow on foot,
-and a second that most of the wood is *not* on the way — both matter.
+straight path goes down into the hollow. The trails are two or three cells wide — one cell was
+reported as "hard to walk through", and it was: `BODY` leaves a cell and a bit of slack, so any
+drift in your heading is a bump. Off the trails the wood is `WOODS_OPEN` percent open, held under
+the percolation threshold on purpose: you get some way in and have to turn round, which is what
+being lost in a wood is. There is a test that every gate reaches the hollow on foot, and a second
+that a good part of the wood is *not* on the way — both matter. At 46% open two thirds of it was
+off limits; at 54% it is a third, which is the balance that feels right.
 
 The edge wanders (`woods_depth()`), and its slope is held under a cell per cell so the ring trail
 that follows it cannot break: a band two cells wide shifted by more than two cells between one

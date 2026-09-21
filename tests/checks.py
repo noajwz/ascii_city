@@ -810,7 +810,7 @@ inside = [(i, j) for i in range(wi - 80, wi + 81) for j in range(wj - 50, wj + 5
           if ac.woods_depth(i, j) > 3.0 and not ac.trail_at(i, j)
           and not ac.hollow_at(i, j)]
 trees = sum(1 for i, j in inside if not ac.is_open(i, j))
-check("off the trails the wood is thick", 0.45 < trees / float(len(inside)) < 0.65,
+check("off the trails the wood is thick", 0.38 < trees / float(len(inside)) < 0.6,
       "%.0f%% trees" % (100.0 * trees / len(inside)))
 from collections import deque as _dq
 seen = {(hi, hj)}
@@ -828,7 +828,7 @@ gates = [(i, j) for i in range(wi - 80, wi + 81) for j in range(wj - 50, wj + 51
          if 0 < ac.woods_depth(i, j) <= 1.0 and ac.trail_at(i, j)]
 check("every gate leads to the hollow on foot", gates
       and all(g in seen for g in gates), "%d gates" % len(gates))
-check("but most of the wood is not on the way", len(seen) < 0.55 * size,
+check("but a good part of the wood is not on the way", len(seen) < 0.75 * size,
       "%d of %d cells reachable" % (len(seen), size))
 
 # The rig: only in the hollow now - the parks are quiet.
@@ -895,14 +895,15 @@ ac.FIREFLY, ac.EYES = 951, 952
 while ac.weather_name() != "dry":       # rain puts the fireflies out
     ac.cycle_weather()
 ff = ey = 0
-for back in (8, 12):
-    for k in range(4):
-        v = ac.View(hx, (hj - back + 0.5) * ac.CELL, math.pi, 110, 30)
-        _, col, _ = ac.render_street(v, t_off + k * 0.9)
-        ff += sum(1 for r in col for a in r if a == 951)
-        ey += sum(1 for r in col for a in r if a == 952)
-check("fireflies over the trail", ff > 20, "%d over eight frames" % ff)
-check("and eyes in the dark", ey > 0, "%d over eight frames" % ey)
+for back in range(6, 18, 2):
+    for yaw in (0.0, math.pi):
+        for k in range(3):
+            v = ac.View(hx, (hj - back + 0.5) * ac.CELL, yaw, 110, 30)
+            _, col, _ = ac.render_street(v, t_off + k * 0.9)
+            ff += sum(1 for r in col for a in r if a == 951)
+            ey += sum(1 for r in col for a in r if a == 952)
+check("fireflies over the trail", ff > 60, "%d over 36 frames" % ff)
+check("and eyes in the dark", ey > 0, "%d over 36 frames" % ey)
 ac.FIREFLY = ac.EYES = 1
 while ac.weather_name() != "auto":
     ac.cycle_weather()
