@@ -125,6 +125,8 @@ RAVE_LONG = 200.0
 RAVE_BPM = 168.0
 RAVE_TONES = (1, 6, 5, 2)   # the rig's palette: magenta, purple, green, cyan
 RING_GAP = 5.0         # world units between the rings of light on the ground
+LAKE_RI = 8.0          # the lake in the woods: radii, in cells
+LAKE_RJ = 5.0
 CASINO_REACH = 2.3     # how close to the door you have to get to be inside
 CASINO_AGAIN = 1.6     # seconds before it deals you another one
 
@@ -1015,7 +1017,41 @@ def trail_at(i, j):
         if abs(di - f) < 1.5:
             return True
     hi, hj = hollow_centre(ci, cj)
-    return abs(i - hi) <= 1 and hj - HOLLOW_RJ - 14 <= j <= hj
+    if abs(i - hi) <= 1 and hj - HOLLOW_RJ - 14 <= j <= hj:
+        return True
+    # And a path round the lake, which any trail that reaches the water
+    # joins; a trail that simply ran into the lake would end in it.
+    return 0.0 <= lake_dist(i, j) < 2.2
+
+
+def lake_centre(ci, cj):
+    """The lake lies off towards one end of the woods, away from the hollow -
+    they are two different places to end up, and between them is where you
+    get lost."""
+    m = _mix(ci, cj, 1231)
+    side = 1 if (m & 1) else -1
+    return ci + side * (30 + ((m >> 1) & 7)), cj - 12 + ((m >> 4) & 7)
+
+
+def lake_dist(i, j):
+    """How far outside the lake's edge this cell is, in cells - negative in
+    the water. The shore wanders the way the woods' own edge does."""
+    ci, cj = woods_home(i, j)
+    li, lj = lake_centre(ci, cj)
+    di, dj = i - li, j - lj
+    a = math.atan2(dj, di)
+    wob = 1.0 + 0.16 * math.sin(a * 3.0 + li) + 0.08 * math.sin(a * 5.0 + lj)
+    r = math.sqrt((di / (LAKE_RI * wob)) ** 2 + (dj / (LAKE_RJ * wob)) ** 2)
+    return (r - 1.0) * LAKE_RJ * wob
+
+
+def lake_at(i, j):
+    return woods_depth(i, j) > 4.0 and lake_dist(i, j) < 0.0
+
+
+def water_at(i, j):
+    """Anything you can see across but not stand on."""
+    return river_at(i, j) or lake_at(i, j)
 
 
 def nearest_hollow(x, z):
@@ -1139,7 +1175,7 @@ def is_open(i, j):
     hit = _open_cache.get(key)
     if hit is None:
         _evict(_open_cache, 60000)
-        if river_at(i, j):
+        if water_at(i, j):
             hit = True          # you can see across it; standing is elsewhere
         elif woods_at(i, j):
             # Trails, the hollow, and otherwise trees thick enough that the
@@ -1197,7 +1233,7 @@ def dry_at(x, z):
     j = int(z / CELL + BIG) - BIG
     if not is_open(i, j):
         return False
-    return not river_at(i, j) or deck_at(i, j)
+    return not water_at(i, j) or deck_at(i, j)
 
 
 def can_stand(x, z):
@@ -2554,11 +2590,19 @@ def reflect_river(ch, co, v, walls, now, wet):
     for sx in range(v.width):
         dist = walls[0][sx]
         if dist is None:
-            continue
+            dist = MAX_VIEW              # open sky over the water: still mirrors
         drop = 2.0 * EYE_Y * v.fy / dist
-        for r in range(max(0, walls[3][sx]), v.horizon):
+        top = max(0, walls[3][sx])
+        for r in range(0, v.horizon):
             glyph = ch[r][sx]
-            if glyph == " " or not (glyph.isalnum() or glyph in "*+@"):
+            if glyph == " ":
+                continue
+            # Above the roofline it is sky, and anything in it is a light -
+            # stars, the moon, whatever else is up there. On the facades only
+            # the lights come across; and a canopy lit by the rig counts.
+            if r >= top and not (glyph.isalnum() or glyph in "*+@"
+                                 or (v.rave is not None
+                                     and co[r][sx] == v.rave[0])):
                 continue
             r2 = int(round(2 * v.horizon - r + drop))
             deep = r2 - v.horizon
@@ -2571,7 +2615,8 @@ def reflect_river(ch, co, v, walls, now, wet):
             if (r2, tx) not in v.water:
                 continue
             attr = co[r][sx] & ~curses.A_BOLD
-            ch[r2][tx] = glyph if deep <= 3 else ":"
+            ch[r2][tx] = (glyph if deep <= 3 and r >= top
+                          else ":" if glyph.isalnum() else glyph)
             co[r2][tx] = attr
             # And the streak under it. Lamplight on water is a smear, not a
             # dot, and the smear is what makes it read as a reflection.
@@ -2626,7 +2671,7 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 x0, y0 = i * CELL, j * CELL
                 # Only the wider streets are marked, and never through a
                 # junction - which is also how it works outside.
-                wet_cell = river_at(i, j)
+                wet_cell = water_at(i, j)
                 deck = wet_cell and deck_at(i, j)
                 pier = wet_cell and pier_at(i, j)
                 woods = not wet_cell and woods_at(i, j)
@@ -3147,7 +3192,10 @@ def rave_hint(v, now):
     nothing with. A bearing is one you can walk on."""
     if rave_window(now) is None:
         return ""
-    hx, hz, _, _ = nearest_hollow(v.x, v.z)
+    hx, hz, hi, hj = nearest_hollow(v.x, v.z)
+    jx, jz = jack_spot(hi, hj)
+    if math.hypot(jx - v.x, jz - v.z) < 7.0:
+        return JACK_LINE
     d = math.hypot(hx - v.x, hz - v.z)
     if d > 700.0:
         return ""
@@ -3193,6 +3241,31 @@ ALTAR = [
 ]
 ALTAR_H = 7.2
 ALTAR_W = 3.6
+
+# The one who is awake. Topknot, white gi, the sword at his hip. He stands at
+# the edge of the hollow with his back to the altar, facing whoever comes down
+# the path - which is you - and he does not move to the beat.
+JACK = [
+    "  _o_  ",
+    "  (-.) ",
+    " /|##|\\",
+    "/ |##| |",
+    "  |__|/ ",
+    "  |  |  ",
+    " _|  |_ ",
+]
+JACK_H = 2.05
+JACK_W = 0.85
+JACK_LINE = '  ~ "it is the music. do not listen to it." ~'
+
+
+def jack_spot(hi, hj):
+    """Where he stands: at the near edge of the hollow, off to one side of the
+    path in, so you come past him on the way to the crowd."""
+    m = _mix(hi, hj, 1237)
+    hx, hz = (hi + 0.5) * CELL, (hj + 0.5) * CELL
+    return (hx + (4.5 if m & 1 else -4.5),
+            hz - HOLLOW_RJ * CELL * 0.62)
 
 
 def draw_hollow_rave(ch, co, v, walls, hi, hj, now, wet):
@@ -3252,6 +3325,12 @@ def draw_hollow_rave(ch, co, v, walls, hi, hj, now, wet):
         if lamp is None and d2 < 900.0:
             for ex in (-0.1, 0.1):
                 put_point(ch, co, v, walls, px + ex, 1.55, pz, ".", EYES)
+
+    # And the one who is not with them. Pale where they are dark, still
+    # where they move, and no light in his eyes.
+    jx, jz = jack_spot(hi, hj)
+    blit_sprite(ch, co, v, walls, JACK, jx, jz, 0.0, JACK_H, JACK_W,
+                FLASH if kick else MOON_DIM)
 
 
 def draw_drawn_in(ch, co, v, walls, hi, hj, now):
@@ -4104,8 +4183,8 @@ def render_street(v, now):
         draw_dock_crane(ch, co, v, walls, ci_, cj_, now, wet)
     for prun, pend in near_piers(v, 95.0):
         draw_pier(ch, co, v, walls, prun, pend, now, wet)
-    if v.water:
-        draw_gulls(ch, co, v, walls, now)
+    if v.water and abs(v.z - river_centre(int(v.x / CELL)) * CELL) < 250.0:
+        draw_gulls(ch, co, v, walls, now)      # the river's, not the lake's
     for bx, bz, bm in near_buoys(v, 90.0):
         draw_buoy(ch, co, v, walls, bx, bz, bm, now, wet)
     reflect_river(ch, co, v, walls, now, wet)
@@ -4423,6 +4502,7 @@ CHEAT_PLACES = [
     ("0", "inside the club", "clubdoor"),
     ("g", "the woods", "woods"),
     ("x", "the woods rave", "rave"),
+    ("e", "the lake", "lake"),
     ("t", "the riverbank", "bank"),
     ("j", "end of a pier", "pier"),
     ("b", "a bridge", "bridge"),
@@ -4637,13 +4717,22 @@ def _woods_spot(x, z, kind):
     the altar. Only takes you there - the menu starts one when you arrive, or
     eighteen times in twenty you would be looking at an empty hollow."""
     hx, hz, hi, hj = nearest_hollow(x, z)
+    ci, cj = woods_home(hi, hj)
+    if kind == "lake":
+        # On the shore path, on the side nearest the hollow, facing the water.
+        li, lj = lake_centre(ci, cj)
+        step = 1 if hi > li else -1
+        for i in range(li, li + step * 16, step):
+            px, pz = (i + 0.5) * CELL, (lj + 0.5) * CELL
+            if not lake_at(i, lj) and can_stand(px, pz):
+                return px, pz, math.atan2(-step, 0.0)
+        return None
     if kind == "rave":
         for back in range(int(HOLLOW_RJ) + 1, int(HOLLOW_RJ) + 14):
             px, pz = hx, (hj - back + 0.5) * CELL
             if can_stand(px, pz):
                 return px, pz, 0.0
         return None
-    ci, cj = woods_home(hi, hj)
     for step in range(0, 60):
         i = ci + (step + 1) // 2 * (1 if step % 2 else -1)
         if not _is_road(i, XP, 91):
@@ -4693,7 +4782,7 @@ def find_place(x, z, kind):
         return _doorway(x, z, 911, "casino")
     if kind == "clubdoor":
         return _doorway(x, z, 909, "club")
-    if kind in ("woods", "rave"):
+    if kind in ("woods", "rave", "lake"):
         return _woods_spot(x, z, kind)
     if kind in ("bank", "pier", "bridge", "leaner"):
         return _water_spot(x, z, kind)

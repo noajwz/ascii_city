@@ -34,8 +34,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   a rave going on.
 - **Dark alleys**, some of which dead-end, and lit ones lined with tiny bars.
 - **The woods** — one great block of trees, a long walk from anywhere, with trails you can get
-  lost on, things in the dark with eyes, and once in a while a rave in the hollow in the middle
-  that nobody asked permission for.
+  lost on, a lake with the stars in it, things in the dark with eyes, and once in a while a rave in
+  the hollow in the middle that nobody asked permission for. Somebody there is not dancing.
 - **A river**, with piers, buoys, mist on cold nights, and footbridges with lamps along them.
 
 Nothing is stored. Every street, building, sign and trail is a hash of its own coordinates, so
