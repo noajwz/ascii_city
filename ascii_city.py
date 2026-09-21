@@ -104,18 +104,27 @@ STRIKE_EVERY = 2.8     # seconds between strikes once one is overhead
 CLUB_ODDS = 1200       # one building in this many is one, and it is unmarked
 CLUB_BPM = 134.0
 
-# --- the rig in the woods ---
-# Somebody carries a sound system into a park and does not ask anyone. It is
-# rare twice over, which is what makes it worth finding: it can only be in the
-# thick of a wood in the middle of a park - never out on the lawn, never within
-# sight of a road - and it is only on for a few minutes in the hour. Faster
-# than the club, because it is not a club.
+# --- the woods, and the rig in them ---
+# Not a park. The parks are the small green squares the city has everywhere;
+# the woods are one great dark block of trees a few districts across, with
+# trails through it, a hollow in the middle, and no streets, lights or
+# buildings in it at all. One per WOODS_TILE cells each way, so from anywhere
+# the nearest is a long walk - and once a night, somebody carries a sound
+# system into the hollow and does not ask anyone.
+WOODS_TILE = 480       # cells from one woods to the next
+WOODS_HALF_I = 70      # half its size along x, in cells - 700 units across
+WOODS_HALF_J = 42      # and along z
+WOODS_OPEN = 46        # percent of the wood you can walk through, off the trails
+HOLLOW_RI = 4.6        # the hollow in the middle: radii, in cells
+HOLLOW_RJ = 3.4
+CROWD = 34             # how many are in it when the rig is on
 RAVE_SLOT = 320.0      # seconds per slot in which one might be on
 RAVE_ODDS = 7          # and only one slot in this many has one
 RAVE_SHORT = 90.0      # the shortest it goes on for
 RAVE_LONG = 200.0
 RAVE_BPM = 168.0
-RAVE_ODDS_SPACE = 30   # and only one candidate clearing in this many is used
+RAVE_TONES = (1, 6, 5, 2)   # the rig's palette: magenta, purple, green, cyan
+RING_GAP = 5.0         # world units between the rings of light on the ground
 CASINO_REACH = 2.3     # how close to the door you have to get to be inside
 CASINO_AGAIN = 1.6     # seconds before it deals you another one
 
@@ -195,6 +204,14 @@ DISTRICTS = [
 ]
 
 DISTRICT_PICK = [n for n, d in enumerate(DISTRICTS) for _ in range(d["weight"])]
+
+# The woods are not in the table: they are not picked, they are placed. A
+# park's row with the trees taller and nobody smoking under them.
+WOODS = dict(key="", name="the woods", weight=0, scale=1.0, lo=9.0, hi=15.0,
+             dens=(0.0, 0.0), flat=0.0, hung=0.0, smoke=0.0, bulb=0.0,
+             neon=None, lantern=0.0, park=True,
+             glyphs="&%", band=None, mullion=False, ground="&", gap=3,
+             pal="leaf", roof="=", whole_floors=False, cjk=False)
 _district_cache = {}
 
 
@@ -216,7 +233,7 @@ def district_at(i, j):
 
 
 def district(i, j):
-    return DISTRICTS[district_at(i, j)]
+    return WOODS if woods_at(i, j) else DISTRICTS[district_at(i, j)]
 
 # Chinatown's signs, if the terminal can draw them. Two or three characters
 # each, which is what fits a vertical sign and what they actually say: bar,
@@ -258,6 +275,7 @@ SIGN_WORDS = [
 PALETTES = {}      # e.g. {"near": [3, 7, 12, ...]} -> lists of curses pair numbers
 NEON = []          # [(lit, unlit), ...] - one entry per neon tube colour
 STAR = STREET = HUD = CURB = HAZE = SMOKE = EMBER = EMBER_HOT = 0
+FIREFLY = EYES = 0
 RAIN = RAIN_FAR = BULB = BULB_DIM = FLASH = CONCRETE = 0
 GOLD = GOLD_DIM = ROU_RED = ROU_BLACK = ROU_GREEN = LANE = 0
 GRASS = BARK = ROOF = 0
@@ -268,6 +286,7 @@ def init_colors():
     global PALETTES, NEON, STAR, STREET, HUD, CURB, HAZE, SMOKE, EMBER
     global EMBER_HOT, RAIN, RAIN_FAR, BULB, BULB_DIM, FLASH, CONCRETE
     global GOLD, GOLD_DIM, ROU_RED, ROU_BLACK, ROU_GREEN, LANE, GRASS, BARK
+    global FIREFLY, EYES
     global ROOF, STAR_DIM, STAR_WARM, STAR_COLD, MOON, MOON_DIM, BAND
 
     curses.start_color()
@@ -302,7 +321,7 @@ def init_colors():
                   "rou_green": 46, "lane": 250, "grass": 22, "bark": 58,
                   "roof": 252, "star_dim": 244, "star_warm": 223,
                   "star_cold": 153, "moon": 231, "moon_dim": 250,
-                  "band": 60}
+                  "band": 60, "firefly": 118, "eyes": 190}
         attrs = {}
     else:
         # 8-colour fallback: bold = the "bright" version of a colour.
@@ -337,7 +356,8 @@ def init_colors():
                   "roof": curses.COLOR_WHITE, "star_dim": curses.COLOR_BLACK,
                   "star_warm": curses.COLOR_YELLOW,
                   "star_cold": curses.COLOR_CYAN, "moon": curses.COLOR_WHITE,
-                  "moon_dim": curses.COLOR_WHITE, "band": curses.COLOR_BLUE}
+                  "moon_dim": curses.COLOR_WHITE, "band": curses.COLOR_BLUE,
+                  "firefly": curses.COLOR_GREEN, "eyes": curses.COLOR_YELLOW}
         attrs = {"near": curses.A_BOLD}
 
     pair = 1
@@ -393,6 +413,8 @@ def init_colors():
     STAR_COLD = made["star_cold"]
     MOON = made["moon"] | curses.A_BOLD
     MOON_DIM = made["moon_dim"]
+    FIREFLY = made["firefly"] | curses.A_BOLD
+    EYES = made["eyes"]
     BAND = made["band"]
 
 
@@ -843,8 +865,7 @@ def bridge_at(i, j):
     with a puddle under it. At one in four you walk the bank to find one, which
     is what makes a bridge worth having.
 
-    They are all building sites for now - hoardings, a crane and a plank deck
-    you can get over on. The real bridges go here."""
+    A footbridge: railings, warm lamps, a string of lights between them."""
     return (river_at(i, j) and _is_road(i, XP, 91)
             and _mix(i // XP, 0, 719) % BRIDGE_ODDS == 0)
 
@@ -913,29 +934,105 @@ def _is_alley(i, j, period, salt, run_salt):
 _yoko_cache = {}
 
 
-_clearing_cache = {}
+_woods_cache = {}
 
 
-def clearing_at(i, j):
-    """Is this the clearing in the woods, the one deep enough in the trees.
+def woods_home(i, j):
+    """Centre (ci, cj) of the woods in the tile this cell belongs to."""
+    ti, tj = i // WOODS_TILE, j // WOODS_TILE
+    m = _mix(ti, tj, 1201)
+    return (ti * WOODS_TILE + WOODS_TILE // 2 + (m & 63) - 32,
+            tj * WOODS_TILE + WOODS_TILE // 2 + ((m >> 6) & 63) - 32)
 
-    Deep matters: a rig in a park cell you can see from the road is not the
-    thing, and the whole point is that you come across it. So the cell has to
-    be open, in a park, off the road, and walled in by trees on most sides."""
+
+def woods_depth(i, j):
+    """How far inside the woods this cell is, in cells; negative outside.
+
+    The edge wanders rather than running straight, so the wood is not a
+    rectangle with corners on it. Kept to a gentle slope - under one cell per
+    cell - so the ring trail that follows the edge stays joined up."""
     key = i * 1048576 + j
-    hit = _clearing_cache.get(key)
+    hit = _woods_cache.get(key)
     if hit is None:
-        _evict(_clearing_cache, 40000)
-        hit = False
-        if (park_core(i, j) and is_open(i, j) and not river_at(i, j)
-                and not road_at(i, j) and _mix(i, j, 733) % RAVE_ODDS_SPACE == 0):
-            trees = sum(not is_open(i + a, j + b)
-                        for a in (-1, 0, 1) for b in (-1, 0, 1) if a or b)
-            near_road = any(road_at(i + a, j + b)
-                            for a in range(-2, 3) for b in range(-2, 3))
-            hit = trees >= 4 and not near_road
-        _clearing_cache[key] = hit
+        _evict(_woods_cache, 60000)
+        ci, cj = woods_home(i, j)
+        di, dj = i - ci, j - cj
+        ei = (WOODS_HALF_I + 3.0 * math.sin(dj / 9.0 + ci)
+              + 2.0 * math.sin(dj / 4.0 + 1.0))
+        ej = (WOODS_HALF_J + 3.0 * math.sin(di / 9.0 + cj)
+              + 2.0 * math.sin(di / 4.0 + 2.0))
+        hit = min(ei - abs(di), ej - abs(dj))
+        _woods_cache[key] = hit
     return hit
+
+
+def woods_at(i, j):
+    """Is this cell in the woods - the big one, not a park."""
+    return woods_depth(i, j) > 0.0
+
+
+def hollow_centre(ci, cj):
+    """The hollow is near the middle of the woods, never exactly at it."""
+    m = _mix(ci, cj, 1207)
+    return ci + (m & 15) - 8, cj + ((m >> 4) & 7) - 4
+
+
+def hollow_at(i, j):
+    ci, cj = woods_home(i, j)
+    hi, hj = hollow_centre(ci, cj)
+    di, dj = i - hi, j - hj
+    wob = 1.0 + 0.12 * math.sin(math.atan2(dj, di) * 3.0 + hi)
+    return (di / (HOLLOW_RI * wob)) ** 2 + (dj / (HOLLOW_RJ * wob)) ** 2 < 1.0
+
+
+def trail_at(i, j):
+    """The paths through the woods, one cell wide and wandering.
+
+    Three the long way, two across, a ring just inside the edge that the
+    others run into, and one straight path down into the hollow. Every road
+    that meets the edge gets a gate through to the ring, so the wood is always
+    enterable and you can always get back out - but off the trails the trees
+    are thick enough that you will not go far before turning round."""
+    depth = woods_depth(i, j)
+    if depth <= 0.0:
+        return False
+    if depth < 3.0:
+        if depth > 1.0:
+            return True                              # the ring
+        return _is_road(i, XP, 91) or _is_road(j, ZP, 137)   # a gate
+    ci, cj = woods_home(i, j)
+    di, dj = i - ci, j - cj
+    for n, off in enumerate((-22, 0, 24)):
+        m = _mix(ci, n, 1213)
+        f = (off + 6.0 * math.sin(di / 23.0 + (m & 7))
+             + 3.0 * math.sin(di / 8.0 + ((m >> 3) & 7)))
+        if abs(dj - f) < 1.0:
+            return True
+    for n, off in enumerate((-30, 28)):
+        m = _mix(cj, n, 1217)
+        f = (off + 5.0 * math.sin(dj / 17.0 + (m & 7))
+             + 2.5 * math.sin(dj / 6.0 + ((m >> 3) & 7)))
+        if abs(di - f) < 1.0:
+            return True
+    hi, hj = hollow_centre(ci, cj)
+    return i == hi and hj - HOLLOW_RJ - 14 <= j <= hj
+
+
+def nearest_hollow(x, z):
+    """(hx, hz, hi, hj) of the hollow nearest this point, in world units and
+    cells. There is one woods a tile, so it is one of nine."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    best = None
+    for a in (-1, 0, 1):
+        for b in (-1, 0, 1):
+            wi, wj = woods_home(ci + a * WOODS_TILE, cj + b * WOODS_TILE)
+            hi, hj = hollow_centre(wi, wj)
+            hx, hz = (hi + 0.5) * CELL, (hj + 0.5) * CELL
+            d2 = (hx - x) ** 2 + (hz - z) ** 2
+            if best is None or d2 < best[0]:
+                best = (d2, hx, hz, hi, hj)
+    return best[1:]
 
 
 _forced_rave = None     # when one was called up, rather than being due
@@ -951,6 +1048,12 @@ def rave_window(now):
     on a longer slot and longer odds - about one hour in seven has one."""
     if _forced_rave is not None and _forced_rave <= now < _forced_rave + RAVE_LONG:
         return _forced_rave, RAVE_LONG
+    if night(now)["alien"]:
+        # The rig in the trees knew. Whoever carried a sound system into the
+        # woods on the one night in forty the sky has something in it was not
+        # guessing: on that night it is on from dusk to dawn.
+        k = int((now + _night_skip) / NIGHT_LENGTH)
+        return k * NIGHT_LENGTH - _night_skip, NIGHT_LENGTH
     k = int(now / RAVE_SLOT)
     for kk in (k, k - 1):
         m = _mix(kk, 0, 829)
@@ -967,6 +1070,13 @@ def rave_light(now, phase, tone):
     """What the rig is doing this instant, or None between hits. Same idea as
     club_light() but faster and less forgiving - no colour wash between the
     kicks, just dark."""
+    sync = city_sync(now)
+    if sync is not None:                # and on that night it is on the sky's beat
+        if sync == "flash":
+            return FLASH
+        if sync == "off":
+            return None
+        return rave_tone(tone, int(now * ALIEN_BPM / 60.0))
     t = now * RAVE_BPM / 60.0 + phase
     beat = t % 1.0
     if (int(t) // 4) % 16 == 15 and int(t * 8) % 2:
@@ -974,8 +1084,15 @@ def rave_light(now, phase, tone):
     if beat < 0.10:
         return FLASH
     if beat < 0.26:
-        return NEON[min(len(NEON) - 1, int(tone * len(NEON)))][0]
+        return rave_tone(tone, int(t / 4))
     return None
+
+
+def rave_tone(tone, bar):
+    """The rig's colour this bar, from its own palette - purples and greens,
+    never the whole neon rainbow, which is the club's."""
+    k = RAVE_TONES[(int(tone * 4) + bar) % len(RAVE_TONES)]
+    return NEON[min(len(NEON) - 1, k)][0]
 
 
 def yokocho_at(i, j):
@@ -989,7 +1106,7 @@ def yokocho_at(i, j):
     if hit is None:
         _evict(_yoko_cache, 40000)
         hit = False
-        if is_open(i, j) and not road_at(i, j):
+        if is_open(i, j) and not road_at(i, j) and not woods_at(i, j):
             if _is_alley(i, j, XP, 91, 211) and _mix(i, j // 6, 331) % 4 == 0:
                 hit = True
             elif _is_alley(j, i, ZP, 137, 223) and _mix(j, i // 6, 337) % 4 == 0:
@@ -1008,7 +1125,12 @@ def face_kind(i, j):
 
 
 def road_at(i, j):
-    """Is this cell part of a proper street - the kind that gets neon?"""
+    """Is this cell part of a proper street - the kind that gets neon?
+
+    No street runs through the woods: the avenue stops at the trees and a gate
+    in the ring trail is what continues it."""
+    if woods_at(i, j):
+        return False
     return _is_road(i, XP, 91) or _is_road(j, ZP, 137)
 
 
@@ -1019,6 +1141,12 @@ def is_open(i, j):
         _evict(_open_cache, 60000)
         if river_at(i, j):
             hit = True          # you can see across it; standing is elsewhere
+        elif woods_at(i, j):
+            # Trails, the hollow, and otherwise trees thick enough that the
+            # open cells do not join up: off a trail you get a few cells in and
+            # have to turn round, which is what being lost in a wood is.
+            hit = (trail_at(i, j) or hollow_at(i, j)
+                   or _mix(i, j, 89) % 100 < WOODS_OPEN)
         elif DISTRICTS[district_at(i, j)]["park"]:
             # Roads still cross a park; everything else is grass, but for the
             # clumps of trees - which are solid, so the renderer and the
@@ -1223,7 +1351,8 @@ def lot(i, j):
         b = {
             "height": max(d["lo"], min(d["hi"],
                                        base * rng.uniform(0.7, 1.5) * d["scale"])),
-            "tone": rng.random(),
+            # The same draw either way, so the woods change nothing else.
+            "tone": rng.random() * (0.4 if d is WOODS else 1.0),
             "glyphs": rng.sample(d["glyphs"], 2),
             "density": rng.uniform(*d["dens"]),
             "seed": rng.randrange(1 << 28),
@@ -1323,6 +1452,7 @@ class View:
         self.fy = self.fx * 0.5
         self.wide = set()       # cells holding a double-width glyph
         self.rave = None        # (colour, x, z) of a rig lighting the woods
+        self.hollow = None      # (x, z, beat, colour) of the rave on the ground
         self.water = set()      # cells the river was drawn into
         self.wet = 0.0          # how hard it is raining, 0..1
         self.flash = 0.0        # how bright the lightning is this instant
@@ -1680,7 +1810,7 @@ def draw_tree_column(ch, co, v, sx, dist, b, u, r_lo, r_hi):
         zw = v.z + v.dz * dist
         xw = v.x + v.dx * dist
         near = (xw - rx) ** 2 + (zw - rz) ** 2
-        if near < 2100.0:
+        if near < 4900.0:
             leaf = lamp
     for y in range(max(r_lo, crown), min(r_hi, under) + 1):
         if _mix(sx, y, 11) % 100 < 64:
@@ -2191,62 +2321,22 @@ def _spill(glow, x, z, reach, attr):
                 glow[a * 65536 + b] = attr
 
 
-# Long and low, and drawn with enough characters to survive being close: a
-# barge passes within twenty units of the bank, and a fifteen-character hull
-# there gets three screen columns a character and comes out as porridge.
-BARGE = [
-    "              ,-----.         ",
-    "   ___________|o o o|________ ",
-    "  /                          \\",
-    "  '--------------------------'",
-]
-
-BARGE_SPEED = 3.2      # world units a second, which is slower than you walk
-BARGE_GAP = 620.0      # and how far apart they are along the channel
-
-
-def near_barges(v, now, reach):
-    """Every barge in sight, bow first.
-
-    A line of them spaced evenly along the river and all drifting at the same
-    pace, rather than one spawned and tracked: the position is a function of
-    the time and nothing is remembered, so a barge is where it should be
-    whether or not you were watching."""
-    drift = (now * BARGE_SPEED) % BARGE_GAP
-    base = math.floor((v.x - reach - drift) / BARGE_GAP)
-    for n in range(int(base), int(base) + int(2 * reach / BARGE_GAP) + 3):
-        x = n * BARGE_GAP + drift
-        if abs(x - v.x) > reach:
-            continue
-        i = int(x / CELL + BIG) - BIG
-        z = (river_centre(i) + 0.5) * CELL
-        rx, rz = x - v.x, z - v.z
-        if rx * v.dx + rz * v.dz < -20.0:
-            continue
-        yield x, z
-
-
-def draw_barge(ch, co, v, walls, x, z, now, wet):
-    """One going by. Hull lights, a lit wheelhouse, and a wake behind it."""
-    blit_sprite(ch, co, v, walls, BARGE, x, z, 0.0, 2.6, 26.0, CURB)
-    put_lit(ch, co, v, walls, x + 12.0, 1.3, z, "o", ROU_GREEN,
-             max(wet, 0.4), now)
-    put_lit(ch, co, v, walls, x - 12.0, 1.3, z, "o", ROU_RED,
-             max(wet, 0.4), now)
-    put_lit(ch, co, v, walls, x + 1.0, 3.4, z, "o", BULB, max(wet, 0.4), now)
-    # The wake, trailing off behind and fanning out.
-    for k in range(1, 9):
-        wobble = 0.5 * math.sin(now * 2.0 + k)
-        for side in (-1, 1):
-            put_point(ch, co, v, walls, x - 14.0 - k * 2.4, 0.12,
-                      z + side * (0.7 + k * 0.42) + wobble, "~", RAIN_FAR)
-
-
 ANGLER = [
     " o    ",
     "/|\\__ ",
     " |   \\",
     "/ \\   ",
+]
+
+# Somebody leaning on a bridge railing, seen from behind: elbows out on the
+# rail, looking down the river. Not on every bridge.
+LEANER = [
+    "  ,-.  ",
+    "  ( )  ",
+    "_/ | \\_",
+    "  |#|  ",
+    "  | |  ",
+    " _| |_ ",
 ]
 
 
@@ -2447,10 +2537,17 @@ def reflect_river(ch, co, v, walls, now, wet):
     the horizon, and the eye being above the water rather than on it is the
     whole of the correction.
 
+    Only the *lights* come across - windows, neon, bulbs - and never the walls,
+    roofs and corners round them. Real water at night does exactly this: the
+    structure of the far bank is black and what lies on the surface is its
+    lit windows, smeared downwards. Mirroring every glyph gave a second,
+    readable copy of the city under the first, which from a pier - where the
+    water fills the bottom half of the screen - was most of what you saw.
+    Below the first couple of rows the glyph gives way to ':', because a
+    reflection that far out is a streak, not a letter.
+
     Only into cells the river was actually drawn into, so the reflection stops
-    at the bank instead of running up the road. Broken up sideways and thinned
-    with depth, the way the waterfront does it: an unbroken copy of the city
-    reads as the picture having been printed twice."""
+    at the bank instead of running up the road."""
     if not v.water:
         return
     chop = int(now * 2.0)
@@ -2461,20 +2558,31 @@ def reflect_river(ch, co, v, walls, now, wet):
         drop = 2.0 * EYE_Y * v.fy / dist
         for r in range(max(0, walls[3][sx]), v.horizon):
             glyph = ch[r][sx]
-            if glyph == " ":
+            if glyph == " " or not (glyph.isalnum() or glyph in "*+@"):
                 continue
             r2 = int(round(2 * v.horizon - r + drop))
             deep = r2 - v.horizon
             if deep < 1 or r2 >= v.height:
                 continue
-            if _mix(sx, r2, 61 + chop) % 100 >= 88 - deep * 5 - int(34 * wet):
+            if _mix(sx, r2, 61 + chop) % 100 >= 85 - deep * 6 - int(30 * wet):
                 continue
             tx = sx + int(round(1.7 * math.sin(now * 1.1 + deep * 0.55)
                                 + 1.3 * wet * math.sin(now * 3.7 + deep)))
             if (r2, tx) not in v.water:
                 continue
-            ch[r2][tx] = glyph
-            co[r2][tx] = co[r][sx] & ~curses.A_BOLD
+            attr = co[r][sx] & ~curses.A_BOLD
+            ch[r2][tx] = glyph if deep <= 3 else ":"
+            co[r2][tx] = attr
+            # And the streak under it. Lamplight on water is a smear, not a
+            # dot, and the smear is what makes it read as a reflection.
+            for tail in (1, 2, 3):
+                ty = r2 + tail
+                if (ty, tx) not in v.water or ch[ty][tx] not in " ~-":
+                    break
+                if _mix(tx, ty, 67 + chop) % 4 == 3:
+                    break
+                ch[ty][tx] = ":"
+                co[ty][tx] = attr
 
 
 def draw_ground(ch, co, v, walls, glow, wet, now):
@@ -2521,11 +2629,14 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 wet_cell = river_at(i, j)
                 deck = wet_cell and deck_at(i, j)
                 pier = wet_cell and pier_at(i, j)
-                green = (not wet_cell
-                         and DISTRICTS[district_at(i, j)]["park"]
+                woods = not wet_cell and woods_at(i, j)
+                green = (not wet_cell and (woods or district(i, j)["park"])
                          and not road_at(i, j))
+                trail = woods and trail_at(i, j)
+                hollow = (woods and v.hollow is not None
+                          and hollow_at(i, j))
                 lane = None
-                if not solid:
+                if not solid and not woods:
                     along_x = road_span(i, XP, 91)
                     along_z = road_span(j, ZP, 137)
                     if along_x and along_z:
@@ -2554,16 +2665,23 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
             g = glow.get(((int(x / GLOW_CELL + BIG) - BIG) * 65536)
                          + (int(z / GLOW_CELL + BIG) - BIG))
             if deck:
-                # Planks. A pier is properly laid; a crossing is a builder's
-                # walkway over a bridge nobody has finished.
+                # A pier is planked across its width, so what you see is the
+                # seam between one plank and the next, every so often, and
+                # dark timber between them. Scattering random '=' over it
+                # instead reads as noise, and at your feet - where one cell is
+                # most of the screen - it was the loudest thing in the view.
+                # A bridge is paved and gets the road's own grain.
                 if pier:
-                    if _mix(int(x * 1.6), int(z * 1.6), 37) % 3:
+                    if (z * 1.4) % 1.0 < 0.2:
+                        glyph, attr = "-", CURB
+                    elif _mix(int(x * 3.0), int(z * 3.0), 37) % 13 == 0:
+                        glyph, attr = ".", STREET
+                    else:
                         continue
-                    glyph, attr = "=", CURB
+                elif _mix(int(x * 3.0), int(z * 3.0), 7) & 7 == 0:
+                    glyph, attr = ".", STREET
                 else:
-                    if _mix(int(x * 2.0), int(z * 2.0), 37) % 4:
-                        continue
-                    glyph, attr = "=", CURB
+                    continue
             elif wet_cell:
                 # Water. It moves along the channel, and it takes whatever the
                 # city is putting out: the glow map is already worked out for
@@ -2578,6 +2696,23 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                     glyph, attr = "-", STREET
                 else:
                     continue
+            elif hollow:
+                # The rings. Light pulsing out across the ground from the
+                # altar on every beat, which is the one thing in the city
+                # meant to look like it is doing something to you.
+                ax, az, beat, lamp = v.hollow
+                dd = math.hypot(x - ax, z - az)
+                if lamp is not None and (dd - beat * RING_GAP) % RING_GAP < 0.8:
+                    glyph, attr = ":", lamp
+                elif _mix(int(x * 3.0), int(z * 3.0), 23) % 5 == 0:
+                    glyph, attr = ".", BARK               # trampled bare
+                else:
+                    continue
+            elif trail:
+                h = _mix(int(x * 3.0), int(z * 3.0), 23)
+                if h % 4:
+                    continue
+                glyph, attr = ("." if h % 3 else ":"), CURB   # beaten earth
             elif green:
                 h = _mix(int(x * 3.0), int(z * 3.0), 23)
                 if h % 3:
@@ -3005,164 +3140,313 @@ COMPASS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
 
 
 def rave_hint(v, now):
-    """What the HUD says when there is a rig going somewhere near.
+    """What the HUD says when the rig is going.
 
     Which way, not just that there is one: a wood is disorienting on purpose,
     and "music somewhere" in a place with no landmarks is a fact you can do
     nothing with. A bearing is one you can walk on."""
     if rave_window(now) is None:
         return ""
-    # Every direction, not only the way you happen to be facing:
-    # near_clearings() drops what is behind the camera because the renderer
-    # has no use for it, but a hint that goes quiet the moment you turn your
-    # back on the music is worse than no hint at all.
-    reach = 160.0
-    n = int(reach / CELL) + 1
-    ci = int(v.x / CELL + BIG) - BIG
-    cj = int(v.z / CELL + BIG) - BIG
-    best = None
-    for i in range(ci - n, ci + n + 1):
-        for j in range(cj - n, cj + n + 1):
-            if not clearing_at(i, j):
-                continue
-            cx, cz = (i + 0.5) * CELL, (j + 0.5) * CELL
-            d2 = (cx - v.x) ** 2 + (cz - v.z) ** 2
-            if d2 <= reach * reach and (best is None or d2 < best[0]):
-                best = (d2, cx, cz)
-    if best is None:
+    hx, hz, _, _ = nearest_hollow(v.x, v.z)
+    d = math.hypot(hx - v.x, hz - v.z)
+    if d > 700.0:
         return ""
-    d = math.sqrt(best[0])
-    way = COMPASS[int(((math.atan2(best[1] - v.x, best[2] - v.z)
+    way = COMPASS[int(((math.atan2(hx - v.x, hz - v.z)
                         / math.tau % 1.0) * 8 + 0.5)) % 8]
-    return "  ~ music %s, %s ~" % (way, "close" if d < 25.0
-                                  else "not far" if d < 70.0 else "a way off")
+    return "  ~ a bass line %s, %s ~" % (
+        way, "close" if d < 30.0 else "not far" if d < 100.0
+        else "a way off" if d < 300.0 else "far off")
 
 
-def draw_woods_rave(ch, co, v, walls, i, j, now, wet):
-    """A rig in a clearing, in the dark, with no permission.
+# The crowd in the hollow. Hoods up, and the one thing they all do is the same
+# thing at the same time.
+ZOMB_UP = [
+    "\\_n_/",
+    " (.) ",
+    " \\#/ ",
+    "  #  ",
+    " / \\ ",
+    "_| |_",
+]
 
-    Everything in here runs off one clock the way the club does, so the trees,
-    the crowd and the light on the ground all hit together. What sells it is
-    not the rig but the canopy: light going up into the leaves is how you know
-    something is happening in a wood before you can see any of it."""
-    cx = (i + 0.5) * CELL
-    cz = (j + 0.5) * CELL
-    m = _mix(i, j, 977)
+ZOMB_DOWN = [
+    " _n_ ",
+    " (.) ",
+    "/ # \\",
+    "  #  ",
+    " / \\ ",
+    "_| |_",
+]
+
+# The altar at the far end of the hollow: the stack, the decks on it, and the
+# thing over the decks that everyone is facing.
+ALTAR = [
+    " \\     / ",
+    "  \\o o/  ",
+    "   \\_/   ",
+    "  _|=|_  ",
+    " |[o][o]|",
+    " |_____| ",
+    "|#||#||#|",
+    "|#||#||#|",
+    "|_||_||_|",
+]
+ALTAR_H = 7.2
+ALTAR_W = 3.6
+
+
+def draw_hollow_rave(ch, co, v, walls, hi, hj, now, wet):
+    """The rig in the hollow, and everyone who came to it.
+
+    The altar is at the far end and the crowd faces it with their backs to
+    you, and every one of them moves on the same beat with no offset at all -
+    hoods up, arms up, arms down, together. That is what makes it not a party.
+    The club's queue is in time; this is in step. Between the kicks, when the
+    hollow goes dark, what is left is their eyes."""
+    hx, hz = (hi + 0.5) * CELL, (hj + 0.5) * CELL
+    m = _mix(hi, hj, 977)
     phase = (m & 255) / 255.0 * 6.0
     tone = ((m >> 8) & 255) / 255.0
     lamp = rave_light(now, phase, tone)
-    lit = NEON[min(len(NEON) - 1, int(tone * len(NEON)))][0]
     t = now * RAVE_BPM / 60.0 + phase
+    if city_sync(now) is not None:
+        t = now * ALIEN_BPM / 60.0
+    kick = lamp == FLASH
 
-    # The stack, against the trees at the back of the clearing.
-    sx = cx + (1.0 if m & 1 else -1.0) * 1.5
-    blit_sprite(ch, co, v, walls, STACK, sx, cz + 1.9, 0.0, 2.6, 1.4,
+    # The altar, against the trees at the back.
+    ax, az = hx, hz + HOLLOW_RJ * CELL * 0.72
+    blit_sprite(ch, co, v, walls, ALTAR, ax, az, 0.0, ALTAR_H, ALTAR_W,
                 lamp if lamp is not None else CONCRETE)
-
-    # A fire, which is the only thing down there that is not on the beat.
-    fx, fz = cx - 1.7, cz - 1.4
-    for k in range(5):
-        a = now * 3.0 + k * 1.3
-        put_lit(ch, co, v, walls, fx + 0.22 * math.sin(a), 0.25 + 0.16 * k,
-                fz + 0.18 * math.cos(a * 0.7),
-                "^*o.,"[k], EMBER_HOT if k < 2 else EMBER, wet, now)
+    for ex in (-0.4, 0.4):              # its eyes, which are never off
+        put_point(ch, co, v, walls, ax + ex, ALTAR_H * (1.0 - 1.5 / 9.0), az,
+                  "o", FLASH if kick else EMBER_HOT)
 
     # Beams going up into the canopy - the giveaway, from much further off
     # than any of the rest of it.
     if lamp is not None:
-        for k in range(5):
+        for k in range(8):
             a = math.sin(t * (0.5 + k * 0.17) + k * 1.9)
-            for step in range(7):
-                h = 1.8 + step * 1.5
-                put_point(ch, co, v, walls, cx + a * h * 0.34, h,
-                          cz + math.cos(t * 0.3 + k) * h * 0.22,
+            for step in range(10):
+                h = 2.0 + step * 1.5
+                put_point(ch, co, v, walls, ax + a * h * 0.45, h,
+                          az - h * 0.15 + math.cos(t * 0.3 + k) * h * 0.22,
                           "|" if abs(a) < 0.4 else ("\\" if a > 0 else "/"),
-                          NEON[(k + int(t / 8)) % len(NEON)][0])
+                          rave_tone(tone, k + int(t / 8)))
 
-    # And the people, who are the reason for it.
-    for k in range(5):
-        g = _mix(i, j, 40 + k)
-        px = cx + ((g & 255) / 255.0 - 0.5) * 3.6
-        pz = cz + (((g >> 8) & 255) / 255.0 - 0.5) * 2.6
-        up = ((t + (g >> 16 & 15) * 0.13) % 1.0) < 0.5
-        blit_sprite(ch, co, v, walls, RAVER_UP if up else RAVER_DOWN,
+    # The crowd. Furthest first so the near ones are drawn over them.
+    up = (t % 1.0) < 0.5
+    crowd = []
+    for k in range(CROWD):
+        g = _mix(hi, hj, 40 + k)
+        r = math.sqrt((g & 255) / 255.0) * 0.86
+        a = ((g >> 8) & 1023) / 1023.0 * math.tau
+        px = hx + r * HOLLOW_RI * CELL * math.cos(a)
+        pz = hz + r * HOLLOW_RJ * CELL * math.sin(a)
+        if (px - ax) ** 2 + (pz - az) ** 2 < 9.0:
+            continue                    # nobody stands on the altar
+        crowd.append(((px - v.x) ** 2 + (pz - v.z) ** 2, px, pz))
+    for d2, px, pz in sorted(crowd, reverse=True):
+        blit_sprite(ch, co, v, walls, ZOMB_UP if up else ZOMB_DOWN,
                     px, pz, 0.05, SMOKER_H, SMOKER_W,
                     lamp if lamp is not None else BARK)
-        if lamp is not None:
-            put_point(ch, co, v, walls, px + (0.5 if up else 0.35),
-                      1.55 + (0.4 if up else 0.0), pz, "*", lit)
+        if lamp is None and d2 < 900.0:
+            for ex in (-0.1, 0.1):
+                put_point(ch, co, v, walls, px + ex, 1.55, pz, ".", EYES)
 
 
-def near_clearings(v, reach):
-    n = int(reach / CELL) + 1
+def draw_drawn_in(ch, co, v, walls, hi, hj, now):
+    """The ones still on their way: standing on the trails near the hollow,
+    hoods up, facing it, not moving. They heard it too."""
+    hx, hz = (hi + 0.5) * CELL, (hj + 0.5) * CELL
+    n = int(60.0 / CELL)
     ci = int(v.x / CELL + BIG) - BIG
     cj = int(v.z / CELL + BIG) - BIG
     for i in range(ci - n, ci + n + 1):
         for j in range(cj - n, cj + n + 1):
-            rx = (i + 0.5) * CELL - v.x
-            rz = (j + 0.5) * CELL - v.z
-            if rx * v.dx + rz * v.dz < -CELL:
+            g = _mix(i, j, 1223)
+            if g % 5 or hollow_at(i, j) or not trail_at(i, j):
                 continue
-            if clearing_at(i, j):
-                yield i, j
+            x, z = (i + 0.5) * CELL, (j + 0.5) * CELL
+            if (x - hx) ** 2 + (z - hz) ** 2 > 90.0 ** 2:
+                continue
+            if (x - v.x) * v.dx + (z - v.z) * v.dz < 0.0:
+                continue
+            x += ((g >> 4) & 7) / 7.0 * 2.4 - 1.2
+            blit_sprite(ch, co, v, walls, ZOMB_DOWN, x, z, 0.05,
+                        SMOKER_H, SMOKER_W, BARK)
+            for ex in (-0.1, 0.1):
+                put_point(ch, co, v, walls, x + ex, 1.55, z, ".", EYES)
 
 
-# No words on it. A board in world space is squashed by perspective to about
-# a column a letter, and at any range you would actually read it from the
-# letters double up - the same thing that made the casino marquee move into
-# screen space. A hazard board says roadworks without asking anyone to read.
-WORKS_SIGN = [
-    " ,-. ",
-    "/ ! \\",
-    "-----",
-    "  |  ",
-    "  |  ",
-]
+def draw_woods_life(ch, co, v, walls, now, wet):
+    """What is out in the trees with you: fireflies over the open ground on a
+    dry night, and now and then two points of light under a tree that go out
+    when you look at them for long enough. Nothing is ever shown attached to
+    them."""
+    n = int(36.0 / CELL)
+    ci = int(v.x / CELL + BIG) - BIG
+    cj = int(v.z / CELL + BIG) - BIG
+    for i in range(ci - n, ci + n + 1):
+        for j in range(cj - n, cj + n + 1):
+            if not woods_at(i, j):
+                continue
+            x, z = (i + 0.5) * CELL, (j + 0.5) * CELL
+            if (x - v.x) * v.dx + (z - v.z) * v.dz < -CELL:
+                continue
+            m = _mix(i, j, 1301)
+            if is_open(i, j):
+                if wet > 0.2:
+                    continue
+                # Most of the wood is behind the nearest trees, so the ones
+                # you actually see are the ones over the trail you are on.
+                for k in range(2 + m % 3 if trail_at(i, j) else m % 3):
+                    s = (m >> (4 + 6 * k)) & 63
+                    if math.sin(now * 1.7 + s) < 0.1:
+                        continue
+                    fx = x + math.sin(now * 0.31 + s) * 1.6
+                    fz = z + math.cos(now * 0.23 + s * 2) * 1.6
+                    fy = 0.7 + 0.4 * math.sin(now * 0.5 + s * 3)
+                    put_point(ch, co, v, walls, fx, fy, z + (fz - z), "'",
+                              FIREFLY)
+            elif m % 3 == 0:
+                if int(now * 0.4 + (m >> 8)) % 7 == 0:
+                    continue                    # blinked
+                dx, dz = v.x - x, v.z - z
+                d = math.hypot(dx, dz) or 1.0
+                if d > 24.0:
+                    continue                    # further off, a tree hides it
+                # Just clear of the trunk on the side facing you - far
+                # enough out to be in the next cell whichever way that is,
+                # and only if that cell is open, or the tree hides its own eyes.
+                ex, ez = x + dx / d * 3.8, z + dz / d * 3.8
+                if not open_at(ex, ez):
+                    continue
+                for side in (-0.2, 0.2):
+                    put_point(ch, co, v, walls, ex - dz / d * side, 0.75,
+                              ez + dx / d * side, ".", EYES)
 
 
-def draw_worksite(ch, co, v, walls, i, j, now, wet):
-    """A bridge nobody has finished, and the paraphernalia of not finishing it.
+BRIDGE_LAMP_GAP = 6.0    # world units between lamp posts along the parapet
+BRIDGE_SEEN = 230.0      # how far off the end lamps are drawn from
+LEANER_ODDS = 3          # one bridge in this many has somebody on it
 
-    Hoardings down both edges of the walkway with an amber lamp on top of every
-    other post, a board at the bank end, and a crane standing over the middle
-    of it. The lamps blink out of step with each other - a row of them in
-    perfect time reads as decoration rather than as roadworks."""
+
+def bridge_edges(i):
+    """(x of one railing, x of the other, z at one bank, z at the other)."""
     lo, hi = river_span(i)
-    x0 = (i + 0.5) * CELL
+    span = road_span(i, XP, 91)
+    wide = span[1] if span else 2
+    return i * CELL, (i + wide) * CELL, (lo + 0.5) * CELL, (hi - 0.5) * CELL
+
+
+def leaner_at(i):
+    """Where somebody is leaning on this bridge's railing, or None."""
+    m = _mix(i, 0, 733)
+    if m % LEANER_ODDS:
+        return None
+    xa, xb, z0, z1 = bridge_edges(i)
+    x = xa if (m >> 4) & 1 else xb
+    z = z0 + (z1 - z0) * (0.3 + ((m >> 5) & 7) / 17.0)
+    return x, z, m
+
+
+def put_halo(ch, co, v, walls, x, y, z, attr, wide):
+    """A soft blob round a light, in screen space so it survives distance.
+
+    A world-space halo collapses into the lamp's own cell from a hundred units
+    off, which is exactly the range this is for."""
+    pr = v.project(x, y, z)
+    if pr is None:
+        return
+    sx, sy, d = int(round(pr[0])), int(round(pr[1])), pr[2]
+    # Over whatever is behind it - the far bank's walls, usually - but never
+    # over another light, which is what the glow is meant to be seen against.
+    around = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    if wide:
+        around += [(-2, 0), (2, 0)]
+    for dx, dy in around:
+        tx, ty = sx + dx, sy + dy
+        if not (0 <= tx < v.width and 0 <= ty < v.height):
+            continue
+        under = ch[ty][tx]
+        if under.isalnum() or under in "*+@":
+            continue
+        put_cell(ch, co, v, walls, tx, ty, d, ".", attr)
+
+
+def draw_bridge_ends(ch, co, v, walls, i, j, now, wet):
+    """The four lamps at the banks, taller than the rest and with a glow round
+    them, drawn from much further off than the bridge itself.
+
+    They are what makes a crossing findable: walking the bank looking for one,
+    the moment you can see a bridge is long before you can see the bridge -
+    the same job the club's spill does for the club."""
+    xa, xb, z0, z1 = bridge_edges(i)
+    near = (i * CELL - v.x) ** 2 + (z0 - v.z) ** 2 < 60.0 ** 2
+    for x in (xa, xb):
+        for z in (z0, z1):
+            for h in (1.4, 2.2, 3.0, 3.8):
+                put_point(ch, co, v, walls, x, h, z, "|", CONCRETE)
+            put_point(ch, co, v, walls, x, 4.9, z, "n", CONCRETE)
+            put_halo(ch, co, v, walls, x, 4.5, z, BULB_DIM, not near)
+            put_lit(ch, co, v, walls, x, 4.5, z, "o", BULB, max(wet, 0.3), now)
+
+
+def draw_bridge(ch, co, v, walls, i, j, now, wet):
+    """A footbridge worth crossing: a railing down each side, warm lamps on
+    posts along it, and a string of small lights slung between the lamps.
+
+    The lamps are the point. They are what you see from the bank, and on a
+    wet night they are what lies on the water under the bridge, because the
+    reflection carries lights and nothing else. They do not blink or flicker -
+    the buoys and the club have that, and a bridge is where the city is
+    quiet. The festoon between them sags the way the yokocho lanterns do, for
+    the same reason: a straight line of dots reads as a fence."""
+    xa, xb, z0, z1 = bridge_edges(i)
     for side in (0, 1):
-        jz = (lo if side else hi)
-        z = (jz + (0.6 if side else -0.6)) * CELL
-        for k in range(3):
-            px = x0 + (k - 1) * 1.7
-            put_point(ch, co, v, walls, px, 0.95, z, "#", CURB)
-            put_point(ch, co, v, walls, px, 0.55, z, "|", CURB)
-            if (k + side) % 2 == 0:
-                # An amber lamp, blinking on its own count.
-                m = _mix(i, int(jz) + k, 611)
-                if ((now * 1.4 + (m & 255) / 255.0) % 1.0) < 0.55:
-                    put_lit(ch, co, v, walls, px, 1.25, z, "o", EMBER_HOT,
-                            max(wet, 0.35), now)
+        x = xb if side else xa
+        # The railing: a post every so often and a rail along the top.
+        z = z0
+        while z <= z1:
+            put_point(ch, co, v, walls, x, 0.95, z, "-", CURB)
+            if int(z / 1.5) % 2 == 0:
+                put_point(ch, co, v, walls, x, 0.5, z, "|", CURB)
+            z += 0.75
+        # The lamps, staggered so the two sides are not in step.
+        lamps = []
+        z = z0 + (BRIDGE_LAMP_GAP * 0.5 if side else 0.0)
+        while z <= z1:
+            for h in (1.4, 2.2, 3.0):
+                put_point(ch, co, v, walls, x, h, z, "|", CONCRETE)
+            put_point(ch, co, v, walls, x, 4.1, z, "n", CONCRETE)
+            put_lit(ch, co, v, walls, x, 3.7, z, "o", BULB, max(wet, 0.3), now)
+            lamps.append(z)
+            z += BRIDGE_LAMP_GAP
+        # And the festoon, lamp to lamp.
+        for a, b in zip(lamps, lamps[1:]):
+            steps = 8
+            for k in range(1, steps):
+                t = k / float(steps)
+                y = 2.4 - 0.6 * math.sin(math.pi * t) + 0.05 * math.sin(now + k)
+                zz = a + (b - a) * t
+                if k % 2:
+                    put_lit(ch, co, v, walls, x, y, zz, "o", EMBER_HOT,
+                            max(wet, 0.2), now)
+                else:
+                    put_point(ch, co, v, walls, x, y, zz, ".", CURB)
 
-    # The board, on the bank, facing whoever is walking up to it.
-    for end, out in ((hi, 1.5), (lo, -1.5)):
-        bz = (end + out) * CELL
-        blit_sprite(ch, co, v, walls, WORKS_SIGN, x0 - 1.6, bz,
-                    0.0, 2.6, 1.6, GOLD)
-
-    # And the crane. Mast out of the water, jib over the gap.
-    mx = x0 + 2.2
-    mz = (lo + hi) * 0.5 * CELL
-    for h in range(14):
-        put_point(ch, co, v, walls, mx, 1.0 + h * 1.1, mz, "#", CONCRETE)
-    for k in range(9):
-        put_point(ch, co, v, walls, mx - 1.0 - k * 1.3, 15.4, mz, "=", CONCRETE)
-    put_point(ch, co, v, walls, mx - 5.0, 15.4, mz, "|", CONCRETE)
-    put_point(ch, co, v, walls, mx - 5.0, 13.0, mz, "o", CURB)
-    if int(now * 0.9) % 2:
-        put_lit(ch, co, v, walls, mx, 16.6, mz, "*", EMBER_HOT, max(wet, 0.3), now)
+    # Somebody leaning on the rail, looking down the river. A cigarette that
+    # brightens when they draw on it, on a slow count, is the only movement.
+    who = leaner_at(i)
+    if who is not None:
+        x, z, m = who
+        blit_sprite(ch, co, v, walls, LEANER, x, z, 0.0, 1.75, 0.95, CURB)
+        drag = (now * 0.25 + (m >> 8 & 15) / 16.0) % 1.0 < 0.18
+        put_point(ch, co, v, walls, x + 0.4, 1.05, z, "*" if drag else ".",
+                  EMBER_HOT if drag else EMBER)
 
 
-def near_worksites(v, reach):
+def near_bridges(v, reach):
     """The middle of each crossing in front of you, one per site."""
     n = int(reach / CELL) + 1
     ci = int(v.x / CELL + BIG) - BIG
@@ -3206,6 +3490,8 @@ def draw_props(ch, co, v, walls, now, wet):
     farthest first so the near ones win."""
     props = []
     for i, j, b in near_lots(v, 62.0):
+        if b["tree"]:
+            continue                    # nothing is hung on a tree
         for f in range(4):
             nx, nz = FACES[f]
             if not is_open(i + nx, j + nz):
@@ -3796,24 +4082,18 @@ def render_street(v, now):
     wet = v.wet = rain_intensity(now)
     v.flash = lightning(now, wet)
 
+    rave = None
     if rave_window(now) is not None:
-        # The nearest lit one, not the first the scan happens to reach: two
-        # clearings can be in view at once, and taking whichever came out of
-        # the loop first threw the light of a rig sixty units away over one
-        # you were standing next to.
-        best = None
-        for ri, rj in near_clearings(v, 110.0):
-            m = _mix(ri, rj, 977)
-            lamp = rave_light(now, (m & 255) / 255.0 * 6.0,
-                              ((m >> 8) & 255) / 255.0)
-            if lamp is None:
-                continue
-            cx, cz = (ri + 0.5) * CELL, (rj + 0.5) * CELL
-            d2 = (cx - v.x) ** 2 + (cz - v.z) ** 2
-            if best is None or d2 < best[0]:
-                best = (d2, lamp, cx, cz)
-        if best is not None:
-            v.rave = best[1:]
+        hx, hz, hi_, hj_ = nearest_hollow(v.x, v.z)
+        if (hx - v.x) ** 2 + (hz - v.z) ** 2 < 130.0 ** 2:
+            m = _mix(hi_, hj_, 977)
+            phase = (m & 255) / 255.0 * 6.0
+            lamp = rave_light(now, phase, ((m >> 8) & 255) / 255.0)
+            beat = (now * RAVE_BPM / 60.0 + phase) % 1.0
+            rave = (hi_, hj_)
+            if lamp is not None:
+                v.rave = (lamp, hx, hz)
+            v.hollow = (hx, hz + HOLLOW_RJ * CELL * 0.72, beat, lamp)
 
     walls = draw_walls(ch, co, v, now)
     draw_sky(ch, co, v, walls, wet, now)
@@ -3828,17 +4108,19 @@ def render_street(v, now):
         draw_gulls(ch, co, v, walls, now)
     for bx, bz, bm in near_buoys(v, 90.0):
         draw_buoy(ch, co, v, walls, bx, bz, bm, now, wet)
-    for bx, bz in near_barges(v, now, 110.0):
-        draw_barge(ch, co, v, walls, bx, bz, now, wet)
     reflect_river(ch, co, v, walls, now, wet)
     for i, j in near_yokocho(v, 55.0):
         draw_lantern_string(ch, co, v, walls, i, j, now)
-    for i, j in near_worksites(v, 85.0):
-        draw_worksite(ch, co, v, walls, i, j, now, wet)
+    for i, j in near_bridges(v, BRIDGE_SEEN):
+        draw_bridge_ends(ch, co, v, walls, i, j, now, wet)
+    for i, j in near_bridges(v, 85.0):
+        draw_bridge(ch, co, v, walls, i, j, now, wet)
     draw_river_mist(ch, co, v, walls, now, wet)
-    if rave_window(now) is not None:
-        for i, j in near_clearings(v, 70.0):
-            draw_woods_rave(ch, co, v, walls, i, j, now, wet)
+    if woods_depth(int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG) > -8.0:
+        draw_woods_life(ch, co, v, walls, now, wet)
+    if rave is not None:
+        draw_drawn_in(ch, co, v, walls, rave[0], rave[1], now)
+        draw_hollow_rave(ch, co, v, walls, rave[0], rave[1], now, wet)
     draw_rain(ch, co, v, walls, now, wet)
     return ch, co, wet
 
@@ -4139,10 +4421,12 @@ CHEAT_PLACES = [
     ("8", "far away", "far"),
     ("9", "inside a casino", "inside"),
     ("0", "inside the club", "clubdoor"),
-    ("R", "the woods rave", "clearing"),
+    ("W", "the woods", "woods"),
+    ("R", "the woods rave", "rave"),
     ("t", "the riverbank", "bank"),
     ("j", "end of a pier", "pier"),
-    ("b", "a bridge site", "bridge"),
+    ("b", "a bridge", "bridge"),
+    ("B", "someone leaning", "leaner"),
 ]
 
 
@@ -4303,8 +4587,8 @@ def _water_spot(x, z, kind):
     infinite city. Go straight to the channel at this x and work along it.
 
     The bank faces across the water; the pier puts you at the far end of one
-    looking back at the city, which is the view it exists for; a bridge site
-    stands you on the road up to it with the whole works in front of you."""
+    looking back at the city, which is the view it exists for; a bridge
+    stands you on the road up to it with the lamps in front of you."""
     ci = int(x / CELL + BIG) - BIG
     for step in range(0, CHEAT_RINGS * 3):
         i = ci + (step + 1) // 2 * (1 if step % 2 else -1)
@@ -4320,15 +4604,21 @@ def _water_spot(x, z, kind):
             if end is None:
                 continue
             px, pz = (i + 0.5) * CELL, (end + 0.5) * CELL
+            if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+                continue                    # the one you are on: move on
             if can_stand(px, pz):
                 return px, pz, 0.0          # looking back up the pier
             continue
-        if kind == "bridge":
+        if kind in ("bridge", "leaner"):
             mid = int((lo + hi) * 0.5)
             if not (bridge_at(i, mid) and not bridge_at(i - 1, mid)):
                 continue
+            if kind == "leaner" and leaner_at(i) is None:
+                continue
             for back in range(2, 16):
                 px, pz = (i + 1.5) * CELL, (hi + back) * CELL
+                if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+                    break                   # the one you are at: move on
                 if can_stand(px, pz):
                     return px, pz, math.pi
             continue
@@ -4341,24 +4631,30 @@ def _water_spot(x, z, kind):
     return None
 
 
-def _clearing_spot(x, z):
-    """Stand at the edge of the clearing looking in, which is how you would
-    come across it. Note this only takes you there - whether anything is
-    happening is the sky's business, so hold w by the fire until it starts, or
-    take the hint from the HUD."""
-    ci = int(x / CELL + BIG) - BIG
-    cj = int(z / CELL + BIG) - BIG
-    for i, j in _rings(ci, cj, CHEAT_RINGS):
-        if not clearing_at(i, j):
-            continue
-        cx, cz = (i + 0.5) * CELL, (j + 0.5) * CELL
-        for back, yaw in (((0.0, -1.0), 0.0), ((0.0, 1.0), math.pi),
-                          ((-1.0, 0.0), math.pi / 2), ((1.0, 0.0), -math.pi / 2)):
-            px, pz = cx + back[0] * 5.5, cz + back[1] * 5.5
+def _woods_spot(x, z, kind):
+    """The woods: at a gate, on the road that runs up to it, looking in. The
+    rave: on the path down into the hollow, a few cells short of it, facing
+    the altar. Only takes you there - the menu starts one when you arrive, or
+    eighteen times in twenty you would be looking at an empty hollow."""
+    hx, hz, hi, hj = nearest_hollow(x, z)
+    if kind == "rave":
+        for back in range(int(HOLLOW_RJ) + 1, int(HOLLOW_RJ) + 14):
+            px, pz = hx, (hj - back + 0.5) * CELL
             if can_stand(px, pz):
-                return px, pz, math.atan2(cx - px, cz - pz)
-        if can_stand(cx, cz):
-            return cx, cz, best_yaw(cx, cz)
+                return px, pz, 0.0
+        return None
+    ci, cj = woods_home(hi, hj)
+    for step in range(0, 60):
+        i = ci + (step + 1) // 2 * (1 if step % 2 else -1)
+        if not _is_road(i, XP, 91):
+            continue
+        j = cj
+        while woods_at(i, j):
+            j -= 1
+        for out in range(2, 6):
+            px, pz = (i + 0.5) * CELL, (j - out + 0.5) * CELL
+            if can_stand(px, pz):
+                return px, pz, 0.0
     return None
 
 
@@ -4397,9 +4693,9 @@ def find_place(x, z, kind):
         return _doorway(x, z, 911, "casino")
     if kind == "clubdoor":
         return _doorway(x, z, 909, "club")
-    if kind == "clearing":
-        return _clearing_spot(x, z)
-    if kind in ("bank", "pier", "bridge"):
+    if kind in ("woods", "rave"):
+        return _woods_spot(x, z, kind)
+    if kind in ("bank", "pier", "bridge", "leaner"):
         return _water_spot(x, z, kind)
     if kind.startswith("@"):
         return _district_spot(x, z, int(kind[1:]))
@@ -4664,7 +4960,7 @@ def main(stdscr):
                             wheel = None
                             street = True
                             note = "-> " + name
-                            if kind == "clearing":
+                            if kind == "rave":
                                 # Taking you to where one sometimes happens is
                                 # no use: eighteen times in twenty there is
                                 # nothing on and you are looking at trees. The

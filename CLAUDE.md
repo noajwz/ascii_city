@@ -180,7 +180,10 @@ trees. Making a clump *solid* is what makes it free — the raycaster and the co
 what a solid cell is, and `draw_tree_column()` just draws it with no roof line, no corner and no
 footing, its canopy height wandering along the clump so the top comes out ragged. Clubs and casinos
 are barred from parks: the cell would be a clump of trees and would be drawn as one, so the venue
-would exist and be invisible.
+would exist and be invisible. Nothing is hung on a tree either — `draw_props()` skips tree lots,
+because the alley's bins and bulbs were turning up against the trunks.
+
+The parks are small and stay small. The big wood is a different thing — see *The woods*.
 
 ## The night sky
 
@@ -268,8 +271,8 @@ matter — one night in forty is unreachable by waiting, and from a street you m
 both "can you see through it" and "can you be here"; those two questions come apart at the water's
 edge. `is_open()` is now the sight test and says yes to water — you can see clean across a river —
 and `dry_at()` is the footing test that `can_stand()` is built from. Anything that means "a building
-stands here" keys off `not is_open()` and so ignores water for free; `clearing_at()` needed an
-explicit no, because a bank cell can otherwise pass its tests.
+stands here" keys off `not is_open()` and so ignores water for free. Anything that means "you can
+be here" has to ask `dry_at()`, or a bank cell passes its tests.
 
 `river_centre(i)` is three sines, so the channel **meanders across the grid** and cuts blocks off
 mid-street — it swings about 330 world units side to side. `river_span(i)` widens the band by the
@@ -301,14 +304,24 @@ channel at your x and works along it.
 straight out of the projection — the height that put a point at `r` puts its mirror the same
 distance the other side of the horizon, and the eye being *above* the water rather than on it is
 the whole of the correction. It draws only into cells the river was actually drawn into (`v.water`),
-so the reflection stops at the bank instead of running up the road, and it is broken sideways and
-thinned with depth: an unbroken copy of the city reads as the picture having been printed twice.
+so the reflection stops at the bank instead of running up the road.
 
-**The barge** is a line of them spaced evenly along the channel, all drifting at the same pace —
-position is a function of time and nothing is remembered, so one is where it should be whether or
-not you were watching. One goes by about every three minutes. Its hull is drawn with thirty
-characters rather than fifteen because it passes within twenty units of the bank, and a
-fifteen-character hull there gets three screen columns a character and comes out as porridge.
+**Only the lights cross the water.** Windows, neon and bulbs — anything alphanumeric or `*+@` —
+and never the walls, roofs and corners around them, and past the first three rows a light becomes
+a `:` with a short streak of `:` under it. The first version mirrored every glyph, thinned a
+little with depth, and it was reported as "everything is mirrored": from a pier, where the water
+is the bottom half of the screen, it was a second readable copy of the city with the signs still
+legible in it. Lights alone are sparse — thirty-odd candidates from a bank — which is why the
+streak exists: lamplight on water is a smear, and the smear is what makes it read as a
+reflection rather than a dot. Measured from the bank it is about 75 cells, from a pier 40.
+
+The pier deck is the same lesson: scattering `=` over it at random reads as noise, and at your
+feet — where one cell is most of the screen — it was the loudest thing in the view. It is drawn
+as plank *seams*, a `-` at intervals along the pier and dark timber between.
+
+There was a barge. It went — asked for, and it was the biggest single thing cluttering the water.
+If something moving on the river is ever wanted again, the shape it had was right: a line of them
+spaced evenly along the channel, position a pure function of time so nothing is remembered.
 
 **Buoys** blink on their own count and on a different one from their neighbour — a row of lights in
 step reads as decoration, and the whole point of a channel marker is that it is not part of the
@@ -326,63 +339,99 @@ the city and the river a narrow band, so their overlap is already about one lot 
 Thinning that again (the first attempt used one in five) leaves no cranes at all, which is how it
 was caught.
 
-## Planned: bridges with lights
+## The bridges
 
-The crossings are **building sites**, deliberately: hoardings with amber lamps blinking out of step,
-a hazard board at each bank, a crane over the gap, and a plank walkway you can already get across on.
-That is the placeholder. The real bridges go exactly there, and want to be a thing in their own
-right — a deck you walk along, a span you can see the shape of from the water, and lights down it.
+The crossings were building sites for a while — hoardings, a hazard board, a crane — as a
+placeholder, and were asked to be made cosier. `draw_bridge()` is a footbridge: a railing down
+each side, lamp posts along it with a warm bulb on each, and a festoon of small amber lights slung
+from lamp to lamp, sagging the way the yokocho lanterns do. The lamps are staggered between the
+two sides so they are not in step, and nothing on it blinks — the buoys and the club have that,
+and a bridge is where the city is quiet.
 
-Note for the works board: it carries **no words**. A sign in world space is squashed by perspective
-to about a column a letter, and at any range you would actually read it from, the letters double up
-— the same thing that moved the casino marquee into screen space. A hazard triangle says roadworks
-without asking anyone to read.
+The lamps are what you see from the bank, and on the water under the bridge, because the
+reflection now carries lights and nothing else — so the bridge and the reflection were designed
+as one thing. Three tiers, railing / festoon / lamps, at heights that stay separate rows from
+thirty units away; with the lamps at the festoon's height the two merged into one row of `o`.
 
-**A note kept on purpose, for whenever the woods rave is rebuilt:** the rig in the trees ought to
-know. Whoever carried a sound system into a park on the one night in forty that the sky has
-something in it was not guessing. Whether that means it is always on that night, or locked to the
-same beat, or simply that the crowd is all facing up, is for the rewrite to decide — but the theory
-is worth keeping alive.
+Two things were added on top, and both are about the bridge being *somewhere* rather than a
+fixture. **Somebody is leaning on the rail** on one bridge in three (`leaner_at()`, hashed on the
+crossing), looking down the river with a cigarette that flares on a slow count — the same job the
+angler does for the pier. And **the four end lamps are drawn from 230 units** with a screen-space
+halo round them (`draw_bridge_ends()`, `put_halo()`), against a bridge drawn from 85: walking the
+bank looking for a crossing, you should see the lamps long before you can see the bridge. The halo
+is in screen space because a world-space one collapses into the lamp's own cell from a hundred
+units off, which is exactly the range it is for; and it paints over the far bank's walls but
+never over another light, because that is what it is meant to be seen against.
 
-## The rig in the woods
+The water cheats did not skip what was underfoot the way the ring search does, so `j` and `b`
+returned the same pier and bridge every press. They move along the river now, and `B` goes to a
+bridge with someone on it — the leaner is one in three, and a thing you cannot reach cannot be
+checked.
 
-The one easter egg. Somebody carries a sound system into a park and does not ask anyone, and it is
-**rare twice over**, which is the whole of what makes it worth finding: rare in *space*, and rare in
-*time*, because `rave_window()` is on roughly 7% of the time. Finding the clearing is not the same as
-finding a rave, and that is deliberate.
+**The rig in the trees knew.** Whoever carried a sound system into the woods on the one night in
+forty that the sky has something in it was not guessing: `rave_window()` is on from dusk to dawn on
+that night, and `rave_light()` gives up 168 BPM and takes the sky's beat through `city_sync()`, the
+way the club does. That was the theory kept alive through the rewrite, and it is now the rule.
 
-**It can only be in the middle of a park** — never out on the lawn at its edge, never within sight of
-a road. `park_core()` is the test, and it samples park-ness at a handful of offsets rather than
-measuring a real distance to the edge, because the true answer is a flood fill and this is asked for
-every cell the raycaster steps through.
+## The woods
 
-Making that stick needed the **wood to thicken towards the middle**: a third of the core is trees
-against a quarter of the lawn. Without it the rule had no solutions at all — a clearing wants four
-tree neighbours out of eight, and at a flat quarter density only 199 park cells in a 500×500 patch
-managed it, none of which were interior. Do not push it much past a third: open cells stop
-percolating somewhere around 60%, and the middle of every park becomes a wall you cannot walk into.
-There is a test that a clearing can still be reached on foot from a road.
+Not a park. The parks are the small green squares the city has everywhere; the woods are one great
+dark block of trees a few districts across — Central Park sized, 700 by 420 units — with trails
+through it, a hollow in the middle, and no street, light or building in it at all. There is one per
+`WOODS_TILE` (2400 units) in each direction, jittered inside its tile, so from anywhere the nearest
+is a long walk. `W` in the menu takes you to a gate.
 
-What sells it is not the rig. It is the **canopy**: a lit clearing throws its colour up into the
-leaves around it, so `draw_tree_column()` swaps the leaf palette for the rig's when it is near one.
-That reads from about 45 units away — you see something going on in a wood long before you can see
-any of it — where the stack and the crowd only resolve in the last few metres. `v.rave` carries it,
-set before `draw_walls()` because a tree clump *is* a wall.
+**It is placed, not picked.** `WOODS` is a district row that is not in `DISTRICTS`: `district()`
+returns it for any cell `woods_at()` says yes to, so `lot()` builds a tree there with no changes of
+its own, and the HUD says *the woods*. The trees are taller than a park's and the leaf tone is
+scaled down to the dark end of the palette — by multiplying the *same* random draw, so nothing else
+about the city moves.
 
-`RAVE_BPM` is 168 against the club's 134, and `rave_light()` gives no colour wash between the kicks
-the way `club_light()` does, only dark. It is not a club.
+**No street runs through it.** `road_at()` says no inside the woods, so an avenue stops dead at the
+trees; what continues it is a **gate** in `trail_at()` — the cells where a road meets the edge are
+open through to a **ring trail** that runs a couple of cells inside the edge all the way round.
+Three long trails and two cross trails wander through the interior and run into the ring, and a
+straight path goes down into the hollow. Off the trails the wood is `WOODS_OPEN` percent open,
+which is below the percolation threshold on purpose: you get a few cells in and have to turn round,
+which is what being lost in a wood is. There is a test that every gate reaches the hollow on foot,
+and a second that most of the wood is *not* on the way — both matter.
 
-**Rare and unreachable are different things, and the menu has to reach it.** `R` used to take you to
-a clearing and leave the rest to luck — with one on 9% of the time that is an empty wood eighteen
-tries in twenty, which is indistinguishable from a broken feature and was reported as one. It calls
-`force_rave()` now, the way `L` calls down a strike. Ten launches, ten raves.
+The edge wanders (`woods_depth()`), and its slope is held under a cell per cell so the ring trail
+that follows it cannot break: a band two cells wide shifted by more than two cells between one
+column and the next would come apart into diagonal steps, which `can_stand()` does not walk.
 
-For finding one without the menu, the HUD gives a **bearing and a rough distance** — `~ music NE,
-not far ~`. Two things there are easy to get wrong: it must scan every direction, not
-`near_clearings()`, which drops what is behind the camera because the renderer has no use for it —
-a hint that goes quiet the moment you turn your back on the music is worse than none. And a bearing
-beats a bare "somewhere": a wood is disorienting on purpose, so a fact you cannot walk on is no
-help.
+**What is in there with you.** `draw_woods_life()` runs whenever you are in or near the woods:
+fireflies over the open ground on a dry night — mostly over the trail you are on, because the rest
+of the wood is behind the nearest trees — and now and then two points of light low under a tree
+that go out if you look for long enough. They sit just clear of the trunk on the side facing you,
+in the next cell over, and only if that cell is open; inside the tree's own cell the tree hides
+its own eyes, which is how the first version showed none at all. Nothing is ever drawn attached
+to them. Rain puts the fireflies out.
+
+## The rave in the hollow
+
+The Samurai Jack episode is the reference — *Jack and the Rave* — and the thing taken from it is
+not the lights, it is the crowd. In the club the queue is *in time*, each dancer a fraction of a
+beat off the next. In the hollow they are **in step**: hoods up, and every one of `CROWD` figures
+does the same thing at the same instant with no offset at all, arms up on one half of the beat
+and down on the other, all facing the altar with their backs to you. That is what makes it not a
+party. Between the kicks the hollow goes dark, and what is left is their eyes.
+
+The **altar** stands at the far end: a stack with the decks on it and, over the decks, a horned
+shape with two eyes that are never off — `EMBER_HOT` between beats, white on the kick. Beams go up
+out of it into the canopy, which is what you see from far off; and on the ground `draw_ground()`
+paints **rings** of light pulsing outward from the altar on every beat, keyed on `v.hollow`, which is
+the one thing in the city meant to look like it is doing something to you. On the trails near the
+hollow stand the ones still on their way, hoods up, facing it, not moving (`draw_drawn_in()`).
+
+The rig's palette is `RAVE_TONES` — magenta, purple, green, cyan — never the full neon rainbow,
+which is the club's. `rave_light()` is 168 BPM with no colour wash between kicks, just dark. On the
+alien night it takes the sky's beat instead.
+
+**Rare and unreachable are different things, and the menu has to reach it.** `R` calls
+`force_rave()` and stands you at the edge of the hollow facing the altar; the HUD gives a bearing
+and a rough distance from up to 700 units (`rave_hint()`), because a wood is disorienting on purpose
+and a fact you cannot walk on is no help.
 
 ## Getting lost is the feature
 
@@ -629,7 +678,9 @@ and casino cell in a patch, uses every cheat, and asserts the two sets are ident
 being that a debug tool that quietly made the rare things common would be worse than no tool.
 
 The search rings outward from where you stand and skips anything within `CHEAT_SKIP`, so pressing
-the same key twice hops to the next one rather than landing you back where you are. Order the
+the same key twice hops to the next one rather than landing you back where you are. The woods and
+the river are not ring searches: there is one of each per tile, at a known place, so they go
+straight there. Order the
 predicates by cost: `_door_spot()` tests the hash **before** `is_open()`, because it throws out 1199
 cells in 1200 for one multiply and means `lot()` — which builds a whole building — is only reached
 on a real hit. That is the difference between 7 ms and something you would notice. `_long_street()`
