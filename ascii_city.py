@@ -127,6 +127,16 @@ RAVE_TONES = (1, 6, 5, 2)   # the rig's palette: magenta, purple, green, cyan
 RING_GAP = 5.0         # world units between the rings of light on the ground
 LAKE_RI = 8.0          # the lake in the woods: radii, in cells
 LAKE_RJ = 5.0
+
+# --- the carnival on the bank ---
+# A small fairground on the riverbank every so often along it: a big wheel
+# with the lights going round, a carousel, a row of stalls, and a string of
+# bulbs the length of it. Lit all night, and the wheel lies on the water.
+CARNIVAL_GAP = 200     # cells along the river between one and the next
+FAIR_LONG = 11         # cells of bank it takes up, along the river
+FAIR_DEEP = 4          # and back from the water
+WHEEL_R = 10.0         # the wheel's radius in world units
+WHEEL_RPM = 1.3
 CASINO_REACH = 2.3     # how close to the door you have to get to be inside
 CASINO_AGAIN = 1.6     # seconds before it deals you another one
 
@@ -872,6 +882,36 @@ def bridge_at(i, j):
             and _mix(i // XP, 0, 719) % BRIDGE_ODDS == 0)
 
 
+def carnival_col(i):
+    """The first cell along the river of the carnival in this stretch."""
+    k = i // CARNIVAL_GAP
+    return k * CARNIVAL_GAP + 30 + _mix(k, 0, 1301) % (CARNIVAL_GAP - 70)
+
+
+def fair_at(i, j):
+    """The fairground: a strip of open bank on the near side, the depth of
+    a few cells, that nothing is built on."""
+    c = carnival_col(i)
+    if not c <= i < c + FAIR_LONG:
+        return False
+    lo, hi = river_span(i)
+    return int(hi) + 1 <= j <= int(hi) + FAIR_DEEP
+
+
+def carnival_spots(c):
+    """Where things stand, given the carnival's first column: the wheel, the
+    carousel, and the stalls, in world units. Laid out along the bank at the
+    depth of the bank's middle column so the meander cannot put one in the
+    water."""
+    mid = c + FAIR_LONG // 2
+    _, hi = river_span(mid)
+    z0 = (int(hi) + 1) * CELL           # the water's edge
+    wheel = ((c + 2.5) * CELL, z0 + 2.2 * CELL)
+    carousel = ((c + 7.0) * CELL, z0 + 1.6 * CELL)
+    stalls = [((c + k) * CELL, z0 + 3.6 * CELL) for k in (5.5, 7.0, 8.5, 10.0)]
+    return wheel, carousel, stalls, z0
+
+
 _open_cache = {}
 _road_cache = {}
 
@@ -1177,6 +1217,8 @@ def is_open(i, j):
         _evict(_open_cache, 60000)
         if water_at(i, j):
             hit = True          # you can see across it; standing is elsewhere
+        elif fair_at(i, j):
+            hit = True          # the fairground: nothing is built on it
         elif woods_at(i, j):
             # Trails, the hollow, and otherwise trees thick enough that the
             # open cells do not join up: off a trail you get a few cells in and
@@ -2311,6 +2353,10 @@ def collect_glow(v, now, wet):
     whatever the weather, and is often the only thing down there that does."""
     glow = {}
     reach = 7.0
+    for c_ in near_carnivals(v, 60.0):
+        (wx, wz), (cx, cz), stalls, _ = carnival_spots(c_)
+        _spill(glow, wx, wz, 11.0, NEON[int(now * 5.0) % len(NEON)][1])
+        _spill(glow, cx, cz, 4.0, GOLD_DIM)
     for i, j, b in near_lots(v, 60.0):
         for f in range(4):
             nx, nz = FACES[f]
@@ -2678,6 +2724,8 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 green = (not wet_cell and (woods or district(i, j)["park"])
                          and not road_at(i, j))
                 trail = woods and trail_at(i, j)
+                fair = (not wet_cell and not solid and not road_at(i, j)
+                        and fair_at(i, j))
                 hollow = (woods and v.hollow is not None
                           and hollow_at(i, j))
                 lane = None
@@ -2758,6 +2806,11 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 if h % 4:
                     continue
                 glyph, attr = ("." if h % 3 else ":"), CURB   # beaten earth
+            elif fair:
+                h = _mix(int(x * 3.0), int(z * 3.0), 23)
+                if h % 5:
+                    continue
+                glyph, attr = ",", GOLD_DIM                   # sawdust
             elif green:
                 h = _mix(int(x * 3.0), int(z * 3.0), 23)
                 if h % 3:
@@ -3469,6 +3522,115 @@ def draw_woods_life(ch, co, v, walls, now, wet):
                 for side in (-0.2, 0.2):
                     put_point(ch, co, v, walls, ex - dz / d * side, 0.75,
                               ez + dx / d * side, ".", EYES)
+
+
+STALL = [
+    "/^^^^^^^\\",
+    "|_______|",
+    "| o   o |",
+    "|_______|",
+]
+
+CAROUSEL = [
+    "    ^    ",
+    "  /   \\  ",
+    " /_____\\ ",
+    "|_______|",
+    "|       |",
+    "|_______|",
+]
+
+
+def near_carnivals(v, reach):
+    """The first column of each carnival in front of you."""
+    ci = int(v.x / CELL + BIG) - BIG
+    seen = set()
+    for k in range(ci - int(reach / CELL) - FAIR_LONG, ci + int(reach / CELL) + 1):
+        c = carnival_col(k)
+        if c in seen or not c <= k < c + FAIR_LONG:
+            continue
+        seen.add(c)
+        (wx, wz), _, _, _ = carnival_spots(c)
+        rx, rz = wx - v.x, wz - v.z
+        if rx * v.dx + rz * v.dz < -CELL or rx * rx + rz * rz > reach * reach:
+            continue
+        yield c
+
+
+def draw_carnival(ch, co, v, walls, c, now, wet):
+    """A wheel, a carousel, a row of stalls and the bulbs strung between.
+
+    The wheel is world points, not a sprite: a ring of bulbs chasing round it,
+    eight spokes, eight cabins that hang from the rim and stay upright as it
+    turns, and an A-frame under the hub. Its plane faces the water, so from
+    the far bank and the pier you see the whole circle and its reflection,
+    and from the bank you are on it comes up edge-on as you walk towards it.
+    Everything else is a billboard."""
+    (wx, wz), (cx, cz), stalls, z0 = carnival_spots(c)
+    hub = WHEEL_R + 1.6
+    turn = now * WHEEL_RPM * math.tau / 60.0
+    chase = int(now * 5.0)
+
+    # The A-frame, then the spokes, then the rim over both.
+    for h in range(0, int(hub * 2)):
+        y = h * 0.5
+        d = (hub - y) * 0.45
+        put_point(ch, co, v, walls, wx - d, y, wz, "/", CONCRETE)
+        put_point(ch, co, v, walls, wx + d, y, wz, "\\", CONCRETE)
+    for s in range(8):
+        a = turn + s * math.tau / 8.0
+        for r in range(1, int(WHEEL_R)):
+            put_point(ch, co, v, walls, wx + math.cos(a) * r, hub + math.sin(a) * r,
+                      wz, "-" if abs(math.cos(a)) > 0.7 else "|", CONCRETE)
+    put_point(ch, co, v, walls, wx, hub, wz, "O", GOLD)
+    for k in range(56):
+        a = turn + k * math.tau / 56.0
+        x, y = wx + math.cos(a) * WHEEL_R, hub + math.sin(a) * WHEEL_R
+        colour = NEON[(k // 7 + chase) % len(NEON)][0]
+        put_lit(ch, co, v, walls, x, y, wz, "o", colour, max(wet, 0.3), now)
+    for s in range(8):
+        a = turn + s * math.tau / 8.0
+        x, y = wx + math.cos(a) * WHEEL_R, hub + math.sin(a) * WHEEL_R
+        put_point(ch, co, v, walls, x - 0.45, y - 0.7, wz, "[", CURB)
+        put_point(ch, co, v, walls, x + 0.45, y - 0.7, wz, "]", CURB)
+        put_point(ch, co, v, walls, x, y - 0.7, wz, "o", BULB_DIM)
+
+    # The carousel: the roof and platform are a billboard, the riders go
+    # round it on their own, bobbing.
+    blit_sprite(ch, co, v, walls, CAROUSEL, cx, cz, 0.0, 3.6, 3.4,
+                NEON[(chase // 3) % len(NEON)][0])
+    for k in range(6):
+        a = -turn * 2.5 + k * math.tau / 6.0
+        put_point(ch, co, v, walls, cx + math.cos(a) * 1.5, 1.1
+                  + 0.25 * math.sin(now * 3.0 + k), cz + math.sin(a) * 1.0,
+                  "n", BULB)
+
+    # The stalls, each its own colour, and a string of bulbs the length of
+    # the ground, sagging between the poles the way the bridge's does.
+    for k, (sx_, sz_) in enumerate(stalls):
+        blit_sprite(ch, co, v, walls, STALL, sx_, sz_, 0.0, 2.4, 2.3,
+                    NEON[(k * 3 + 1) % len(NEON)][0])
+        put_lit(ch, co, v, walls, sx_, 1.2, sz_ - 0.3, "*", BULB,
+                max(wet, 0.3), now)
+    for k in range(FAIR_LONG + 1):
+        px = (c + k) * CELL
+        for h in (1.0, 2.0, 3.0):
+            put_point(ch, co, v, walls, px, h, z0 + 0.6 * CELL, "|", CONCRETE)
+        if k < FAIR_LONG:
+            for step in range(1, 5):
+                t = step / 5.0
+                y = 3.1 - 0.5 * math.sin(math.pi * t)
+                put_lit(ch, co, v, walls, px + t * CELL, y, z0 + 0.6 * CELL, "o",
+                        NEON[(k + step + chase // 2) % len(NEON)][0],
+                        max(wet, 0.2), now)
+
+    # A few people, looking up at the wheel.
+    for k in range(4):
+        m = _mix(c, k, 1303)
+        px = (c + 1.5 + (m & 255) / 255.0 * 8.0) * CELL
+        pz = z0 + (0.9 + ((m >> 8) & 255) / 255.0 * 2.0) * CELL
+        blit_sprite(ch, co, v, walls, LOOK_UP, px, pz, 0.0, SMOKER_H, SMOKER_W,
+                    CURB)
 
 
 BRIDGE_LAMP_GAP = 6.0    # world units between lamp posts along the parapet
@@ -4253,6 +4415,8 @@ def render_street(v, now):
         draw_gulls(ch, co, v, walls, now)      # the river's, not the lake's
     for bx, bz, bm in near_buoys(v, 90.0):
         draw_buoy(ch, co, v, walls, bx, bz, bm, now, wet)
+    for c_ in near_carnivals(v, 170.0):
+        draw_carnival(ch, co, v, walls, c_, now, wet)
     reflect_river(ch, co, v, walls, now, wet)
     for i, j in near_yokocho(v, 55.0):
         draw_lantern_string(ch, co, v, walls, i, j, now)
@@ -4570,6 +4734,7 @@ CHEAT_PLACES = [
     ("x", "the woods rave", "rave"),
     ("e", "the lake", "lake"),
     ("t", "the riverbank", "bank"),
+    ("i", "the carnival", "carnival"),
     ("j", "end of a pier", "pier"),
     ("b", "a bridge", "bridge"),
     ("B", "someone leaning", "leaner"),
@@ -4736,6 +4901,17 @@ def _water_spot(x, z, kind):
     looking back at the city, which is the view it exists for; a bridge
     stands you on the road up to it with the lamps in front of you."""
     ci = int(x / CELL + BIG) - BIG
+    if kind == "carnival":
+        # On the fairground, near the water, looking down the length of it.
+        for k in range(-1, 3):
+            c = carnival_col(ci + k * CARNIVAL_GAP)
+            _, _, _, z0 = carnival_spots(c)
+            px, pz = (c + 0.5) * CELL, z0 + 1.2 * CELL
+            if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+                continue
+            if can_stand(px, pz):
+                return px, pz, math.pi * 0.5
+        return None
     for step in range(0, CHEAT_RINGS * 3):
         i = ci + (step + 1) // 2 * (1 if step % 2 else -1)
         lo, hi = river_span(i)
@@ -4850,7 +5026,7 @@ def find_place(x, z, kind):
         return _doorway(x, z, 909, "club")
     if kind in ("woods", "rave", "lake"):
         return _woods_spot(x, z, kind)
-    if kind in ("bank", "pier", "bridge", "leaner"):
+    if kind in ("bank", "pier", "bridge", "leaner", "carnival"):
         return _water_spot(x, z, kind)
     if kind.startswith("@"):
         return _district_spot(x, z, int(kind[1:]))
