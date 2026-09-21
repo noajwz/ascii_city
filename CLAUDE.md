@@ -368,6 +368,12 @@ returned the same pier and bridge every press. They move along the river now, an
 bridge with someone on it — the leaner is one in three, and a thing you cannot reach cannot be
 checked.
 
+**No key may differ from another only by case unless it is a variant of it.** The woods went in as
+`W` next to `w` weather, and the rave as `R` next to `r` residential, and the report back was "W is
+already weather" and "the rave cheat teleports me to just city" — lowercase pressed, weather cycled,
+a housing district reached. Both were working. `b`/`B` (a bridge, the same bridge with someone on
+it) is the one pair that earns it.
+
 **The rig in the trees knew.** Whoever carried a sound system into the woods on the one night in
 forty that the sky has something in it was not guessing: `rave_window()` is on from dusk to dawn on
 that night, and `rave_light()` gives up 168 BPM and takes the sky's beat through `city_sync()`, the
@@ -379,7 +385,7 @@ Not a park. The parks are the small green squares the city has everywhere; the w
 dark block of trees a few districts across — Central Park sized, 700 by 420 units — with trails
 through it, a hollow in the middle, and no street, light or building in it at all. There is one per
 `WOODS_TILE` (2400 units) in each direction, jittered inside its tile, so from anywhere the nearest
-is a long walk. `W` in the menu takes you to a gate.
+is a long walk. `g` in the menu takes you to a gate.
 
 **It is placed, not picked.** `WOODS` is a district row that is not in `DISTRICTS`: `district()`
 returns it for any cell `woods_at()` says yes to, so `lot()` builds a tree there with no changes of
@@ -428,7 +434,7 @@ The rig's palette is `RAVE_TONES` — magenta, purple, green, cyan — never the
 which is the club's. `rave_light()` is 168 BPM with no colour wash between kicks, just dark. On the
 alien night it takes the sky's beat instead.
 
-**Rare and unreachable are different things, and the menu has to reach it.** `R` calls
+**Rare and unreachable are different things, and the menu has to reach it.** `x` calls
 `force_rave()` and stands you at the edge of the hollow facing the altar; the HUD gives a bearing
 and a rough distance from up to 700 units (`rave_hint()`), because a wood is disorienting on purpose
 and a fact you cannot walk on is no help.
