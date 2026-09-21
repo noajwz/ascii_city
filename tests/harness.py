@@ -22,7 +22,7 @@ ac.NEON = [(100 + i, 200 + i) for i in range(8)]
 for _n in ("STAR", "STREET", "HUD", "CURB", "HAZE", "SMOKE", "EMBER",
            "EMBER_HOT", "RAIN", "RAIN_FAR", "BULB", "BULB_DIM", "FLASH",
            "CONCRETE", "GOLD", "GOLD_DIM", "ROU_RED", "ROU_BLACK",
-           "ROU_GREEN", "LANE", "GRASS", "BARK", "ROOF"):
+           "ROU_GREEN", "LANE", "GRASS", "BARK", "ROOF", "FIREFLY", "EYES"):
     setattr(ac, _n, 1)
 ac.curses.A_BOLD = 0
 ac.curses.A_REVERSE = 0

@@ -123,7 +123,7 @@ for _ in range(3):
         spot = ac.find_place(x, z, kind)
         if spot: x, z, _ = spot
 ac._open_cache.clear(); ac._lots.clear(); ac._road_cache.clear()
-ac._district_cache.clear(); ac._clearing_cache.clear()
+ac._district_cache.clear(); ac._woods_cache.clear()
 ac._core_cache.clear()
 check("teleporting does not change what is rare", census() == before,
       "%d clubs, %d casinos, unchanged" % (len(before[0]), len(before[1])))
@@ -190,7 +190,7 @@ check("and stays out of the way when there is no room",
 v = ac.View(37.5, 52.5, 0.7, 100, 30)
 a, _, _ = ac.render_street(v, 2.0)
 ac._open_cache.clear(); ac._lots.clear(); ac._road_cache.clear()
-ac._district_cache.clear(); ac._clearing_cache.clear()
+ac._district_cache.clear(); ac._woods_cache.clear()
 ac._core_cache.clear()
 b, _, _ = ac.render_street(ac.View(37.5, 52.5, 0.7, 100, 30), 2.0)
 check("the city is still deterministic", a == b)
@@ -446,8 +446,8 @@ for n, d in enumerate(ac.DISTRICTS):
     found_faces = 0
     for i in range(-400, 400, 3):
         for j in range(-400, 400, 3):
-            if ac.district_at(i, j) != n or ac.is_open(i, j):
-                continue
+            if ac.district_at(i, j) != n or ac.is_open(i, j) or ac.woods_at(i, j):
+                continue                # the woods are placed, not picked
             b = ac.lot(i, j)
             # A club is a squat bunker and a casino a low slab whatever part
             # of town they are in; they are meant to ignore the district.
@@ -781,173 +781,133 @@ ac.WIDE_OK = False
 ac._lots.clear()
 
 
-# --- the rig in the woods ------------------------------------------------
-# Rare twice over on purpose: rare in space, so most parks have no clearing,
-# and rare in time, so finding the clearing is not the same as finding a rave.
-park = clearings = 0
-for i in range(-250, 250):
-    for j in range(-250, 250):
-        if ac.DISTRICTS[ac.district_at(i, j)]["park"] and ac.is_open(i, j):
-            park += 1
-            clearings += ac.clearing_at(i, j)
-check("clearings are rare in space", clearings and park / clearings > 400,
-      "one per %d park cells" % (park // max(1, clearings)))
+# --- the woods -----------------------------------------------------------
+# One great block of trees a tile, with trails through it, a hollow in the
+# middle, and no street, light or building in it. The parks are not this.
+hx, hz, hi, hj = ac.nearest_hollow(x0, z0)
+wi, wj = ac.woods_home(hi, hj)
+size = sum(1 for i in range(wi - 90, wi + 91) for j in range(wj - 60, wj + 61)
+           if ac.woods_at(i, j))
+check("the woods are big", size > 4 * ac.DISTRICT_CELLS ** 2,
+      "%d cells, against a district's %d" % (size, ac.DISTRICT_CELLS ** 2))
+check("and a long way from the start", math.hypot(hx - x0, hz - z0) > 800,
+      "%.0f units" % math.hypot(hx - x0, hz - z0))
+check("with no streets in them",
+      not any(ac.road_at(i, j) for i in range(wi - 80, wi + 81)
+              for j in range(wj - 50, wj + 51) if ac.woods_at(i, j)))
+check("and nothing built in them",
+      all(ac.lot(i, j)["tree"] and ac.lot(i, j)["club"] is None
+          and ac.lot(i, j)["casino"] is None
+          for i in range(wi - 80, wi + 81, 3) for j in range(wj - 50, wj + 51, 3)
+          if ac.woods_at(i, j) and not ac.is_open(i, j)))
+check("the hollow is open ground", all(
+    ac.is_open(i, j) for i in range(hi - 3, hi + 4) for j in range(hj - 2, hj + 3)))
+check("and inside the woods", ac.woods_at(hi, hj) and ac.hollow_at(hi, hj))
 
-on = sum(1 for k in range(200000) if ac.rave_window(k * 0.5) is not None)
-check("and rare in time", 0.02 < on / 200000.0 < 0.15,
-      "on %.1f%% of the time" % (100.0 * on / 200000))
-
-# A clearing has to be somewhere you would come across rather than see from
-# the road, or it is not an easter egg, it is a landmark.
-bad = []
-for i in range(-250, 250):
-    for j in range(-250, 250):
-        if not ac.clearing_at(i, j):
-            continue
-        if any(ac.road_at(i + a, j + b)
-               for a in range(-2, 3) for b in range(-2, 3)):
-            bad.append((i, j))
-        if sum(not ac.is_open(i + a, j + b)
-               for a in (-1, 0, 1) for b in (-1, 0, 1) if a or b) < 4:
-            bad.append((i, j))
-check("every clearing is deep in the trees, off the road", not bad,
-      "%d in the open" % len(bad))
-
-# "Only in the middle of a park" - never out on the lawn at its edge.
-edge = []
-for i in range(-250, 250):
-    for j in range(-250, 250):
-        if not ac.clearing_at(i, j):
-            continue
-        if not ac.park_core(i, j):
-            edge.append((i, j))
-check("and every one is in the middle of a park", not edge,
-      "%d out on the edge" % len(edge))
-
-margins = []
-for i in range(-160, 160):
-    for j in range(-160, 160):
-        if not ac.clearing_at(i, j):
-            continue
-        out = 99
-        for a in range(-12, 13):
-            for b in range(-12, 13):
-                if not ac.DISTRICTS[ac.district_at(i + a, j + b)]["park"]:
-                    out = min(out, max(abs(a), abs(b)))
-        margins.append(out)
-check("with real park all round it", margins and min(margins) >= 4,
-      "closest sits %d cells (%.0f units) from the edge"
-      % (min(margins), min(margins) * ac.CELL))
-
-# The wood has to thicken in the middle or there is nowhere to hide a rig,
-# but not so far that the clumps join up and you cannot walk through it.
-core_open = core_all = lawn_open = lawn_all = 0
-for i in range(-160, 160):
-    for j in range(-160, 160):
-        if not (ac.DISTRICTS[ac.district_at(i, j)]["park"] or ac.road_at(i, j)):
-            continue
-        if not ac.DISTRICTS[ac.district_at(i, j)]["park"] or ac.road_at(i, j):
-            continue
-        if ac.river_at(i, j):
-            continue        # the river is open water, not a gap in the trees
-        if ac.park_core(i, j):
-            core_all += 1
-            core_open += ac.is_open(i, j)
-        else:
-            lawn_all += 1
-            lawn_open += ac.is_open(i, j)
-deep = 1.0 - core_open / float(max(1, core_all))
-thin = 1.0 - lawn_open / float(max(1, lawn_all))
-check("the wood is thicker in the middle than at the edge", deep > thin + 0.04,
-      "%.0f%% trees in the core against %.0f%% on the lawn" % (deep * 100, thin * 100))
-check("and still open enough to walk through", deep < 0.45,
-      "%.0f%% trees" % (deep * 100))
-
+# Thick off the trails - you should get lost - but every gate where a road
+# meets the edge has to lead to the hollow on foot, and back out.
+inside = [(i, j) for i in range(wi - 80, wi + 81) for j in range(wj - 50, wj + 51)
+          if ac.woods_depth(i, j) > 3.0 and not ac.trail_at(i, j)
+          and not ac.hollow_at(i, j)]
+trees = sum(1 for i, j in inside if not ac.is_open(i, j))
+check("off the trails the wood is thick", 0.45 < trees / float(len(inside)) < 0.65,
+      "%.0f%% trees" % (100.0 * trees / len(inside)))
 from collections import deque as _dq
-walled = 0
-for (ci, cj) in [(i, j) for i in range(-160, 160) for j in range(-160, 160)
-                 if ac.clearing_at(i, j)][:8]:
-    seen = {(ci, cj)}
-    q = _dq([(ci, cj)])
-    out = False
-    while q and len(seen) < 4000:
-        i, j = q.popleft()
-        if ac.road_at(i, j):
-            out = True
-            break
-        for a, b in ((i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)):
-            if (a, b) in seen or not ac.is_open(a, b):
-                continue
-            if not ac.can_stand((a + 0.5) * ac.CELL, (b + 0.5) * ac.CELL):
-                continue
-            seen.add((a, b))
-            q.append((a, b))
-    walled += not out
-check("you can walk to a clearing from the street", walled == 0,
-      "%d walled in" % walled)
-check("and you can stand in one",
-      all(ac.can_stand((i + 0.5) * ac.CELL, (j + 0.5) * ac.CELL)
-          for i in range(-120, 120) for j in range(-120, 120)
-          if ac.clearing_at(i, j)))
+seen = {(hi, hj)}
+q = _dq([(hi, hj)])
+while q:
+    i, j = q.popleft()
+    for a, b in ((i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)):
+        if (a, b) in seen or ac.woods_depth(a, b) <= -3.0:
+            continue
+        if not ac.can_stand((a + 0.5) * ac.CELL, (b + 0.5) * ac.CELL):
+            continue
+        seen.add((a, b))
+        q.append((a, b))
+gates = [(i, j) for i in range(wi - 80, wi + 81) for j in range(wj - 50, wj + 51)
+         if 0 < ac.woods_depth(i, j) <= 1.0 and ac.trail_at(i, j)]
+check("every gate leads to the hollow on foot", gates
+      and all(g in seen for g in gates), "%d gates" % len(gates))
+check("but most of the wood is not on the way", len(seen) < 0.55 * size,
+      "%d of %d cells reachable" % (len(seen), size))
 
+# The rig: only in the hollow now - the parks are quiet.
+on = sum(1 for k in range(200000) if ac.rave_window(k * 0.5) is not None)
+check("the rave is rare in time", 0.02 < on / 200000.0 < 0.15,
+      "on %.1f%% of the time" % (100.0 * on / 200000))
 t_on = next(k * 2.0 for k in range(200000) if ac.rave_window(k * 2.0))
 t_off = next(k * 2.0 for k in range(200000) if ac.rave_window(k * 2.0) is None)
-spot = ac.find_place(x0, z0, "clearing")
-check("the cheat reaches the clearing", spot is not None
-      and ac.can_stand(spot[0], spot[1]))
-ci = int(spot[0] / ac.CELL + ac.BIG) - ac.BIG
-cj = int(spot[1] / ac.CELL + ac.BIG) - ac.BIG
-check("and it is in a park",
-      ac.DISTRICTS[ac.district_at(ci, cj)]["park"])
+spot = ac.find_place(x0, z0, "rave")
+check("the cheat reaches the hollow", spot is not None
+      and ac.can_stand(spot[0], spot[1])
+      and math.hypot(spot[0] - hx, spot[1] - hz) < 40)
+gate = ac.find_place(x0, z0, "woods")
+gi = int(gate[0] / ac.CELL + ac.BIG) - ac.BIG
+gj = int(gate[1] / ac.CELL + ac.BIG) - ac.BIG
+check("and the woods cheat stands you at a gate, outside, on a road",
+      gate is not None and ac.can_stand(gate[0], gate[1])
+      and not ac.woods_at(gi, gj) and ac.road_at(gi, gj)
+      and ac.woods_at(gi, gj + 6))
 
 save = ac.PALETTES["leaf"]
 ac.PALETTES["leaf"] = [700] * 5
+blits = []
+real_blit = ac.blit_sprite
+ac.blit_sprite = lambda ch, co, v, w, art, *a: (blits.append(art),
+                                              real_blit(ch, co, v, w, art, *a))
 
 
-def woods(t, w=88, h=22):
+def hollow(t, w=88, h=22):
+    del blits[:]
     v = ac.View(spot[0], spot[1], spot[2], w, h)
     grid, colour, _ = ac.render_street(v, t)
     canopy = sum(1 for y in range(h) for x in range(w)
                  if grid[y][x] in "&%*#" and colour[y][x] != 700)
-    rig = sum(1 for y in range(h) for x in range(w) if grid[y][x] == "O")
-    return canopy, rig
+    crowd = sum(1 for a in blits if a is ac.ZOMB_UP or a is ac.ZOMB_DOWN)
+    return canopy, crowd, ac.ALTAR in blits, set(map(id, blits))
 
 
-lit = max(woods(t_on + k * 0.05) for k in range(8))
-dark = max(woods(t_off + k * 0.05) for k in range(8))
+lit = max(hollow(t_on + k * 0.05) for k in range(8))
+dark = max(hollow(t_off + k * 0.05) for k in range(8))
 check("with one on, the light goes up into the leaves", lit[0] > 150,
       "%d canopy cells lit" % lit[0])
-check("and there is a rig under them", lit[1] > 0, "%d stack cells" % lit[1])
-check("with none on, the woods are just woods", dark[0] < 60 and dark[1] == 0,
-      "%d canopy, %d rig" % dark)
+check("there is a crowd in the hollow", lit[1] > 20, "%d of them" % lit[1])
+check("facing an altar", lit[2])
+check("with none on, the woods are just woods",
+      dark[0] < 60 and dark[1] == 0 and not dark[2],
+      "%d canopy, %d people" % (dark[0], dark[1]))
+# The crowd is not in time, it is in step: one pose for all of them at once.
+poses = set()
+real_drawn_in = ac.draw_drawn_in
+ac.draw_drawn_in = lambda *a: None      # the ones on the path stand still
+for k in range(12):
+    hollow(t_on + k * 0.031)
+    poses.add(frozenset(id(a) for a in blits if a in (ac.ZOMB_UP, ac.ZOMB_DOWN)))
+check("and every one of them moves together",
+      all(len(p) <= 1 for p in poses) and len(poses) >= 2,
+      "%d poses seen, never mixed" % len(poses))
+ac.draw_drawn_in = real_drawn_in
+ac.blit_sprite = real_blit
 ac.PALETTES["leaf"] = save
 
-# Two clearings can be in view at once, and the light must come from the
-# nearer of them - taking whichever the scan reached first lit the woods from
-# a rig sixty units away while you stood next to a dark one.
-twin = None
-for k in range(9):
-    probe = ac.find_place(x0 + k * 400, z0 - k * 300, "clearing")
-    if probe is None:
-        continue
-    pv = ac.View(probe[0], probe[1], probe[2], 86, 20)
-    if len(list(ac.near_clearings(pv, 70.0))) > 1:
-        twin = probe
-        break
-if twin is not None:
-    got = 0
-    for k in range(40):
-        pv = ac.View(twin[0], twin[1], twin[2], 86, 20)
-        ac.render_street(pv, t_on + k * 0.02)
-        if pv.rave is not None:
-            near = min(((cx - twin[0]) ** 2 + (cz - twin[1]) ** 2
-                        for _, cx, cz in [pv.rave]))
-            got = max(got, 1 if near < 400 else -1)
-    check("the light comes from the nearest rig, not the first one found",
-          got == 1, "two clearings in view")
+# Life in the trees on a quiet night: fireflies over the trail, and eyes.
+ac.FIREFLY, ac.EYES = 951, 952
+while ac.weather_name() != "dry":       # rain puts the fireflies out
+    ac.cycle_weather()
+ff = ey = 0
+for back in (8, 12):
+    for k in range(4):
+        v = ac.View(hx, (hj - back + 0.5) * ac.CELL, math.pi, 110, 30)
+        _, col, _ = ac.render_street(v, t_off + k * 0.9)
+        ff += sum(1 for r in col for a in r if a == 951)
+        ey += sum(1 for r in col for a in r if a == 952)
+check("fireflies over the trail", ff > 20, "%d over eight frames" % ff)
+check("and eyes in the dark", ey > 0, "%d over eight frames" % ey)
+ac.FIREFLY = ac.EYES = 1
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
 
-# The menu has to deliver the rave, not the field it sometimes happens in:
-# left to chance you arrive to an empty wood eighteen times in twenty.
+# The menu has to deliver the rave, not the hollow it sometimes happens in.
 ac._forced_rave = None
 odds = sum(1 for k in range(2000) if ac.rave_window(k * 7.3 + 11.0) is not None)
 check("left to itself, one is on only now and then", odds / 2000.0 < 0.2,
@@ -958,34 +918,35 @@ check("but the menu starts one on demand",
 check("and it ends", ac.rave_window(9000.0 + ac.RAVE_LONG + 1) is None)
 ac._forced_rave = None
 
-# A bearing you can walk on, in every direction - a hint that goes quiet when
-# you turn your back on the music is worse than none.
+# On the night the sky has something in it, the rig knew.
+ac._night_skip = 0.0
+alien = next(k for k in range(400) if ac.night(k * ac.NIGHT_LENGTH + 100)["alien"])
+ta = alien * ac.NIGHT_LENGTH
+check("on the strange night the rave is on all night",
+      all(ac.rave_window(ta + f * ac.NIGHT_LENGTH) is not None
+          for f in (0.05, 0.3, 0.6, 0.95)))
+check("and on the sky's beat",
+      {ac.rave_light(ta + 100 + k * 0.01, 0.0, 0.5) for k in range(200)}
+      == {ac.club_light(ta + 100 + k * 0.01, {"tone": 0.5, "phase": 0.0})
+          for k in range(200)} or ac.city_sync(ta + 100) is not None)
+
+# A bearing you can walk on, in every direction.
 ac.force_rave(500.0)
-here = None
-for i in range(-160, 160):
-    for j in range(-160, 160):
-        if ac.clearing_at(i, j):
-            here = ((i + 0.5) * ac.CELL, (j + 0.5) * ac.CELL)
-            break
-    if here:
-        break
-cx, cz = here
-lone = all(not ac.clearing_at(int((cx + dx) / ac.CELL + ac.BIG) - ac.BIG,
-                              int((cz + dz) / ac.CELL + ac.BIG) - ac.BIG)
-           for dx, dz in ((60, 0), (-60, 0), (0, 60), (0, -60)))
+cx, cz = hx, hz
 wrong = []
 for dx, dz, want in ((0, -30, "N"), (0, 30, "S"), (-30, 0, "E"), (30, 0, "W"),
                      (-22, -22, "NE"), (22, 22, "SW")):
     hint = ac.rave_hint(ac.View(cx + dx, cz + dz, 0.0, 88, 22), 500.0).strip()
     if not hint:
         wrong.append("silent %d,%d" % (dx, dz))
-    elif lone and hint.split()[2].rstrip(",") != want:
-        wrong.append("%s not %s" % (hint.split()[2].rstrip(","), want))
+    elif hint.split()[4].rstrip(",") != want:
+        wrong.append("%s not %s" % (hint.split()[4].rstrip(","), want))
 check("the hint points at the music from every side", not wrong,
       ", ".join(wrong) or "including from behind")
 check("it says how far too",
       "close" in ac.rave_hint(ac.View(cx, cz - 12, 0.0, 88, 22), 500.0)
-      and "way off" in ac.rave_hint(ac.View(cx, cz - 120, 0.0, 88, 22), 500.0))
+      and "way off" in ac.rave_hint(ac.View(cx, cz - 200, 0.0, 88, 22), 500.0)
+      and "far off" in ac.rave_hint(ac.View(cx, cz - 500, 0.0, 88, 22), 500.0))
 check("and says nothing when there is no rig going",
       ac.rave_hint(ac.View(cx, cz - 12, 0.0, 88, 22), 500.0 + ac.RAVE_LONG + 5) == ""
       or ac.rave_window(500.0 + ac.RAVE_LONG + 5) is not None)
@@ -996,6 +957,18 @@ check("the rig has a beat, and is dark between", len(beats) >= 3 and None in bea
       "%d distinct states" % len(beats))
 check("and it is faster than the club", ac.RAVE_BPM > ac.CLUB_BPM,
       "%g against %g bpm" % (ac.RAVE_BPM, ac.CLUB_BPM))
+# A tree has no door, so nothing gets hung on one - the alley's bins and
+# bulbs were turning up against the trunks.
+blits = []
+ac.blit_sprite = lambda ch, co, v, w, art, *a: (blits.append(art),
+                                              real_blit(ch, co, v, w, art, *a))
+for back in (4, 10, 16):
+    ac.render_street(ac.View(hx, (hj - back + 0.5) * ac.CELL, 0.0, 110, 30), t_off)
+    ac.render_street(ac.View(hx, (hj - back + 0.5) * ac.CELL, math.pi, 110, 30), t_off)
+ac.blit_sprite = real_blit
+check("nothing is hung on a tree",
+      not any(a is ac.BIN or a is ac.SMOKER_REST or a is ac.SMOKER_DRAG
+              for a in blits))
 
 
 # --- the night sky -------------------------------------------------------
@@ -1483,33 +1456,97 @@ while ac.weather_name() != "dry":
     ac.cycle_weather()
 bank = ac.find_place(x0, z0, "bank")
 
-# Reflections: the water carries glyphs that are not water's own.
+# Reflections: measured as what reflect_river() itself puts on the water,
+# by rendering once with it switched off and diffing - bridges and piers
+# stand over the water too and would otherwise be counted as reflection.
 vv = ac.View(bank[0], bank[1], bank[2], 108, 26)
+real_reflect = ac.reflect_river
+ac.reflect_river = lambda *a: None
+plain, _, _ = ac.render_street(vv, 200.0)
+ac.reflect_river = real_reflect
 grid, colour, _ = ac.render_street(vv, 200.0)
-mirrored = sum(1 for (y, sx) in vv.water
-               if grid[y][sx] not in " ~-:" and y < 26)
-check("the city lies across the water", mirrored > 25,
-      "%d reflected cells in %d of river" % (mirrored, len(vv.water)))
+mirrored = [(y, sx) for (y, sx) in vv.water if grid[y][sx] != plain[y][sx]]
+check("the city lies across the water", len(mirrored) > 25,
+      "%d reflected cells in %d of river" % (len(mirrored), len(vv.water)))
 deepest = max((y for (y, _) in vv.water), default=0)
-shallow = sum(1 for (y, sx) in vv.water
-              if grid[y][sx] not in " ~-:" and y < (vv.horizon + deepest) // 2)
-deep = sum(1 for (y, sx) in vv.water
-           if grid[y][sx] not in " ~-:" and y >= (vv.horizon + deepest) // 2)
+shallow = sum(1 for (y, _) in mirrored if y < (vv.horizon + deepest) // 2)
+deep = sum(1 for (y, _) in mirrored if y >= (vv.horizon + deepest) // 2)
 check("and breaks up as it comes towards you", shallow > deep,
       "%d far, %d near" % (shallow, deep))
 
-# The barge: one every few minutes, and it moves.
-gap = ac.BARGE_GAP / ac.BARGE_SPEED
-check("a barge goes by every few minutes", 120.0 < gap < 400.0,
-      "one every %.0f s at %.1f units a second" % (gap, ac.BARGE_SPEED))
-check("the barge art is square", len({len(r) for r in ac.BARGE}) == 1)
-seen_at = []
-for k in range(40):
-    t = 200.0 + k * 6.0
-    for bx, bz in ac.near_barges(vv, t, 200.0):
-        seen_at.append(round(bx, 1))
-check("and it is somewhere different every time you look",
-      len(set(seen_at)) > 20, "%d distinct positions" % len(set(seen_at)))
+# What comes across is the lights, not the buildings. Mirroring every glyph
+# gave a readable second copy of the city under the first, which from a pier
+# was most of the screen: only windows, neon and bulbs may cross, and past
+# the first rows they are streaks, not letters.
+bad = [grid[y][sx] for (y, sx) in mirrored
+       if not (grid[y][sx].isalnum() or grid[y][sx] in "*+@:")]
+check("the reflection carries lights, not walls", not bad,
+      "%d structural glyphs: %r" % (len(bad), "".join(sorted(set(bad)))))
+streaks = sum(1 for (y, sx) in mirrored if grid[y][sx] == ":")
+check("and smears them into streaks further out", streaks > 0,
+      "%d of %d" % (streaks, len(mirrored)))
+
+# The deck of a pier is planks, and at your feet it must not be the loudest
+# thing on the screen: it used to be a third of the cells filled with '='.
+pier = ac._water_spot(x0, z0, "pier")
+pv = ac.View(pier[0], pier[1], pier[2], 110, 30)
+pgrid, _, _ = ac.render_street(pv, 300.0)
+feet = [pgrid[y][sx] for y in range(24, 30) for sx in range(110)]
+loud = sum(1 for g in feet if g == "=")
+check("the pier deck at your feet is not noise", loud < 12,
+      "%d '=' in the nearest six rows" % loud)
+check("but it is planked", any(g == "-" for g in feet))
+
+# The bridge: lamps along it, a festoon between them, and no crane.
+ac.BULB, ac.EMBER_HOT = 941, 942
+bridge = ac._water_spot(x0, z0, "bridge")
+bv = ac.View(bridge[0], bridge[1], bridge[2], 110, 30)
+_, bcol, _ = ac.render_street(bv, 300.0)
+lamps = sum(1 for r in bcol for a in r if a == 941)
+festoon = sum(1 for r in bcol for a in r if a == 942)
+check("a bridge has lamps along it", lamps >= 4, "%d lit" % lamps)
+check("and a string of lights between them", festoon >= 6, "%d bulbs" % festoon)
+check("and nobody left a barge on the river", not hasattr(ac, "near_barges"))
+ac.BULB = ac.EMBER_HOT = 1
+
+# Somebody on some bridges, not all - and the menu goes straight to one.
+crossings = [i for i in range(-3000, 3000)
+             if ac.bridge_at(i, int(sum(ac.river_span(i)) * 0.5))
+             and not ac.bridge_at(i - 1, int(sum(ac.river_span(i)) * 0.5))]
+with_someone = sum(1 for i in crossings if ac.leaner_at(i) is not None)
+check("some bridges have somebody leaning on the rail",
+      0.15 < with_someone / float(len(crossings)) < 0.55,
+      "%d of %d" % (with_someone, len(crossings)))
+lean = ac.find_place(x0, z0, "leaner")
+li = int(round(lean[0] / ac.CELL - 1.5))
+check("and the menu finds one", lean is not None and ac.leaner_at(li) is not None)
+blits = []
+real_blit = ac.blit_sprite
+ac.blit_sprite = lambda ch, co, v, w, art, *a: (blits.append(art),
+                                              real_blit(ch, co, v, w, art, *a))
+lx, lz, _ = ac.leaner_at(li)
+xa, xb, z0b, z1b = ac.bridge_edges(li)
+lv = ac.View(lx + (1.2 if lx == xa else -1.2), lz + 9.0,
+             math.atan2(0.0, -9.0), 110, 30)
+ac.render_street(lv, 300.0)
+ac.blit_sprite = real_blit
+check("and they are drawn when you are on the bridge",
+      any(a is ac.LEANER for a in blits))
+again = ac.find_place(lean[0], lean[1], "bridge")
+check("pressing the bridge key again moves you on",
+      again is not None and abs(again[0] - lean[0]) > ac.CHEAT_SKIP)
+
+# The end lamps are what makes a crossing findable from along the river.
+ac.BULB_DIM = 943
+fi = li + 30
+fmid = (ac.river_centre(fi) + 0.5) * ac.CELL
+fx = (fi + 0.5) * ac.CELL
+fyaw = math.atan2((li + 1) * ac.CELL - fx, (z0b + z1b) * 0.5 - fmid)
+_, fcol, _ = ac.render_street(ac.View(fx, fmid, fyaw, 110, 30), 300.0)
+halo = sum(1 for r in fcol for a in r if a == 943)
+check("a bridge glows from 150 units up the river", halo >= 4,
+      "%d halo cells" % halo)
+ac.BULB_DIM = 1
 
 # Buoys: present, and deliberately out of step with each other.
 buoys = list(ac.near_buoys(vv, 200.0))
