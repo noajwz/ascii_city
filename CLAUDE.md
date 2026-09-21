@@ -440,9 +440,16 @@ does the same thing at the same instant with no offset at all, arms up on one ha
 and down on the other, all facing the altar with their backs to you. That is what makes it not a
 party. Between the kicks the hollow goes dark, and what is left is their eyes.
 
-The **altar** stands at the far end: a stack with the decks on it and, over the decks, a horned
-shape with two eyes that are never off — `EMBER_HOT` between beats, white on the kick. Beams go up
-out of it into the canopy, which is what you see from far off; and on the ground `draw_ground()`
+The **booth** stands at the far end — a stack with the decks on it — and **Aku is on the decks**.
+In the episode it is one of his minions with headphones shaped like his horns, and Jack mistakes
+him for Aku; here it is the real thing. He is the one sprite in the city that is not one colour:
+four layers blitted at the same anchor (`AKU_BODY`, `AKU_FACE`, `AKU_BROW`, `AKU_WHITE`), which
+works because `blit_sprite()` paints only the non-blank cells — the crest and horns in the dark
+purple the rig leaves on things between hits (white when the strobe takes everything), the face a
+filled green, the brows red, the eyes and the grin white. He stands up behind the booth, which hides
+whatever he has for feet, towers over it, and bobs on the kick. The beams are drawn *before* him so
+they come up from behind; drawn after, they were painted across his face. Beams go up out of the
+booth into the canopy, which is what you see from far off; and on the ground `draw_ground()`
 paints **rings** of light pulsing outward from the altar on every beat, keyed on `v.hollow`, which is
 the one thing in the city meant to look like it is doing something to you. On the trails near the
 hollow stand the ones still on their way, hoods up, facing it, not moving (`draw_drawn_in()`).
