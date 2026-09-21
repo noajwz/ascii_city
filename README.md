@@ -39,7 +39,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   you will not like who is on the decks.
 - **A river**, with piers, buoys, mist on cold nights, footbridges with lamps along them, now and
   then a carnival on the bank with a big wheel turning over the water, and once in a long way a bay
-  with a suspension bridge across it, lights the length of its cables.
+  with a suspension bridge across it, lights the length of its cables, landing on a headland with
+  a lighthouse at the point whose beam goes round over all of it.
 
 Nothing is stored. Every street, building, sign and trail is a hash of its own coordinates, so
 the city is infinite, identical every time you walk back to it, and held in no memory at all.
