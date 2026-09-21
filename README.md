@@ -37,8 +37,9 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   lost on, a lake with the stars in it, things in the dark with eyes, and once in a while a rave in
   the hollow in the middle that nobody asked permission for. Somebody there is not dancing, and
   you will not like who is on the decks.
-- **A river**, with piers, buoys, mist on cold nights, footbridges with lamps along them, and
-  now and then a carnival on the bank with a big wheel turning over the water.
+- **A river**, with piers, buoys, mist on cold nights, footbridges with lamps along them, now and
+  then a carnival on the bank with a big wheel turning over the water, and once in a long way a bay
+  with a suspension bridge across it, lights the length of its cables.
 
 Nothing is stored. Every street, building, sign and trail is a hash of its own coordinates, so
 the city is infinite, identical every time you walk back to it, and held in no memory at all.
