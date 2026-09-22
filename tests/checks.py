@@ -212,6 +212,56 @@ check("and stays out of a narrow one", "L U C K Y" not in "\n".join("".join(r) f
 check("it goes idle after a while", slot.idle(settled + ac.SLOT_HOLD + 0.1)
       and not slot.idle(settled))
 
+# --- blackjack -----------------------------------------------------------
+check("aces count eleven until that busts",
+      ac.hand_value([("A", "^"), ("K", "v")]) == 21
+      and ac.hand_value([("A", "^"), ("A", "v"), ("9", "*")]) == 21
+      and ac.hand_value([("A", "^"), ("9", "*"), ("5", "o")]) == 15)
+bj = ac.Blackjack()
+bj.deal(0.0)
+check("a hand is two cards each, from one deck", len(bj.player) == 2 and len(bj.dealer) == 2
+      and len(set(bj.shoe + bj.player + bj.dealer)) == 52)
+bj = ac.Blackjack(); bj.chips = 100
+bj.phase, bj.player, bj.dealer = "player", [("10", "^"), ("6", "v")], [("9", "*"), ("7", "o")]
+bj.hit(1.0)                                  # whatever comes, it is at least 6 more
+busted = ac.hand_value(bj.player) > 21
+check("hitting can bust you, and that costs the bet",
+      (busted and bj.phase == "done" and bj.outcome == "BUST" and bj.chips == 90)
+      or (not busted and bj.phase == "player"))
+bj = ac.Blackjack(); bj.chips = 100
+bj.phase, bj.player, bj.dealer = "player", [("10", "^"), ("9", "v")], [("10", "*"), ("6", "o")]
+bj.shoe = [("9", "^")] * 20 + [("2", "v")]   # pop() takes the end; enough not to refill
+bj.stand(2.0)
+bj.update(2.0)
+check("the dealer takes a card at a time", bj.phase == "dealer" and len(bj.dealer) == 2)
+bj.update(2.0 + ac.BJ_DEAL)
+check("and draws on sixteen", len(bj.dealer) == 3)
+bj.update(2.0 + ac.BJ_DEAL); bj.update(3.0 + 2 * ac.BJ_DEAL)
+check("and stands on seventeen or more, then settles",
+      bj.phase == "done" and ac.hand_value(bj.dealer) >= 17)
+check("nineteen beats eighteen", bj.outcome == "YOU WIN" and bj.chips == 110,
+      "%s, %d chips" % (bj.outcome, bj.chips))
+bj = ac.Blackjack(); bj.chips = 100
+bj.phase, bj.player, bj.dealer = "player", [("A", "^"), ("K", "v")], [("9", "*"), ("7", "o")]
+bj._finish(0.0)
+check("blackjack pays three to two", bj.outcome == "BLACKJACK" and bj.chips == 115)
+bj = ac.Blackjack(); bj.chips = 100
+bj.phase, bj.player, bj.dealer = "player", [("10", "^"), ("8", "v")], [("10", "*"), ("8", "o")]
+bj._finish(0.0)
+check("and a push is a push", bj.outcome == "PUSH" and bj.chips == 100)
+bj = ac.Blackjack(); bj.deal(0.0)
+if bj.phase == "player":
+    bj.stand(0.0)
+room, _ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), 120, 32, 0.0, ac.Slot(), bj)
+text = "\n".join("".join(r) for r in room)
+check("the table is in the room with the wheel and the machine",
+      "BLACKJACK" in text and "L U C K Y" in text and "FAITES" in text)
+bj2 = ac.Blackjack(); bj2.deal(0.0)
+room, _ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), 120, 32, 0.0, ac.Slot(), bj2)
+text = "\n".join("".join(r) for r in room)
+check("and the dealer's second card is face down until you stand",
+      (":::" in text) == (bj2.phase == "player"))
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")

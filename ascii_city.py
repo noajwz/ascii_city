@@ -5119,6 +5119,143 @@ def draw_slot(ch, co, slot, x0, y0, now):
           FLASH if flash else GOLD if win else GOLD_DIM)
 
 
+# The blackjack table, on the other side of the room. One deck, dealer
+# stands on 17, blackjack pays three to two. The dealer takes a card every
+# BJ_DEAL seconds rather than all at once, because a hand that resolves in
+# one frame is a number, not a game.
+BJ_BET = 10
+BJ_DEAL = 0.8
+SUITS = "^v*o"          # spades, hearts, clubs, diamonds
+RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+
+
+def hand_value(cards):
+    """Best total, aces counting eleven where that does not bust."""
+    total = sum(11 if r == "A" else 10 if r in "JQK" else int(r) for r, _ in cards)
+    aces = sum(1 for r, _ in cards if r == "A")
+    while total > 21 and aces:
+        total -= 10
+        aces -= 1
+    return total
+
+
+class Blackjack:
+    def __init__(self):
+        self.chips = 100
+        self.shoe = []
+        self.player = []
+        self.dealer = []
+        self.phase = "idle"         # idle, player, dealer, done
+        self.outcome = ""
+        self.t_phase = 0.0
+
+    def _draw(self):
+        if len(self.shoe) < 15:
+            self.shoe = [(r, s) for r in RANKS for s in SUITS]
+            _spin_rng.shuffle(self.shoe)
+        return self.shoe.pop()
+
+    def deal(self, now):
+        if self.phase in ("player", "dealer"):
+            return
+        self.player = [self._draw(), self._draw()]
+        self.dealer = [self._draw(), self._draw()]
+        self.phase = "player"
+        self.outcome = ""
+        self.t_phase = now
+        if hand_value(self.player) == 21:
+            self._finish(now)
+
+    def hit(self, now):
+        if self.phase != "player":
+            return
+        self.player.append(self._draw())
+        if hand_value(self.player) > 21:
+            self._finish(now)
+
+    def stand(self, now):
+        if self.phase != "player":
+            return
+        self.phase = "dealer"
+        self.t_phase = now
+
+    def update(self, now):
+        """The dealer's turn, a card at a time."""
+        if self.phase != "dealer":
+            return
+        if hand_value(self.dealer) >= 17:
+            self._finish(now)
+        elif now - self.t_phase >= BJ_DEAL - 1e-6:
+            self.dealer.append(self._draw())
+            self.t_phase = now
+
+    def _finish(self, now):
+        p, d = hand_value(self.player), hand_value(self.dealer)
+        natural = len(self.player) == 2 and p == 21
+        if p > 21:
+            self.outcome, win = "BUST", -BJ_BET
+        elif natural and not (len(self.dealer) == 2 and d == 21):
+            self.outcome, win = "BLACKJACK", BJ_BET * 3 // 2
+        elif d > 21:
+            self.outcome, win = "DEALER BUSTS", BJ_BET
+        elif p > d:
+            self.outcome, win = "YOU WIN", BJ_BET
+        elif p < d:
+            self.outcome, win = "DEALER WINS", -BJ_BET
+        else:
+            self.outcome, win = "PUSH", 0
+        self.chips += win
+        self.phase = "done"
+        self.t_phase = now
+
+
+def _card(ch, co, y, x, card, hidden=False):
+    if hidden:
+        art, attr = (".---.", "|:::|", "'---'"), CONCRETE
+    else:
+        r, s = card
+        face = (r + s).ljust(3) if len(r) == 1 else r + s
+        art = (".---.", "|" + face + "|", "'---'")
+        attr = ROU_RED if s in "vo" else ROU_BLACK
+    for k, line in enumerate(art):
+        _text(ch, co, y + k, x, line, attr)
+
+
+def draw_blackjack(ch, co, bj, x0, y0, now):
+    """The table: 40 columns by 13 rows. The dealer's second card stays face
+    down until you stand."""
+    w = 40
+    _text(ch, co, y0, x0, "." + "-" * (w - 2) + ".", GOLD_DIM)
+    for r in range(1, 12):
+        _text(ch, co, y0 + r, x0, "|", GOLD_DIM)
+        _text(ch, co, y0 + r, x0 + w - 1, "|", GOLD_DIM)
+    _text(ch, co, y0 + 12, x0, "'" + "-" * (w - 2) + "'", GOLD_DIM)
+    _text(ch, co, y0 + 1, x0 + 2, "BLACKJACK", GOLD)
+    _text(ch, co, y0 + 1, x0 + w - 13, "chips %4d" % bj.chips, GOLD)
+    showing = bj.phase in ("dealer", "done")
+    for row, (who, cards) in enumerate((("dealer", bj.dealer), ("you", bj.player))):
+        y = y0 + 2 + row * 4
+        _text(ch, co, y, x0 + 2, who, GOLD_DIM)
+        if cards:
+            seen = cards if (showing or who == "you") else cards[:1]
+            _text(ch, co, y, x0 + w - 7, "(%2d)" % hand_value(seen), GOLD_DIM)
+        for k, card in enumerate(cards[:6]):
+            _card(ch, co, y + 1, x0 + 2 + k * 6, card,
+                  hidden=(who == "dealer" and k == 1 and not showing))
+    if bj.phase == "player":
+        keys = "h hit   k stand"
+    elif bj.phase == "dealer":
+        keys = "dealer's turn"
+    else:
+        keys = "b deals a hand"
+    _text(ch, co, y0 + 10, x0 + 2, keys, GOLD_DIM)
+    if bj.outcome:
+        win = bj.outcome in ("BLACKJACK", "YOU WIN", "DEALER BUSTS")
+        flash = win and int(now * 6) % 2 == 0
+        _text(ch, co, y0 + 11, x0 + (w - len(bj.outcome)) // 2, bj.outcome,
+              FLASH if flash else GOLD if win else ROU_RED)
+
+
 def venue_at(x, z):
     """The club or casino you are standing in the doorway of, as (kind, dict),
     or None.
@@ -5174,7 +5311,7 @@ def _big(ch, co, y, x, s, attr):
             col += 2
 
 
-def render_casino_room(spin, width, height, now, slot=None):
+def render_casino_room(spin, width, height, now, slot=None, table=None):
     """Inside.
 
     The wheel is the middle of a room rather than the whole screen: a ceiling
@@ -5210,12 +5347,20 @@ def render_casino_room(spin, width, height, now, slot=None):
     cy = (band_top + band_bot) / 2.0
     rx = min(width * 0.36, 42.0)
     ry = min((band_bot - band_top) / 2.0 - 0.5, 10.0)
-    # The slot machine stands to the right of the table when there is room
-    # for it beside the wheel; the wheel gives up a little of its radius.
+    # The slot machine stands to the right of the wheel and the blackjack
+    # table to its left when there is room for them; the wheel moves over
+    # and gives up some radius so that all three fit.
     machine = roomy and slot is not None and width >= 78
+    cards = roomy and table is not None and width >= 92
+    left = 43.0 if cards else 1.0
+    right = width - 21.0 if machine else width - 2.0
+    if machine or cards:
+        cx = (left + right) / 2.0
+        rx = min(rx, (right - left) / 2.0 - 1.0)
     if machine:
-        rx = min(rx, width / 2.0 - 22.0)
         draw_slot(ch, co, slot, width - 19, band_top + 1, now)
+    if cards:
+        draw_blackjack(ch, co, table, 1, band_top + 1, now)
 
     if rx < 12 or ry < 3.5:
         say = ("%s: %d" % (spin.name, spin.result) if spin.settled(now)
@@ -5831,7 +5976,7 @@ ARROWS = (curses.KEY_LEFT, curses.KEY_RIGHT, curses.KEY_UP, curses.KEY_DOWN)
 
 SKYLINE_HUD = " x=%-6d %s  tab view  arrows/hl walk  HL run  space wander  ` cheats "
 STREET_HUD = " %d,%d %s, %s%s  ws walk  ad turn  ,. step  tab view  ` cheats "
-ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p pulls the slot"
+ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  b/h/k blackjack"
                 "  -  s walks out  -  q quit ")
 RAVE_HUD = " inside the club at %d,%d  -  s walks back out  -  q quit "
 
@@ -5855,6 +6000,7 @@ def main(stdscr):
     blocked = False             # did the last step run into something
     wheel = None                # the roulette, while you stand in a casino
     slot = Slot()               # and the machine beside it
+    table = Blackjack()         # and the table on the other side
     slot_idle_since = 0.0
     wheel_at = 0.0
     cheats = False              # is the cheat panel up
@@ -5934,6 +6080,12 @@ def main(stdscr):
             elif wheel is not None and key in (ord("p"), ord("P")):
                 if slot.idle(now):
                     slot.pull(now)
+            elif wheel is not None and key in (ord("b"), ord("B")):
+                table.deal(now)
+            elif wheel is not None and key in (ord("h"), ord("H")):
+                table.hit(now)
+            elif wheel is not None and key in (ord("k"), ord("K")):
+                table.stand(now)
             elif street:
                 if key in (curses.KEY_UP, ord("w"), ord("W")):
                     fwd = WALK * (RUN_MULTIPLIER if key == ord("W") else 1.0)
@@ -6016,7 +6168,8 @@ def main(stdscr):
                 slot.pull(now)            # it deals you one, like the wheel
             if not slot.idle(now):
                 slot_idle_since = now
-            ch, co = render_casino_room(wheel, width, height, now, slot)
+            table.update(now)
+            ch, co = render_casino_room(wheel, width, height, now, slot, table)
             hud = ROULETTE_HUD % (wheel.name, cam_x, cam_z)
         elif venue is not None and venue[0] == "club":
             ch, co = render_rave(venue[1], width, height, now)
