@@ -30,8 +30,9 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   the only thing that brings lightning.
 - **A night sky with a different character every night** — clarity, the moon's phase, whether the
   milky way is up, the odd meteor. Once in a great while, something else entirely.
-- **Places you can go into** — a casino with a roulette wheel that spins honestly and a slot
-  machine that pays out the same way, and a club with a rave going on.
+- **Places you can go into** — a casino with a roulette wheel that spins honestly, a slot machine
+  that pays out the same way and a blackjack table that deals straight, and a club with a rave
+  going on.
 - **Dark alleys**, some of which dead-end, and lit ones lined with tiny bars.
 - **The woods** — one great block of trees, a long walk from anywhere, with trails you can get
   lost on, a lake with the stars in it, things in the dark with eyes, and once in a while a rave in

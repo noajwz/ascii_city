@@ -717,6 +717,15 @@ itself after `SLOT_IDLE` seconds, the way the wheel deals you another. The one t
 menu puts you in the casino but leaves the panel open, and with the panel open `p` is the park.
 Close the panel first; that was the first pty run's "nothing happened".
 
+**Blackjack** is on the other side of the wheel, from 92 columns; the wheel moves over and gives
+up radius so all three fit (`left`/`right` in `render_casino_room()` — the wheel's `cx` is not the
+screen's centre once the tables are in). One deck, reshuffled under fifteen cards, dealer stands
+on 17, blackjack pays three to two, `BJ_BET` a hand against a running chip count. `b` deals, `h`
+hits, `k` stands — `s` is taken, it walks you out. The dealer's second card stays face down until
+you stand, and the dealer then takes a card every `BJ_DEAL` seconds rather than all at once: a
+hand that resolves in one frame is a number, not a game. The one thing that bit: `now - t >= 0.8`
+is false at `t + 0.8` in floating point, so the timer compares with an epsilon.
+
 ## Inside the club
 
 `render_rave()` is the club's answer to the casino room, and it runs off `club_light()` and the same
