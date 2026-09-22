@@ -854,11 +854,30 @@ RIVER_HALF = 3.4       # half the channel, in cells, before the wobble
 _river_cache = {}
 
 
+_centre_cache = {}
+_span_cache = {}
+
+
 def river_centre(i):
-    """Where the middle of the channel is, in cells across."""
-    return (26.0 * math.sin(i / 55.0)
-            + 8.0 * math.sin(i / 23.0 + 1.7)
-            + 3.0 * math.sin(i / 11.0 + 0.4))
+    """Where the middle of the channel is, in cells across.
+
+    Cached per column: with the promenade, the fairground, the headland and
+    the moat all keyed on where the river is, this was being asked several
+    thousand times a frame, three sines each."""
+    hit = _centre_cache.get(i)
+    if hit is None:
+        _evict(_centre_cache, 20000)
+        hit = (26.0 * math.sin(i / 55.0)
+               + 8.0 * math.sin(i / 23.0 + 1.7)
+               + 3.0 * math.sin(i / 11.0 + 0.4))
+        _centre_cache[i] = hit
+    return hit
+
+
+def near_river(i, j):
+    """Within reach of anything the river puts on its banks. Cheap, and
+    the gate in front of every bank test: most of the city is nowhere near."""
+    return abs(j - river_centre(i)) < 48.0
 
 
 _grand_cache = {}
@@ -908,17 +927,21 @@ def headland_r(i, j):
         return 9.0
     li, lj = home
     di, dj = i - li, j - lj
+    # The box first: nearly every cell asked about is nowhere near, and the
+    # trig below was most of what road_at() cost near the river.
+    if abs(di) > HEAD_RI * HEAD_MOAT + 1.0 or abs(dj) > HEAD_RJ * HEAD_MOAT + 1.0:
+        return 9.0
     a = math.atan2(dj, di)
     wob = 1.0 + 0.10 * math.sin(a * 4.0 + li) + 0.06 * math.sin(a * 7.0 + lj)
     return math.sqrt((di / (HEAD_RI * wob)) ** 2 + (dj / (HEAD_RJ * wob)) ** 2)
 
 
 def headland_at(i, j):
-    return headland_r(i, j) < 1.0 and not river_at(i, j)
+    return near_river(i, j) and headland_r(i, j) < 1.0 and not river_at(i, j)
 
 
 def moat_at(i, j):
-    return 1.0 <= headland_r(i, j) < HEAD_MOAT
+    return near_river(i, j) and 1.0 <= headland_r(i, j) < HEAD_MOAT
 
 
 def lighthouse_spot(i):
@@ -938,6 +961,10 @@ def river_span(i):
     half its width exactly where it turns - which is the one place a river gets
     wider, not narrower. And opened out into a bay under the big bridge, which
     wants water worth spanning."""
+    hit = _span_cache.get(i)
+    if hit is not None:
+        return hit
+    _evict(_span_cache, 20000)
     mid = river_centre(i)
     slope = (river_centre(i + 1) - river_centre(i - 1)) * 0.5
     half = ((RIVER_HALF + 1.1 * math.sin(i / 17.0 + 2.2))
@@ -946,7 +973,9 @@ def river_span(i):
     if span is not None:
         d = (i - (span[0] + span[1] * 0.5)) / BAY_REACH
         half *= 1.0 + BAY_WIDEN * math.exp(-d * d)
-    return mid - half, mid + half
+    hit = (mid - half, mid + half)
+    _span_cache[i] = hit
+    return hit
 
 
 def river_at(i, j):
@@ -1007,7 +1036,7 @@ def bridge_at(i, j):
 def prom_at(i, j):
     """The promenade: open bank on the near side, two cells deep, along two
     stretches in three."""
-    if _mix(i // PROM_STRETCH, 0, 1401) % 3 == 0:
+    if not near_river(i, j) or _mix(i // PROM_STRETCH, 0, 1401) % 3 == 0:
         return False
     _, hi = river_span(i)
     return int(hi) + 1 <= j <= int(hi) + PROM_DEEP
@@ -1222,7 +1251,7 @@ def lake_at(i, j):
 
 def water_at(i, j):
     """Anything you can see across but not stand on."""
-    return river_at(i, j) or lake_at(i, j) or moat_at(i, j)
+    return river_at(i, j) or moat_at(i, j) or lake_at(i, j)
 
 
 def nearest_hollow(x, z):
@@ -2598,7 +2627,12 @@ def near_dock_cranes(v, reach):
     ci = int(v.x / CELL + BIG) - BIG
     cj = int(v.z / CELL + BIG) - BIG
     for i in range(ci - n, ci + n + 1):
-        for j in range(cj - n, cj + n + 1):
+        # Only the rows either side of the channel: a crane is on the bank,
+        # and scanning the whole square was a millisecond and a half a frame.
+        lo, hi = river_span(i)
+        j0 = max(cj - n, int(lo) - 2)
+        j1 = min(cj + n, int(hi) + PROM_DEEP + 3)
+        for j in range(j0, j1 + 1):
             if is_open(i, j):
                 continue
             if DISTRICTS[district_at(i, j)]["name"] != "docks":
@@ -6005,6 +6039,7 @@ def main(stdscr):
     wheel_at = 0.0
     cheats = False              # is the cheat panel up
     note = ""                   # and what did it last do
+    note_at = -1e9              # when, so the HUD can show it after the panel closes
     autopilot = False
     frame_time = 1.0 / FPS
 
@@ -6059,6 +6094,11 @@ def main(stdscr):
                             wheel = None
                             street = True
                             note = "-> " + name
+                            # And the panel closes: you jumped somewhere to
+                            # look at it, and with the panel still up the
+                            # next key you press is a district or another
+                            # jump - p in the casino was the park.
+                            cheats, note_at = False, now
                             if kind == "rave":
                                 # Taking you to where one sometimes happens is
                                 # no use: eighteen times in twenty there is
@@ -6067,6 +6107,7 @@ def main(stdscr):
                                 # one, the way L calls down a strike.
                                 force_rave(now)
                                 note = "-> the woods rave (starting)"
+                                note_at = now
                         break
             elif key in (ord("q"), 27):
                 return
@@ -6190,6 +6231,8 @@ def main(stdscr):
             hud = SKYLINE_HUD % (sky_x, weather_word(now, rain_intensity(now)))
         if cheats:
             draw_cheats(ch, co, note)
+        elif now - note_at < 4.0 and note:
+            hud = hud.rstrip() + "  " + note.strip() + " "
 
         wide = v.wide if (street and wheel is None and venue is None) else ()
         stdscr.erase()

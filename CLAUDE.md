@@ -715,7 +715,9 @@ the result is drawn first from `SLOT_WEIGHTS` (a 7 is rare, a `%` is not) and th
 shown stopping on it, left to right, `SLOT_STAGGER` apart. `p` pulls it; left alone it pulls
 itself after `SLOT_IDLE` seconds, the way the wheel deals you another. The one trap: `9` in the
 menu puts you in the casino but leaves the panel open, and with the panel open `p` is the park.
-Close the panel first; that was the first pty run's "nothing happened".
+That was the first pty run's "nothing happened", and then it was reported: "when I pull the slot
+with p I go to the park". The panel closes on a jump now and its note goes to the HUD for a few
+seconds instead.
 
 **Blackjack** is on the other side of the wheel, from 92 columns; the wheel moves over and gives
 up radius so all three fit (`left`/`right` in `render_casino_room()` — the wheel's `cx` is not the
@@ -813,7 +815,9 @@ weather, time, a mode — give it a key that sets it, the way `w` and `L` do. Bo
 Adding the feature and leaving the menu alone is an unfinished job.
 
 `` ` `` opens a panel over the live view — over, not instead of, so that weather you change happens
-in front of you. Two columns, three groups: the city on the left with the weather under it, the
+in front of you. **A jump closes it** — you went somewhere to look at it, and with the panel still
+up the next key is a district or another jump; the `-> where` note shows on the HUD for four
+seconds instead. Two columns, three groups: the city on the left with the weather under it, the
 parts of town on the right with **OUT OF TOWN** — the river and the woods, `OUT_OF_TOWN` — under
 them; a single list of everything outgrew a 30-row terminal. Letters belong to the panel while it is up; the arrow keys do not, so you can still
 walk about with it open.
@@ -890,3 +894,12 @@ ground means ground *points* outnumber cells fifty to one, and `draw_ground()` i
 kerb test used to ask `is_open()` of the four neighbours per point and that alone was 46 ms on the
 bank; it is asked once per cell now. If it ever slips again, the levers in order are the per-point
 `_mix()` texture hashes in `draw_ground()`, `near_lots()` reach, `RAIN_REACH` and `MAX_VIEW`.
+
+**Anything keyed on where the river is must be cheap, because `road_at()` and `is_open()` ask it
+for every cell.** The promenade, the fairground, the headland and the moat all went in keyed on
+`river_span()`, which was nine sines, uncached, and a street walk went from 4.5 to 6.2 ms a frame
+without anything on screen changing — reported as "slower than it used to be". `river_centre()`
+and `river_span()` are cached per column now, `near_river()` gates every bank test, and
+`headland_r()` does its box test before its trig. `tools/`-less rule of thumb: benchmark a
+40-frame walk with the caches cleared (the profile in the session log) before and after anything
+that touches `is_open()`'s path.
