@@ -913,6 +913,27 @@ landing at every floor and the count in the corner; at the top the sky opens out
 parapet. It shares `main()`'s lift state — the same ride, a different picture — and `s` on the
 roof climbs you back down into the alley. `|` in the menu stands you at the foot of one.
 
+## The pictures
+
+A cinema is as rare as a club — `CLUB_ODDS` on its own hash, a street front required — and from
+the pavement it is a marquee over lit doors: NOW SHOWING and the title in a ring of chasing bulbs,
+in screen space for the casino marquee's reason. `*` in the menu stands you in the doorway, and
+`venue_at()` does the rest the way it does for the casino.
+
+Inside you are in the back rows: the screen between red curtains, the projector's beam coming over
+your head with dust turning in it, and three rows of the audience in silhouette — lit by the film,
+so a bright scene throws light on them and a dark one leaves them as shapes. `film_frame()` is the
+picture: a black-and-white short of six scenes, `SCENE_LEN` each — the title on grainy black, rain
+on a window with a lamp outside, a night drive, two of them talking with subtitles (`FILM_LINES`),
+the city with its windows going out, THE END — on a loop, and on the city's clock plus a per-cinema
+offset, so you walk in on whatever is showing. Everything in the frame is keyed on the time within
+the loop, grain and flicker included, so it really is the same film every time round; there is a
+test that one loop on is the same frame.
+
+The marquee's NOW SHOWING was in the star colour at first, and the stars-inside-buildings test
+counted its letters as stars drawn inside a building. Anything in screen space on a facade needs a
+colour that is not a star's.
+
 ## Inside the club
 
 `render_rave()` is the club's answer to the casino room, and it runs off `club_light()` and the same
@@ -1002,10 +1023,14 @@ Adding the feature and leaving the menu alone is an unfinished job.
 `` ` `` opens a panel over the live view — over, not instead of, so that weather you change happens
 in front of you. **A jump closes it** — you went somewhere to look at it, and with the panel still
 up the next key is a district or another jump; the `-> where` note shows on the HUD for four
-seconds instead. Two columns, three groups: the city on the left with the weather under it, the
-parts of town on the right with **OUT OF TOWN** — the river and the woods, `OUT_OF_TOWN` — under
-them; a single list of everything outgrew a 30-row terminal. Letters belong to the panel while it is up; the arrow keys do not, so you can still
-walk about with it open.
+seconds instead.
+
+Three columns: **IN THE CITY**, then **PARTS OF TOWN** with **SKY AND STREETS** (weather, strikes,
+nights, the overcast, people) under it, then **OUT OF TOWN** (`OUT_OF_TOWN`: the river and the
+woods). It was two, every new place went into the first, and it quietly grew past a 24-row terminal
+and then a 30-row one — `draw_cheats()` draws nothing when there is no room, so the symptom is the
+panel simply not opening. There is a test that it opens at 80x24. Letters belong to the panel while
+it is up; the arrow keys do not, so you can still walk about with it open.
 
 **It generates nothing.** The city is a pure function of its coordinates, so `find_place()` searches
 for what is already out there and moves the camera to it. `CLUB_ODDS` and the rest are only ever
