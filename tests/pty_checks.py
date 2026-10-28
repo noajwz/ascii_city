@@ -85,5 +85,8 @@ ok &= report("fire escape: climb, look round, climb down", *run(
      (b"w", 4.0)], cols=100, rows=30))
 ok &= report("the pictures: go in, watch, walk out", *run(
     [(b"`", .5), (b"*", 2.5), (b"s", .6), (b"s", .6), (b"w", .4)], cols=100, rows=30))
+ok &= report("tunnels: walk through a short one and a long one", *run(
+    [(b"`", .5), (b"[", 1.0), (b"w", 2.0), (b"`", .5), (b"]", 1.0), (b"w", 3.0)],
+    cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
