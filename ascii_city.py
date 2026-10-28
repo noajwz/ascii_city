@@ -1129,6 +1129,45 @@ def bridge_at(i, j):
             and (_mix(i // XP, 0, 719) % BRIDGE_ODDS == 0 or grand_at(i)))
 
 
+PARK_ODDS = 26         # one city block in this many is a car park
+PARK_DISTRICTS = ("downtown", "market", "docks", "old town", "residential")
+PARK_BAY = 2.6         # a parking bay's width along the row
+BAY_ROW = 16.0         # bays, aisle, bays: one double row, in world units along z
+LAMP_GAP = 13.0        # between the sodium lamps down an aisle
+_car_park_cache = {}
+
+
+def car_park_block(bi, bj):
+    """Is the city block (bi, bj) a car park."""
+    if _mix(bi, bj, 1951) % PARK_ODDS:
+        return False
+    ci, cj = bi * XP + XP // 2, bj * ZP + ZP // 2
+    return DISTRICTS[district_at(ci, cj)]["name"] in PARK_DISTRICTS
+
+
+def car_park_at(i, j):
+    """Is this cell part of a car park: in a car-park block, and not the
+    street round it, the river, or anything else that claims the ground."""
+    key = i * 1048576 + j
+    hit = _car_park_cache.get(key)
+    if hit is None:
+        _evict(_car_park_cache, 40000)
+        hit = (car_park_block(i // XP, j // ZP)
+               and not _is_road(i, XP, 91) and not _is_road(j, ZP, 137)
+               and not woods_at(i, j) and not water_at(i, j)
+               and not (near_river(i, j) and (fair_at(i, j) or prom_at(i, j)
+                                              or headland_at(i, j))))
+        _car_park_cache[key] = hit
+    return hit
+
+
+def bay_of(x, z):
+    """(slot along the row, row, how far into the row) for a point on the
+    asphalt: rows of bays BAY_ROW apart with an aisle down the middle."""
+    k, along = divmod(z, BAY_ROW)
+    return int(math.floor(x / PARK_BAY)), int(k), along
+
+
 def prom_at(i, j):
     """The promenade: open bank on the near side, two cells deep, along two
     stretches in three."""
@@ -1473,7 +1512,8 @@ def is_open(i, j):
         _evict(_open_cache, 60000)
         if water_at(i, j):
             hit = True          # you can see across it; standing is elsewhere
-        elif fair_at(i, j) or headland_at(i, j) or prom_at(i, j):
+        elif (fair_at(i, j) or headland_at(i, j) or prom_at(i, j)
+              or car_park_at(i, j)):
             hit = True          # fairground, headland, promenade: nothing built
         elif woods_at(i, j):
             # Trails, the hollow, and otherwise trees thick enough that the
@@ -2675,6 +2715,8 @@ def collect_glow(v, now, wet):
     whatever the weather, and is often the only thing down there that does."""
     glow = {}
     reach = 7.0
+    for lx, lz in near_park_lamps(v, 60.0):
+        _spill(glow, lx, lz, 6.5, EMBER)
     for c_ in near_carnivals(v, 60.0):
         (wx, wz), (cx, cz), stalls, _ = carnival_spots(c_)
         _spill(glow, wx, wz, 11.0, NEON[int(now * 5.0) % len(NEON)][1])
@@ -3073,6 +3115,7 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 fair = (not wet_cell and not solid and not road_at(i, j)
                         and fair_at(i, j))
                 rock = not wet_cell and not solid and headland_at(i, j)
+                tarmac = not wet_cell and not solid and car_park_at(i, j)
                 hollow = (woods and v.hollow is not None
                           and hollow_at(i, j))
                 lane = None
@@ -3173,6 +3216,19 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 if h % 5:
                     continue
                 glyph, attr = ",", GOLD_DIM                   # sawdust
+            elif tarmac:
+                # Painted bays: a line between every one, a line across their
+                # ends, and the aisle down the middle left bare.
+                _, _, along = bay_of(x, z)
+                in_bays = along < 5.0 or along > BAY_ROW - 5.0
+                if in_bays and (x % PARK_BAY) < 0.2:
+                    glyph, attr = "|", LANE
+                elif abs(along - 5.0) < 0.15 or abs(along - (BAY_ROW - 5.0)) < 0.15:
+                    glyph, attr = "-", LANE
+                elif _mix(int(x * 3.0), int(z * 3.0), 47) % 11 == 0:
+                    glyph, attr = ".", STREET               # the asphalt
+                else:
+                    continue
             elif rock:
                 h = _mix(int(x * 3.0), int(z * 3.0), 23)
                 if h % 6:
@@ -4808,23 +4864,41 @@ def draw_el(ch, co, v, walls, x0, x1, now, wet):
                       EMBER_HOT)
 
 
+_tower_blocks = {}
+
+
+def towers_in_block(bi, bj):
+    """The sky-deck towers in city block (bi, bj), worked out once. Asked per
+    cell, the hash over every cell in 150 units was four thousand calls a
+    frame and a millisecond on every street, beacon or no beacon."""
+    key = (bi, bj)
+    hit = _tower_blocks.get(key)
+    if hit is None:
+        _evict(_tower_blocks, 4000)
+        hit = []
+        for i in range(bi * XP, bi * XP + XP):
+            for j in range(bj * ZP, bj * ZP + ZP):
+                if _mix(i, j, 1907) % TOWER_ODDS or is_open(i, j):
+                    continue
+                t = lot(i, j)["tower"]
+                if t is not None:
+                    hit.append(t)
+        _tower_blocks[key] = hit
+    return hit
+
+
 def near_towers(v, reach):
-    """Sky-deck towers in front of you, for their beacons - the hash first,
-    because it throws out all but one cell in many for a multiply."""
-    n = int(reach / CELL) + 1
-    ci = int(v.x / CELL + BIG) - BIG
-    cj = int(v.z / CELL + BIG) - BIG
-    for i in range(ci - n, ci + n + 1):
-        for j in range(cj - n, cj + n + 1):
-            if _mix(i, j, 1907) % TOWER_ODDS or is_open(i, j):
-                continue
-            t = lot(i, j)["tower"]
-            if t is None:
-                continue
-            rx, rz = (i + 0.5) * CELL - v.x, (j + 0.5) * CELL - v.z
-            if rx * v.dx + rz * v.dz < -CELL:
-                continue
-            yield t
+    """Sky-deck towers in front of you, for their beacons."""
+    b0, b1 = int((v.x - reach) // (XP * CELL)), int((v.x + reach) // (XP * CELL))
+    c0, c1 = int((v.z - reach) // (ZP * CELL)), int((v.z + reach) // (ZP * CELL))
+    for bi in range(b0, b1 + 1):
+        for bj in range(c0, c1 + 1):
+            for t in towers_in_block(bi, bj):
+                rx = (t["i"] + 0.5) * CELL - v.x
+                rz = (t["j"] + 0.5) * CELL - v.z
+                if rx * v.dx + rz * v.dz < -CELL or rx * rx + rz * rz > reach * reach:
+                    continue
+                yield t
 
 
 def draw_tower_beacon(ch, co, v, walls, t, now, wet):
@@ -5184,6 +5258,128 @@ def roof_view(t, yaw, width, height):
     z = (t["j"] + 0.5) * CELL + math.cos(yaw) * ROOF_STEP
     return View(x, z, yaw, width, height, eye=t["height"] + 1.7,
                 reach=ROOF_REACH)
+
+
+CAR = [
+    " .----. ",
+    "/_|__|_\\",
+    "'o----o'",
+]
+PAY_BOOTH = [
+    " ____ ",
+    "|[##]|",
+    "|    |",
+    "|____|",
+]
+
+
+def car_parks_near(v, reach):
+    """Is any car-park block within reach - a handful of hashes, and the
+    gate in front of everything else here: most of the city has none, and
+    scanning every bay in sight for nothing was most of two milliseconds."""
+    b0, b1 = int((v.x - reach) // (XP * CELL)), int((v.x + reach) // (XP * CELL))
+    c0, c1 = int((v.z - reach) // (ZP * CELL)), int((v.z + reach) // (ZP * CELL))
+    return any(car_park_block(bi, bj) for bi in range(b0, b1 + 1)
+               for bj in range(c0, c1 + 1))
+
+
+def near_park_lamps(v, reach):
+    """The sodium lamps down the aisles of any car park in reach."""
+    if not car_parks_near(v, reach):
+        return
+    n = int(reach / LAMP_GAP) + 1
+    k0 = int(math.floor(v.z / BAY_ROW))
+    g0 = int(math.floor(v.x / LAMP_GAP))
+    for k in range(k0 - int(reach / BAY_ROW) - 1, k0 + int(reach / BAY_ROW) + 2):
+        z = k * BAY_ROW + BAY_ROW * 0.5
+        for g in range(g0 - n, g0 + n + 1):
+            x = g * LAMP_GAP + LAMP_GAP * 0.5
+            if (x - v.x) ** 2 + (z - v.z) ** 2 > reach * reach:
+                continue
+            if car_park_at(int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG):
+                yield x, z
+
+
+def near_parked_cars(v, reach):
+    """(x, z, seed) for every occupied bay in front of you, farthest first.
+    Two cars in three bays, by a hash of the bay: same cars every time."""
+    out = []
+    if not car_parks_near(v, reach):
+        return out
+    n = int(reach / PARK_BAY) + 1
+    s0 = int(math.floor(v.x / PARK_BAY))
+    k0 = int(math.floor(v.z / BAY_ROW))
+    for k in range(k0 - int(reach / BAY_ROW) - 1, k0 + int(reach / BAY_ROW) + 2):
+        for side, along in ((0, 2.5), (1, BAY_ROW - 2.5)):
+            z = k * BAY_ROW + along
+            for s in range(s0 - n, s0 + n + 1):
+                m = _mix(s, k * 2 + side, 1953)
+                if m % 3 == 0:
+                    continue
+                x = (s + 0.5) * PARK_BAY
+                rx, rz = x - v.x, z - v.z
+                if (rx * v.dx + rz * v.dz < NEAR_Z + 1.0
+                        or rx * rx + rz * rz > reach * reach):
+                    continue
+                # Only where the whole bay is car park, so no car sits half in
+                # the road or the next building.
+                ok = all(car_park_at(int(px / CELL + BIG) - BIG,
+                                     int(pz / CELL + BIG) - BIG)
+                         for px, pz in ((x - 1.0, z - 2.0), (x + 1.0, z + 2.0)))
+                if ok:
+                    out.append((rx * rx + rz * rz, x, z, m))
+    out.sort(reverse=True)
+    return out
+
+
+def draw_car_park(ch, co, v, walls, now, wet):
+    """Parked cars in their bays, tall sodium lamps throwing orange over the
+    tarmac, and at the corner nearest you a blue P on a pole and the pay
+    booth with its light on. Now and then a car's alarm light winks."""
+    if not car_parks_near(v, 75.0):
+        return
+    for lx, lz in near_park_lamps(v, 75.0):
+        for h in range(7):
+            put_point(ch, co, v, walls, lx, 0.5 + h * 0.85, lz, "|", CONCRETE)
+        put_point(ch, co, v, walls, lx - 0.5, 6.4, lz, "_", CONCRETE)
+        put_lit(ch, co, v, walls, lx - 0.9, 6.1, lz, "o", EMBER_HOT,
+                max(wet, 0.4), now)
+    for _, x, z, m in near_parked_cars(v, 60.0):
+        paint = tone_colour(("mid", "far", "cold", "warm", "rust")[m >> 3 & 3],
+                            (m >> 6 & 15) / 15.0)
+        blit_sprite(ch, co, v, walls, CAR, x, z, 0.0, 1.35, 1.9, paint)
+        if (m >> 11) % 17 == 0 and int(now * 1.5 + (m & 7)) % 2 == 0:
+            put_lit(ch, co, v, walls, x + 0.4, 1.15, z, ".", ROU_RED, wet, now)
+    # The sign and the booth, at the corners of each car park in reach.
+    seen = set()
+    n = int(70.0 / CELL) + 1
+    ci = int(v.x / CELL + BIG) - BIG
+    cj = int(v.z / CELL + BIG) - BIG
+    for i in range(ci - n, ci + n + 1):
+        for j in range(cj - n, cj + n + 1):
+            if not car_park_at(i, j):
+                continue
+            west, east = not car_park_at(i - 1, j), not car_park_at(i + 1, j)
+            north, south = not car_park_at(i, j - 1), not car_park_at(i, j + 1)
+            if not ((west or east) and (north or south)) or (i, j) in seen:
+                continue                       # only the corners, one sign each
+            seen.add((i, j))
+            x = i * CELL + (1.2 if west else CELL - 1.2)
+            z = j * CELL + (1.2 if north else CELL - 1.2)
+            if (x - v.x) * v.dx + (z - v.z) * v.dz < NEAR_Z:
+                continue
+            for h in range(6):
+                put_point(ch, co, v, walls, x, 0.5 + h * 0.8, z, "|", CONCRETE)
+            pr = v.project(x, 5.3, z)
+            if pr is not None and pr[2] < 70.0:
+                sx, sy = int(round(pr[0])), int(round(pr[1]))
+                for k, c in enumerate("[P]"):
+                    put_cell(ch, co, v, walls, sx - 1 + k, sy, pr[2], c,
+                             NEON[2][0])
+            blit_sprite(ch, co, v, walls, PAY_BOOTH, x + 2.6, z + 0.8, 0.0, 2.2,
+                        1.5, CURB)
+            put_lit(ch, co, v, walls, x + 2.6, 1.5, z + 0.8, "#", BULB,
+                    max(wet, 0.3), now)
 
 
 def draw_props(ch, co, v, walls, now, wet):
@@ -5937,6 +6133,7 @@ def render_street(v, now):
     draw_ground(ch, co, v, walls, collect_glow(v, now, wet), wet, now)
     draw_flash(ch, co, v, walls, v.flash)
     draw_props(ch, co, v, walls, now, wet)
+    draw_car_park(ch, co, v, walls, now, wet)
     draw_walkers(ch, co, v, walls, now, wet)
     for ex0, ex1 in near_els(v, EL_REACH):
         draw_el(ch, co, v, walls, ex0, ex1, now, wet)
@@ -6656,6 +6853,7 @@ CHEAT_PLACES = [
     ("=", "under the el", "el"),
     ("^", "a sky deck", "tower"),
     ("|", "a fire escape", "escape"),
+    ("_", "a car park", "carpark"),
     ("g", "the woods", "woods"),
     ("x", "the woods rave", "rave"),
     ("e", "the lake", "lake"),
@@ -6976,6 +7174,28 @@ def _doorway(x, z, salt, key):
     return None
 
 
+def _car_park_spot(x, z):
+    """At the edge of the nearest car park, on the street, looking in across
+    it. The block hash first: one in PARK_ODDS, before anything costs."""
+    bi0, bj0 = int(x / (XP * CELL)), int(z / (ZP * CELL))
+    for r in range(0, 60):
+        for bi in range(bi0 - r, bi0 + r + 1):
+            for bj in (bj0 - r, bj0 + r) if r else (bj0,):
+                if not car_park_block(bi, bj):
+                    continue
+                for i in range(bi * XP, bi * XP + XP):
+                    j = bj * ZP + ZP // 2
+                    if not car_park_at(i, j) or car_park_at(i - 1, j):
+                        continue
+                    px, pz = (i - 0.5) * CELL, (j + 0.5) * CELL
+                    if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+                        break
+                    if can_stand(px, pz):
+                        return px, pz, math.pi * 0.5
+                    break
+    return None
+
+
 def _escape_spot(x, z):
     """In the alley at the foot of a fire escape that goes all the way up,
     a couple of steps back and facing it: walk forward and you are climbing."""
@@ -7076,6 +7296,8 @@ def find_place(x, z, kind):
         return _tower_spot(x, z)
     if kind == "escape":
         return _escape_spot(x, z)
+    if kind == "carpark":
+        return _car_park_spot(x, z)
     if kind in ("woods", "rave", "lake"):
         return _woods_spot(x, z, kind)
     if kind in ("bank", "pier", "bridge", "leaner", "carnival", "grand",

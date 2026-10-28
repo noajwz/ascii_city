@@ -35,6 +35,7 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   on, ramen counters down the lit lanes where you can sit and wait for your bowl, and sky decks:
   ride the lift to the roof of the tallest towers and look out over the whole city.
 - **People out walking** — not many, it is night — under umbrellas when it rains.
+- **Car parks** here and there, under orange sodium lamps, the bays half full.
 - **An elevated train** over some of the avenues, rattling along with its windows lit, and from
   across the water a row of lights sliding through the town.
 - **Dark alleys**, some of which dead-end, and lit ones lined with tiny bars — and fire escapes
