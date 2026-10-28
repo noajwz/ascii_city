@@ -595,13 +595,57 @@ check("and on a night without it there is none",
       ac.snow_cover(100.0) > 0 or not any(a == 1031 for r in dcol for a in r))
 ac.SNOW = ac.ROOF = 1
 
+# --- overcast: a pitch-black sky on demand -------------------------------
+ac.STAR = ac.STAR_DIM = ac.STAR_WARM = ac.STAR_COLD = ac.BAND = 1041
+ac.MOON = ac.MOON_DIM = 1042
+while ac.weather_name() != "dry":
+    ac.cycle_weather()
+ac._night_skip = 0.0
+clearest = max(range(200), key=lambda k: ac.night(k * ac.NIGHT_LENGTH + 100)["clarity"]
+               * (0 if ac.night(k * ac.NIGHT_LENGTH + 100)["alien"] else 1))
+tc = clearest * ac.NIGHT_LENGTH + 100
+ta = next(k * ac.NIGHT_LENGTH + 100 for k in range(400)
+          if ac.night(k * ac.NIGHT_LENGTH + 100)["alien"])
+up = ac.find_place(x0, z0, "street")
+
+
+def sky_cells(now):
+    v = ac.View(up[0], up[1], up[2], 110, 30)
+    g, c, _ = ac.render_street(v, now)
+    street = sum(1 for y in range(v.horizon) for x in range(110)
+                 if g[y][x] != " " and c[y][x] in (1041, 1042))
+    g2, c2 = ac.render_skyline(100.0, 110, 26, now)
+    skyline = sum(1 for r in c2 for a in r if a in (1041, 1042))
+    return street, skyline
+
+
+before = sky_cells(tc)
+check("on a clear night the sky has stars in it", before[0] > 3 and before[1] > 10,
+      "%d in the street, %d on the waterfront" % before)
+check("the menu draws the cloud over", ac.cycle_clouds() == "overcast")
+after = sky_cells(tc)
+check("and then there are none, from the street or the water", after == (0, 0),
+      "%d, %d" % after)
+alien_sky = sky_cells(ta)
+check("not even on the strange night", alien_sky[1] == 0, "%d" % alien_sky[1])
+ac.force_strike(tc + 1.0)
+_, fcol, _ = ac.render_street(ac.View(up[0], up[1], up[2], 110, 30), tc + 1.05)
+ac.FLASH = 1
+check("lightning still lights it from underneath", ac.lightning(tc + 1.05, 0.0) > 0.5)
+check("and it clears again", ac.cycle_clouds() == "as it comes" and sky_cells(tc) == before)
+ac.STAR = ac.STAR_DIM = ac.STAR_WARM = ac.STAR_COLD = ac.BAND = 1
+ac.MOON = ac.MOON_DIM = 1
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")
 text = "\n".join("".join(r) for r in big[0])
 check("the panel lists everything it does",
       all(n in text for _, n, _ in ac.CHEAT_PLACES)
-      and "weather:" in text and "strike now" in text and "people:" in text)
+      and "weather:" in text and "strike now" in text and "people:" in text
+      and "sky:" in text)
 small = ([[" "]*20 for _ in range(8)], [[0]*20 for _ in range(8)])
 ac.draw_cheats(small[0], small[1], "x")
 check("and stays out of the way when there is no room",

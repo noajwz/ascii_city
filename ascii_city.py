@@ -654,7 +654,7 @@ def draw_stars(ch, co, cam_x, ground, wet, now, tops):
     they are a very long way off."""
     n = night(now)
     clear = n["clarity"] * max(0.0, 1.0 - wet / 0.55)
-    if clear <= 0.02:
+    if clear <= 0.02 or _overcast:
         return
     width = len(ch[0])
     off = int(cam_x * 0.05)
@@ -2594,6 +2594,8 @@ def draw_sky(ch, co, v, walls, wet, now):
     # Cloud takes the sky away gradually rather than all at once at a
     # threshold, so a night can be half lost behind it.
     clear = n["clarity"] * max(0.0, 1.0 - wet / 0.55 - v.snow * 1.4)
+    if _overcast:
+        clear = 0.0
     # walls[3], not walls[1]: a star must clear every roof in its column, not
     # only the nearest one. The part of a far tower that shows above a nearer
     # roof is still a building, and stars were being drawn straight into it.
@@ -2650,7 +2652,7 @@ def draw_sky(ch, co, v, walls, wet, now):
                     ch[y][sx] = "." if v.flash < 0.5 else ":"
                     co[y][sx] = FLASH
 
-    if n["alien"]:
+    if n["alien"] and not _overcast:
         draw_sky_beams(ch, co, v, tops, now, seen)
         draw_mother(ch, co, v, tops, now, seen)
         draw_saucers(ch, co, v, tops, now, seen)
@@ -5148,6 +5150,22 @@ _weather_i = 0
 _forced_strike = None       # when a strike was called for, rather than due
 
 
+_overcast = False           # the cheat menu has drawn the cloud over
+
+
+def cycle_clouds():
+    """Draw the cloud over, or take it away. Overcast is a pitch-black sky:
+    no stars, no moon, no milky way, no meteors - and on the strange night,
+    nothing up there either. The weather goes on underneath it as before."""
+    global _overcast
+    _overcast = not _overcast
+    return clouds_name()
+
+
+def clouds_name():
+    return "overcast" if _overcast else "as it comes"
+
+
 def cycle_weather():
     global _weather_i
     _weather_i = (_weather_i + 1) % len(WEATHER_STEPS)
@@ -6901,6 +6919,7 @@ def draw_cheats(ch, co, note):
     left += [("", ""), ("w", "weather: " + weather_name()),
              ("L", "strike now"), ("n", "next night"),
              ("A", "a strange night"), ("z", "a lantern night"),
+             ("s", "sky: " + clouds_name()),
              ("a", "people: " + crowd_name())]
     right = [("", "PARTS OF TOWN")]
     right += [(d["key"], d["name"]) for d in DISTRICTS]
@@ -7258,6 +7277,8 @@ def main(stdscr):
                             if skip_to_alien(now) else "no such night near")
                 elif key == ord("a"):
                     note = "people: " + cycle_crowd()
+                elif key == ord("s"):
+                    note = "sky: " + cycle_clouds()
                 elif key == ord("z"):
                     note = ("lanterns on the river tonight"
                             if skip_to_lanterns(now) else "no such night near")
