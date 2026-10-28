@@ -26,8 +26,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
 - **Nine parts of town** — downtown under the neon, quiet housing, Chinatown and a night market
   strung with lanterns, a financial district that is black but for the floor the cleaners are on,
   the docks, the old town, and small parks.
-- **Weather that runs itself** — rain that comes and goes, and storms that are rare, violent, and
-  the only thing that brings lightning.
+- **Weather that runs itself** — rain that comes and goes, storms that are rare, violent, and
+  the only thing that brings lightning, and rarer still, snow that settles on the whole city.
 - **A night sky with a different character every night** — clarity, the moon's phase, whether the
   milky way is up, the odd meteor. Once in a great while, something else entirely.
 - **Places you can go into** — a casino with a roulette wheel that spins honestly, a slot machine

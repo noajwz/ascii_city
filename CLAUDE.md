@@ -696,6 +696,18 @@ Both of those were reported as "lightning doesn't work", twice, and neither was 
 reading the code or from a single rendered frame. Counting output per frame through a pty is the
 tool for anything whose defect is *when* it happens rather than *what* it draws.
 
+**Snow is the rarest weather of all** — about 2% of the time against a storm's 4.5%, a fall every
+two hours or so, two to five minutes long (`snow_window()`, on its own slots, and a storm always
+wins). While it falls it is the whole sky's weather: `rain_intensity()` is zero, so the streets are
+dry and nobody has an umbrella up, the cloud takes the stars, and the mist off the river goes. It
+**settles** — `snow_cover()` builds over `SNOW_SETTLE` seconds of falling and melts over
+`SNOW_MELT` after it stops, so the city stays white a while once the sky has cleared. Lying snow
+covers the ground ahead of anything else the ground would draw, bare road included, except the kerb
+line, which is how you still tell street from pavement; every roofline goes white through
+`roof_colour()`, the canopy whitens from the top down, and on the waterfront the top of every
+building on the far bank. Flakes are on the rain's world-locked lattice but slow and each on its
+own sway. `w` in the menu has a `snow` step, which also lays a full cover at once.
+
 Drops sit on a **world-locked lattice** so they hold still relative to the city while you walk and
 turn through them, and each is drawn as the segment it fell through since the last frame, which is
 what gives the streak its slant — the wind's and the perspective's — without faking anything in
