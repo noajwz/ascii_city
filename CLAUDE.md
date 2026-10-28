@@ -595,9 +595,11 @@ deck under them; head-on from under the line they are a pair of headlights comin
 the steel. Within earshot the HUD says `~ a train overhead ~`. The line stops where the avenue
 does, at the woods and the headland (`el_runs()`).
 
-On the waterfront it is a dotted track across the middle layer, on that layer's parallax so it
-sits in the town rather than on the glass, and every 48 seconds a train slides across it one
-way, then the other — drawn before the reflection, so it lies on the water too. `=` in the menu
+On the waterfront it is a dotted track across the middle layer — its ties on that layer's
+parallax, so it sits in the town rather than on the glass — and every 48 seconds a train slides
+across the screen along it, one way then the other, drawn before the reflection so it lies on
+the water too. The train itself is in screen space, not parallax: it is crossing the view, and
+pinning it to the layer made it stand still whenever you did. `=` in the menu
 stands you under it, on the pavement by the columns, looking along.
 
 ## Getting lost is the feature
