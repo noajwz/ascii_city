@@ -453,6 +453,15 @@ reflection now carries lights and nothing else — so the bridge and the reflect
 as one thing. Three tiers, railing / festoon / lamps, at heights that stay separate rows from
 thirty units away; with the lamps at the festoon's height the two merged into one row of `o`.
 
+**It has to stand out from the water**, and for a while it did not — a thin grey rail at knee
+height over a deck of scattered dots, reported as "it blends in with the water". `draw_bridge_body()`
+gives every footbridge a solid stone parapet with a pale `ROOF`-coloured coping on top, a kerbed
+and paved deck, and under it the arches and piers going down into the river. All of it is
+structure glyphs in structure colours, so the reflection — which carries only lights — leaves it
+alone, and from the bank it is a hard band across the water with the lamplight lying under it. The
+big bridge gets the same parapet with a girder underneath instead of arches, since its deck hangs
+from the cables.
+
 Two things were added on top, and both are about the bridge being *somewhere* rather than a
 fixture. **Somebody is leaning on the rail** on one bridge in three (`leaner_at()`, hashed on the
 crossing), looking down the river with a cigarette that flares on a slow count — the same job the

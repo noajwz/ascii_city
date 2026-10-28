@@ -417,6 +417,32 @@ check("a hanging sign rarely shares its frontage with everything else",
       faces > 50 and both / float(faces) < 0.1, "%d of %d" % (both, faces))
 check("and a far one is drawn unlit", ac.SIGN_LIT_FAR < ac.MAX_VIEW)
 
+# --- a bridge stands out from the water -----------------------------------
+# Reported as "it blends in with the water": a thin rail over a dotted deck.
+# From the bank, side on, there has to be a solid band of structure across
+# the river where the bridge is.
+ac.ROOF = 1011
+br = ac.find_place(x0, z0, "bridge")
+bi = int(round(br[0] / ac.CELL - 1.5))
+bxa, bxb, bz0, bz1 = ac.bridge_edges(bi)
+side = None
+for di in list(range(4, 20)) + list(range(-20, -4)):
+    blo, bhi = ac.river_span(bi + di)
+    for bj in (int(bhi) + 1, int(bhi) + 2, int(blo) - 1, int(blo) - 2):
+        px, pz = (bi + di + 0.5) * ac.CELL, (bj + 0.5) * ac.CELL
+        if ac.can_stand(px, pz) and not ac.river_at(bi + di, bj):
+            side = (px, pz)
+            break
+    if side:
+        break
+yaw_ = math.atan2((bxa + bxb) / 2 - side[0], (bz0 + bz1) / 2 - side[1])
+grid, colour, _ = ac.render_street(ac.View(side[0], side[1], yaw_, 110, 30), 300.0)
+coping = sum(1 for r in colour for a in r if a == 1011)
+check("from the bank a bridge is a pale line across the river", coping > 25,
+      "%d cells of coping" % coping)
+check("over a parapet and arches", sum(r.count("#") for r in map("".join, grid)) > 30)
+ac.ROOF = 1
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")
@@ -1820,7 +1846,7 @@ check("and smears them into streaks further out", streaks > 0,
 pier = ac._water_spot(x0, z0, "pier")
 pv = ac.View(pier[0], pier[1], pier[2], 110, 30)
 pgrid, _, _ = ac.render_street(pv, 300.0)
-feet = [pgrid[y][sx] for y in range(24, 30) for sx in range(110)]
+feet = [pgrid[y][sx] for y in range(24, 30) for sx in range(37, 73)]   # under you
 loud = sum(1 for g in feet if g == "=")
 check("the pier deck at your feet is not noise", loud < 12,
       "%d '=' in the nearest six rows" % loud)
