@@ -380,7 +380,7 @@ SIGN_WORDS = [
 PALETTES = {}      # e.g. {"near": [3, 7, 12, ...]} -> lists of curses pair numbers
 NEON = []          # [(lit, unlit), ...] - one entry per neon tube colour
 STAR = STREET = HUD = CURB = HAZE = SMOKE = EMBER = EMBER_HOT = 0
-FIREFLY = EYES = SNOW = 0
+FIREFLY = EYES = SNOW = CLOUD = 0
 RAIN = RAIN_FAR = BULB = BULB_DIM = FLASH = CONCRETE = 0
 GOLD = GOLD_DIM = ROU_RED = ROU_BLACK = ROU_GREEN = LANE = 0
 GRASS = BARK = ROOF = 0
@@ -391,7 +391,7 @@ def init_colors():
     global PALETTES, NEON, STAR, STREET, HUD, CURB, HAZE, SMOKE, EMBER
     global EMBER_HOT, RAIN, RAIN_FAR, BULB, BULB_DIM, FLASH, CONCRETE
     global GOLD, GOLD_DIM, ROU_RED, ROU_BLACK, ROU_GREEN, LANE, GRASS, BARK
-    global FIREFLY, EYES, SNOW
+    global FIREFLY, EYES, SNOW, CLOUD
     global ROOF, STAR_DIM, STAR_WARM, STAR_COLD, MOON, MOON_DIM, BAND
 
     curses.start_color()
@@ -426,7 +426,8 @@ def init_colors():
                   "rou_green": 46, "lane": 250, "grass": 22, "bark": 58,
                   "roof": 252, "star_dim": 244, "star_warm": 223,
                   "star_cold": 153, "moon": 231, "moon_dim": 250,
-                  "band": 60, "firefly": 118, "eyes": 190, "snow": 255}
+                  "band": 60, "firefly": 118, "eyes": 190, "snow": 255,
+                  "cloud": 239}
         attrs = {}
     else:
         # 8-colour fallback: bold = the "bright" version of a colour.
@@ -463,7 +464,7 @@ def init_colors():
                   "star_cold": curses.COLOR_CYAN, "moon": curses.COLOR_WHITE,
                   "moon_dim": curses.COLOR_WHITE, "band": curses.COLOR_BLUE,
                   "firefly": curses.COLOR_GREEN, "eyes": curses.COLOR_YELLOW,
-                  "snow": curses.COLOR_WHITE}
+                  "snow": curses.COLOR_WHITE, "cloud": curses.COLOR_BLUE}
         attrs = {"near": curses.A_BOLD}
 
     pair = 1
@@ -522,6 +523,7 @@ def init_colors():
     FIREFLY = made["firefly"] | curses.A_BOLD
     EYES = made["eyes"]
     SNOW = made["snow"] | curses.A_BOLD
+    CLOUD = made["cloud"]
     BAND = made["band"]
 
 
@@ -667,6 +669,25 @@ def blit(dst_ch, dst_co, b, sx, ground):
                 dst_co[y][x] = b["color"]
 
 
+def cloud_at(col, y, now, cloud):
+    """Is there visible cloud at this sky cell: a slow drifting field, cut at
+    a level set by how much cloud there is, and thinned so it is texture and
+    not a wall. Lit faintly from below by the city, which is all you see of
+    a cloud at night."""
+    f = (math.sin(col * 0.021 + now * 0.015 + y * 0.35)
+         + 0.6 * math.sin(col * 0.047 - now * 0.011 + y * 0.9))
+    return f > 1.55 - cloud * 1.3 and _mix(col, y, 73) % 3 == 0
+
+
+def draw_cloud_skyline(ch, co, cam_x, ground, tops, now, cloud):
+    width = len(ch[0])
+    off = int(cam_x * 0.05)
+    for sx in range(width):
+        for y in range(min(max(1, ground - 3), tops[sx])):
+            if ch[y][sx] == " " and cloud_at(sx + off, y, now, cloud):
+                ch[y][sx], co[y][sx] = ("~" if (sx + y) % 3 else "-"), CLOUD
+
+
 def draw_stars(ch, co, cam_x, ground, wet, now, tops):
     """The same night as the street sees, over the water.
 
@@ -676,8 +697,11 @@ def draw_stars(ch, co, cam_x, ground, wet, now, tops):
     no turning in this view - drifting almost imperceptibly is what tells you
     they are a very long way off."""
     n = night(now)
-    clear = n["clarity"] * max(0.0, 1.0 - wet / 0.55)
-    if clear <= 0.02 or _overcast:
+    cloud = 1.0 if overcast_held() else (0.0 if n["alien"] else cloud_cover(now))
+    clear = n["clarity"] * (1.0 - cloud)
+    if cloud > 0.2 and not n["alien"]:
+        draw_cloud_skyline(ch, co, cam_x, ground, tops, now, cloud)
+    if clear <= 0.02:
         return
     width = len(ch[0])
     off = int(cam_x * 0.05)
@@ -690,12 +714,12 @@ def draw_stars(ch, co, cam_x, ground, wet, now, tops):
         for y in range(ceiling):
             m = _mix(col, y, 71)
             alt = 1.0 - y / float(top)
-            rate = 85.0 * clear
+            rate = STAR_RATE * clear
             if n["alien"]:
                 rate += 190.0
             if band_mid is not None:
                 near = max(0.0, 1.0 - abs(alt - band_mid) / 0.19)
-                rate += 460.0 * clear * near
+                rate += BAND_RATE * clear * near
             if (m % 1000) >= rate:
                 continue
             glyph, attr = star_look(m, n["warmth"])
@@ -2588,8 +2612,15 @@ class SkyBox:
                 - self.width // 2)
 
 
-STAR_TIERS = ((640, ".", "dim"), (860, "'", "dim"), (950, "*", "mid"),
-              (990, "+", "bright"), (1000, "o", "bright"))
+# Stars per thousand sky cells on a perfectly clear night, and how many more
+# the milky way adds where it is up. Halved from what they were: the sky was
+# reported as "too distracting and too much", and on a clear night with the
+# band up it had been a seventh of everything above the roofs.
+STAR_RATE = 45.0
+BAND_RATE = 210.0
+
+STAR_TIERS = ((720, ".", "dim"), (905, "'", "dim"), (975, "*", "mid"),
+              (996, "+", "bright"), (1000, "o", "bright"))
 
 
 def star_look(m, warmth):
@@ -2695,9 +2726,8 @@ def draw_sky(ch, co, v, walls, wet, now):
     n = night(now)
     # Cloud takes the sky away gradually rather than all at once at a
     # threshold, so a night can be half lost behind it.
-    clear = n["clarity"] * max(0.0, 1.0 - wet / 0.55 - v.snow * 1.4)
-    if _overcast:
-        clear = 0.0
+    cloud = 1.0 if overcast_held() else (0.0 if n["alien"] else cloud_cover(now))
+    clear = n["clarity"] * (1.0 - cloud)
     # walls[3], not walls[1]: a star must clear every roof in its column, not
     # only the nearest one. The part of a far tower that shows above a nearer
     # roof is still a building, and stars were being drawn straight into it.
@@ -2720,12 +2750,12 @@ def draw_sky(ch, co, v, walls, wet, now):
             for y in range(min(top, v.horizon)):
                 m = _mix(bearing, y, 71)
                 alt = 1.0 - y / float(max(1, v.horizon - 1))
-                rate = 85.0 * clear
+                rate = STAR_RATE * clear
                 if n["alien"]:
                     rate += 190.0     # the sky is the rig tonight
                 if band_mid is not None:
                     near = max(0.0, 1.0 - abs(alt - band_mid) / 0.19)
-                    rate += 460.0 * clear * near
+                    rate += BAND_RATE * clear * near
                 if (m % 1000) >= rate:
                     continue
                 glyph, attr = star_look(m, n["warmth"])
@@ -2754,7 +2784,14 @@ def draw_sky(ch, co, v, walls, wet, now):
                     ch[y][sx] = "." if v.flash < 0.5 else ":"
                     co[y][sx] = FLASH
 
-    if n["alien"] and not _overcast:
+    if cloud > 0.2 and not n["alien"]:
+        for sx in range(v.width):
+            cam = 2.0 * sx / (v.width - 1) - 1.0
+            bearing = int((v.yaw + math.atan(cam * PLANE)) * 90.0)
+            for y in range(min(tops[sx], v.horizon - 1)):
+                if ch[y][sx] == " " and cloud_at(bearing, y, now, cloud):
+                    ch[y][sx], co[y][sx] = ("~" if (bearing + y) % 3 else "-"), CLOUD
+    if n["alien"] and not overcast_held():
         draw_sky_beams(ch, co, v, tops, now, seen)
         draw_mother(ch, co, v, tops, now, seen)
         draw_saucers(ch, co, v, tops, now, seen)
@@ -5706,20 +5743,52 @@ _weather_i = 0
 _forced_strike = None       # when a strike was called for, rather than due
 
 
-_overcast = False           # the cheat menu has drawn the cloud over
+SKY_MODES = ["as it comes", "clear", "overcast"]
+_sky_mode = 0               # the cheat menu's hold on the cloud
 
 
 def cycle_clouds():
-    """Draw the cloud over, or take it away. Overcast is a pitch-black sky:
-    no stars, no moon, no milky way, no meteors - and on the strange night,
-    nothing up there either. The weather goes on underneath it as before."""
-    global _overcast
-    _overcast = not _overcast
+    """As it comes, then a clear sky held, then overcast held. Overcast is
+    pitch black: no stars, no moon, no milky way, no meteors - and on the
+    strange night nothing up there either. The weather goes on underneath."""
+    global _sky_mode
+    _sky_mode = (_sky_mode + 1) % len(SKY_MODES)
     return clouds_name()
 
 
 def clouds_name():
-    return "overcast" if _overcast else "as it comes"
+    return SKY_MODES[_sky_mode]
+
+
+def overcast_held():
+    return _sky_mode == 2
+
+
+def cloud_cover(now):
+    """How much of the sky is cloud, 0..1.
+
+    It comes and goes on its own - three slow waves, like the rain's, on
+    their own periods - so some stretches of a night are clear, some broken
+    and some overcast, and a stretch of overcast is a night with no stars in
+    it at all. Rain and snow bring their own cloud with them."""
+    if _sky_mode == 1:
+        return 0.0
+    if _sky_mode == 2:
+        return 1.0
+    c = (0.40 + 0.55 * math.sin(now / 233.0 + 0.7)
+         + 0.30 * math.sin(now / 89.0 + 2.1)
+         + 0.10 * math.sin(now / 29.0 + 0.3))
+    c = max(c, min(1.0, rain_intensity(now) / 0.55), min(1.0, snowfall(now) * 1.4))
+    return max(0.0, min(1.0, c))
+
+
+def sky_word(now, wet):
+    """The HUD's weather, with the cloud when it is not raining or snowing."""
+    w = weather_word(now, wet)
+    if w != "dry":
+        return w
+    c = cloud_cover(now)
+    return "overcast" if c > 0.8 else ("cloudy" if c > 0.4 else "clear")
 
 
 def cycle_weather():
@@ -8271,7 +8340,7 @@ def main(stdscr):
             ch, co, wet = render_street(v, now)
             hud = (ESCAPE_ROOF_HUD if on_roof.get("kind") == "escape"
                    else ROOF_HUD) % (int(on_roof["height"] / FLOOR_H),
-                                     weather_word(now, wet))
+                                     sky_word(now, wet))
         elif wheel is not None:
             slot.settle(now)
             table.update(now)
@@ -8295,7 +8364,7 @@ def main(stdscr):
                 cam_x, cam_z,
                 district(int(cam_x / CELL + BIG) - BIG,
                          int(cam_z / CELL + BIG) - BIG)["name"],
-                weather_word(now, wet),
+                sky_word(now, wet),
                 rave_hint(v, now)
                 or ("  ~ something over the city ~" if night(now)["alien"]
                     else "")
@@ -8307,7 +8376,7 @@ def main(stdscr):
                     if fireworks_near(cam_x, cam_z, now) else ""))
         else:
             ch, co = render_skyline(sky_x, width, height, now)
-            hud = SKYLINE_HUD % (sky_x, weather_word(now, rain_intensity(now)))
+            hud = SKYLINE_HUD % (sky_x, sky_word(now, rain_intensity(now)))
         if cheats:
             draw_cheats(ch, co, note)
         elif now - note_at < 4.0 and note:
