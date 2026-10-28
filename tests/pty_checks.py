@@ -72,5 +72,7 @@ ok &= report("20x8 window with panel", *run(
     [(b"`",.5),(b"2",.7),(b"w",.4)], cols=20, rows=8))
 ok &= report("240x70 window with panel", *run(
     [(b"`",.5),(b"6",.7),(b"w",.4)], cols=240, rows=70))
+ok &= report("ramen counter, sit and leave", *run(
+    [(b"`", .5), (b"v", 1.0), (b"w", .3), (b"s", .6), (b"s", .6), (b"w", .4)]))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

@@ -3393,6 +3393,27 @@ def draw_over_door(ch, co, v, walls, text, world, now, tone):
         put_wide(ch, co, v, walls, sx - len(text) + k * 2, sy, dist, c, lit)
 
 
+def draw_noren(ch, co, v, walls, world, normal, now):
+    """The split red curtain over a ramen shop's door, and the steam coming
+    out under it - which is how you know from down the lane."""
+    x, _, z = world
+    ax, az = -normal[1], normal[0]           # along the wall
+    for k in range(-3, 4):
+        for h in (2.2, 2.5, 2.8):
+            if k % 2 == 0 and h < 2.5:
+                continue                     # the slits between the panels
+            put_point(ch, co, v, walls, x + ax * k * 0.45, h, z + az * k * 0.45,
+                      "#", ROU_RED)
+    for k in range(5):
+        y = 2.0 + k * 0.6
+        drift = 0.4 * math.sin(now * 1.3 + k)
+        if (int(now * 4) + k) % 4 == 0:
+            continue
+        put_point(ch, co, v, walls, x + ax * drift + normal[0] * (0.3 + k * 0.1),
+                  y, z + az * drift + normal[1] * (0.3 + k * 0.1),
+                  "(" if k % 2 else ")", HAZE)
+
+
 def near_yokocho(v, reach):
     """Open cells of a lit lane in front of you."""
     n = int(reach / CELL) + 1
@@ -4320,8 +4341,13 @@ def draw_props(ch, co, v, walls, now, wet):
             lit = face_kind(i + nx, j + nz)
             if lit == "yokocho" and fc["pub"]:
                 w = face_point(i, j, f, CELL * 0.5, 0.5, 3.4)
+                ramen = ramen_at(i, j, f)
                 props.append((_d2(v, w), "overdoor",
-                              (fc["over"], fc["lanterns"]), w, (nx, nz)))
+                              ("ラーメン" if ramen else fc["over"],
+                               fc["lanterns"]), w, (nx, nz)))
+                if ramen:
+                    w = face_point(i, j, f, CELL * 0.5, 0.6, 0.0)
+                    props.append((_d2(v, w), "noren", (i, j, f), w, (nx, nz)))
             if lit:
                 if fc["hung"] is not None:
                     s = fc["hung"]
@@ -4342,7 +4368,9 @@ def draw_props(ch, co, v, walls, now, wet):
     props.sort(key=lambda p: -p[0])
 
     for _, kind, s, world, normal in props:
-        if kind == "overdoor":
+        if kind == "noren":
+            draw_noren(ch, co, v, walls, world, normal, now)
+        elif kind == "overdoor":
             tone = s[1]["tone"] if s[1] else 0.44
             draw_over_door(ch, co, v, walls, s[0], world, now, tone)
         elif kind == "lanterns":
@@ -5290,9 +5318,34 @@ def draw_blackjack(ch, co, bj, x0, y0, now):
               FLASH if flash else GOLD if win else ROU_RED)
 
 
+RAMEN_ODDS = 3         # one yokocho counter in this many is a ramen shop
+RAMEN_SERVE = 4.5      # seconds from sitting down to the bowl in front of you
+RAMEN_MENU = [("SHOYU", 850), ("MISO", 900), ("SHIO", 850),
+              ("TONKOTSU", 980), ("TANTANMEN", 1050), ("GYOZA", 450)]
+
+
+def ramen_at(i, j, f):
+    """Is the place behind this face a ramen counter.
+
+    A yokocho pub, one in RAMEN_ODDS, by a hash of the face - the hash first,
+    because it is the cheap test and the lot is not."""
+    if _mix(i, j * 4 + f, 1601) % RAMEN_ODDS:
+        return False
+    nx, nz = FACES[f]
+    if not is_open(i + nx, j + nz) or face_kind(i + nx, j + nz) != "yokocho":
+        return False
+    return lot(i, j)["faces"][f]["pub"]
+
+
+def ramen_door(i, j, f):
+    """Where you stand to be at the counter: just out from the middle of it."""
+    p = face_point(i, j, f, CELL * 0.5, 1.4, 0.0)
+    return p[0], p[2]
+
+
 def venue_at(x, z):
-    """The club or casino you are standing in the doorway of, as (kind, dict),
-    or None.
+    """The club, casino or ramen counter you are standing in the doorway of,
+    as (kind, dict), or None.
 
     These two are the only way into a building in the city. Both are a trigger
     at the door rather than somewhere you walk around inside, because a
@@ -5315,6 +5368,13 @@ def venue_at(x, z):
                 p = face_point(i, j, v["door"], v["u"], 1.4, 0.0)
                 if ((p[0] - x) ** 2 + (p[2] - z) ** 2) < CASINO_REACH ** 2:
                     return kind, v
+            for f in range(4):
+                if not ramen_at(i, j, f):
+                    continue
+                dx, dz = ramen_door(i, j, f)
+                if (dx - x) ** 2 + (dz - z) ** 2 < CASINO_REACH ** 2:
+                    return "ramen", {"seed": _mix(i, j * 4 + f, 1603),
+                                     "tone": b["tone"]}
     return None
 
 
@@ -5481,6 +5541,7 @@ CHEAT_PLACES = [
     ("8", "far away", "far"),
     ("9", "inside a casino", "inside"),
     ("0", "inside the club", "clubdoor"),
+    ("v", "a ramen counter", "ramen"),
     ("g", "the woods", "woods"),
     ("x", "the woods rave", "rave"),
     ("e", "the lake", "lake"),
@@ -5801,6 +5862,26 @@ def _doorway(x, z, salt, key):
     return None
 
 
+def _ramen_spot(x, z):
+    """At the counter of the nearest ramen shop, facing it. Skips the one you
+    are sat at, so a second press finds another."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    for i, j in _rings(ci, cj, CHEAT_RINGS):
+        if is_open(i, j):
+            continue
+        for f in range(4):
+            if _mix(i, j * 4 + f, 1601) % RAMEN_ODDS or not ramen_at(i, j, f):
+                continue
+            px, pz = ramen_door(i, j, f)
+            if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+                continue
+            if can_stand(px, pz):
+                nx, nz = FACES[f]
+                return px, pz, math.atan2(-nx, -nz)
+    return None
+
+
 def find_place(x, z, kind):
     """Somewhere of this kind to stand, and which way to face. None if there is
     none within reach - the panel says so rather than the search running on."""
@@ -5815,6 +5896,8 @@ def find_place(x, z, kind):
         return _doorway(x, z, 911, "casino")
     if kind == "clubdoor":
         return _doorway(x, z, 909, "club")
+    if kind == "ramen":
+        return _ramen_spot(x, z)
     if kind in ("woods", "rave", "lake"):
         return _woods_spot(x, z, kind)
     if kind in ("bank", "pier", "bridge", "leaner", "carnival", "grand",
@@ -5898,6 +5981,141 @@ def _beam(ch, co, x0, y0, ang, y1, attr):
         if 0 <= x < width and ch[y][x] == " ":
             ch[y][x] = glyph
             co[y][x] = attr
+
+
+COOK = [
+    " ___ ",
+    "(___)",
+    " (o) ",
+    "/|=|\\",
+    " |=| ",
+]
+DINER = [
+    " ,-. ",
+    "(   )",
+    "/|#|\\",
+]
+BOWL = [
+    "\\~~~~~~~~/",
+    " \\______/ ",
+]
+
+
+def render_ramen(shop, width, height, now, since):
+    """Sat at the counter.
+
+    The noren over the door behind you is at the top of the picture, then the
+    menu board, the back wall with the pots going and the cook between them,
+    the counter, the others along it with their heads down, and your own
+    place in front of you - empty when you sit, and a bowl a few seconds
+    later. Everything steams. Nothing here is on a beat: this is the one room
+    in the city that is quiet."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    t = now - since
+    m = shop["seed"]
+    warm = tone_colour("warm", shop["tone"])
+    cx = (width - 1) // 2
+    served = t >= RAMEN_SERVE
+
+    if width < 44 or height < 18:
+        _text(ch, co, height // 2, 1, "~ at the ramen counter ~", warm)
+        _text(ch, co, min(height - 1, height // 2 + 1), 1,
+              "a bowl, steaming" if served else "irasshaimase!", BULB)
+        _text(ch, co, min(height - 1, height // 2 + 3), 1, "s to leave", GOLD_DIM)
+        return ch, co
+
+    # The noren: split cloth panels across the top, moving a little.
+    for x in range(width):
+        k = x // 7
+        sway = int(1.5 * math.sin(now * 0.9 + k))
+        edge = (x + sway) % 7 == 0
+        for y in (0, 1, 2):
+            if not edge:
+                ch[y][x] = "#" if y < 2 else "~"
+                co[y][x] = ROU_RED
+    _text(ch, co, 1, cx - 4, " RAMEN ", FLASH)
+
+    # The menu board, the prices in yen, and a lantern either side of it.
+    items = RAMEN_MENU
+    bw = max(len("%-10s %5d" % it) for it in items) + 4
+    bx = cx - bw // 2
+    _text(ch, co, 4, bx, "." + "-" * (bw - 2) + ".", BARK)
+    for r, (name, yen) in enumerate(items[:3]):
+        _text(ch, co, 5 + r, bx, "|", BARK)
+        _text(ch, co, 5 + r, bx + 2, "%-10s %5d" % (name, yen), STAR)
+        _text(ch, co, 5 + r, bx + bw - 1, "|", BARK)
+    _text(ch, co, 8, bx, "'" + "-" * (bw - 2) + "'", BARK)
+    for lx in (bx - 6, bx + bw + 4):
+        if 0 <= lx < width - 3:
+            _text(ch, co, 4, lx + 1, "|", BARK)
+            _text(ch, co, 5, lx, "(o)", EMBER_HOT)
+            _text(ch, co, 6, lx, "(o)", EMBER_HOT)
+            _text(ch, co, 7, lx + 1, "v", EMBER)
+
+    # The back wall: the stock pots, the cook between them, and steam off
+    # everything - drifting up and thinning, a column at a time.
+    bar = height - 6
+    wall = max(13, bar - 9)      # the back wall sits just behind the counter
+    pots = (cx - 22, cx + 14)
+    for px in pots:
+        if 0 <= px and px + 9 < width:
+            _text(ch, co, wall - 1, px, "(________)", CONCRETE)
+            _text(ch, co, wall, px, "|________|", CONCRETE)
+    cook_x = cx - 2 + int(round(3.0 * math.sin(now * 0.6 + (m & 7))))
+    for r, line in enumerate(COOK):
+        _text(ch, co, wall - 4 + r, cook_x, line, STAR if r < 2 else CURB)
+    ladle = int(now * 2.0) % 4
+    _text(ch, co, wall - 1, cook_x + (5 if ladle < 2 else -2), "o~" if ladle < 2
+          else "~o", CONCRETE)
+
+    def steam(x, y0, n, seed):
+        for k in range(n):
+            y = y0 - k
+            drift = int(round(1.2 * math.sin(now * 1.3 + k * 0.9 + seed)))
+            if 0 <= y < height and 0 <= x + drift < width:
+                if (int(now * 4) + k + seed) % 5 == 0:
+                    continue
+                ch[y][x + drift] = "(" if k % 2 else ")"
+                co[y][x + drift] = HAZE if k > 1 else STAR_DIM
+
+    for px in pots:
+        for s in range(3):
+            steam(px + 2 + s * 3, wall - 2, 4, px + s)
+
+    # The counter, the others along it, heads down over their bowls, each
+    # slurping on their own count.
+    for x in range(width):
+        ch[bar][x] = "="
+        co[bar][x] = BARK
+        ch[bar + 1][x] = "_" if x % 9 else "|"
+        co[bar + 1][x] = BARK
+    for k, sx in enumerate(range(3, width - 6, 12)):
+        if abs(sx + 2 - cx) < 10:
+            continue                     # your place
+        bob = 1 if math.sin(now * 2.1 + k * 1.7) > 0.6 else 0
+        for r, line in enumerate(DINER):
+            _text(ch, co, bar - 3 + r + bob, sx, line, warm if r == 0 else CURB)
+        _text(ch, co, bar - 1, sx + 5, "u", CONCRETE)
+        steam(sx + 5, bar - 2, 2, k * 3)
+
+    # Your place. Chopsticks first; the bowl when it comes.
+    if served:
+        for r, line in enumerate(BOWL):
+            _text(ch, co, bar - 2 + r, cx - 5, line, STAR if r == 0 else CONCRETE)
+        _text(ch, co, bar - 3, cx - 1, "@", EMBER_HOT)     # the egg
+        _text(ch, co, bar - 3, cx + 2, "=", GRASS)          # and the nori
+        for s in range(3):
+            steam(cx - 2 + s * 2, bar - 4, 4, s * 5)
+        say = "o-machi-dou sama!" if t < RAMEN_SERVE + 2.5 else ""
+    else:
+        _text(ch, co, bar - 1, cx - 1, "||", CONCRETE)
+        say = "irasshaimase!" if t < 2.5 else "..."
+    if say:
+        _text(ch, co, wall - 6, cx - len(say) // 2, say, BULB)
+
+    _text(ch, co, height - 1, max(1, cx - 10), "-- the way out (s) --", GOLD_DIM)
+    return ch, co
 
 
 def render_rave(club, width, height, now):
@@ -6013,6 +6231,7 @@ STREET_HUD = " %d,%d %s, %s%s  ws walk  ad turn  ,. step  tab view  ` cheats "
 ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  b/h/k blackjack"
                 "  -  s walks out  -  q quit ")
 RAVE_HUD = " inside the club at %d,%d  -  s walks back out  -  q quit "
+RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 
 
 def main(stdscr):
@@ -6035,6 +6254,7 @@ def main(stdscr):
     wheel = None                # the roulette, while you stand in a casino
     slot = Slot()               # and the machine beside it
     table = Blackjack()         # and the table on the other side
+    seated = None               # (which ramen counter, since when)
     slot_idle_since = 0.0
     wheel_at = 0.0
     cheats = False              # is the cheat panel up
@@ -6195,6 +6415,8 @@ def main(stdscr):
         # this city. Walk back out and the wheel goes away; stand there and it
         # deals you another, because that is what a casino is for.
         venue = venue_at(cam_x, cam_z) if street else None
+        if venue is None or venue[0] != "ramen":
+            seated = None               # stood up: the next visit is a new bowl
         if venue is None or venue[0] != "casino":
             wheel = None
         elif wheel is None or (wheel.done(now)
@@ -6215,6 +6437,11 @@ def main(stdscr):
         elif venue is not None and venue[0] == "club":
             ch, co = render_rave(venue[1], width, height, now)
             hud = RAVE_HUD % (cam_x, cam_z)
+        elif venue is not None and venue[0] == "ramen":
+            if seated is None or seated[0] != venue[1]["seed"]:
+                seated = (venue[1]["seed"], now)    # sat down just now
+            ch, co = render_ramen(venue[1], width, height, now, seated[1])
+            hud = RAMEN_HUD % (cam_x, cam_z)
         elif street:
             v = View(cam_x, cam_z, yaw, width, height)
             ch, co, wet = render_street(v, now)

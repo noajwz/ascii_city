@@ -138,7 +138,7 @@ check("every destination lands somewhere you can stand", not bad, ",".join(bad))
 
 blind = []
 for _, name, kind in ac.CHEAT_PLACES:
-    if kind in ("inside", "clubdoor", "club"):
+    if kind in ("inside", "clubdoor", "club", "ramen"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -261,6 +261,51 @@ room, _ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), 120, 32, 0.0, ac.Slot(),
 text = "\n".join("".join(r) for r in room)
 check("and the dealer's second card is face down until you stand",
       (":::" in text) == (bj2.phase == "player"))
+
+# --- the ramen counter ---------------------------------------------------
+# A yokocho pub, one in RAMEN_ODDS, that you can sit down at. The menu finds
+# one, standing there is being inside, and the bowl comes after a while.
+shop = ac.find_place(x0, z0, "ramen")
+check("the menu finds a ramen counter", shop is not None and ac.can_stand(shop[0], shop[1]))
+ven = ac.venue_at(shop[0], shop[1])
+check("and standing at it is being inside it", ven is not None and ven[0] == "ramen")
+si = int(shop[0] / ac.CELL + ac.BIG) - ac.BIG
+sj = int(shop[1] / ac.CELL + ac.BIG) - ac.BIG
+check("it is on a lit lane", ac.yokocho_at(si, sj))
+again = ac.find_place(shop[0], shop[1], "ramen")
+check("and a second press finds another",
+      again is not None and math.hypot(again[0] - shop[0], again[1] - shop[1]) > ac.CHEAT_SKIP)
+pubs = shops = 0
+for i in range(-150, 150):
+    for j in range(-150, 150):
+        if ac.is_open(i, j):
+            continue
+        for f in range(4):
+            nx, nz = ac.FACES[f]
+            if (ac.is_open(i + nx, j + nz) and ac.face_kind(i + nx, j + nz) == "yokocho"
+                    and ac.lot(i, j)["faces"][f]["pub"]):
+                pubs += 1
+                shops += ac.ramen_at(i, j, f)
+check("about one yokocho counter in three is ramen",
+      0.2 < shops / float(max(1, pubs)) < 0.47, "%d of %d" % (shops, pubs))
+room, _ = ac.render_ramen(ven[1], 110, 32, 101.0, 100.0)
+text = "\n".join("".join(r) for r in room)
+check("inside: the noren, the menu, the cook", "RAMEN" in text and "SHOYU" in text
+      and "(o)" in text and "irasshaimase" in text)
+check("and no bowl yet", "\\~~~~~~~~/" not in text)
+room, _ = ac.render_ramen(ven[1], 110, 32, 100.0 + ac.RAMEN_SERVE + 0.5, 100.0)
+text = "\n".join("".join(r) for r in room)
+check("then the bowl comes", "\\~~~~~~~~/" in text and "o-machi" in text)
+room, _ = ac.render_ramen(ven[1], 30, 10, 101.0, 100.0)
+check("and a tiny window still says where you are",
+      "ramen" in "\n".join("".join(r) for r in room))
+blits = []
+real_noren = ac.draw_noren
+ac.draw_noren = lambda *a: (blits.append(1), real_noren(*a))
+ac.render_street(ac.View(shop[0] - math.sin(shop[2]) * 3.0, shop[1] - math.cos(shop[2]) * 3.0,
+                         shop[2], 110, 30), 300.0)
+ac.draw_noren = real_noren
+check("outside, the noren hangs over its door", blits)
 
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
