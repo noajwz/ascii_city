@@ -598,8 +598,8 @@ does, at the woods and the headland (`el_runs()`).
 On the waterfront it is a dotted track across the middle layer — its ties on that layer's
 parallax, so it sits in the town rather than on the glass — and every 48 seconds a train slides
 across the screen along it, one way then the other, drawn before the reflection so it lies on
-the water too. The train itself is in screen space, not parallax: it is crossing the view, and
-pinning it to the layer made it stand still whenever you did. `=` in the menu
+the water too. The train itself is in screen space, not on the layer's parallax — a simplification;
+putting it on the parallax would make it slide with the town as you pan, which it does not yet. `=` in the menu
 stands you under it, on the pavement by the columns, looking along.
 
 ## Getting lost is the feature
