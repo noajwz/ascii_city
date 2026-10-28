@@ -5512,7 +5512,33 @@ SLOT_WEIGHTS = [1, 2, 3, 4, 5, 6]
 SLOT_SPIN = 1.3        # seconds before the first reel stops
 SLOT_STAGGER = 0.65    # and between one reel stopping and the next
 SLOT_HOLD = 3.0        # how long the result stays up before it goes idle
-SLOT_IDLE = 9.0        # seconds idle before it pulls itself, like the wheel
+SLOT_BETS = [1, 5, 10, 25]
+# Three of a kind pays this many times the bet, by symbol; a pair gives the
+# bet back. Worked out from SLOT_WEIGHTS it returns about 82 chips in 100 -
+# the house wins slowly, which is what a slot machine is.
+SLOT_PAYS = [100, 40, 20, 10, 6, 4]
+SLOT_PAIR = 1
+STAKE = 100            # what the house gives you when you have run out
+
+
+class Purse:
+    """The chips you carry round the room - the slot and the blackjack
+    table play out of the same pocket."""
+
+    def __init__(self):
+        self.chips = STAKE
+        self.staked = 0          # times the house has topped you up
+
+    def take(self, n):
+        """Pay n in, or False if you cannot. Broke, the house stakes you
+        again - nobody is turned away from a casino for having lost."""
+        if self.chips < n:
+            if self.chips > 0:
+                return False
+            self.chips = STAKE
+            self.staked += 1
+        self.chips -= n
+        return True
 
 
 class Slot:
@@ -5520,16 +5546,45 @@ class Slot:
     says what is showing in a reel this instant, and the payline is the
     middle row."""
 
-    def __init__(self):
+    def __init__(self, purse=None):
         self.t0 = None
         self.result = None
         self.pulls = 0
+        self.purse = purse if purse is not None else Purse()
+        self.bet = SLOT_BETS[1]
+        self.won = 0             # what the last pull paid, once it settles
+        self.paid = True
+        self.short = False       # the last pull was refused: not enough chips
+
+    def bet_up(self, step):
+        k = SLOT_BETS.index(self.bet) if self.bet in SLOT_BETS else 1
+        self.bet = SLOT_BETS[max(0, min(len(SLOT_BETS) - 1, k + step))]
 
     def pull(self, now):
+        """Pay the bet and spin; refused, and it says so, if you cannot
+        cover it."""
+        self.short = not self.purse.take(self.bet)
+        if self.short:
+            return False
         picks = _spin_rng.choices(range(len(SLOT_SYMBOLS)), SLOT_WEIGHTS, k=3)
         self.result = picks
         self.t0 = now
         self.pulls += 1
+        self.won = 0
+        self.paid = False
+        return True
+
+    def settle(self, now):
+        """Pay out once, when the last reel stops."""
+        if self.paid or not self.settled(now):
+            return
+        a, b, c = self.result
+        if a == b == c:
+            self.won = self.bet * SLOT_PAYS[a]
+        elif a == b or b == c or a == c:
+            self.won = self.bet * SLOT_PAIR
+        self.purse.chips += self.won
+        self.paid = True
 
     def stop_at(self, k):
         return SLOT_SPIN + k * SLOT_STAGGER
@@ -5566,27 +5621,53 @@ class Slot:
         return "NO LUCK"
 
 
-def draw_slot(ch, co, slot, x0, y0, now):
-    """The cabinet: 17 columns by 9 rows, reels in the middle, the payline
-    marked, the verdict underneath."""
-    frame = [".---------------.", "|   L U C K Y   |", "|===============|",
-             None, None, None, "|===============|", None, "'---------------'"]
-    for r, line in enumerate(frame):
-        if line is not None:
-            _text(ch, co, y0 + r, x0, line, GOLD_DIM)
+SLOT_W = 19             # the cabinet's width, in columns
+SLOT_H = 12             # and its height, without the pay table under it
+
+
+def draw_slot(ch, co, slot, x0, y0, now, paytable=True):
+    """The cabinet: reels in the middle with the payline marked, the verdict
+    under them, and the chips, the bet and the last win on the panel below.
+    The pay table goes under the cabinet when there is room for it."""
+    w = SLOT_W
+    bar = "|" + "=" * (w - 2) + "|"
+    _text(ch, co, y0, x0, "." + "-" * (w - 2) + ".", GOLD_DIM)
+    _text(ch, co, y0 + 1, x0, "|" + "L U C K Y  7".center(w - 2) + "|", GOLD)
+    _text(ch, co, y0 + 2, x0, bar, GOLD_DIM)
     reels = [slot.reel_at(k, now) for k in range(3)]
     for r in range(3):
         row = " ".join("[%s]" % reels[k][r] for k in range(3))
         pay = r == 1
-        _text(ch, co, y0 + 3 + r, x0, ">" if pay else "|", GOLD if pay else GOLD_DIM)
-        _text(ch, co, y0 + 3 + r, x0 + 3, row, ROU_RED if pay else CONCRETE)
-        _text(ch, co, y0 + 3 + r, x0 + 16, "<" if pay else "|",
-              GOLD if pay else GOLD_DIM)
-    say = slot.payout(now) or ("p pulls" if slot.idle(now) else "")
-    win = say in ("JACKPOT", "THREE OF A KIND", "PAIR")
-    flash = win and int(now * 6) % 2 == 0
-    _text(ch, co, y0 + 7, x0, "|" + say.center(15) + "|",
-          FLASH if flash else GOLD if win else GOLD_DIM)
+        y = y0 + 3 + r
+        _text(ch, co, y, x0, ">" if pay else "|", GOLD if pay else GOLD_DIM)
+        _text(ch, co, y, x0 + (w - len(row)) // 2, row,
+              ROU_RED if pay else CONCRETE)
+        _text(ch, co, y, x0 + w - 1, "<" if pay else "|", GOLD if pay else GOLD_DIM)
+    _text(ch, co, y0 + 6, x0, bar, GOLD_DIM)
+    verdict = slot.payout(now)
+    if slot.short:
+        say, attr = "NOT ENOUGH", ROU_RED
+    elif verdict is not None:
+        win = slot.won > slot.bet
+        say = ("WIN %d" % slot.won) if win else verdict
+        attr = (FLASH if int(now * 6) % 2 == 0 else GOLD) if win else GOLD_DIM
+    elif slot.t0 is not None:
+        say, attr = "* spinning *", GOLD_DIM
+    else:
+        say, attr = "p to pull", GOLD_DIM
+    _text(ch, co, y0 + 7, x0, "|" + say[:w - 2].center(w - 2) + "|", attr)
+    _text(ch, co, y0 + 8, x0, bar, GOLD_DIM)
+    _text(ch, co, y0 + 9, x0,
+          "|" + ("chips %5d" % slot.purse.chips).center(w - 2) + "|", GOLD)
+    _text(ch, co, y0 + 10, x0,
+          "|" + ("bet %-3d  - +" % slot.bet).center(w - 2) + "|", GOLD_DIM)
+    _text(ch, co, y0 + 11, x0, "'" + "-" * (w - 2) + "'", GOLD_DIM)
+    if paytable:
+        lines = ["%s%s%s  x%d" % (s, s, s, p)
+                 for s, p in zip(SLOT_SYMBOLS, SLOT_PAYS)]
+        lines.append("any pair  bet back")
+        for k, line in enumerate(lines):
+            _text(ch, co, y0 + 13 + k, x0 + 1, line, GOLD_DIM)
 
 
 # The blackjack table, on the other side of the room. One deck, dealer
@@ -5610,8 +5691,8 @@ def hand_value(cards):
 
 
 class Blackjack:
-    def __init__(self):
-        self.chips = 100
+    def __init__(self, purse=None):
+        self.purse = purse if purse is not None else Purse()
         self.shoe = []
         self.player = []
         self.dealer = []
@@ -5625,9 +5706,21 @@ class Blackjack:
             _spin_rng.shuffle(self.shoe)
         return self.shoe.pop()
 
+    @property
+    def chips(self):
+        return self.purse.chips
+
+    @chips.setter
+    def chips(self, n):
+        self.purse.chips = n
+
     def deal(self, now):
         if self.phase in ("player", "dealer"):
             return
+        if not self.purse.take(BJ_BET):
+            self.outcome = "NOT ENOUGH"
+            return
+        self.purse.chips += BJ_BET       # only checking: it is settled at the end
         self.player = [self._draw(), self._draw()]
         self.dealer = [self._draw(), self._draw()]
         self.phase = "player"
@@ -5852,15 +5945,17 @@ def render_casino_room(spin, width, height, now, slot=None, table=None):
     # The slot machine stands to the right of the wheel and the blackjack
     # table to its left when there is room for them; the wheel moves over
     # and gives up some radius so that all three fit.
-    machine = roomy and slot is not None and width >= 78
+    machine = slot is not None and width >= 62 and height >= SLOT_H + 3
     cards = roomy and table is not None and width >= 92
     left = 43.0 if cards else 1.0
-    right = width - 21.0 if machine else width - 2.0
+    right = width - SLOT_W - 3.0 if machine else width - 2.0
     if machine or cards:
         cx = (left + right) / 2.0
         rx = min(rx, (right - left) / 2.0 - 1.0)
     if machine:
-        draw_slot(ch, co, slot, width - 19, band_top + 1, now)
+        sy = band_top + 1 if roomy else 1
+        draw_slot(ch, co, slot, width - SLOT_W - 1, sy, now,
+                  paytable=sy + SLOT_H + 8 < height)
     if cards:
         draw_blackjack(ch, co, table, 1, band_top + 1, now)
 
@@ -6660,8 +6755,8 @@ ARROWS = (curses.KEY_LEFT, curses.KEY_RIGHT, curses.KEY_UP, curses.KEY_DOWN)
 
 SKYLINE_HUD = " x=%-6d %s  tab view  arrows/hl walk  HL run  space wander  ` cheats "
 STREET_HUD = " %d,%d %s, %s%s  ws walk  ad turn  ,. step  tab view  ` cheats "
-ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  b/h/k blackjack"
-                "  -  s walks out  -  q quit ")
+ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
+                " blackjack  -  s walks out  -  q quit ")
 RAVE_HUD = " inside the club at %d,%d  -  s walks back out  -  q quit "
 RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 
@@ -6684,10 +6779,10 @@ def main(stdscr):
     steer = 0.0                 # the autopilot's heading, eased not snapped
     blocked = False             # did the last step run into something
     wheel = None                # the roulette, while you stand in a casino
-    slot = Slot()               # and the machine beside it
-    table = Blackjack()         # and the table on the other side
+    purse = Purse()             # the chips you carry round the casino
+    slot = Slot(purse)          # the machine beside the wheel
+    table = Blackjack(purse)    # and the table on the other side
     seated = None               # (which ramen counter, since when)
-    slot_idle_since = 0.0
     wheel_at = 0.0
     cheats = False              # is the cheat panel up
     note = ""                   # and what did it last do
@@ -6773,8 +6868,13 @@ def main(stdscr):
             elif key == ord(" "):
                 autopilot = not autopilot
             elif wheel is not None and key in (ord("p"), ord("P")):
-                if slot.idle(now):
+                if slot.t0 is None or slot.settled(now):
+                    slot.settle(now)
                     slot.pull(now)
+            elif wheel is not None and key in (ord("+"), ord("=")):
+                slot.bet_up(1)
+            elif wheel is not None and key in (ord("-"), ord("_")):
+                slot.bet_up(-1)
             elif wheel is not None and key in (ord("b"), ord("B")):
                 table.deal(now)
             elif wheel is not None and key in (ord("h"), ord("H")):
@@ -6861,10 +6961,7 @@ def main(stdscr):
         # --- draw ------------------------------------------------------
         height, width = stdscr.getmaxyx()
         if wheel is not None:
-            if slot.idle(now) and now - slot_idle_since > SLOT_IDLE:
-                slot.pull(now)            # it deals you one, like the wheel
-            if not slot.idle(now):
-                slot_idle_since = now
+            slot.settle(now)
             table.update(now)
             ch, co = render_casino_room(wheel, width, height, now, slot, table)
             hud = ROULETTE_HUD % (wheel.name, cam_x, cam_z)

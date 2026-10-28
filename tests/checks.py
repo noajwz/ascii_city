@@ -209,8 +209,45 @@ text = "\n".join("".join(r) for r in room)
 check("the machine stands in the room", "L U C K Y" in text and "PAIR" in text)
 room, _ = ac.render_casino_room(spin, 60, 24, settled, slot)
 check("and stays out of a narrow one", "L U C K Y" not in "\n".join("".join(r) for r in room))
-check("it goes idle after a while", slot.idle(settled + ac.SLOT_HOLD + 0.1)
-      and not slot.idle(settled))
+
+# Playable: a bet comes out of the chips, the payline pays by the table, the
+# blackjack table plays out of the same purse, and the house stakes you again
+# when you are broke but not before.
+purse = ac.Purse()
+slot = ac.Slot(purse)
+slot.bet = 5
+slot.pull(0.0)
+check("a pull costs the bet", purse.chips == ac.STAKE - 5)
+slot.result = [1, 1, 1]
+end = slot.stop_at(2) + 0.1
+slot.settle(end)
+slot.settle(end + 1.0)
+check("three $ pays forty times the bet, once", purse.chips == ac.STAKE - 5 + 5 * 40,
+      "%d chips" % purse.chips)
+check("the blackjack table sees the same chips", ac.Blackjack(purse).chips == purse.chips)
+purse.chips = 3
+slot.bet = 5
+check("you cannot bet more than you have", not slot.pull(10.0) and slot.short
+      and purse.chips == 3)
+purse.chips = 0
+check("but broke, the house stakes you again", slot.pull(20.0)
+      and purse.chips == ac.STAKE - 5 and purse.staked == 1)
+slot.bet_up(5)
+check("bets go up to the top of the table and stop", slot.bet == ac.SLOT_BETS[-1])
+slot.bet_up(-9)
+check("and down to the bottom", slot.bet == ac.SLOT_BETS[0])
+house = ac.Purse()
+house.chips = 10 ** 9
+rtp = ac.Slot(house)
+rtp.bet = 1
+for k in range(20000):
+    rtp.pull(k * 10.0)
+    rtp.settle(k * 10.0 + 9.0)
+back = (house.chips - (10 ** 9 - 20000)) / 20000.0
+check("it pays back most of what goes in, not all of it", 0.70 < back < 0.95,
+      "%.2f per chip" % back)
+room, _ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), 80, 24, end, slot, None)
+check("and an 80x24 room has it", "L U C K Y" in "\n".join("".join(r) for r in room))
 
 # --- blackjack -----------------------------------------------------------
 check("aces count eleven until that busts",

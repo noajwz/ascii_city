@@ -776,20 +776,28 @@ random source in this file that is deliberately **not** seeded from position —
 hash of where you are so the city is the same city every time, but a wheel you could predict is not
 a wheel.
 
-**The slot machine** stands to the right of the table when the room is at least 78 columns wide,
-and the wheel gives up a little of its radius to make room. `Slot` is honest the way `Spin` is —
-the result is drawn first from `SLOT_WEIGHTS` (a 7 is rare, a `%` is not) and the reels are then
-shown stopping on it, left to right, `SLOT_STAGGER` apart. `p` pulls it; left alone it pulls
-itself after `SLOT_IDLE` seconds, the way the wheel deals you another. The one trap: `9` in the
-menu puts you in the casino but leaves the panel open, and with the panel open `p` is the park.
-That was the first pty run's "nothing happened", and then it was reported: "when I pull the slot
-with p I go to the park". The panel closes on a jump now and its note goes to the HUD for a few
-seconds instead.
+**The slot machine** stands to the right of the wheel from 62 columns and 15 rows — it used to
+need 78 columns and a full room, and on an ordinary terminal it simply was not there, so a request
+to "add a slot machine" arrived for one that existed. `Slot` is honest the way `Spin` is: the result
+is drawn first from `SLOT_WEIGHTS` (a 7 is rare, a `%` is not) and the reels are then shown stopping
+on it, left to right, `SLOT_STAGGER` apart.
+
+It is played for chips. A `Purse` is the pocket you carry round the room — the slot and the
+blackjack table play out of the same one, so a win at one is chips at the other. `p` pays the bet
+and pulls, `+`/`-` step the bet through `SLOT_BETS`; three of a kind pays `SLOT_PAYS` times the bet
+by symbol (777 is a hundred), a pair gives the bet back, and `settle()` pays out once, when the
+last reel stops. Against `SLOT_WEIGHTS` that returns about 82 chips in 100, which there is a test
+for — the house wins slowly. A pull you cannot cover is refused and says `NOT ENOUGH`; at zero the
+house stakes you `STAKE` again, because nobody is turned away from a casino for having lost. It no
+longer pulls itself: a machine that spent your chips while you stood there would be a bug.
+
+The one trap from before still holds: `9` puts you in the casino, and the panel used to stay open
+so `p` was the park. A jump closes the panel now.
 
 **Blackjack** is on the other side of the wheel, from 92 columns; the wheel moves over and gives
 up radius so all three fit (`left`/`right` in `render_casino_room()` — the wheel's `cx` is not the
 screen's centre once the tables are in). One deck, reshuffled under fifteen cards, dealer stands
-on 17, blackjack pays three to two, `BJ_BET` a hand against a running chip count. `b` deals, `h`
+on 17, blackjack pays three to two, `BJ_BET` a hand out of the shared purse. `b` deals, `h`
 hits, `k` stands — `s` is taken, it walks you out. The dealer's second card stays face down until
 you stand, and the dealer then takes a card every `BJ_DEAL` seconds rather than all at once: a
 hand that resolves in one frame is a number, not a game. The one thing that bit: `now - t >= 0.8`
