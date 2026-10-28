@@ -224,21 +224,34 @@ Two things about it are worth keeping:
   two stars and no sense of a sky at all. They are keyed on `(bearing, row)` instead, which still
   pins them to the compass so they hold still while you turn — there is a test that turns the camera
   and checks not one of them moved.
-- **Most of them are faint.** 80% are `.` or `'`, 12% `*`, and under 1% the brightest. A sky where
-  every star is bright reads as static and the bright ones stop counting for anything. The colour
+- **Most of them are faint, and there are fewer than there were.** The sky was reported as "too
+  distracting and too much": measured, a clear night with the milky way up was a seventh of
+  everything above the roofs, and a fifth of the stars were bright. `STAR_RATE` and `BAND_RATE`
+  are half what they were and `STAR_TIERS` makes nine in ten `.` or `'` — a typical night is now
+  under 2% of the sky, the clearest under 7%, and one star in ten is bright. A sky where every star
+  is bright reads as static and the bright ones stop counting for anything. The colour
   works the same way: mostly grey, a few warm and a few cold, and the milky way in its own dim blue.
 
 Clarity is the whole range from 0.22 to 1.0 with a median around 0.43, so a properly clear night is
-worth staying out for and most nights are not one. Cloud takes the sky away *by degrees* rather than
-at a threshold — `clear = clarity * (1 - wet/0.55)` — so a night can be half lost behind it, and a
-storm leaves none of it. The moon crosses through the night rather than sitting still, and at new
+worth staying out for and most nights are not one.
+
+**Cloud comes and goes on its own.** `cloud_cover()` is three slow waves on their own periods, like
+the rain's, and rain and snow raise it to cover the sky as they come; the sky is
+`clarity * (1 - cloud)`, so it goes by degrees rather than at a threshold. Of the time it is not
+raining the sky is clear about half of it, cloudy a quarter, overcast a fifth — and the HUD says
+which (`sky_word()`). Under cloud the stars and moon go, and a faint texture drifts across in its
+own `CLOUD` colour, lit from below the way a cloud over a city is: a slow field cut at a level set
+by how much cloud there is, thinned to texture. It had the haze colour for a minute and the mist
+tests counted it as mist off the river. Natural cloud never hides the strange night — that sky is
+lit by what is in it — but the held overcast does. `s` in the menu cycles the sky: as it comes,
+held clear, held overcast. The moon crosses through the night rather than sitting still, and at new
 moon there is simply no moon, which is a perfectly good night in its own right.
 
-`s` in the cheat menu draws the cloud over (`_overcast`): a pitch-black sky — no stars, moon,
-milky way or meteors, from the street or the water, and on the strange night nothing up there
-either, though the city still pulses to it. It is a sky setting, not a weather: the rain, snow and
-lightning go on underneath it as before, and a strike still lights the cloud from below. Press it
-again and the night comes back exactly as it was.
+`s` in the cheat menu cycles the sky (`_sky_mode`): as it comes, held clear, held overcast. Held
+overcast is a pitch-black sky — no stars, moon, milky way or meteors, from the street or the water,
+and on the strange night nothing up there either, though the city still pulses to it. It is a sky
+setting, not a weather: the rain, snow and lightning go on underneath it, and a strike still lights
+the cloud from below. Held clear is how the star tests look at the stars.
 
 `n` in the cheat menu steps to the next night. Nights are eleven minutes long, and waiting one out to
 see whether the next sky differs is not a way to look at anything.

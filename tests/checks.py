@@ -619,10 +619,11 @@ def sky_cells(now):
     return street, skyline
 
 
+check("the menu holds the sky clear", ac.cycle_clouds() == "clear")
 before = sky_cells(tc)
-check("on a clear night the sky has stars in it", before[0] > 3 and before[1] > 10,
+check("and on a clear night the sky has stars in it", before[0] > 1 and before[1] > 10,
       "%d in the street, %d on the waterfront" % before)
-check("the menu draws the cloud over", ac.cycle_clouds() == "overcast")
+check("then draws the cloud over", ac.cycle_clouds() == "overcast")
 after = sky_cells(tc)
 check("and then there are none, from the street or the water", after == (0, 0),
       "%d, %d" % after)
@@ -632,7 +633,10 @@ ac.force_strike(tc + 1.0)
 _, fcol, _ = ac.render_street(ac.View(up[0], up[1], up[2], 110, 30), tc + 1.05)
 ac.FLASH = 1
 check("lightning still lights it from underneath", ac.lightning(tc + 1.05, 0.0) > 0.5)
-check("and it clears again", ac.cycle_clouds() == "as it comes" and sky_cells(tc) == before)
+check("and lets it come and go again", ac.cycle_clouds() == "as it comes")
+ac._sky_mode = 1
+check("and the clear night is the same night as before", sky_cells(tc) == before)
+ac._sky_mode = 0
 ac.STAR = ac.STAR_DIM = ac.STAR_WARM = ac.STAR_COLD = ac.BAND = 1
 ac.MOON = ac.MOON_DIM = 1
 while ac.weather_name() != "auto":
@@ -1676,6 +1680,7 @@ check("nothing is hung on a tree",
 # --- the night sky -------------------------------------------------------
 ac._night_skip = 0.0
 ac._night_cache.clear()
+ac._sky_mode = 1                # these are about the stars: hold the cloud off
 ac.STAR_DIM, ac.STAR, ac.STAR_WARM = 801, 802, 803
 ac.STAR_COLD, ac.MOON, ac.MOON_DIM, ac.BAND = 804, 805, 806, 807
 SKY = {801, 802, 803, 804, 805, 806, 807}
@@ -1757,7 +1762,7 @@ for cam in (0.0, 300.0, 900.0, 2500.0):
                       if colour[y][x] in SKY)
 check("nor from the waterfront, not even through an unlit window", inside == 0,
       "%d of %d stars were" % (inside, shown))
-check("and there are still plenty of stars", shown > 150, "%d" % shown)
+check("and there are still plenty of stars", shown > 70, "%d" % shown)
 
 # Stars are fixed to the compass, not the screen: they must not swim about as
 # you turn under them.
@@ -1788,17 +1793,24 @@ for turn in (0.05, 0.12, 0.25, 0.4):
 check("the stars hold still while you turn under them", drift == 0 and len(base) > 5,
       "%d of them, none moved" % len(base))
 
-# Cloud has to take the sky away, and the storm all of it.
+# Rain brings its own cloud and has to take the sky away by degrees, and the
+# storm all of it - measured at a moment when the sky's own cloud is off.
+ac._sky_mode = 0
+while ac.weather_name() != "dry":
+    ac.cycle_weather()
+no_cloud = next(k * 3.0 for k in range(20000) if ac.cloud_cover(k * 3.0) == 0.0
+                and not ac.night(k * 3.0)["alien"] and ac.night(k * 3.0)["clarity"] > 0.6)
 counts = {}
 for w in ("dry", "drizzle", "rain", "downpour", "storm"):
     while ac.weather_name() != w:
         ac.cycle_weather()
-    _, colour, _ = ac.render_street(ac.View(sx0, sz0, syaw, 110, 32), 200.0)
+    _, colour, _ = ac.render_street(ac.View(sx0, sz0, syaw, 110, 32), no_cloud)
     counts[w] = sum(1 for r in colour for c in r if c in SKY)
 check("cloud takes the sky away by degrees",
       counts["dry"] > counts["drizzle"] > counts["rain"] > counts["downpour"],
       "  ".join("%s %d" % kv for kv in counts.items()))
 check("and a storm leaves none of it", counts["storm"] == 0)
+ac._sky_mode = 1
 while ac.weather_name() != "dry":
     ac.cycle_weather()
 
@@ -1855,6 +1867,32 @@ ac._night_skip = 0.0
 while ac.weather_name() != "auto":
     ac.cycle_weather()
 
+
+# The sky's own cloud: it comes and goes without any rain, so a dry stretch
+# can be clear, broken or overcast - and overcast means no stars.
+ac._sky_mode = 0
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
+words = {}
+for k in range(0, 400000, 7):
+    w = ac.sky_word(float(k), ac.rain_intensity(float(k)))
+    if w in ("clear", "cloudy", "overcast"):
+        words[w] = words.get(w, 0) + 1
+dry_total = float(sum(words.values()))
+check("when it is not raining the sky is sometimes clear, cloudy or overcast",
+      all(0.12 < words.get(w, 0) / dry_total < 0.65 for w in ("clear", "cloudy", "overcast")),
+      "  ".join("%s %.0f%%" % (w, 100 * words.get(w, 0) / dry_total)
+                for w in ("clear", "cloudy", "overcast")))
+while ac.weather_name() != "dry":
+    ac.cycle_weather()
+grey = next(k * 3.0 for k in range(40000) if ac.cloud_cover(k * 3.0) == 1.0
+            and not ac.night(k * 3.0)["alien"] and ac.night(k * 3.0)["clarity"] > 0.6)
+_, gcol, _ = ac.render_street(ac.View(sx0, sz0, syaw, 110, 32), grey)
+check("and an overcast stretch has no stars in it, rain or no rain",
+      not any(a in SKY for r in gcol for a in r))
+check("which the HUD calls overcast", ac.sky_word(grey, 0.0) == "overcast")
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
 
 # --- the night the sky has something in it -------------------------------
 ac._night_skip = 0.0
