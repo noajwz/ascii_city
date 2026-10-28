@@ -365,6 +365,41 @@ check("the menu sets how many", ac.crowd_name() == "some"
 while ac.weather_name() != "auto":
     ac.cycle_weather()
 
+# --- the elevated line --------------------------------------------------
+els = [k for k in range(-300, 300) if ac.el_span(k) is not None]
+check("one avenue in a dozen or so carries the el",
+      12 < len(els) < 90, "%d of 600 avenues" % len(els))
+check("and every one of them is a real avenue",
+      all(ac.road_span(ac.el_span(k)[0], ac.XP, 91) is not None for k in els))
+under = ac.find_place(x0, z0, "el")
+check("the menu stands you under it, on the street", under is not None
+      and ac.can_stand(under[0], under[1])
+      and ac.el_at(int(under[0] / ac.CELL + ac.BIG) - ac.BIG))
+ex0, ex1 = next(ac.near_els(ac.View(under[0], under[1], 0.0, 10, 10), 60.0))
+heads = [sorted(h for h, _, _ in ac.el_trains(ex0, ex1, under[1], 2000.0, t_))
+         for t_ in (300.0, 301.0)]
+check("trains run both ways along it", len({d for _, d, _ in
+      ac.el_trains(ex0, ex1, under[1], 2000.0, 300.0)}) == 2)
+check("and they move", heads[0] != heads[1])
+gap = [t_ for t_ in range(0, 600) if ac.el_overhead(under[0], under[1], float(t_))]
+check("one passes overhead every minute or two", 10 < len(gap) < 300,
+      "overhead %d s of 600" % len(gap))
+ac.CONCRETE, ac.BULB = 1001, 1002
+when = next(300.0 + k * 0.25 for k in range(4000) if any(
+    under[1] + 14 < h < under[1] + 22
+    for h, d, tx in ac.el_trains(ex0, ex1, under[1], 120.0, 300.0 + k * 0.25)))
+_, ecol, _ = ac.render_street(ac.View(under[0], under[1], under[2], 110, 30), when)
+steel = sum(1 for r in ecol for a in r if a == 1001)
+lit = sum(1 for r in ecol for a in r if a == 1002)
+check("under it you see the steel", steel > 60, "%d cells" % steel)
+check("and the train's windows lit", lit > 10, "%d" % lit)
+ac.CONCRETE = ac.BULB = 1
+check("the woods stop it", not ac.el_runs(*ac.find_place(x0, z0, "rave")[:2]))
+sky, _ = ac.render_skyline(100.0, 110, 30, 300.0 + 10)
+sky2, _ = ac.render_skyline(100.0, 110, 30, 300.0 + 12)
+check("and from the waterfront a train crosses the town",
+      any("oo|oo" in "".join(r) for r in sky) and sky != sky2)
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")
