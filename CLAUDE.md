@@ -234,6 +234,12 @@ at a threshold — `clear = clarity * (1 - wet/0.55)` — so a night can be half
 storm leaves none of it. The moon crosses through the night rather than sitting still, and at new
 moon there is simply no moon, which is a perfectly good night in its own right.
 
+`s` in the cheat menu draws the cloud over (`_overcast`): a pitch-black sky — no stars, moon,
+milky way or meteors, from the street or the water, and on the strange night nothing up there
+either, though the city still pulses to it. It is a sky setting, not a weather: the rain, snow and
+lightning go on underneath it as before, and a strike still lights the cloud from below. Press it
+again and the night comes back exactly as it was.
+
 `n` in the cheat menu steps to the next night. Nights are eleven minutes long, and waiting one out to
 see whether the next sky differs is not a way to look at anything.
 
