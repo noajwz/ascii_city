@@ -745,6 +745,49 @@ ac.render_street(ac.View(cin_at[0] - math.sin(cin_at[2]) * 10,
 ac.draw_cinema_front = real_front
 check("and from the street you see the marquee", front)
 
+# --- fireworks over the bay -----------------------------------------------
+ac._night_skip = 0.0
+fw_nights = [k for k in range(900) if ac.night(k * ac.NIGHT_LENGTH + 100)["fireworks"]]
+check("one night in fifteen or so has fireworks", 30 < len(fw_nights) < 100,
+      "%d of 900" % len(fw_nights))
+check("never the strange night or the lantern night", not any(
+    ac.night(k * ac.NIGHT_LENGTH + 100)["alien"] or ac.night(k * ac.NIGHT_LENGTH + 100)["lanterns"]
+    for k in fw_nights))
+check("the menu skips to one", ac.skip_to_fireworks(300.0) and ac.night(300.0)["fireworks"])
+in_air = [len(list(ac.shells(300.0 + k * 0.5))) for k in range(40)]
+check("shells go up all night", min(in_air) >= 1, "%d to %d at once" % (min(in_air), max(in_air)))
+fin = max(len(list(ac.shells(ac.FW_FINALE * 3 - 5.0 + k * 0.2))) for k in range(20))
+check("and there is a finale", fin > max(in_air), "%d at once" % fin)
+deck2 = ac.find_place(x0, z0, "grand")
+gi2 = int(deck2[0] / ac.CELL + ac.BIG) - ac.BIG
+bx2, bz2 = ac.bay_centre(gi2)
+sparks = [s for t0, m in ac.shells(302.0) for s in ac.shell_sparks(bx2, bz2, t0, m, 302.0)]
+check("over the bay, and over the bridge's towers",
+      all(abs(x - bx2) < 90 and abs(z - bz2) < 60 for x, _, z, _, _, _ in sparks)
+      and max(y for _, y, _, _, _, _ in sparks) > ac.TOWER_H)
+fspan = ac.grand_avenue(gi2)
+flo, fhi = ac.river_span(fspan[0] + 25)
+fx2, fz2 = (fspan[0] + 25.5) * ac.CELL, (int(fhi) + 1.5) * ac.CELL
+fyaw = math.atan2(bx2 - fx2, bz2 - fz2)
+ac.NEON = [(1100 + k, 1110 + k) for k in range(8)]
+lit = 0
+for k in range(6):
+    fv = ac.View(fx2, fz2, fyaw, 110, 30)
+    _, fcol, _ = ac.render_street(fv, 302.0 + k * 0.4)
+    lit += sum(1 for y in range(fv.horizon) for x in range(110) if 1100 <= fcol[y][x] < 1118)
+check("from the bank you see them go off", lit > 30, "%d lit sparks over six frames" % lit)
+check("and the HUD tells you", ac.fireworks_near(fx2, fz2, 302.0))
+sky_fw = sum(1 for r in ac.render_skyline(100.0, 110, 26, 302.2)[1] for a in r
+             if 1100 <= a < 1118)
+check("and from across the water", sky_fw > 10, "%d" % sky_fw)
+ac._night_skip = 0.0
+quiet = next(k * ac.NIGHT_LENGTH + 100 for k in range(200)
+             if not ac.night(k * ac.NIGHT_LENGTH + 100)["fireworks"])
+check("on any other night there are none", not ac.fireworks_near(fx2, fz2, quiet))
+ac.NEON = [(100 + k, 200 + k) for k in range(8)]
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")
