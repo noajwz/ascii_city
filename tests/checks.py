@@ -144,7 +144,7 @@ check("every destination lands somewhere you can stand", not bad, ",".join(bad))
 
 blind = []
 for _, name, kind in ac.CHEAT_PLACES:
-    if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape"):
+    if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -707,6 +707,44 @@ check("the bays are painted", sum(1 for r in pc for a in r if a == 1051) > 20)
 check("and there is a P sign", any("[P]" in "".join(r) for r in pg))
 ac.LANE, ac.NEON = 1, [(100 + k, 200 + k) for k in range(8)]
 
+# --- the pictures --------------------------------------------------------
+cin_at = ac.find_place(x0, z0, "cinema")
+cin = ac.venue_at(cin_at[0], cin_at[1])
+check("the menu stands you in a cinema's doorway", cin is not None and cin[0] == "cinema")
+check("and it has a film on", cin[1]["title"] in ac.FILM_TITLES)
+cinemas = sum(1 for i in range(-200, 200) for j in range(-200, 200)
+              if ac._mix(i, j, 1961) % ac.CLUB_ODDS == 0 and not ac.is_open(i, j)
+              and ac.lot(i, j)["cinema"] is not None)
+check("cinemas are rare", 8 < cinemas < 250,
+      "%d in a 2000-unit square" % cinemas)
+seen_scenes = set()
+for k in range(ac.FILM_SCENES):
+    frame, bright = ac.film_frame("NEON RAIN", k * ac.SCENE_LEN + 4.0, 60, 14)
+    seen_scenes.add("\n".join(frame))
+    check("scene %d draws something" % (k + 1), any(line.strip() for line in frame)
+          and 0.0 < bright <= 1.0)
+check("and every scene is different", len(seen_scenes) == ac.FILM_SCENES)
+opening = "\n".join(ac.film_frame("NEON RAIN", 1.0, 60, 14)[0])
+talking = "\n".join(ac.film_frame("NEON RAIN", 3 * ac.SCENE_LEN + 1.0, 60, 14)[0])
+check("it opens on its title and has dialogue", "NEON RAIN" in opening
+      and any(line in talking for _, line in ac.FILM_LINES))
+loop = ac.FILM_SCENES * ac.SCENE_LEN
+check("and it loops", ac.film_frame("X", 5.0, 40, 10) == ac.film_frame("X", 5.0 + loop, 40, 10))
+room, _ = ac.render_cinema(cin[1], 90, 28, 300.0)
+rtext = "\n".join("".join(r) for r in room)
+check("inside: the screen between curtains, the audience, the way out",
+      "(|(" in rtext and "(_)" in rtext and "the way out" in rtext)
+small, _ = ac.render_cinema(cin[1], 30, 10, 300.0)
+check("and a tiny window still says what is on",
+      cin[1]["title"] in "\n".join("".join(r) for r in small))
+front = []
+real_front = ac.draw_cinema_front
+ac.draw_cinema_front = lambda *a: (front.append(1), real_front(*a))
+ac.render_street(ac.View(cin_at[0] - math.sin(cin_at[2]) * 10,
+                         cin_at[1] - math.cos(cin_at[2]) * 10, cin_at[2], 110, 30), 300.0)
+ac.draw_cinema_front = real_front
+check("and from the street you see the marquee", front)
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")
@@ -715,6 +753,9 @@ check("the panel lists everything it does",
       all(n in text for _, n, _ in ac.CHEAT_PLACES)
       and "weather:" in text and "strike now" in text and "people:" in text
       and "sky:" in text)
+std = ([[" "] * 80 for _ in range(24)], [[0] * 80 for _ in range(24)])
+ac.draw_cheats(std[0], std[1], "-> somewhere")
+check("and it opens on an 80x24 terminal", any("close" in "".join(r) for r in std[0]))
 small = ([[" "]*20 for _ in range(8)], [[0]*20 for _ in range(8)])
 ac.draw_cheats(small[0], small[1], "x")
 check("and stays out of the way when there is no room",
