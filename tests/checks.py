@@ -792,6 +792,69 @@ ac.NEON = [(100 + k, 200 + k) for k in range(8)]
 while ac.weather_name() != "auto":
     ac.cycle_weather()
 
+# --- dawn ------------------------------------------------------------------
+ac._night_skip = 0.0
+dn = [k for k in range(1200) if ac.night(k * ac.NIGHT_LENGTH + 100)["dawn"]]
+check("one night in a dozen or so ends in a morning", 60 < len(dn) < 150,
+      "%d of 1200" % len(dn))
+check("never the strange night", not any(ac.night(k * ac.NIGHT_LENGTH + 100)["alien"]
+                                         for k in dn))
+d0 = dn[0] * ac.NIGHT_LENGTH
+check("only at the end of the night", ac.dawn(d0 + 30.0) == 0.0
+      and ac.dawn(d0 + ac.NIGHT_LENGTH - ac.DAWN_LEN - 1.0) == 0.0
+      and 0.0 < ac.dawn(d0 + ac.NIGHT_LENGTH - ac.DAWN_LEN / 2) < 1.0
+      and ac.dawn(d0 + ac.NIGHT_LENGTH - 2.0) == 1.0)
+check("and the next night is a night again", ac.dawn(d0 + ac.NIGHT_LENGTH + 5.0) == 0.0)
+ac._sky_mode = 1
+while ac.weather_name() != "dry":
+    ac.cycle_weather()
+check("the menu goes to just before one", ac.skip_to_dawn(500.0)
+      and ac.dawn(500.0) == 0.0 and ac.dawn(500.0 + 30.0) > 0.0)
+ac.STAR, ac.STAR_DIM, ac.STAR_WARM, ac.STAR_COLD, ac.BAND, ac.EMBER = (
+    1201, 1202, 1203, 1204, 1205, 1206)
+ac.PALETTES["near"] = [1210 + k for k in range(12)]
+early, late = 500.0, 500.0 + ac.DAWN_LEN
+eg, ec = ac.render_skyline(100.0, 110, 24, early)
+lg, lc = ac.render_skyline(100.0, 110, 24, late)
+glow = sum(1 for r in lc for a in r if a in (1203, 1204, 1205, 1206))
+check("the sky pales from the horizon up", glow > 300, "%d cells of morning" % glow)
+water = max(5, min(24 - 4, int(24 * 0.58)))
+check("and the light lies on the river",
+      sum(1 for y in range(water, 24) for x in range(110)
+          if lc[y][x] in (1203, 1204, 1205, 1206)) > 20)
+lit_e = sum(1 for y in range(water) for x in range(110)
+            if eg[y][x] not in " |=_-~^:." and ec[y][x] not in range(1201, 1207))
+lit_l = sum(1 for y in range(water) for x in range(110)
+            if lg[y][x] not in " |=_-~^:." and lc[y][x] not in range(1201, 1207))
+check("and the far bank's windows go out", lit_l < lit_e * 0.3, "%d to %d" % (lit_e, lit_l))
+wsp = ac.find_place(x0, z0, "street")
+save_pal = dict(ac.PALETTES)
+for name_ in ac.PALETTES:
+    ac.PALETTES[name_] = [1300] * 12
+sg0, sc0, _ = ac.render_street(ac.View(wsp[0], wsp[1], wsp[2], 110, 28), early)
+sg1, sc1, _ = ac.render_street(ac.View(wsp[0], wsp[1], wsp[2], 110, 28), late)
+win0 = sum(1 for y in range(28) for x in range(110)
+           if sc0[y][x] == 1300 and sg0[y][x] not in "|=_-~^\"'.,")
+win1 = sum(1 for y in range(28) for x in range(110)
+           if sc1[y][x] == 1300 and sg1[y][x] not in "|=_-~^\"'.,")
+ac.PALETTES.update(save_pal)
+# Under half rather than near zero: the ground-floor shopfronts are drawn in
+# the same colours whatever the window density, and they are frontage, not
+# lights left on.
+check("and in the street the windows go dark", win1 < win0 * 0.45, "%d to %d" % (win0, win1))
+signs_on = [ac.neon_attr({"tone": 0.5, "phase": p, "dead": (), "flicker": False}, 0, early)
+            for p in (0.5, 2.5, 4.5)]
+signs_half = [ac.neon_attr({"tone": 0.5, "phase": p, "dead": (), "flicker": False}, 0,
+                           500.0 + ac.DAWN_LEN * 0.4) for p in (0.5, 2.5, 4.5)]
+check("and the signs switch off one by one",
+      len(set(signs_on)) == 1 and len(set(signs_half)) == 2)
+ac.STAR = ac.STAR_DIM = ac.STAR_WARM = ac.STAR_COLD = ac.BAND = ac.EMBER = 1
+ac.PALETTES["near"] = list(range(1, 13))
+ac._sky_mode = 0
+ac._night_skip = 0.0
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")

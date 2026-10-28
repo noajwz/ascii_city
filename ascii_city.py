@@ -189,6 +189,15 @@ ROWBOAT_DRIFT = 0.7    # world units a second, with the current
 LANTERN_ODDS = 12      # one night in this many has lanterns on the river
 LANTERN_DRIFT = 0.9
 
+# --- dawn ---
+# Once in a while a night ends. Over its last DAWN_LEN seconds the sky pales
+# from the horizon up, the stars go, the signs switch off one by one and the
+# windows go dark, and the city stands black against the morning - and then
+# the next night begins, as every night here does.
+DAWN_ODDS = 12
+DAWN_LEN = 120.0
+DAWN_HOLD = 15.0       # seconds of full dawn before the night comes round again
+
 # --- fireworks over the bay ---
 # One night in FIREWORK_ODDS somebody puts on a show over the big bridge's
 # bay: shells going up off the water all night, and a finale every few
@@ -669,6 +678,29 @@ def blit(dst_ch, dst_co, b, sx, ground):
                 dst_co[y][x] = b["color"]
 
 
+def dawn_glow(col, y, horizon, amount):
+    """What the morning sky looks like at this cell, or None for still dark.
+
+    The light comes up from the horizon: the band nearest it goes first and
+    goes orange, then peach above it, then a pale blue climbing higher as it
+    gets lighter, and the dark at the top last of all. Dithered, so it is a
+    gradient and not stripes."""
+    up = (horizon - y) / float(max(1, horizon))       # 0 at the horizon, 1 overhead
+    reach = amount * 1.25                              # how high the light has got
+    if up > reach:
+        return None
+    strength = 1.0 - up / max(1e-6, reach)
+    if _mix(col, y, 2101) % 100 >= 25 + 70 * strength:
+        return None
+    if up < 0.12 * amount:
+        return "=", EMBER                              # the line of the sunrise
+    if up < 0.3 * amount:
+        return "-", STAR_WARM
+    if up < 0.65 * amount:
+        return ":", STAR_COLD
+    return ".", BAND
+
+
 def cloud_at(col, y, now, cloud):
     """Is there visible cloud at this sky cell: a slow drifting field, cut at
     a level set by how much cloud there is, and thinned so it is texture and
@@ -698,7 +730,24 @@ def draw_stars(ch, co, cam_x, ground, wet, now, tops):
     they are a very long way off."""
     n = night(now)
     cloud = 1.0 if overcast_held() else (0.0 if n["alien"] else cloud_cover(now))
-    clear = n["clarity"] * (1.0 - cloud)
+    morning = dawn(now)
+    clear = n["clarity"] * (1.0 - cloud) * max(0.0, 1.0 - morning * 1.4)
+    if morning > 0.0:
+        width = len(ch[0])
+        off = int(cam_x * 0.05)
+        for sx in range(width):
+            for y in range(min(ground, tops[sx])):
+                if ch[y][sx] == " ":
+                    g = dawn_glow(sx + off, y, ground, morning)
+                    if g is not None:
+                        ch[y][sx], co[y][sx] = g
+            # And the far bank's windows going out as it gets light - the
+            # same switching-off the street sees, on buildings the street's
+            # renderer never built.
+            for y in range(max(0, tops[sx]), ground + 1):
+                if (ch[y][sx] not in " |=_-~^:." and _mix(sx + off, y, 2103) % 100
+                        < morning * 90):
+                    ch[y][sx] = " "
     if cloud > 0.2 and not n["alien"]:
         draw_cloud_skyline(ch, co, cam_x, ground, tops, now, cloud)
     if clear <= 0.02:
@@ -1945,6 +1994,7 @@ class View:
         self.wet = 0.0          # how hard it is raining, 0..1
         self.roof = None        # the sky-deck tower you are standing on, if any
         self.snow = 0.0         # how hard it is snowing
+        self.dawn = 0.0         # how far into the morning, 0..1
         self.cover = 0.0        # and how much is lying
         self.flash = 0.0        # how bright the lightning is this instant
 
@@ -2113,6 +2163,9 @@ def wall_colour(b, dist, lit, flash=0.0):
 
 def neon_attr(s, i, now):
     lit, dark = NEON[min(len(NEON) - 1, int(s["tone"] * len(NEON)))]
+    d = dawn(now)
+    if d > 0.0 and s["phase"] / 5.0 < d * 1.15:
+        return dark             # switched off for the morning, one by one
     sync = city_sync(now)
     if sync is not None:
         # The bad tubes are cured for one night, along with everything else.
@@ -2387,6 +2440,7 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     colour = wall_colour(b, dist, lit, v.flash)
     thick = max(1, min(5, int(FLOOR_H * scale * 0.45)))   # windows have height
     density = b["density"] if lit else b["density"] * 0.35
+    density *= 1.0 - 0.92 * v.dawn          # the windows going out at dawn
     # The colour a dark window is drawn in, or None for no dot: only on the
     # tall ones - a low building is outlined by its own roof against the sky,
     # a tower's roof is off the top of the screen - on faces near enough to
@@ -2727,7 +2781,7 @@ def draw_sky(ch, co, v, walls, wet, now):
     # Cloud takes the sky away gradually rather than all at once at a
     # threshold, so a night can be half lost behind it.
     cloud = 1.0 if overcast_held() else (0.0 if n["alien"] else cloud_cover(now))
-    clear = n["clarity"] * (1.0 - cloud)
+    clear = n["clarity"] * (1.0 - cloud) * max(0.0, 1.0 - v.dawn * 1.4)
     # walls[3], not walls[1]: a star must clear every roof in its column, not
     # only the nearest one. The part of a far tower that shows above a nearer
     # roof is still a building, and stars were being drawn straight into it.
@@ -2784,6 +2838,15 @@ def draw_sky(ch, co, v, walls, wet, now):
                     ch[y][sx] = "." if v.flash < 0.5 else ":"
                     co[y][sx] = FLASH
 
+    if v.dawn > 0.0:
+        for sx in range(v.width):
+            cam = 2.0 * sx / (v.width - 1) - 1.0
+            bearing = int((v.yaw + math.atan(cam * PLANE)) * 90.0)
+            for y in range(min(tops[sx], v.horizon)):
+                if ch[y][sx] == " ":
+                    g = dawn_glow(bearing, y, v.horizon, v.dawn)
+                    if g is not None:
+                        ch[y][sx], co[y][sx] = g
     if cloud > 0.2 and not n["alien"]:
         for sx in range(v.width):
             cam = 2.0 * sx / (v.width - 1) - 1.0
@@ -6007,6 +6070,33 @@ def skip_to_alien(now):
     return False
 
 
+def dawn(now):
+    """How far into the morning it is, 0..1: zero on every night without
+    one and until its last DAWN_LEN seconds, then rising to one and held
+    there for the last DAWN_HOLD."""
+    if not night(now)["dawn"]:
+        return 0.0
+    t = (now + _night_skip) % NIGHT_LENGTH
+    start = NIGHT_LENGTH - DAWN_LEN
+    if t < start:
+        return 0.0
+    return min(1.0, (t - start) / (DAWN_LEN - DAWN_HOLD))
+
+
+def skip_to_dawn(now):
+    """To the next night that ends in a morning, and to a few seconds before
+    the sky starts to go - a night is eleven minutes, and the dawn is the
+    last two of them."""
+    global _night_skip
+    for _ in range(DAWN_ODDS * 8):
+        _night_skip += NIGHT_LENGTH
+        if night(now)["dawn"]:
+            t = (now + _night_skip) % NIGHT_LENGTH
+            _night_skip += (NIGHT_LENGTH - DAWN_LEN - 5.0) - t
+            return night(now)["dawn"]
+    return False
+
+
 def skip_to_fireworks(now):
     """Straight to the next night with a show over the bay."""
     global _night_skip
@@ -6070,6 +6160,9 @@ def night(now):
         # river to themselves.
         got["fireworks"] = (_mix(k, 1, 613) % FIREWORK_ODDS == 0
                             and not got["alien"] and not got["lanterns"])
+        # The strange night does not end in a morning. Whatever that was, it
+        # is the one night the city never wakes up from.
+        got["dawn"] = _mix(k, 2, 613) % DAWN_ODDS == 0 and not got["alien"]
         if got["alien"]:
             # Whatever the weather was going to be up there, the sky is lit by
             # what is in it tonight.
@@ -6382,6 +6475,7 @@ def render_street(v, now):
     v.flash = lightning(now, wet)
     v.snow = snowfall(now)
     v.cover = snow_cover(now)
+    v.dawn = dawn(now)
 
     rave = None
     if rave_window(now) is not None:
@@ -7613,14 +7707,15 @@ def draw_cheats(ch, co, note):
     middle += [(d["key"], d["name"]) for d in DISTRICTS]
     middle += [("", ""), ("", "SKY AND STREETS"),
                ("w", "weather: " + weather_name()),
-               ("L", "strike now"), ("n", "next night"),
-               ("A", "a strange night"), ("z", "a lantern night"),
-               ("!", "fireworks night"),
+               ("L", "strike now"),
                ("s", "sky: " + clouds_name()),
-               ("a", "people: " + crowd_name())]
+               ("a", "people: " + crowd_name()),
+               ("", ""), ("`", "close")]
     right = [("", "OUT OF TOWN")]
     right += [(k, name) for k, name, kind in CHEAT_PLACES if kind in OUT_OF_TOWN]
-    right += [("", ""), ("`", "close")]
+    right += [("", "NIGHTS"),
+              ("n", "the next one"), ("A", "a strange night"),
+              ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn")]
     columns = (left, middle, right)
 
     col = 20
@@ -8136,6 +8231,9 @@ def main(stdscr):
                     note = "people: " + cycle_crowd()
                 elif key == ord("s"):
                     note = "sky: " + cycle_clouds()
+                elif key == ord("@"):
+                    note = ("the night is nearly over"
+                            if skip_to_dawn(now) else "no such night near")
                 elif key == ord("!"):
                     note = ("fireworks over the bay tonight"
                             if skip_to_fireworks(now) else "no such night near")
@@ -8373,7 +8471,8 @@ def main(stdscr):
                 or ("  ~ a fire escape: walk into it to climb ~"
                     if escape_near(cam_x, cam_z) else "")
                 or ("  ~ fireworks over the bay ~"
-                    if fireworks_near(cam_x, cam_z, now) else ""))
+                    if fireworks_near(cam_x, cam_z, now) else "")
+                or ("  ~ dawn ~" if dawn(now) > 0.0 else ""))
         else:
             ch, co = render_skyline(sky_x, width, height, now)
             hud = SKYLINE_HUD % (sky_x, sky_word(now, rain_intensity(now)))
