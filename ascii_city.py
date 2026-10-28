@@ -3093,6 +3093,43 @@ LOOK_UP = [
 SMOKER_H = 1.9         # how tall he is, in world units
 SMOKER_W = 0.79        # chosen so the art keeps its aspect ratio on screen
 
+# People walking. A lane down each pavement of every street, slots along it
+# sliding with time at the lane's pace, and one slot in a few has somebody
+# in it - so nothing is stored, a walker is where they should be whether or
+# not you were looking, and two on the same lane never walk through each
+# other. Sparse on purpose: it is a city at night.
+WALK_SLOT = 9.0        # world units between slots along a lane
+WALK_REACH = 70.0      # how far off they are drawn
+CROWDS = ["some", "busy", "none"]
+_crowd = 0             # index into CROWDS, set from the cheat menu
+CROWD_ODDS = {"some": 5, "busy": 2}      # one slot in this many is filled
+
+WALKER_A = [
+    " ,-. ",
+    " (_) ",
+    " /#\\ ",
+    "/|#|\\",
+    " / | ",
+    "_|  \\",
+]
+WALKER_B = [
+    " ,-. ",
+    " (_) ",
+    " /#\\ ",
+    "/|#|\\",
+    " | \\ ",
+    " |_ \\",
+]
+UMBRELLA = [
+    " .---. ",
+    "/_____\\",
+    "   |   ",
+    "  (_)  ",
+    "  /#|  ",
+    "  |#|  ",
+    "  / \\  ",
+]
+
 
 def put_cell(ch, co, v, walls, sx, sy, dist, glyph, attr):
     """One cell, if it is on the screen and no facade is in front of it."""
@@ -4297,6 +4334,86 @@ def near_lots(v, reach):
                 yield i, j, lot(i, j)
 
 
+def cycle_crowd():
+    global _crowd
+    _crowd = (_crowd + 1) % len(CROWDS)
+    return CROWDS[_crowd]
+
+
+def crowd_name():
+    return CROWDS[_crowd]
+
+
+def near_walkers(v, now):
+    """(x, z, phase, colour, umbrella) for everyone walking in front of you.
+
+    Streets both ways - avenues run along z, cross streets along x - found by
+    stepping across the view and asking road_span(), one lane per pavement.
+    On the night the sky has something in it they have all stopped where they
+    were when it started, and look up."""
+    odds = CROWD_ODDS.get(CROWDS[_crowd])
+    if odds is None:
+        return
+    nt = night(now)
+    if nt["alien"]:
+        now = int((now + _night_skip) / NIGHT_LENGTH) * NIGHT_LENGTH - _night_skip
+    n = int(WALK_REACH / CELL) + 1
+    ci = int(v.x / CELL + BIG) - BIG
+    cj = int(v.z / CELL + BIG) - BIG
+    seen = set()
+    for axis, centre, period, salt, across in ((0, ci, XP, 91, v.x),
+                                               (1, cj, ZP, 137, v.z)):
+        for c in range(centre - n, centre + n + 1):
+            span = road_span(c, period, salt)
+            if span is None or (axis, span[0]) in seen:
+                continue
+            seen.add((axis, span[0]))
+            for side in (0, 1):
+                edge = (span[0] + (span[1] if side else 0)) * CELL
+                off = edge + (-0.9 if side else 0.9)
+                m = _mix(axis * 7919 + span[0], side, 1701)
+                pace = (1.1 + (m & 7) * 0.08) * (1 if (m >> 3) & 1 else -1)
+                along0 = (v.z if axis == 0 else v.x)
+                shift = now * pace
+                k0 = int(math.floor((along0 - WALK_REACH - shift) / WALK_SLOT))
+                for k in range(k0, k0 + int(2 * WALK_REACH / WALK_SLOT) + 2):
+                    g = _mix(axis * 7919 + span[0], side * 100003 + k, 1703)
+                    if g % odds:
+                        continue
+                    along = k * WALK_SLOT + shift + (g >> 4 & 7) * 0.3
+                    x, z = (off, along) if axis == 0 else (along, off)
+                    rx, rz = x - v.x, z - v.z
+                    if rx * v.dx + rz * v.dz < NEAR_Z + 1.0:
+                        continue
+                    if rx * rx + rz * rz > WALK_REACH ** 2:
+                        continue
+                    i = int(x / CELL + BIG) - BIG
+                    j = int(z / CELL + BIG) - BIG
+                    if not road_at(i, j) or not dry_at(x, z):
+                        continue
+                    phase = (along / 0.8) % 2.0
+                    yield (rx * rx + rz * rz, x, z, phase, g,
+                           nt["alien"])
+
+
+def draw_walkers(ch, co, v, walls, now, wet):
+    """Everyone out walking, farthest first. In the rain one in two has an
+    umbrella up, and the coats are the warm and dim colours of the city."""
+    people = sorted(near_walkers(v, now), reverse=True)
+    for _, x, z, phase, g, stopped in people:
+        coat = (CURB, BARK, tone_colour("warm", (g >> 8 & 15) / 15.0),
+                tone_colour("cold", (g >> 12 & 15) / 15.0))[g >> 16 & 3]
+        if stopped:
+            blit_sprite(ch, co, v, walls, LOOK_UP, x, z, 0.0, SMOKER_H, SMOKER_W,
+                        coat)
+        elif wet > 0.25 and (g >> 18) & 1:
+            blit_sprite(ch, co, v, walls, UMBRELLA, x, z, 0.0, SMOKER_H * 1.25,
+                        SMOKER_W * 1.4, coat)
+        else:
+            blit_sprite(ch, co, v, walls, WALKER_A if phase < 1.0 else WALKER_B,
+                        x, z, 0.0, SMOKER_H, SMOKER_W, coat)
+
+
 def draw_props(ch, co, v, walls, now, wet):
     """Everything hanging off a facade or standing in front of one, drawn
     farthest first so the near ones win."""
@@ -4930,6 +5047,7 @@ def render_street(v, now):
     draw_ground(ch, co, v, walls, collect_glow(v, now, wet), wet, now)
     draw_flash(ch, co, v, walls, v.flash)
     draw_props(ch, co, v, walls, now, wet)
+    draw_walkers(ch, co, v, walls, now, wet)
     for ci_, cj_ in near_dock_cranes(v, 95.0):
         draw_dock_crane(ch, co, v, walls, ci_, cj_, now, wet)
     for prun, pend in near_piers(v, 95.0):
@@ -5937,7 +6055,8 @@ def draw_cheats(ch, co, note):
     left += [(k, name) for k, name, kind in CHEAT_PLACES if kind not in OUT_OF_TOWN]
     left += [("", ""), ("w", "weather: " + weather_name()),
              ("L", "strike now"), ("n", "next night"),
-             ("A", "a strange night"), ("z", "a lantern night")]
+             ("A", "a strange night"), ("z", "a lantern night"),
+             ("a", "people: " + crowd_name())]
     right = [("", "PARTS OF TOWN")]
     right += [(d["key"], d["name"]) for d in DISTRICTS]
     right += [("", ""), ("", "OUT OF TOWN")]
@@ -6287,6 +6406,8 @@ def main(stdscr):
                 elif key == ord("A"):
                     note = ("the sky is busy tonight"
                             if skip_to_alien(now) else "no such night near")
+                elif key == ord("a"):
+                    note = "people: " + cycle_crowd()
                 elif key == ord("z"):
                     note = ("lanterns on the river tonight"
                             if skip_to_lanterns(now) else "no such night near")

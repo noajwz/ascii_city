@@ -307,13 +307,71 @@ ac.render_street(ac.View(shop[0] - math.sin(shop[2]) * 3.0, shop[1] - math.cos(s
 ac.draw_noren = real_noren
 check("outside, the noren hangs over its door", blits)
 
+# --- people walking ------------------------------------------------------
+while ac.weather_name() != "dry":
+    ac.cycle_weather()
+walk_spot = ac.find_place(x0, z0, "street")
+wv = ac.View(walk_spot[0], walk_spot[1], walk_spot[2], 110, 30)
+ac._night_skip = 0.0
+plain_night = next(k * ac.NIGHT_LENGTH + 100 for k in range(200)
+                   if not ac.night(k * ac.NIGHT_LENGTH + 100)["alien"])
+people = list(ac.near_walkers(wv, plain_night))
+check("there are people walking", len(people) >= 2, "%d in view" % len(people))
+check("on the pavement, never in a wall or the road's middle", all(
+    ac.dry_at(x, z) and ac.road_at(int(x / ac.CELL + ac.BIG) - ac.BIG,
+                                    int(z / ac.CELL + ac.BIG) - ac.BIG)
+    for _, x, z, _, _, _ in people))
+later = {g: (x, z) for _, x, z, _, g, _ in ac.near_walkers(wv, plain_night + 2.0)}
+moved = [g for _, x, z, _, g, _ in people if g in later and later[g] != (x, z)]
+check("and they move", len(moved) >= 1, "%d of %d moved in two seconds" % (len(moved), len(people)))
+close = 0
+pts = [(x, z) for _, x, z, _, _, _ in people]
+for a in range(len(pts)):
+    for b in range(a + 1, len(pts)):
+        if math.hypot(pts[a][0] - pts[b][0], pts[a][1] - pts[b][1]) < 1.0:
+            close += 1
+check("and nobody walks through anybody", close == 0, "%d pairs closer than a metre" % close)
+blits = []
+walk_blit = ac.blit_sprite
+ac.blit_sprite = lambda ch, co, v, w, art, *a: (blits.append(art),
+                                              walk_blit(ch, co, v, w, art, *a))
+ac.render_street(wv, plain_night)
+dry = [a for a in blits if a in (ac.WALKER_A, ac.WALKER_B, ac.UMBRELLA)]
+while ac.weather_name() != "downpour":
+    ac.cycle_weather()
+del blits[:]
+ac.render_street(wv, plain_night)
+wetp = [a for a in blits if a in (ac.WALKER_A, ac.WALKER_B, ac.UMBRELLA)]
+check("walking in their stride when it is dry", dry and ac.UMBRELLA not in dry)
+check("and under umbrellas in the rain", ac.UMBRELLA in wetp)
+while ac.weather_name() != "dry":
+    ac.cycle_weather()
+alien = next(k * ac.NIGHT_LENGTH + 100 for k in range(400)
+             if ac.night(k * ac.NIGHT_LENGTH + 100)["alien"])
+a1 = sorted((x, z) for _, x, z, _, _, _ in ac.near_walkers(wv, alien))
+a2 = sorted((x, z) for _, x, z, _, _, _ in ac.near_walkers(wv, alien + 3.0))
+del blits[:]
+ac.render_street(wv, alien)
+check("on the strange night they stop and look up",
+      a1 == a2 and ac.LOOK_UP in blits and ac.WALKER_A not in blits
+      and ac.WALKER_B not in blits)
+ac.blit_sprite = walk_blit
+check("the menu sets how many", ac.crowd_name() == "some"
+      and ac.cycle_crowd() == "busy"
+      and len(list(ac.near_walkers(wv, plain_night))) > len(people)
+      and ac.cycle_crowd() == "none"
+      and not list(ac.near_walkers(wv, plain_night))
+      and ac.cycle_crowd() == "some")
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")
 text = "\n".join("".join(r) for r in big[0])
 check("the panel lists everything it does",
       all(n in text for _, n, _ in ac.CHEAT_PLACES)
-      and "weather:" in text and "strike now" in text)
+      and "weather:" in text and "strike now" in text and "people:" in text)
 small = ([[" "]*20 for _ in range(8)], [[0]*20 for _ in range(8)])
 ac.draw_cheats(small[0], small[1], "x")
 check("and stays out of the way when there is no room",
