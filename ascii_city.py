@@ -189,6 +189,17 @@ ROWBOAT_DRIFT = 0.7    # world units a second, with the current
 LANTERN_ODDS = 12      # one night in this many has lanterns on the river
 LANTERN_DRIFT = 0.9
 
+# --- tunnels ---
+# Here and there an avenue goes under a road deck for a stretch: a short
+# underpass under one, two cells of it, and now and then a long one where a
+# cross street was built over and the avenue goes under the whole block.
+# Under the short ones somebody has a fire going in a can.
+TUNNEL_H = 5.0         # the ceiling, world units off the road
+SHORT_ODDS = 20        # of the avenue-blocks, one in this many has a short one
+LONG_ODDS = 3          # of the stretches a long one could go, one in this many
+TUNNEL_LAMP = 6.0      # world units between the lights in a long one
+_tunnel_cache = {}
+
 # --- dawn ---
 # Once in a while a night ends. Over its last DAWN_LEN seconds the sky pales
 # from the horizon up, the stars go, the signs switch off one by one and the
@@ -1292,6 +1303,72 @@ def bay_of(x, z):
     return int(math.floor(x / PARK_BAY)), int(k), along
 
 
+def tunnel_run(i, j):
+    """(kind, first j, last j) of the tunnel this avenue cell is in, or None.
+
+    Short ones sit in the middle of a block, clear of the cross streets at
+    either end. Long ones only go where the next cross street was built over,
+    so the avenue runs a long way with nothing crossing it - a tunnel with a
+    side street opening off it halfway is not a tunnel."""
+    key = i * 1048576 + j
+    hit = _tunnel_cache.get(key, 0)
+    if hit != 0:
+        return hit
+    _evict(_tunnel_cache, 40000)
+    hit = None
+    span = road_span(i, XP, 91)
+    if span is not None and not woods_at(i, j) and not el_at(i) and not grand_at(i):
+        a = span[0]
+        b = j // ZP
+        lng = None
+        for bb in (b, b - 1):
+            if _mix(a, bb, 2203) % LONG_ODDS == 0:
+                # From the middle of this block, under the built-over cross
+                # street, to the middle of the next - stopping short of the
+                # cross street after it.
+                j0, j1 = bb * ZP + 5, (bb + 1) * ZP + 7
+                if (j0 <= j <= j1 and all(not _is_road(k, ZP, 137)
+                                           for k in range(j0, j1 + 1))):
+                    lng = ("long", j0, j1)
+        if lng is not None:
+            hit = lng
+        elif _mix(a, b, 2201) % SHORT_ODDS == 0:
+            j0, j1 = b * ZP + 5, b * ZP + 6
+            if j0 <= j <= j1 and not any(_is_road(k, ZP, 137)
+                                         for k in range(j0 - 1, j1 + 2)):
+                hit = ("short", j0, j1)
+        if hit is not None and any(water_at(i, k) for k in range(hit[1], hit[2] + 1)):
+            hit = None
+    _tunnel_cache[key] = hit
+    return hit
+
+
+def tunnel_at(i, j):
+    return tunnel_run(i, j) is not None
+
+
+def near_tunnels(v, reach):
+    """(x0, x1, z0, z1, kind) for each tunnel in reach: the avenue's edges and
+    the two mouths, in world units."""
+    out = []
+    seen = set()
+    n = int(reach / CELL) + 1
+    ci = int(v.x / CELL + BIG) - BIG
+    cj = int(v.z / CELL + BIG) - BIG
+    for i in range(ci - n, ci + n + 1):
+        span = road_span(i, XP, 91)
+        if span is None or span[0] != i:
+            continue
+        for j in range(cj - n, cj + n + 1):
+            run = tunnel_run(i, j)
+            if run is None or (i, run[1]) in seen:
+                continue
+            seen.add((i, run[1]))
+            out.append((span[0] * CELL, (span[0] + span[1]) * CELL,
+                        run[1] * CELL, (run[2] + 1) * CELL, run[0]))
+    return out
+
+
 def prom_at(i, j):
     """The promenade: open bank on the near side, two cells deep, along two
     stretches in three."""
@@ -1993,6 +2070,8 @@ class View:
         self.water = set()      # cells the river was drawn into
         self.wet = 0.0          # how hard it is raining, 0..1
         self.roof = None        # the sky-deck tower you are standing on, if any
+        self.ceiling = {}       # tunnel ceiling cells: row * 4096 + col -> distance
+        self.tunnels = []       # the tunnels in reach this frame, found once
         self.snow = 0.0         # how hard it is snowing
         self.dawn = 0.0         # how far into the morning, 0..1
         self.cover = 0.0        # and how much is lying
@@ -2601,6 +2680,8 @@ def draw_walls(ch, co, v, now):
                 cont is None and sx > 0,
                 cont or (None, None, None, None, ()),
                 face_kind(i + nx, j + nz), now))
+            if v.tunnels and tunnel_at(i + nx, j + nz):
+                tunnel_lining(ch, co, v, sx, dist, r_lo, r_hi, j, _mix(i, j, 2209))
             cover = r_lo if cover is None else min(cover, r_lo)
             sky_top[sx] = cover
             if not n:
@@ -2876,6 +2957,9 @@ def collect_glow(v, now, wet):
     reach = 7.0
     for lx, lz in near_park_lamps(v, 60.0):
         _spill(glow, lx, lz, 6.5, EMBER)
+    for tx0, tx1, tz0, tz1, kind in v.tunnels:
+        if kind == "short":
+            _spill(glow, *camp_spot(tx0, tx1, tz0, tz1), 5.0, EMBER)
     for c_ in near_carnivals(v, 60.0):
         (wx, wz), (cx, cz), stalls, _ = carnival_spots(c_)
         _spill(glow, wx, wz, 11.0, NEON[int(now * 5.0) % len(NEON)][1])
@@ -3304,7 +3388,7 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
             elif CELL - fz_ < edge and CELL - fz_ < PAVE and wall_s:
                 edge = CELL - fz_
 
-            if (v.cover > 0.05 and not wet_cell and not deck
+            if (v.cover > 0.05 and not wet_cell and not deck and not tunnel_at(i, j)
                     and not (PAVE - 0.3 <= edge < PAVE)):
                 # Snow lying, ahead of everything else the ground would draw:
                 # it covers the bare road as well as the texture, by degrees
@@ -3544,11 +3628,16 @@ UMBRELLA = [
 
 
 def put_cell(ch, co, v, walls, sx, sy, dist, glyph, attr):
-    """One cell, if it is on the screen and no facade is in front of it."""
+    """One cell, if it is on the screen and no facade is in front of it - and,
+    inside a tunnel, no ceiling either."""
     if not (0 <= sx < v.width and 0 <= sy < v.height):
         return
     if hidden(walls, sx, sy, dist):
         return
+    if v.ceiling:
+        cd = v.ceiling.get(sy * 4096 + sx)
+        if cd is not None and cd < dist:
+            return
     ch[sy][sx] = glyph
     co[sy][sx] = attr
 
@@ -5661,6 +5750,159 @@ def draw_car_park(ch, co, v, walls, now, wet):
                     max(wet, 0.3), now)
 
 
+def draw_tunnel_ceiling(ch, co, v, walls, now, tunnels):
+    """The underside of the deck, solved per screen row the way the ground is.
+
+    Every row above the horizon is one distance to a plane at TUNNEL_H; where
+    that point is over a tunnel and nearer than the wall in its column, the
+    ceiling is what you see there - so it covers the sky, the stars and
+    whatever is past the far mouth, and the mouth itself is the gap where the
+    ceiling stops. Joints across it every two units, and lights down the
+    middle of a long one, drawn after as lights so they hold at any range.
+
+    It goes in v.ceiling as well, cell by cell with its distance, and
+    put_cell() will not draw anything further away into those cells - so
+    the rain past the mouth and the lights of the town beyond stay behind it,
+    and someone walking through in front of you stays in front of it. It is
+    drawn early, right after the ground, for the second half of that."""
+    if v.eye >= TUNNEL_H or not tunnels:
+        return
+    width = v.width
+    rdx0, rdz0 = v.dx - v.plx, v.dz - v.plz
+    rdx1, rdz1 = v.dx + v.plx, v.dz + v.plz
+    for y in range(0, v.horizon):
+        d = (TUNNEL_H - v.eye) * v.fy / (v.horizon - y)
+        if d > 120.0:
+            continue
+        wx, wz = v.x + rdx0 * d, v.z + rdz0 * d
+        stepx = (rdx1 - rdx0) * d / (width - 1)
+        stepz = (rdz1 - rdz0) * d / (width - 1)
+        for sx in range(width):
+            x, z = wx, wz
+            wx += stepx
+            wz += stepz
+            wd = walls[0][sx]
+            if wd is not None and wd < d:
+                continue
+            run = tunnel_run(int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG)
+            if run is None:
+                continue
+            glyph, attr = " ", 0
+            if (z % 2.0) < 0.12:
+                glyph, attr = "=", CONCRETE
+            ch[y][sx], co[y][sx] = glyph, attr
+            v.ceiling[y * 4096 + sx] = d     # what is further is behind it
+
+
+def tunnel_lining(ch, co, v, sx, dist, r_lo, r_hi, j_or_i, seed):
+    """A side wall inside a tunnel, from the road to the deck: dark, tiled,
+    grimy, a tag now and then. Laid over the facade the column drew - above
+    the deck the building carries on as itself."""
+    scale = v.fy / dist
+    top = int(round(v.horizon - (TUNNEL_H - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    for y in range(max(r_lo, top), min(r_hi, foot) + 1):
+        m = _mix(sx, y, 2207)
+        if y == top:
+            g, a = "_", CONCRETE
+        elif m % 9 == 0:
+            g, a = "|", CONCRETE
+        elif m % 13 == 0:
+            g, a = ".", BARK
+        else:
+            g, a = " ", 0
+        ch[y][sx], co[y][sx] = g, a
+    if (seed % 5 == 0 and r_lo <= top + 3 <= r_hi and dist < 30.0):
+        tag = "%%&@"[seed % 4]
+        ch[top + 3][sx], co[top + 3][sx] = tag, NEON[seed % len(NEON)][1]
+
+
+def draw_headwall(ch, co, v, walls, x0, x1, z, outward):
+    """The face of the deck over a tunnel mouth: brick from the top of the
+    opening to the parapet, a railing along the top. Only from its own side:
+    from inside the tunnel, or from in front of the other mouth, the deck is
+    between you and it."""
+    if (v.z - z) * outward <= 0.0:
+        return
+    x = x0
+    while x <= x1:
+        for y in (TUNNEL_H + 0.3, TUNNEL_H + 0.8, TUNNEL_H + 1.3, TUNNEL_H + 1.8):
+            put_point(ch, co, v, walls, x, y, z, "#", CONCRETE)
+        put_point(ch, co, v, walls, x, TUNNEL_H, z, "=", CURB)
+        put_point(ch, co, v, walls, x, TUNNEL_H + 2.2, z, "=", ROOF)
+        put_point(ch, co, v, walls, x, TUNNEL_H + 3.0, z, "-", CURB)
+        x += 0.3
+
+
+CAN_FIRE = [
+    "|####|",
+    "|####|",
+    "|____|",
+]
+SITTER = [
+    " ,-. ",
+    "(   )",
+    "/###\\",
+    "~~~~~",
+]
+WARMER = [
+    " ,-. ",
+    " ( ) ",
+    "-/#\\-",
+    " |#| ",
+    " / \\ ",
+]
+CART = [
+    " ______ ",
+    "|##=#=#|",
+    " \\____/ ",
+    "  o  o  ",
+]
+
+
+def camp_spot(x0, x1, z0, z1):
+    """Where the fire is under a short tunnel: against one side wall, about
+    halfway along."""
+    return x0 + 1.6, (z0 + z1) * 0.5
+
+
+def draw_camp(ch, co, v, walls, x0, x1, z0, z1, now, wet):
+    """A can with a fire in it, the people round it, a blanket, a cart. The
+    flames are the only light under here and everything else is lit by them."""
+    fx, fz = camp_spot(x0, x1, z0, z1)
+    people = [(fx + 0.4, fz - 1.4, SITTER, 1.0), (fx + 1.8, fz + 0.2, WARMER, 1.9),
+              (fx + 0.3, fz + 1.5, SITTER, 1.0)]
+    things = [(fx - 0.2, fz + 3.6, CART, 1.1, 1.6)]
+    for px, pz, art, h in sorted(people, key=lambda p: -((p[0] - v.x) ** 2
+                                                         + (p[1] - v.z) ** 2)):
+        blit_sprite(ch, co, v, walls, art, px, pz, 0.0, h, h * 0.62, EMBER)
+    for px, pz, art, h, w in things:
+        blit_sprite(ch, co, v, walls, art, px, pz, 0.0, h, w, CURB)
+    blit_sprite(ch, co, v, walls, CAN_FIRE, fx, fz, 0.0, 1.0, 0.75, BARK)
+    for k in range(6):
+        a = now * 7.0 + k * 1.7
+        y = 1.05 + 0.18 * k + 0.08 * math.sin(a)
+        glyph = "^" if k < 2 else ("(" if math.sin(a) > 0 else ")")
+        put_lit(ch, co, v, walls, fx + 0.15 * math.sin(a * 1.3), y, fz,
+                glyph, EMBER_HOT if k < 3 else GOLD, max(wet, 0.5), now)
+    for k in range(4):                      # sparks going up into the dark
+        t = (now * 0.8 + k * 0.27) % 1.0
+        put_point(ch, co, v, walls, fx + 0.3 * math.sin(k * 2.0 + now),
+                  1.6 + t * 2.8, fz, ".", EMBER_HOT)
+
+
+def fire_near(x, z):
+    """For the HUD: under a short tunnel, near its fire."""
+    i = int(x / CELL + BIG) - BIG
+    j = int(z / CELL + BIG) - BIG
+    for di in range(-3, 4):
+        for dj in range(-3, 4):
+            run = tunnel_run(i + di, j + dj)
+            if run is not None and run[0] == "short":
+                return True
+    return False
+
+
 def draw_props(ch, co, v, walls, now, wet):
     """Everything hanging off a facade or standing in front of one, drawn
     farthest first so the near ones win."""
@@ -5672,6 +5914,8 @@ def draw_props(ch, co, v, walls, now, wet):
             nx, nz = FACES[f]
             if not is_open(i + nx, j + nz):
                 continue
+            if tunnel_at(i + nx, j + nz):
+                continue                # nothing hangs inside a tunnel
             if b["cinema"] is not None and f == b["cinema"]["door"]:
                 w = face_point(i, j, f, CELL * 0.5, 0.4, 3.9)
                 props.append((_d2(v, w), "cinema", b["cinema"], w, (nx, nz)))
@@ -6398,7 +6642,8 @@ def draw_snow(ch, co, v, walls, now):
             sway = 0.7 * math.sin(now * 0.8 + phase * 9.0)
             x = (a + ((m >> 18) & 63) / 64.0) * RAIN_LATTICE + sway
             z = (b + ((m >> 24) & 63) / 64.0) * RAIN_LATTICE
-            if not open_at(x, z):
+            if not open_at(x, z) or tunnel_at(int(x / CELL + BIG) - BIG,
+                                              int(z / CELL + BIG) - BIG):
                 continue                  # it is not snowing indoors
             pr = v.project(x, y, z)
             if pr is None:
@@ -6435,7 +6680,8 @@ def draw_rain(ch, co, v, walls, now, wet):
                 continue
             if abs(rx * v.dz - rz * v.dx) > perp * limit:
                 continue
-            if not open_at(x, z):
+            if not open_at(x, z) or tunnel_at(int(x / CELL + BIG) - BIG,
+                                              int(z / CELL + BIG) - BIG):
                 continue                      # it is not raining indoors
 
             phase = ((m >> 22) & 255) / 256.0
@@ -6490,15 +6736,29 @@ def render_street(v, now):
                 v.rave = (lamp, hx, hz)
             v.hollow = (hx, hz + HOLLOW_RJ * CELL * 0.72, beat, lamp)
 
+    v.tunnels = near_tunnels(v, 90.0)
     walls = draw_walls(ch, co, v, now)
     draw_sky(ch, co, v, walls, wet, now)
     draw_ground(ch, co, v, walls, collect_glow(v, now, wet), wet, now)
+    tunnels = v.tunnels
+    draw_tunnel_ceiling(ch, co, v, walls, now, tunnels)
     draw_flash(ch, co, v, walls, v.flash)
     draw_props(ch, co, v, walls, now, wet)
     draw_car_park(ch, co, v, walls, now, wet)
     draw_walkers(ch, co, v, walls, now, wet)
     for ex0, ex1 in near_els(v, EL_REACH):
         draw_el(ch, co, v, walls, ex0, ex1, now, wet)
+    for tx0, tx1, tz0, tz1, kind in tunnels:
+        draw_headwall(ch, co, v, walls, tx0, tx1, tz0, -1.0)
+        draw_headwall(ch, co, v, walls, tx0, tx1, tz1, 1.0)
+        if kind == "short":
+            draw_camp(ch, co, v, walls, tx0, tx1, tz0, tz1, now, wet)
+        else:
+            z = tz0 + TUNNEL_LAMP * 0.5
+            while z < tz1:
+                put_lit(ch, co, v, walls, (tx0 + tx1) * 0.5, TUNNEL_H - 0.15, z,
+                        "o", EMBER_HOT, max(wet, 0.3), now)
+                z += TUNNEL_LAMP
     for t_ in near_towers(v, 150.0 if v.eye < 10.0 else ROOF_REACH):
         if v.roof is None or t_["i"] != v.roof["i"] or t_["j"] != v.roof["j"]:
             draw_tower_beacon(ch, co, v, walls, t_, now, wet)
@@ -7218,6 +7478,8 @@ CHEAT_PLACES = [
     ("|", "a fire escape", "escape"),
     ("_", "a car park", "carpark"),
     ("*", "the pictures", "cinema"),
+    ("[", "a short tunnel", "tunnel"),
+    ("]", "a long tunnel", "longtunnel"),
     ("g", "the woods", "woods"),
     ("x", "the woods rave", "rave"),
     ("e", "the lake", "lake"),
@@ -7538,6 +7800,30 @@ def _doorway(x, z, salt, key):
     return None
 
 
+def _tunnel_spot(x, z, kind):
+    """On the avenue a little way short of the mouth, looking in. Avenue by
+    avenue outwards, the block hash first."""
+    a0 = int(x / (XP * CELL))
+    b0 = int(z / (ZP * CELL))
+    for r in range(0, 80):
+        for a in {a0 - r, a0 + r}:
+            for b in range(b0 - r, b0 + r + 1):
+                for i in range(a * XP, a * XP + XP):
+                    span = road_span(i, XP, 91)
+                    if span is None or span[0] != i:
+                        continue
+                    run = tunnel_run(i, b * ZP + 5)
+                    if run is None or run[0] != kind:
+                        continue
+                    px = (span[0] + span[1] * 0.5) * CELL
+                    pz = (run[1] - 2.5) * CELL
+                    if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+                        continue
+                    if can_stand(px, pz):
+                        return px, pz, 0.0
+    return None
+
+
 def _car_park_spot(x, z):
     """At the edge of the nearest car park, on the street, looking in across
     it. The block hash first: one in PARK_ODDS, before anything costs."""
@@ -7664,6 +7950,8 @@ def find_place(x, z, kind):
         return _car_park_spot(x, z)
     if kind == "cinema":
         return _doorway(x, z, 1961, "cinema")
+    if kind in ("tunnel", "longtunnel"):
+        return _tunnel_spot(x, z, "short" if kind == "tunnel" else "long")
     if kind in ("woods", "rave", "lake"):
         return _woods_spot(x, z, kind)
     if kind in ("bank", "pier", "bridge", "leaner", "carnival", "grand",
@@ -7695,32 +7983,35 @@ def draw_cheats(ch, co, note):
     """The panel, drawn over the live frame rather than instead of it, so that
     what you change to the weather happens in front of you.
 
-    Three columns: the places in the city; the parts of town with the sky and
-    the streets under them; and out of town - the river and the woods. It was
-    two, and every new place went into the first until it was taller than a
-    thirty-row terminal and the panel quietly stopped opening at all. There
-    is a test that it opens at 80x24."""
+    Four columns: the places in the city; the streets, with the parts of town
+    under them; out of town - the river and the woods; and the weather, the
+    sky and the special nights. Every new place used to go into the first
+    until it was taller than the terminal and the panel quietly stopped
+    opening at all. There is a test that it opens at 80x24."""
     height, width = len(ch), len(ch[0])
+    streets = ("alley", "yokocho", "deadend", "crossroads", "street",
+               "tunnel", "longtunnel")
     left = [("", "IN THE CITY")]
-    left += [(k, name) for k, name, kind in CHEAT_PLACES if kind not in OUT_OF_TOWN]
-    middle = [("", "PARTS OF TOWN")]
+    left += [(k, name) for k, name, kind in CHEAT_PLACES
+             if kind not in OUT_OF_TOWN and kind not in streets]
+    middle = [("", "STREETS")]
+    middle += [(k, name) for k, name, kind in CHEAT_PLACES if kind in streets]
+    middle += [("", ""), ("", "PARTS OF TOWN")]
     middle += [(d["key"], d["name"]) for d in DISTRICTS]
-    middle += [("", ""), ("", "SKY AND STREETS"),
-               ("w", "weather: " + weather_name()),
-               ("L", "strike now"),
-               ("s", "sky: " + clouds_name()),
-               ("a", "people: " + crowd_name()),
-               ("", ""), ("`", "close")]
     right = [("", "OUT OF TOWN")]
     right += [(k, name) for k, name, kind in CHEAT_PLACES if kind in OUT_OF_TOWN]
-    right += [("", "NIGHTS"),
-              ("n", "the next one"), ("A", "a strange night"),
-              ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn")]
-    columns = (left, middle, right)
+    sky = [("", "WEATHER & SKY"),
+           ("w", weather_name()), ("L", "strike now"),
+           ("s", "sky " + clouds_name()), ("a", "people " + crowd_name()),
+           ("", ""), ("", "NIGHTS"),
+           ("n", "the next one"), ("A", "a strange night"),
+           ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
+           ("", ""), ("`", "close")]
+    columns = (left, middle, right, sky)
 
-    col = 20
+    col = 18
     rows = max(len(c) for c in columns)
-    w, h = col * 3 + 3, rows + (3 if note else 2)
+    w, h = col * 4 + 3, rows + (3 if note else 2)
     if width < w + 4 or height < h + 2:
         return                          # no room; the city is more use
     x0, y0 = 2, 1
@@ -8472,7 +8763,9 @@ def main(stdscr):
                     if escape_near(cam_x, cam_z) else "")
                 or ("  ~ fireworks over the bay ~"
                     if fireworks_near(cam_x, cam_z, now) else "")
-                or ("  ~ dawn ~" if dawn(now) > 0.0 else ""))
+                or ("  ~ dawn ~" if dawn(now) > 0.0 else "")
+                or ("  ~ a fire going under the road ~"
+                    if fire_near(cam_x, cam_z) else ""))
         else:
             ch, co = render_skyline(sky_x, width, height, now)
             hud = SKYLINE_HUD % (sky_x, sky_word(now, rain_intensity(now)))

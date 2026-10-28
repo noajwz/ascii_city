@@ -855,14 +855,86 @@ ac._night_skip = 0.0
 while ac.weather_name() != "auto":
     ac.cycle_weather()
 
+# --- tunnels ---------------------------------------------------------------
+st = ac.find_place(x0, z0, "tunnel")
+lt = ac.find_place(x0, z0, "longtunnel")
+check("the menu finds a short tunnel and a long one", st is not None and lt is not None)
+runs = {}
+for sp_, kind in ((st, "short"), (lt, "long")):
+    ti = int(sp_[0] / ac.CELL + ac.BIG) - ac.BIG
+    tj = int(sp_[1] / ac.CELL + ac.BIG) - ac.BIG + 3
+    runs[kind] = (ti, ac.tunnel_run(ti, tj))
+check("and each is the kind asked for", runs["short"][1][0] == "short"
+      and runs["long"][1][0] == "long")
+s_len = runs["short"][1][2] - runs["short"][1][1] + 1
+l_len = runs["long"][1][2] - runs["long"][1][1] + 1
+check("a short one is short and a long one long", s_len <= 3 and l_len >= 8,
+      "%d cells and %d" % (s_len, l_len))
+li_, (_, lj0, lj1) = runs["long"]
+check("and nothing crosses the long one", not any(ac._is_road(k, ac.ZP, 137)
+                                                  for k in range(lj0, lj1 + 1)))
+check("you can walk through them", all(ac.can_stand((li_ + 0.5) * ac.CELL, (k + 0.5) * ac.CELL)
+                                       for k in range(lj0, lj1 + 1)))
+inside_v = ac.View(lt[0], lt[1] + 6 * ac.CELL, 0.0, 110, 30)
+ac.STAR = ac.STAR_DIM = ac.STAR_WARM = ac.STAR_COLD = ac.BAND = 1401
+ac.MOON = ac.MOON_DIM = 1402
+ac._sky_mode = 1
+ig, ic, _ = ac.render_street(inside_v, 300.0)
+check("inside one the ceiling hides the sky", not any(
+    ic[y][x] in (1401, 1402) for y in range(0, 6) for x in range(30, 80)))
+ac._sky_mode = 0
+ac.STAR = ac.STAR_DIM = ac.STAR_WARM = ac.STAR_COLD = ac.BAND = 1
+ac.MOON = ac.MOON_DIM = 1
+walls_hw = []
+real_hw = ac.draw_headwall
+ac.draw_headwall = lambda ch, co, v, w, x0_, x1_, z_, out: (
+    walls_hw.append((v.z - z_) * out > 0), real_hw(ch, co, v, w, x0_, x1_, z_, out))
+ac.render_street(ac.View(lt[0], lt[1], 0.0, 110, 30), 300.0)
+outside_sees = any(walls_hw)
+del walls_hw[:]
+ac.render_street(inside_v, 300.0)
+ac.draw_headwall = real_hw
+check("the brick over the mouth shows from outside, not from in",
+      outside_sees and not any(walls_hw))
+drops = 0
+while ac.weather_name() != "downpour":
+    ac.cycle_weather()
+ac.RAIN = ac.RAIN_FAR = 1403
+rg, rc, _ = ac.render_street(ac.View(st[0], st[1] + 3.0 * ac.CELL, 0.0, 110, 30), 300.0)
+og, oc, _ = ac.render_street(ac.View(st[0], st[1] - 6.0 * ac.CELL, 0.0, 110, 30), 300.0)
+under = sum(1 for y in range(0, 5) for x in range(40, 70) if rc[y][x] == 1403)
+out_ = sum(1 for y in range(0, 5) for x in range(40, 70) if oc[y][x] == 1403)
+check("and it does not rain under the deck", under < out_ / 4, "%d against %d" % (under, out_))
+ac.RAIN = ac.RAIN_FAR = 1
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
+camp = []
+real_camp = ac.draw_camp
+ac.draw_camp = lambda *a: (camp.append(1), real_camp(*a))
+ac.EMBER_HOT = 1404
+_, cc, _ = ac.render_street(ac.View(st[0], st[1], 0.0, 110, 30), 300.0)
+ac.draw_camp = real_camp
+check("under the short one there is a fire going", camp
+      and any(a == 1404 for r in cc for a in r))
+ac.EMBER_HOT = 1
+check("and the HUD knows", ac.fire_near(st[0], st[1] + 2.0 * ac.CELL))
+lamps = []
+real_lit = ac.put_lit
+ac.put_lit = lambda ch, co, v, w, x, y, z, g, a, wet, now: (
+    lamps.append(y) if abs(y - (ac.TUNNEL_H - 0.15)) < 1e-6 else None,
+    real_lit(ch, co, v, w, x, y, z, g, a, wet, now))
+ac.render_street(inside_v, 300.0)
+ac.put_lit = real_lit
+check("and the long one is lit down the middle", len(lamps) >= 4, "%d lights" % len(lamps))
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")
 text = "\n".join("".join(r) for r in big[0])
 check("the panel lists everything it does",
       all(n in text for _, n, _ in ac.CHEAT_PLACES)
-      and "weather:" in text and "strike now" in text and "people:" in text
-      and "sky:" in text)
+      and ac.weather_name() in text and "strike now" in text and "people" in text
+      and "sky " in text and "dawn" in text)
 std = ([[" "] * 80 for _ in range(24)], [[0] * 80 for _ in range(24)])
 ac.draw_cheats(std[0], std[1], "-> somewhere")
 check("and it opens on an 80x24 terminal", any("close" in "".join(r) for r in std[0]))
