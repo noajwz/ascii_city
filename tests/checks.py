@@ -443,6 +443,31 @@ check("from the bank a bridge is a pale line across the river", coping > 25,
 check("over a parapet and arches", sum(r.count("#") for r in map("".join, grid)) > 30)
 ac.ROOF = 1
 
+# --- a tower is not the night sky -----------------------------------------
+# Reported: "hard to make out a skyscraper because of the night sky". A tall
+# face with its windows dark was black with scattered lights, like the sky.
+# Its dark windows are faint dots on the window grid now, and only on the
+# tall ones.
+save_dark = ac.PALETTES["dark"]
+ac.PALETTES["dark"] = [1301] * 5
+fin = ac.find_place(x0 + 300.0, z0 - 230.0, "@5")
+fv = ac.View(fin[0], fin[1], fin[2] - 0.5, 110, 30)
+fgrid, fcol, _ = ac.render_street(fv, 300.0)
+dots = [(y, x) for y in range(fv.horizon) for x in range(110)
+        if fcol[y][x] == 1301 and fgrid[y][x] == "."]
+rows = {}
+for y, x in dots:
+    rows[y] = rows.get(y, 0) + 1
+check("a tower's dark windows show as a grid", len(dots) > 40
+      and max(rows.values()) >= 5, "%d dots" % len(dots))
+low = ac.find_place(x0, z0, "@6")              # the docks: low sheds
+lv = ac.View(low[0], low[1], low[2], 110, 30)
+lgrid, lcol, _ = ac.render_street(lv, 300.0)
+check("and a low building does not get one",
+      sum(1 for r in range(lv.horizon) for x in range(110)
+          if lcol[r][x] == 1301 and lgrid[r][x] == ".") < 10)
+ac.PALETTES["dark"] = save_dark
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")
