@@ -728,6 +728,23 @@ you stand, and the dealer then takes a card every `BJ_DEAL` seconds rather than 
 hand that resolves in one frame is a number, not a game. The one thing that bit: `now - t >= 0.8`
 is false at `t + 0.8` in floating point, so the timer compares with an epsilon.
 
+## The ramen counter
+
+The third way into a building. One yokocho pub in `RAMEN_ODDS` is a ramen shop (`ramen_at()`,
+hash of the face first because the lot is the expensive test), and from the lane it says so: the
+sign over the door reads ラーメン instead of the pub's usual word, a split red **noren** hangs over
+the door, and steam comes out from under it. `venue_at()` treats its door like the casino's —
+stand within `CASINO_REACH` and `render_ramen()` draws the room round you.
+
+Inside is the one room in the city that is **not on a beat**: the noren across the top, the menu
+board with prices in yen and a lantern either side, the cook moving between two stock pots, the
+others along the counter heads down and slurping on their own counts, and steam off everything.
+You sit down to chopsticks; the bowl arrives `RAMEN_SERVE` seconds later — egg, nori, steam — and
+the cook calls it. `seated` in `main()` is what remembers when you sat, keyed on the shop, so
+walking out and back in is a new bowl. It is all ASCII inside: the room is drawn without the
+`v.wide` bookkeeping, so the Japanese stays on the sign outside. `v` in the menu puts you at a
+counter, and a second press finds another.
+
 ## Inside the club
 
 `render_rave()` is the club's answer to the casino room, and it runs off `club_light()` and the same
