@@ -774,6 +774,41 @@ def draw_skyline_rain(ch, co, cam_x, water, now, wet, flash):
                     RAIN if yy > water - 6 else RAIN_FAR)
 
 
+def draw_skyline_el(ch, co, cam_x, ground, tops, now):
+    """The elevated from across the water: a dotted line of track running
+    across in front of the middle layer, and now and then a train along it -
+    a row of lit windows sliding across the city. It moves with that layer's
+    parallax, so it sits in the town rather than on the glass."""
+    width = len(ch[0])
+    y = ground - max(3, int((ground + 1) * 0.12))
+    if y < 2:
+        return
+    off = cam_x * LAYERS[1]["parallax"]
+    for x in range(width):
+        wx = int(x + off)
+        if wx % 3 == 0:
+            ch[y][x] = "-"
+            co[y][x] = CONCRETE
+        if wx % 17 == 0:
+            ch[y + 1][x] = "|"
+            co[y + 1][x] = CONCRETE
+    # A train every so often, one way then the other, taking half a minute to
+    # cross and with a quiet spell between.
+    period = 48.0
+    k = int(now / period)
+    t = (now % period) / 30.0
+    if t <= 1.0:
+        d = 1 if k % 2 == 0 else -1
+        head = -30 + t * (width + 60)
+        if d < 0:
+            head = width + 30 - t * (width + 60)
+        for c in range(22):
+            x = int(round(head - d * c))
+            if 0 <= x < width:
+                ch[y - 1][x] = "o" if c % 3 else "|"
+                co[y - 1][x] = BULB if c % 3 else CURB
+
+
 def render_skyline(cam_x, width, height, now):
     """The city from across the water, in whatever weather the street is in.
 
@@ -809,6 +844,7 @@ def render_skyline(cam_x, width, height, now):
                         tops[x] = roof
 
     draw_stars(ch, co, cam_x, ground, wet, now, tops)
+    draw_skyline_el(ch, co, cam_x, ground, tops, now)
 
     draw_flash_sky(ch, co, water, flash)
     if flash >= 0.05:
@@ -3093,6 +3129,21 @@ LOOK_UP = [
 SMOKER_H = 1.9         # how tall he is, in world units
 SMOKER_W = 0.79        # chosen so the art keeps its aspect ratio on screen
 
+# --- the elevated line ---
+# One avenue in EL_EVERY carries a steel viaduct down its middle: columns on
+# both kerbs, a deck overhead, two tracks, and trains rattling along them
+# with their windows lit. Position is a function of time, like everything
+# that moves here. A station every so often, with a lit canopy.
+EL_EVERY = 12          # avenues
+EL_H = 6.4             # the deck's height, world units
+EL_COL = 7.5           # between columns along the kerb
+EL_SPEED = 13.0        # world units a second
+EL_SPACING = 900.0     # between one train and the next on the same track
+EL_CARS = 4
+EL_CAR = 9.0           # one car's length
+EL_STATION = 34        # cells between stations
+EL_REACH = 120.0
+
 # People walking. A lane down each pavement of every street, slots along it
 # sliding with time at the lane's pace, and one slot in a few has somebody
 # in it - so nothing is stored, a walker is where they should be whether or
@@ -4414,6 +4465,157 @@ def draw_walkers(ch, co, v, walls, now, wet):
                         x, z, 0.0, SMOKER_H, SMOKER_W, coat)
 
 
+_el_cache = {}
+
+
+def el_span(k):
+    """(first cell, width) of the avenue the elevated runs over, if avenue
+    k is one of those, else None."""
+    hit = _el_cache.get(k, 0)
+    if hit == 0:
+        hit = None
+        if _mix(k, 0, 1801) % EL_EVERY == 0:
+            for r in range(XP):
+                span = road_span(k * XP + r, XP, 91)
+                if span is not None:
+                    hit = span
+                    break
+        _el_cache[k] = hit
+    return hit
+
+
+def el_at(i):
+    """Does the elevated run over this column of cells."""
+    span = el_span(i // XP)
+    return span is not None and span[0] <= i < span[0] + span[1]
+
+
+def el_runs(x, z):
+    """The line stops at the woods and at the headland, where the avenue does."""
+    i = int(x / CELL + BIG) - BIG
+    j = int(z / CELL + BIG) - BIG
+    return not woods_at(i, j) and not headland_at(i, j)
+
+
+def near_els(v, reach):
+    """(x0, x1) of each elevated avenue within reach across."""
+    k0 = int((v.x - reach) / (XP * CELL)) - 1
+    for k in range(k0, k0 + int(2 * reach / (XP * CELL)) + 3):
+        span = el_span(k)
+        if span is None:
+            continue
+        x0, x1 = span[0] * CELL, (span[0] + span[1]) * CELL
+        if abs((x0 + x1) * 0.5 - v.x) < reach:
+            yield x0, x1
+
+
+def el_trains(x0, x1, z, reach, now):
+    """(z of the head, direction, track x) for each train within reach of z."""
+    xm = (x0 + x1) * 0.5
+    for d, tx in ((1, xm - 1.6), (-1, xm + 1.6)):
+        off = (_mix(int(x0), d, 1803) & 1023) / 1023.0 * EL_SPACING
+        head0 = d * EL_SPEED * now + off
+        n0 = int(math.floor((z - reach - head0) / EL_SPACING)) - 1
+        for n in range(n0, n0 + int(2 * reach / EL_SPACING) + 3):
+            head = n * EL_SPACING + head0
+            if abs(head - z) < reach + EL_CARS * EL_CAR:
+                yield head, d, tx
+
+
+def el_overhead(x, z, now):
+    """Is a train passing over you, near enough to be heard."""
+    for x0, x1 in near_els(View(x, z, 0.0, 2, 2), 30.0):
+        if not x0 - 6.0 < x < x1 + 6.0:
+            continue
+        for head, d, _ in el_trains(x0, x1, z, 40.0, now):
+            tail = head - d * EL_CARS * EL_CAR
+            if min(head, tail) - 20.0 < z < max(head, tail) + 20.0:
+                return True
+    return False
+
+
+def draw_el(ch, co, v, walls, x0, x1, now, wet):
+    """The viaduct, and the trains on it.
+
+    Columns stand on both kerbs every EL_COL units; the deck is two girders
+    along the top with cross beams between, the rails on top of that. Points
+    are laid along z only over the stretch in front of you, because a column
+    of points down an avenue is cheap and an avenue is long."""
+    xm = (x0 + x1) * 0.5
+    cx0, cx1 = x0 + 0.5, x1 - 0.5
+    ahead = v.dz
+    span = EL_REACH
+    zs = v.z - (span if ahead < 0 else CELL * 2)
+    ze = v.z + (span if ahead >= 0 else CELL * 2)
+    if abs(v.dx) > 0.3:                  # looking across it: the stretch in view
+        zs, ze = v.z - span * 0.6, v.z + span * 0.6
+    # Columns and cross beams.
+    z = math.floor(zs / EL_COL) * EL_COL
+    while z <= ze:
+        if el_runs(xm, z):
+            for cx in (cx0, cx1):
+                y = 0.0
+                while y < EL_H:
+                    put_point(ch, co, v, walls, cx, y, z, "|", CONCRETE)
+                    y += 0.7
+            x = cx0
+            while x <= cx1:
+                put_point(ch, co, v, walls, x, EL_H - 0.4, z, "=", CONCRETE)
+                x += 0.9
+        z += EL_COL
+    # The girders and rails, and the station canopies.
+    z = math.floor(zs / 1.2) * 1.2
+    while z <= ze:
+        if el_runs(xm, z):
+            for gx in (cx0, cx1):
+                put_point(ch, co, v, walls, gx, EL_H, z, "=", CURB)
+            for tx in (xm - 1.6, xm + 1.6):
+                put_point(ch, co, v, walls, tx, EL_H + 0.25, z, "-", CONCRETE)
+        z += 1.2
+    gap = EL_STATION * CELL
+    for k in range(int(zs / gap) - 1, int(ze / gap) + 2):
+        sz = (k * EL_STATION + (_mix(int(x0), k, 1805) % 8)) * CELL
+        if not el_runs(xm, sz) or not zs - 20 < sz < ze + 20:
+            continue
+        for dz in range(-6, 7, 2):
+            for gx in (cx0 - 0.6, cx1 + 0.6):
+                put_point(ch, co, v, walls, gx, EL_H + 3.2, sz + dz, "_", CURB)
+            if dz % 4 == 0:
+                put_lit(ch, co, v, walls, xm, EL_H + 3.0, sz + dz, "o", BULB,
+                        max(wet, 0.3), now)
+        for gx in (cx0 - 0.6, cx1 + 0.6):
+            for y in (EL_H + 0.8, EL_H + 1.8, EL_H + 2.8):
+                put_point(ch, co, v, walls, gx, y, sz - 6, "|", CONCRETE)
+                put_point(ch, co, v, walls, gx, y, sz + 6, "|", CONCRETE)
+    # The trains.
+    for head, d, tx in el_trains(x0, x1, v.z, EL_REACH, now):
+        for c in range(EL_CARS):
+            front = head - d * c * EL_CAR
+            back = front - d * (EL_CAR - 0.6)
+            lo, hi = min(front, back), max(front, back)
+            if not el_runs(xm, (lo + hi) * 0.5):
+                continue
+            z = lo
+            while z <= hi:
+                put_point(ch, co, v, walls, tx, EL_H + 3.0, z, "_", CURB)
+                put_point(ch, co, v, walls, tx, EL_H + 0.6, z, "=", CURB)
+                lit = int((z - lo) / 1.0) % 2 == 0
+                put_lit(ch, co, v, walls, tx, EL_H + 1.9, z,
+                        "o" if lit else "|", BULB if lit else CURB,
+                        max(wet, 0.2), now)
+                z += 0.5
+            for edge in (lo, hi):
+                for y in (EL_H + 1.0, EL_H + 1.9, EL_H + 2.7):
+                    put_point(ch, co, v, walls, tx, y, edge, "|", CURB)
+        # The headlights, and the sparks underneath now and then.
+        for hx in (tx - 0.5, tx + 0.5):
+            put_lit(ch, co, v, walls, hx, EL_H + 1.2, head, "*", FLASH,
+                    max(wet, 0.3), now)
+        if int(now * 7 + head) % 9 == 0:
+            put_point(ch, co, v, walls, tx, EL_H + 0.1, head - d * 3.0, "*",
+                      EMBER_HOT)
+
+
 def draw_props(ch, co, v, walls, now, wet):
     """Everything hanging off a facade or standing in front of one, drawn
     farthest first so the near ones win."""
@@ -5048,6 +5250,8 @@ def render_street(v, now):
     draw_flash(ch, co, v, walls, v.flash)
     draw_props(ch, co, v, walls, now, wet)
     draw_walkers(ch, co, v, walls, now, wet)
+    for ex0, ex1 in near_els(v, EL_REACH):
+        draw_el(ch, co, v, walls, ex0, ex1, now, wet)
     for ci_, cj_ in near_dock_cranes(v, 95.0):
         draw_dock_crane(ch, co, v, walls, ci_, cj_, now, wet)
     for prun, pend in near_piers(v, 95.0):
@@ -5660,6 +5864,7 @@ CHEAT_PLACES = [
     ("9", "inside a casino", "inside"),
     ("0", "inside the club", "clubdoor"),
     ("v", "a ramen counter", "ramen"),
+    ("=", "under the el", "el"),
     ("g", "the woods", "woods"),
     ("x", "the woods rave", "rave"),
     ("e", "the lake", "lake"),
@@ -5980,6 +6185,26 @@ def _doorway(x, z, salt, key):
     return None
 
 
+def _el_spot(x, z):
+    """Under the elevated, on the pavement by a column, looking along it.
+    The next press goes to the next elevated avenue over."""
+    k0 = int(x / (XP * CELL))
+    for step in range(0, 400):
+        k = k0 + (step + 1) // 2 * (1 if step % 2 else -1)
+        span = el_span(k)
+        if span is None:
+            continue
+        px = span[0] * CELL + 1.3
+        if abs(px - x) < CHEAT_SKIP:
+            continue
+        for back in range(0, 60):
+            pz = z + back * CELL
+            if can_stand(px, pz) and el_runs(px, pz) and road_at(
+                    int(px / CELL + BIG) - BIG, int(pz / CELL + BIG) - BIG):
+                return px, pz, 0.0
+    return None
+
+
 def _ramen_spot(x, z):
     """At the counter of the nearest ramen shop, facing it. Skips the one you
     are sat at, so a second press finds another."""
@@ -6016,6 +6241,8 @@ def find_place(x, z, kind):
         return _doorway(x, z, 909, "club")
     if kind == "ramen":
         return _ramen_spot(x, z)
+    if kind == "el":
+        return _el_spot(x, z)
     if kind in ("woods", "rave", "lake"):
         return _woods_spot(x, z, kind)
     if kind in ("bank", "pier", "bridge", "leaner", "carnival", "grand",
@@ -6573,6 +6800,8 @@ def main(stdscr):
                 weather_word(now, wet),
                 rave_hint(v, now)
                 or ("  ~ something over the city ~" if night(now)["alien"]
+                    else "")
+                or ("  ~ a train overhead ~" if el_overhead(cam_x, cam_z, now)
                     else ""))
         else:
             ch, co = render_skyline(sky_x, width, height, now)
