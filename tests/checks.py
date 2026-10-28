@@ -138,7 +138,7 @@ check("every destination lands somewhere you can stand", not bad, ",".join(bad))
 
 blind = []
 for _, name, kind in ac.CHEAT_PLACES:
-    if kind in ("inside", "clubdoor", "club", "ramen"):
+    if kind in ("inside", "clubdoor", "club", "ramen", "tower"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -505,6 +505,59 @@ check("and a low building does not get one",
           if lcol[r][x] == 1301 and lgrid[r][x] == ".") < 10)
 ac.PALETTES["dark"] = save_dark
 
+# --- the sky deck ---------------------------------------------------------
+towers = [ac.lot(i, j)["tower"] for i in range(-200, 200) for j in range(-200, 200)
+          if ac._mix(i, j, 1907) % ac.TOWER_ODDS == 0 and not ac.is_open(i, j)
+          and ac.lot(i, j)["tower"] is not None]
+check("some tall buildings have a sky deck", len(towers) >= 3,
+      "%d in a 2000-unit square" % len(towers))
+check("and each is the tallest thing in town",
+      all(t_["height"] >= ac.TOWER_TOP for t_ in towers)
+      and ac.TOWER_TOP > max(d["hi"] for d in ac.DISTRICTS))
+sky = ac.find_place(x0, z0, "tower")
+check("the menu stands you outside a lobby", sky is not None
+      and ac.can_stand(sky[0], sky[1]) and ac.venue_at(sky[0], sky[1]) is None)
+step_in = (sky[0] + math.sin(sky[2]) * 1.6, sky[1] + math.cos(sky[2]) * 1.6)
+lobby = ac.venue_at(*step_in)
+check("and one step in is the lift", lobby is not None and lobby[0] == "tower")
+tw = lobby[1]
+floors = int(tw["height"] / ac.FLOOR_H)
+shut, there, opened = ac.lift_times(floors)
+frames = [ac.render_lift(True, floors, s, 70, 22, 100.0 + s)[0]
+          for s in (0.1, (shut + there) / 2, there + 0.3)]
+txt = ["\n".join("".join(r) for r in f) for f in frames]
+check("the lift: the counter starts at the ground", "[     1 ]" in txt[0]
+      or "[ ^   1 ]" in txt[0])
+check("climbs with the arrow lit and the shaft going by",
+      "==" in txt[1] and "going up" in txt[1])
+check("and dings at the top", "*ding*" in txt[2] and "%3d ]" % floors in txt[2])
+down = ac.render_lift(False, floors, (shut + there) / 2, 70, 22, 100.0)[0]
+check("and goes down too", "going down" in "\n".join("".join(r) for r in down))
+ac.ROOF = 1021
+rv = ac.roof_view(tw, 0.0, 110, 30)
+rv.roof = tw
+rgrid, rcol, _ = ac.render_street(rv, 300.0)
+check("on the roof you are up there", rv.eye > ac.TOWER_TOP)
+below = sum(1 for y in range(rv.horizon + 1, 30) for x in range(110)
+            if rgrid[y][x] != " " and rcol[y][x] != 1021)
+check("and the city is under you", below > 150, "%d cells below the horizon" % below)
+parapet = 0
+for yaw in (0.8, 2.4, 3.9, 5.5):
+    pv = ac.roof_view(tw, yaw, 110, 30)
+    pv.roof = tw
+    _, pcol, _ = ac.render_street(pv, 300.0)
+    parapet += sum(1 for r in pcol for a in r if a == 1021)
+check("behind a parapet, at the corners as you turn", parapet > 20,
+      "%d cells of coping" % parapet)
+ac.ROOF = 1
+seen = set()
+for yaw in (0.0, 1.6, 3.2, 4.7):
+    v2 = ac.roof_view(tw, yaw, 110, 30)
+    v2.roof = tw
+    seen.add(ac.can_stand(v2.x, v2.z) or not ac.is_open(int(v2.x / ac.CELL + ac.BIG) - ac.BIG,
+                                                          int(v2.z / ac.CELL + ac.BIG) - ac.BIG))
+check("and you stay on your own roof as you turn", seen == {True})
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")
@@ -782,7 +835,7 @@ for n, d in enumerate(ac.DISTRICTS):
             b = ac.lot(i, j)
             # A club is a squat bunker and a casino a low slab whatever part
             # of town they are in; they are meant to ignore the district.
-            if b["club"] is None and b["casino"] is None:
+            if b["club"] is None and b["casino"] is None and b["tower"] is None:
                 hs.append(b["height"])
             trees += b["tree"]
             for f in range(4):

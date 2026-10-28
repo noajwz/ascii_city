@@ -32,7 +32,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   milky way is up, the odd meteor. Once in a great while, something else entirely.
 - **Places you can go into** — a casino with a roulette wheel that spins honestly, a slot machine
   you play for chips and a blackjack table that deals straight, a club with a rave going
-  on, and ramen counters down the lit lanes where you can sit and wait for your bowl.
+  on, ramen counters down the lit lanes where you can sit and wait for your bowl, and sky decks:
+  ride the lift to the roof of the tallest towers and look out over the whole city.
 - **People out walking** — not many, it is night — under umbrellas when it rains.
 - **An elevated train** over some of the avenues, rattling along with its windows lit, and from
   across the water a row of lights sliding through the town.
