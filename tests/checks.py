@@ -675,6 +675,38 @@ ac.render_street(ac.View(fe[0], fe[1], fe[2], 110, 30), 300.0)
 ac.blit_sprite = real_prop_blit
 check("and from the alley you can see the drop ladder", ["|-|"] * 4 in lad)
 
+# --- car parks -------------------------------------------------------------
+cp = ac.find_place(x0, z0, "carpark")
+check("the menu finds a car park", cp is not None and ac.can_stand(cp[0], cp[1]))
+cpi = int(cp[0] / ac.CELL + ac.BIG) - ac.BIG + 2
+cpj = int(cp[1] / ac.CELL + ac.BIG) - ac.BIG
+cells = [(i, j) for i in range(cpi - 12, cpi + 12) for j in range(cpj - 12, cpj + 12)
+         if ac.car_park_at(i, j)]
+check("a car park is a block of open ground", len(cells) > 20
+      and all(ac.is_open(i, j) and ac.can_stand((i + 0.5) * ac.CELL, (j + 0.5) * ac.CELL)
+              for i, j in cells), "%d cells" % len(cells))
+check("with no building on it", all(ac.lot(i, j)["club"] is None or ac.is_open(i, j)
+                                    for i, j in cells))
+blocks = [(bi, bj) for bi in range(-60, 60) for bj in range(-60, 60)
+          if ac.car_park_block(bi, bj)]
+check("car parks are a block in thirty or so where they are allowed",
+      100 < len(blocks) < 1000, "%d of 14400 blocks" % len(blocks))
+check("and only in the parts of town that have them",
+      all(ac.DISTRICTS[ac.district_at(bi * ac.XP + ac.XP // 2, bj * ac.ZP + ac.ZP // 2)]["name"]
+          in ac.PARK_DISTRICTS for bi, bj in blocks))
+pv = ac.View(cp[0], cp[1], cp[2], 110, 30)
+cars = ac.near_parked_cars(pv, 60.0)
+check("there are cars in the bays", len(cars) > 6, "%d" % len(cars))
+check("and every one is on the car park", all(
+    ac.car_park_at(int(x / ac.CELL + ac.BIG) - ac.BIG, int(z / ac.CELL + ac.BIG) - ac.BIG)
+    for _, x, z, _ in cars))
+check("under sodium lamps", len(list(ac.near_park_lamps(pv, 60.0))) >= 2)
+ac.LANE, ac.NEON = 1051, [(1052 + k, 1060 + k) for k in range(8)]
+pg, pc, _ = ac.render_street(pv, 300.0)
+check("the bays are painted", sum(1 for r in pc for a in r if a == 1051) > 20)
+check("and there is a P sign", any("[P]" in "".join(r) for r in pg))
+ac.LANE, ac.NEON = 1, [(100 + k, 200 + k) for k in range(8)]
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")

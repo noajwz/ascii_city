@@ -634,6 +634,23 @@ the water too. The train itself is in screen space, not on the layer's parallax 
 putting it on the parallax would make it slide with the town as you pan, which it does not yet. `=` in the menu
 stands you under it, on the pavement by the columns, looking along.
 
+## Car parks
+
+One block in `PARK_ODDS`, in the parts of town listed in `PARK_DISTRICTS`, is a car park instead
+of buildings (`car_park_block()` on the block index, `car_park_at()` per cell). `is_open()` says yes
+to it the way it does to the fairground, so the buildings round it face in across the open ground.
+The ground pass paints it: a white line between every bay, a line across their ends, the aisle
+down the middle bare, double rows `BAY_ROW` apart. Two bays in three have a car in them, by a hash
+of the bay — the same cars every time, and only where the whole bay is car park, so none sits half
+in the road; the odd one has its alarm light winking. Sodium lamps down every aisle spill orange
+on the tarmac through `collect_glow()`, and each corner has a blue `[P]` on a pole and a pay booth
+with its light on. `_` in the menu stands you on the street at its edge looking in.
+
+`PARK_BAY` is the bay width. It was `BAY_W` for about a minute, which is already the facades'
+window spacing — defined again further down the module, it would have quietly respaced every
+window in the city. Everything here is gated on `car_parks_near()`, a few block hashes, because
+scanning every bay in sight where there is no car park was most of two milliseconds a frame.
+
 ## Getting lost is the feature
 
 The layout is deliberately irregular, because the point is to be able to lose yourself in it.
@@ -1068,6 +1085,9 @@ for every cell.** The promenade, the fairground, the headland and the moat all w
 `river_span()`, which was nine sines, uncached, and a street walk went from 4.5 to 6.2 ms a frame
 without anything on screen changing — reported as "slower than it used to be". `river_centre()`
 and `river_span()` are cached per column now, `near_river()` gates every bank test, and
-`headland_r()` does its box test before its trig. `tools/`-less rule of thumb: benchmark a
+`headland_r()` does its box test before its trig. The same thing happened again with the sky
+decks: `near_towers()` hashed every cell in 150 units to find the beacons, four thousand calls a
+frame on every street, and a walk went from 4.8 to 6.0 ms. `towers_in_block()` caches each city
+block's towers once. Benchmarking every commit since the last good number is what found it. `tools/`-less rule of thumb: benchmark a
 40-frame walk with the caches cleared (the profile in the session log) before and after anything
 that touches `is_open()`'s path.
