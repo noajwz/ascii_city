@@ -77,5 +77,8 @@ ok &= report("ramen counter, sit and leave", *run(
 ok &= report("casino slot: bet up, pull, bet down", *run(
     [(b"`", .5), (b"9", 1.0), (b"+", .3), (b"p", 3.0), (b"-", .3), (b"p", 3.0),
      (b"b", .6), (b"k", 3.0)], cols=100, rows=30))
+ok &= report("sky deck: lift up, look round, lift down", *run(
+    [(b"`", .5), (b"^", 1.0), (b"w", 6.0), (b"d", .5), (b"a", .5), (b"s", 6.0),
+     (b"w", .4)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

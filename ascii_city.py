@@ -178,6 +178,18 @@ LANTERN_DRIFT = 0.9
 CASINO_REACH = 2.3     # how close to the door you have to get to be inside
 CASINO_AGAIN = 1.6     # seconds before it deals you another one
 
+# --- the sky deck ---
+# One tall building in TOWER_ODDS has a lobby you can walk into and a lift to
+# the roof. You ride it up - doors, a floor counter, the shaft going by - and
+# step out onto the roof with the real city under you.
+TOWER_ODDS = 9         # of the buildings tall enough, one in this many
+TOWER_MIN = 34.0       # how tall, in world units, a building must be to have one
+TOWER_TOP = 72.0       # and how tall it is made: over everything else in town
+ROOF_REACH = 260.0     # how far you can see from up there
+ROOF_STEP = 1.6        # how far from the middle of the roof you stand
+LIFT_DOORS = 0.9       # seconds for the doors to close or open
+LIFT_FLOOR = 0.07      # seconds per floor going past
+
 CASINO_NAMES = ["ROYALE", "GOLDEN", "LUCKY", "ACES", "MIRAGE", "JACKPOT",
                 "FORTUNA", "DIAMOND", "SPHINX", "MONTE"]
 
@@ -1660,7 +1672,7 @@ def lot(i, j):
         # Neither belongs in a park: the cell would be a clump of trees, and
         # draw_wall_column() would draw it as one, so the venue would exist
         # and be invisible.
-        b["club"] = b["casino"] = None
+        b["club"] = b["casino"] = b["tower"] = None
         if d["park"]:
             pass
         elif _mix(i, j, 909) % CLUB_ODDS == 0:
@@ -1681,6 +1693,19 @@ def lot(i, j):
                                "tone": rng.random(),
                                "sign_tone": rng.random(),
                                "phase": rng.uniform(0.0, 5.0)}
+        elif b["height"] >= TOWER_MIN and _mix(i, j, 1907) % TOWER_ODDS == 0:
+            # A sky deck. Off a hash rather than the lot's rng, so being one
+            # moves nothing else about the building; and only with a street
+            # front, for the same reason as the casino.
+            face = _road_face(i, j, _mix(i, j, 1909) % 4)
+            if face is not None:
+                # Taller than anything else in the city, so the view from the
+                # top is over the town rather than into the next tower - the
+                # first ones were often hemmed in by taller neighbours - and so
+                # its light is a landmark from across it.
+                b["height"] = TOWER_TOP + _mix(i, j, 1913) % 9
+                b["tower"] = {"door": face, "u": CELL * 0.5, "i": i, "j": j,
+                              "height": b["height"]}
         _lots[key] = b
     return b
 
@@ -1723,9 +1748,14 @@ class View:
     Terminal cells are about twice as tall as they are wide, so the vertical
     focal length is half the horizontal one."""
 
-    def __init__(self, x, z, yaw, width, height):
+    def __init__(self, x, z, yaw, width, height, eye=EYE_Y, reach=MAX_VIEW):
         self.x = x
         self.z = z
+        self.eye = eye          # how high the camera is: the street, or a roof
+        self.reach = reach      # how far a wall ray is followed
+        # and how many walls deep: from the street the fourth wall back is
+        # hidden behind the first three; from a roof you see over all of them.
+        self.depth = 4 if eye < 10.0 else 14
         self.yaw = yaw
         self.width = width
         self.height = height
@@ -1742,6 +1772,7 @@ class View:
         self.hollow = None      # (x, z, beat, colour) of the rave on the ground
         self.water = set()      # cells the river was drawn into
         self.wet = 0.0          # how hard it is raining, 0..1
+        self.roof = None        # the sky-deck tower you are standing on, if any
         self.flash = 0.0        # how bright the lightning is this instant
 
     def ray(self, sx):
@@ -1769,13 +1800,13 @@ class View:
             return None
         lat = rx * self.dz - rz * self.dx
         return (self.cx + lat * self.fx / perp,
-                self.horizon - (y - EYE_Y) * self.fy / perp,
+                self.horizon - (y - self.eye) * self.fy / perp,
                 perp)
 
     def reflect_row(self, y, perp):
         """Where a thing at height y shows up in the wet road under it: the
         mirror image sits at -y, which is the same column, further down."""
-        return self.horizon + (y + EYE_Y) * self.fy / perp
+        return self.horizon + (y + self.eye) * self.fy / perp
 
 
 def cast(v, rdx, rdz, limit=4):
@@ -1807,7 +1838,7 @@ def cast(v, rdx, rdz, limit=4):
         step_j = 0
 
     hits = []
-    max_cells = MAX_VIEW / CELL
+    max_cells = v.reach / CELL
     while True:
         if next_x < next_z:
             t = next_x
@@ -1854,8 +1885,8 @@ def sign_u(face, u):
 
 def wall_span(v, dist, height):
     scale = v.fy / dist
-    return (int(math.floor(v.horizon - (height - EYE_Y) * scale)),
-            int(math.ceil(v.horizon + EYE_Y * scale)))
+    return (int(math.floor(v.horizon - (height - v.eye) * scale)),
+            int(math.ceil(v.horizon + v.eye * scale)))
 
 
 def roof_colour(b, dist, flash=0.0):
@@ -1949,8 +1980,8 @@ def draw_club_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge, cont,
     scale = v.fy / dist
     club = b["club"]
     trim = FLASH if v.flash > 0.35 else CONCRETE
-    roof = int(round(v.horizon - (b["height"] - EYE_Y) * scale))
-    foot = int(round(v.horizon + EYE_Y * scale))
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
 
     if edge:
         for y in range(r_lo, r_hi + 1):
@@ -1972,14 +2003,14 @@ def draw_club_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge, cont,
     lamp = club_light(now, club)
 
     # A band of slit windows under the roof, and the light behind them.
-    slit = int(round(v.horizon - (b["height"] - 1.7 - EYE_Y) * scale))
+    slit = int(round(v.horizon - (b["height"] - 1.7 - v.eye) * scale))
     if r_lo <= slit <= r_hi and int(u / 1.1) % 2 == 0:
         ch[slit][sx] = "=" if lamp is None else "#"
         co[slit][sx] = CONCRETE if lamp is None else lamp
 
     # The door. Steel, shut most of the time, and blinding when it is not.
     if face == club["door"] and abs(u - club["u"]) < 0.8:
-        head = int(round(v.horizon - (2.3 - EYE_Y) * scale))
+        head = int(round(v.horizon - (2.3 - v.eye) * scale))
         for y in range(max(r_lo, head), r_hi + 1):
             ch[y][sx] = "#" if lamp is not None else "]"
             co[y][sx] = lamp if lamp is not None else CONCRETE
@@ -2009,8 +2040,8 @@ def draw_casino_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
     scale = v.fy / dist
     cas = b["casino"]
     trim = FLASH if v.flash > 0.35 else GOLD_DIM
-    roof = int(round(v.horizon - (b["height"] - EYE_Y) * scale))
-    foot = int(round(v.horizon + EYE_Y * scale))
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
 
     if edge:
         for y in range(r_lo, r_hi + 1):
@@ -2019,7 +2050,7 @@ def draw_casino_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
         return roof, None, foot, None, ()
 
     prev_roof, prev_awn, prev_foot, prev_k = cont[:4]
-    awning = int(round(v.horizon - (FLOOR_H - EYE_Y) * scale))
+    awning = int(round(v.horizon - (FLOOR_H - v.eye) * scale))
     facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "=",
                 roof_colour(b, dist, v.flash))
     facade_line(ch, co, sx, awning, prev_awn, r_lo, r_hi, "-", trim)
@@ -2047,7 +2078,7 @@ def draw_casino_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
     gold = tone_colour("near", 0.55)
 
     for f in range(int(b["height"] / FLOOR_H)):
-        y = int(round(v.horizon - ((f + 0.55) * FLOOR_H - EYE_Y) * scale))
+        y = int(round(v.horizon - ((f + 0.55) * FLOOR_H - v.eye) * scale))
         if y > r_hi or y + thick < r_lo:
             continue
         if letter_k is not None and f == sign_floor:
@@ -2089,8 +2120,8 @@ def draw_tree_column(ch, co, v, sx, dist, b, u, r_lo, r_hi):
     scale = v.fy / dist
     wob = (_mix(b["seed"], int(u * 2.5), 5) % 100) / 100.0
     top_y = b["height"] * (0.70 + 0.30 * wob)
-    crown = int(round(v.horizon - (top_y - EYE_Y) * scale))
-    under = int(round(v.horizon - (top_y * 0.34 - EYE_Y) * scale))
+    crown = int(round(v.horizon - (top_y - v.eye) * scale))
+    under = int(round(v.horizon - (top_y * 0.34 - v.eye) * scale))
     leaf = tone_colour("leaf", b["tone"])
     # A rig in a clearing throws its light up into the leaves around it, and
     # that is what you see first - long before the stack, the fire or anyone
@@ -2135,9 +2166,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
         # Lightning picks out every edge in the city at once, which is what
         # makes a flash read as a flash rather than as the screen blinking.
         trim = FLASH
-    roof = int(round(v.horizon - (b["height"] - EYE_Y) * scale))
-    awning = int(round(v.horizon - (FLOOR_H - EYE_Y) * scale))
-    foot = int(round(v.horizon + EYE_Y * scale))
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    awning = int(round(v.horizon - (FLOOR_H - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
 
     if edge:
         # A building corner. Solid, so it reads as a hard edge and nothing
@@ -2191,7 +2222,7 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     # which is what killed the first attempt at this months ago.
     bands = ()
     if d["band"]:
-        bands = tuple(int(round(v.horizon - (f * FLOOR_H - EYE_Y) * scale))
+        bands = tuple(int(round(v.horizon - (f * FLOOR_H - v.eye) * scale))
                       for f in range(1, storeys))
         for n, by in enumerate(bands):
             if r_lo - 2 <= by <= r_hi + 2:
@@ -2214,7 +2245,7 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     escape = (not lit) and fc["escape"] and 0.45 < frac < 0.8
 
     for f in range(storeys):
-        y = int(round(v.horizon - ((f + 0.55) * FLOOR_H - EYE_Y) * scale))
+        y = int(round(v.horizon - ((f + 0.55) * FLOOR_H - v.eye) * scale))
         if y > r_hi or y + thick < r_lo:
             continue
         if letter_k is not None and sign["floor"] == f:
@@ -2268,7 +2299,7 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
         # rows when you are stood right outside, and they come apart into
         # unrelated marks - the same reason the hung signs count rows.
         warm = tone_colour("warm", b["tone"])
-        base = int(round(v.horizon - (1.05 - EYE_Y) * scale))
+        base = int(round(v.horizon - (1.05 - v.eye) * scale))
         if r_lo <= base <= r_hi:
             ch[base][sx] = "="
             co[base][sx] = trim
@@ -2307,7 +2338,7 @@ def draw_walls(ch, co, v, now):
     for sx in range(width):
         rdx, rdz = v.ray(sx)
         cover = None
-        for n, (dist, i, j, f, u) in enumerate(cast(v, rdx, rdz)):
+        for n, (dist, i, j, f, u) in enumerate(cast(v, rdx, rdz, v.depth)):
             b = lot(i, j)
             top, base = wall_span(v, dist, b["height"])
             r_lo = max(0, top)
@@ -2880,7 +2911,7 @@ def reflect_river(ch, co, v, walls, now, wet):
         dist = walls[0][sx]
         if dist is None:
             dist = MAX_VIEW              # open sky over the water: still mirrors
-        drop = 2.0 * EYE_Y * v.fy / dist
+        drop = 2.0 * v.eye * v.fy / dist
         top = max(0, walls[3][sx])
         for r in range(0, v.horizon):
             glyph = ch[r][sx]
@@ -2933,10 +2964,14 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
     rdz1 = v.dz + v.plz
     inv = 1.0 / CELL
     ripple = wet > 0.45
+    # From a roof every row of ground on screen is further off than the street
+    # ever needs - at seventy units up the nearest is a hundred away - so the
+    # ground goes as far as the view does.
+    far = GROUND_FAR if v.eye < 10.0 else v.reach
 
     for y in range(v.horizon + 1, v.height):
-        d = EYE_Y * v.fy / (y - v.horizon)
-        if d > GROUND_FAR:
+        d = v.eye * v.fy / (y - v.horizon)
+        if d > far:
             continue
         wx = v.x + rdx0 * d
         wz = v.z + rdz0 * d
@@ -4702,6 +4737,219 @@ def draw_el(ch, co, v, walls, x0, x1, now, wet):
                       EMBER_HOT)
 
 
+def near_towers(v, reach):
+    """Sky-deck towers in front of you, for their beacons - the hash first,
+    because it throws out all but one cell in many for a multiply."""
+    n = int(reach / CELL) + 1
+    ci = int(v.x / CELL + BIG) - BIG
+    cj = int(v.z / CELL + BIG) - BIG
+    for i in range(ci - n, ci + n + 1):
+        for j in range(cj - n, cj + n + 1):
+            if _mix(i, j, 1907) % TOWER_ODDS or is_open(i, j):
+                continue
+            t = lot(i, j)["tower"]
+            if t is None:
+                continue
+            rx, rz = (i + 0.5) * CELL - v.x, (j + 0.5) * CELL - v.z
+            if rx * v.dx + rz * v.dz < -CELL:
+                continue
+            yield t
+
+
+def draw_tower_beacon(ch, co, v, walls, t, now, wet):
+    """A red light on the roof, blinking, and a mast under it - the thing you
+    find a sky deck by from across town."""
+    x, z = (t["i"] + 0.5) * CELL, (t["j"] + 0.5) * CELL
+    for k in range(5):
+        put_point(ch, co, v, walls, x, t["height"] + k * 0.8, z, "|", CONCRETE)
+    on = int(now * 1.3 + t["i"]) % 2 == 0
+    put_lit(ch, co, v, walls, x, t["height"] + 4.4, z, "*" if on else ".",
+            ROU_RED if on else CONCRETE, max(wet, 0.3), now)
+
+
+def draw_lobby(ch, co, v, walls, t, now):
+    """The lit lobby door and SKY DECK over it, in screen space so it can be
+    read - the casino marquee's reasoning, at a smaller size."""
+    i, j, f = t["i"], t["j"], t["door"]
+    w = face_point(i, j, f, CELL * 0.5, 0.15, 3.6)
+    pr = v.project(w[0], w[1], w[2])
+    if pr is None:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    if dist > 60.0:
+        return
+    word = "SKY DECK"
+    for k, c in enumerate(word):
+        put_cell(ch, co, v, walls, sx - len(word) // 2 + k, sy, dist, c, GOLD)
+    door = face_point(i, j, f, CELL * 0.5, 0.2, 0.0)
+    blit_sprite(ch, co, v, walls, ["[|]", "[|]", "[|]"], door[0], door[2],
+                0.0, 2.4, 1.4, BULB)
+
+
+LIFT_CAR = [
+    ".-------------------.",
+    "|                   |",
+    "|                   |",
+    "|                   |",
+    "|                   |",
+    "|                   |",
+    "|                   |",
+    "|                   |",
+    "|                   |",
+    "'-------------------'",
+]
+
+
+def lift_times(floors):
+    """(doors closed, arrived, doors open) as seconds from stepping in."""
+    travel = 0.6 + floors * LIFT_FLOOR
+    return LIFT_DOORS, LIFT_DOORS + travel, LIFT_DOORS * 2 + travel
+
+
+def render_lift(up, floors, t, width, height, now):
+    """Inside the lift, facing the doors.
+
+    The doors slide shut from the sides, the indicator over them counts the
+    floors with the arrow lit, the shaft goes by through the gap at the
+    edge of the doors - floor slabs passing the other way to the ride - and
+    the gauge on the wall shows the car climbing its shaft. Then a ding, and
+    the doors open on wherever you were going."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    shut, there, opened = lift_times(floors)
+    if t < shut:
+        closed = t / shut                         # 0 open .. 1 shut
+    elif t < there:
+        closed = 1.0
+    else:
+        closed = max(0.0, 1.0 - (t - there) / LIFT_DOORS)
+    ride = min(1.0, max(0.0, (t - shut) / max(1e-6, there - shut)))
+    ease = 0.5 - 0.5 * math.cos(ride * math.pi)
+    floor = 1 + int(round(ease * (floors - 1))) if up else \
+        floors - int(round(ease * (floors - 1)))
+    cx = width // 2
+
+    if width < 30 or height < 14:
+        _text(ch, co, height // 2, 1, "in the lift  %s %d" % ("^" if up else "v",
+                                                              floor), GOLD)
+        return ch, co
+
+    # The indicator over the doors.
+    arrow = ("^" if up else "v") if 0.0 < ride < 1.0 and int(now * 4) % 2 == 0 \
+        else " "
+    panel = "[ %s %3d ]" % (arrow, floor)
+    _text(ch, co, 1, cx - len(panel) // 2, panel, ROU_RED)
+    if t >= there and t < there + 1.2:
+        _text(ch, co, 1, cx + len(panel) // 2 + 2, "*ding*", GOLD)
+
+    # The doors: two brushed-steel panels meeting in the middle.
+    top, bot = 3, height - 3
+    half = int((width // 2 - 4) * closed)
+    left, right = 3, width - 4
+    for y in range(top, bot + 1):
+        _text(ch, co, y, left - 1, "#", CONCRETE)
+        _text(ch, co, y, right + 1, "#", CONCRETE)
+    _text(ch, co, top - 1, left - 1, "#" * (right - left + 3), CONCRETE)
+    _text(ch, co, bot + 1, left - 1, "#" * (right - left + 3), CONCRETE)
+    # What is behind the doors: the shaft while moving, the lobby or the
+    # roof either end of the ride.
+    for y in range(top, bot + 1):
+        for x in range(left, right + 1):
+            if left + half <= x <= right - half:
+                if 0.0 < ride < 1.0:
+                    # Floor slabs going past the gap, the other way.
+                    slab = (y + int(ease * floors * 6) * (1 if up else -1)) % 6
+                    ch[y][x] = "=" if slab == 0 else ("|" if x in (left + half,
+                                                                    right - half)
+                                                       else " ")
+                    co[y][x] = CONCRETE
+                elif t >= there and up:
+                    ch[y][x] = "." if _mix(x, y, 1911) % 9 == 0 else " "
+                    co[y][x] = STAR                  # sky, through the doors
+                else:
+                    ch[y][x] = "_" if y == bot else " "
+                    co[y][x] = GOLD_DIM              # the lobby floor
+            else:
+                ch[y][x] = "|" if x in (cx - 1, cx) else ("." if (x + y) % 7 == 0
+                                                         else " ")
+                co[y][x] = CURB
+    # The gauge: the car in its shaft, on the wall to the left of the doors.
+    if left > 0 and height > 16:
+        gy0, gy1 = top, bot
+        car = gy1 - int(round(ease * (gy1 - gy0))) if up else \
+            gy0 + int(round(ease * (gy1 - gy0)))
+        for y in range(gy0, gy1 + 1):
+            _text(ch, co, y, 0, "|" if y != car else "#", GOLD if y == car else BARK)
+    say = ("going up" if up else "going down") if ride < 1.0 else (
+        "the roof" if up else "the lobby")
+    _text(ch, co, height - 1, cx - len(say) // 2, say, GOLD_DIM)
+    return ch, co
+
+
+def draw_roof_ledge(ch, co, v, walls, t, now, wet):
+    """Your own roof: a parapet round the edge at waist height, a water tower
+    on one corner and the mast with its red light on another. Drawn in world
+    space, so it turns with you and frames whichever way you look."""
+    h = t["height"]
+    i, j = t["i"], t["j"]
+    x0, z0 = i * CELL, j * CELL
+    x1, z1 = x0 + CELL, z0 + CELL
+    # The parapet is solved per screen column rather than drawn as points:
+    # at arm's length a point every quarter-unit lands five columns from the
+    # next, and the rows between came out as stripes. Each column's ray leaves
+    # the roof square somewhere; the coping is at that distance, and below it
+    # the wall hides whatever the city put there.
+    cap = h + 1.0
+    for sx in range(v.width):
+        rdx, rdz = v.ray(sx)
+        t = 1e9
+        for d, lo, hi, p in ((rdx, x0, x1, v.x), (rdz, z0, z1, v.z)):
+            if d > 1e-9:
+                t = min(t, (hi - p) / d)
+            elif d < -1e-9:
+                t = min(t, (lo - p) / d)
+        if t <= 0.05 or t > 50.0:
+            continue
+        top = int(round(v.horizon - (cap - v.eye) * v.fy / t))
+        for y in range(max(0, top), v.height):
+            if y == top:
+                ch[y][sx], co[y][sx] = "=", ROOF
+            elif (y - top) % 3 == 0:
+                ch[y][sx], co[y][sx] = "-", CONCRETE        # the courses
+            elif (y - top) % 6 in (1, 2) and (sx + (y - top) // 3 * 2) % 5 == 0:
+                ch[y][sx], co[y][sx] = "|", CONCRETE        # and the joints
+            else:
+                ch[y][sx], co[y][sx] = " ", 0
+    # The water tower, on legs, in the corner the mast is not in.
+    wx, wz = x0 + 1.0, z0 + 1.0
+    for y in (h + 0.3, h + 1.0):
+        for dx, dz in ((-0.4, -0.4), (0.4, -0.4), (-0.4, 0.4), (0.4, 0.4)):
+            put_point(ch, co, v, walls, wx + dx, y, wz + dz, "|", BARK)
+    for y in (h + 1.6, h + 2.2, h + 2.8):
+        for a in range(8):
+            ang = a * math.tau / 8.0
+            put_point(ch, co, v, walls, wx + 0.6 * math.cos(ang), y,
+                      wz + 0.6 * math.sin(ang), "#", BARK)
+    put_point(ch, co, v, walls, wx, h + 3.3, wz, "^", BARK)
+    mx, mz = x1 - 0.8, z1 - 0.8
+    for y in range(6):
+        put_point(ch, co, v, walls, mx, h + 0.5 + y * 0.9, mz, "|", CONCRETE)
+    on = int(now * 1.3 + i) % 2 == 0
+    put_lit(ch, co, v, walls, mx, h + 5.8, mz, "*" if on else ".",
+            ROU_RED if on else CONCRETE, max(wet, 0.3), now)
+
+
+def roof_view(t, yaw, width, height):
+    """The camera on a sky-deck roof: up at the parapet on whichever side you
+    are facing, so you look over it and down into the street - in the middle
+    of the roof the parapet hides everything nearer than the next district.
+    Turning walks you round the inside of it."""
+    x = (t["i"] + 0.5) * CELL + math.sin(yaw) * ROOF_STEP
+    z = (t["j"] + 0.5) * CELL + math.cos(yaw) * ROOF_STEP
+    return View(x, z, yaw, width, height, eye=t["height"] + 1.7,
+                reach=ROOF_REACH)
+
+
 def draw_props(ch, co, v, walls, now, wet):
     """Everything hanging off a facade or standing in front of one, drawn
     farthest first so the near ones win."""
@@ -4713,6 +4961,9 @@ def draw_props(ch, co, v, walls, now, wet):
             nx, nz = FACES[f]
             if not is_open(i + nx, j + nz):
                 continue
+            if b["tower"] is not None and f == b["tower"]["door"]:
+                w = face_point(i, j, f, CELL * 0.5, 0.3, 0.0)
+                props.append((_d2(v, w), "lobby", b["tower"], w, (nx, nz)))
             if b["casino"] is not None:
                 # It has to be obvious from down the street what this is.
                 if f == b["casino"]["door"]:
@@ -4775,6 +5026,8 @@ def draw_props(ch, co, v, walls, now, wet):
     for _, kind, s, world, normal in props:
         if kind == "noren":
             draw_noren(ch, co, v, walls, world, normal, now)
+        elif kind == "lobby":
+            draw_lobby(ch, co, v, walls, s, now)
         elif kind == "overdoor":
             tone = s[1]["tone"] if s[1] else 0.44
             draw_over_door(ch, co, v, walls, s[0], world, now, tone)
@@ -5338,6 +5591,11 @@ def render_street(v, now):
     draw_walkers(ch, co, v, walls, now, wet)
     for ex0, ex1 in near_els(v, EL_REACH):
         draw_el(ch, co, v, walls, ex0, ex1, now, wet)
+    for t_ in near_towers(v, 150.0 if v.eye < 10.0 else ROOF_REACH):
+        if v.roof is None or t_["i"] != v.roof["i"] or t_["j"] != v.roof["j"]:
+            draw_tower_beacon(ch, co, v, walls, t_, now, wet)
+    if v.roof is not None:
+        draw_roof_ledge(ch, co, v, walls, v.roof, now, wet)
     for ci_, cj_ in near_dock_cranes(v, 95.0):
         draw_dock_crane(ch, co, v, walls, ci_, cj_, now, wet)
     for prun, pend in near_piers(v, 95.0):
@@ -5859,7 +6117,7 @@ def venue_at(x, z):
             if is_open(i, j):
                 continue
             b = lot(i, j)
-            for kind in ("casino", "club"):
+            for kind in ("casino", "club", "tower"):
                 v = b[kind]
                 if v is None:
                     continue
@@ -6046,6 +6304,7 @@ CHEAT_PLACES = [
     ("0", "inside the club", "clubdoor"),
     ("v", "a ramen counter", "ramen"),
     ("=", "under the el", "el"),
+    ("^", "a sky deck", "tower"),
     ("g", "the woods", "woods"),
     ("x", "the woods rave", "rave"),
     ("e", "the lake", "lake"),
@@ -6366,6 +6625,26 @@ def _doorway(x, z, salt, key):
     return None
 
 
+def _tower_spot(x, z):
+    """Outside the lobby of the nearest sky deck, a few steps back, facing
+    the door: one step forward and you are in the lift."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    for i, j in _rings(ci, cj, CHEAT_RINGS):
+        if _mix(i, j, 1907) % TOWER_ODDS or is_open(i, j):
+            continue
+        t = lot(i, j)["tower"]
+        if t is None:
+            continue
+        px, _, pz = face_point(i, j, t["door"], t["u"], CASINO_REACH + 2.4, 0.0)
+        if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+            continue
+        if can_stand(px, pz):
+            nx, nz = FACES[t["door"]]
+            return px, pz, math.atan2(-nx, -nz)
+    return None
+
+
 def _el_spot(x, z):
     """Under the elevated, on the pavement by a column, looking along it.
     The next press goes to the next elevated avenue over."""
@@ -6424,6 +6703,8 @@ def find_place(x, z, kind):
         return _ramen_spot(x, z)
     if kind == "el":
         return _el_spot(x, z)
+    if kind == "tower":
+        return _tower_spot(x, z)
     if kind in ("woods", "rave", "lake"):
         return _woods_spot(x, z, kind)
     if kind in ("bank", "pier", "bridge", "leaner", "carnival", "grand",
@@ -6759,6 +7040,9 @@ ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
                 " blackjack  -  s walks out  -  q quit ")
 RAVE_HUD = " inside the club at %d,%d  -  s walks back out  -  q quit "
 RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
+LIFT_HUD = " in the lift, going %s "
+ROOF_HUD = (" on the roof, %d floors up, %s  -  ad look round  -  s takes the"
+            " lift down  -  q quit ")
 
 
 def main(stdscr):
@@ -6783,6 +7067,8 @@ def main(stdscr):
     slot = Slot(purse)          # the machine beside the wheel
     table = Blackjack(purse)    # and the table on the other side
     seated = None               # (which ramen counter, since when)
+    lift = None                 # riding a sky-deck lift: {"up", "t0", "t"}
+    on_roof = None              # the tower whose roof you are standing on
     wheel_at = 0.0
     cheats = False              # is the cheat panel up
     note = ""                   # and what did it last do
@@ -6881,6 +7167,14 @@ def main(stdscr):
                 table.hit(now)
             elif wheel is not None and key in (ord("k"), ord("K")):
                 table.stand(now)
+            elif lift is not None:
+                pass                            # nothing to do but ride
+            elif on_roof is not None and key in (curses.KEY_DOWN, ord("s"),
+                                                 ord("S")):
+                lift = {"up": False, "t0": now, "t": on_roof}
+            elif on_roof is not None and key in (curses.KEY_UP, ord("w"),
+                                                 ord("W")):
+                pass                            # the parapet is right there
             elif street:
                 if key in (curses.KEY_UP, ord("w"), ord("W")):
                     fwd = WALK * (RUN_MULTIPLIER if key == ord("W") else 1.0)
@@ -6930,6 +7224,11 @@ def main(stdscr):
             if now - last["t"] > KEY_GRACE:
                 spin = 0.0
 
+        if lift is not None or on_roof is not None:
+            fwd = side = 0.0            # on the roof you can only look round
+            autopilot = False
+            if lift is not None:
+                spin = 0.0
         sky_x += sky_v * frame_time
         yaw += spin * frame_time
         # Move on each axis in turn, so running into a wall at an angle slides
@@ -6949,6 +7248,28 @@ def main(stdscr):
         # this city. Walk back out and the wheel goes away; stand there and it
         # deals you another, because that is what a casino is for.
         venue = venue_at(cam_x, cam_z) if street else None
+        # The sky deck: walking into the lobby is stepping into the lift.
+        if lift is not None:
+            venue = None
+            floors = max(2, int(lift["t"]["height"] / FLOOR_H))
+            if now - lift["t0"] >= lift_times(floors)[2]:
+                if lift["up"]:
+                    on_roof = lift["t"]
+                else:
+                    t_ = lift["t"]
+                    ox, _, oz = face_point(t_["i"], t_["j"], t_["door"],
+                                           t_["u"], CASINO_REACH + 1.8, 0.0)
+                    if can_stand(ox, oz):
+                        cam_x, cam_z = ox, oz
+                    nx_, nz_ = FACES[t_["door"]]
+                    yaw = math.atan2(nx_, nz_)       # facing out, to the street
+                    on_roof = None
+                lift = None
+        elif on_roof is not None:
+            venue = None
+        elif venue is not None and venue[0] == "tower":
+            lift = {"up": True, "t0": now, "t": venue[1]}
+            venue = None
         if venue is None or venue[0] != "ramen":
             seated = None               # stood up: the next visit is a new bowl
         if venue is None or venue[0] != "casino":
@@ -6960,7 +7281,18 @@ def main(stdscr):
 
         # --- draw ------------------------------------------------------
         height, width = stdscr.getmaxyx()
-        if wheel is not None:
+        if lift is not None:
+            floors = max(2, int(lift["t"]["height"] / FLOOR_H))
+            ch, co = render_lift(lift["up"], floors, now - lift["t0"], width,
+                                 height, now)
+            hud = LIFT_HUD % ("up" if lift["up"] else "down")
+        elif on_roof is not None:
+            v = roof_view(on_roof, yaw, width, height)
+            v.roof = on_roof
+            ch, co, wet = render_street(v, now)
+            hud = ROOF_HUD % (int(on_roof["height"] / FLOOR_H),
+                              weather_word(now, wet))
+        elif wheel is not None:
             slot.settle(now)
             table.update(now)
             ch, co = render_casino_room(wheel, width, height, now, slot, table)
@@ -6994,7 +7326,8 @@ def main(stdscr):
         elif now - note_at < 4.0 and note:
             hud = hud.rstrip() + "  " + note.strip() + " "
 
-        wide = v.wide if (street and wheel is None and venue is None) else ()
+        wide = v.wide if (street and wheel is None and venue is None
+                          and lift is None) else ()
         stdscr.erase()
         for y in range(height):
             row_ch, row_co = ch[y], co[y]
