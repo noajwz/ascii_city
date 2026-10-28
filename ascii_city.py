@@ -2113,6 +2113,9 @@ def draw_tree_column(ch, co, v, sx, dist, b, u, r_lo, r_hi):
     return crown, None, None, None, ()
 
 
+TOWER_GRID = 20.0       # buildings this tall show their dark windows as a grid
+
+
 def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
                      edge, cont, lit, now):
     """One screen column of one facade. Returns what the caller needs to keep
@@ -2173,6 +2176,13 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     colour = wall_colour(b, dist, lit, v.flash)
     thick = max(1, min(5, int(FLOOR_H * scale * 0.45)))   # windows have height
     density = b["density"] if lit else b["density"] * 0.35
+    # The colour a dark window is drawn in, or None for no dot: only on the
+    # tall ones - a low building is outlined by its own roof against the sky,
+    # a tower's roof is off the top of the screen - on faces near enough to
+    # see the grid of, and fogged out with everything else.
+    unlit = (tone_colour("dark", b["tone"])
+             if b["height"] >= TOWER_GRID and bay_cols > 1.2 and dist < 90.0
+             else None)
     storeys = int(b["height"] / FLOOR_H)
 
     # A line at every storey: balconies in Chinatown and the housing, ribbing
@@ -2227,12 +2237,22 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
             # Keyed on the block, not the cell, or the lit floor is five
             # metres of one and stops reading as a floor of a tower.
             if _mix(b["block"], f, 3) % 11:
+                if unlit is not None and r_lo <= y <= r_hi:
+                    ch[y][sx], co[y][sx] = ".", unlit
                 continue
             glyph, attr = d["glyphs"][0], colour
         else:
             m = _mix(b["seed"] + face, f, bay)
             if (m & 0xFFFF) / 65535.0 >= density:
-                continue                      # a dark, unlit window
+                # A dark window is still a window. Drawn as nothing, a tower
+                # with few lights on was a black face with scattered points -
+                # which is exactly what the night sky is, and the two could
+                # not be told apart ("hard to make out a skyscraper against
+                # the night sky"). A faint dot on the window grid gives the
+                # face the regularity stars never have.
+                if unlit is not None and r_lo <= y <= r_hi:
+                    ch[y][sx], co[y][sx] = ".", unlit
+                continue
             glyph, attr = b["glyphs"][(m >> 17) & 1], colour
         for dy in range(thick):
             yy = y + dy

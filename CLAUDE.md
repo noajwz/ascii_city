@@ -95,6 +95,14 @@ there is no fisheye to correct at the edges.
   than dropping straight into the fog, because the rooflines you can actually see are the
   middle-distance ones. And no district's roof glyph may be the same mark as its own banding, which
   is asserted: Chinatown's `~` upturned eave exists because its balconies were already `=`.
+- **A tower's dark windows are drawn, faintly.** Reported: "hard to make out a skyscraper because
+  of the night sky". Measured first, and it was not the outline — 87% of the cells where a tower
+  meets the sky already had a corner bar. It was the face: an unlit window was a blank cell, so a
+  tower with few lights on was black with scattered points, which is exactly what the sky is.
+  Unlit windows on buildings `TOWER_GRID` tall and up are now a `.` in the darkest grey, on the
+  window grid — regular, which stars never are. Only on the tall ones: a low building is outlined
+  by its own roof, and putting the same grey dots on everything made the districts measurably
+  more alike (the docks/Chinatown/financial pairs dropped under their 0.40 bar).
 - **Three lines make a building read as a building**: the roof, the awning over the shopfronts, and
   the footing where the wall meets the ground. The footing is the one that does the most work and
   was the last to arrive — with enough neon and lit windows in frame the eye stops being able to
