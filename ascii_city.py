@@ -3003,8 +3003,12 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                         glyph, attr = ".", STREET
                     else:
                         continue
-                elif _mix(int(x * 3.0), int(z * 3.0), 7) & 7 == 0:
-                    glyph, attr = ".", STREET
+                elif fx_ < 0.5 and not bridge_at(i - 1, j):
+                    glyph, attr = "=", CURB            # the deck's kerb
+                elif CELL - fx_ < 0.5 and not bridge_at(i + 1, j):
+                    glyph, attr = "=", CURB
+                elif _mix(int(x * 3.0), int(z * 3.0), 7) % 3 == 0:
+                    glyph, attr = ".", CURB            # paving, not water
                 else:
                     continue
             elif wet_cell:
@@ -3980,6 +3984,8 @@ def draw_grand_bridge(ch, co, v, walls, i, j, now, wet):
     za, zb = z0 - 0.5 * CELL, z1 + 0.5 * CELL           # the anchorages
     zt1, zt2 = za + (zb - za) * 0.27, za + (zb - za) * 0.73
     blink = int(now * 1.1) % 2 == 0
+    draw_bridge_body(ch, co, v, walls, xa + TOWER_OUT, xb - TOWER_OUT, z0, z1,
+                     arches=False)
 
     for x in (xa, xb):
         # The main cable, a bulb every few units along it.
@@ -4004,12 +4010,6 @@ def draw_grand_bridge(ch, co, v, walls, i, j, now, wet):
                 put_point(ch, co, v, walls, x, y, zf, "|", CONCRETE)
                 y += 1.1
             zf += 2.4
-        # The railing along the deck, at the deck's own edge.
-        zf = z0
-        while zf <= z1:
-            put_point(ch, co, v, walls, x - TOWER_OUT if x == xa else x + TOWER_OUT,
-                      0.95, zf, "-", CURB)
-            zf += 0.75
 
     # The towers.
     for zt in (zt1, zt2):
@@ -4315,6 +4315,54 @@ def draw_bridge_ends(ch, co, v, walls, i, j, now, wet):
             put_lit(ch, co, v, walls, x, 4.5, z, "o", BULB, max(wet, 0.3), now)
 
 
+BRIDGE_ARCH = 7.5       # world units between the piers under a footbridge
+
+
+def draw_bridge_body(ch, co, v, walls, xa, xb, z0, z1, arches=True):
+    """What makes a bridge read as a thing standing over the water rather
+    than as more water: a solid stone parapet down each side with a pale
+    coping on top, and under it the arches and piers going down into the
+    river.
+
+    It used to be a thin grey rail at knee height over a deck of scattered
+    dots, and from the bank it was lost in the ripples - reported as "it
+    blends in with the water". Everything here is a structure glyph in a
+    structure colour, so the reflection leaves it alone and it stays a hard
+    band across the river with the lamps' light lying under it."""
+    for x in (xa, xb):
+        z = z0 - 0.5
+        while z <= z1 + 0.5:
+            put_point(ch, co, v, walls, x, 1.05, z, "=", ROOF)       # coping
+            put_point(ch, co, v, walls, x, 0.7, z, "#", CURB)        # parapet
+            put_point(ch, co, v, walls, x, 0.35, z, "#", CURB)
+            put_point(ch, co, v, walls, x, 0.02, z, "_", ROOF)       # the deck's edge
+            z += 0.5
+        if not arches:
+            # A suspension deck hangs from its cables: a girder under it, no
+            # arches - a solid band from the deck down to the steel.
+            z = z0 - 0.5
+            while z <= z1 + 0.5:
+                put_point(ch, co, v, walls, x, -0.4, z, "#", CONCRETE)
+                put_point(ch, co, v, walls, x, -0.8, z, "=", CURB)
+                z += 0.5
+            continue
+        # The arches: from pier to pier, the soffit rising to the crown.
+        n = max(1, int(round((z1 - z0) / BRIDGE_ARCH)))
+        span = (z1 - z0) / n
+        for k in range(n + 1):
+            zp = z0 + k * span
+            for y in (-0.15, -0.5, -0.85):
+                put_point(ch, co, v, walls, x, y, zp, "#", CURB)      # a pier
+        for k in range(n):
+            za = z0 + k * span
+            for s in range(1, 12):
+                t = s / 12.0
+                y = -0.9 + 0.8 * math.sin(math.pi * t)
+                put_point(ch, co, v, walls, x, y, za + t * span,
+                          "-" if 0.3 < t < 0.7 else ("/" if t < 0.5 else "\\"),
+                          CURB)
+
+
 def draw_bridge(ch, co, v, walls, i, j, now, wet):
     """A footbridge worth crossing: a railing down each side, warm lamps on
     posts along it, and a string of small lights slung between the lamps.
@@ -4326,15 +4374,9 @@ def draw_bridge(ch, co, v, walls, i, j, now, wet):
     quiet. The festoon between them sags the way the yokocho lanterns do, for
     the same reason: a straight line of dots reads as a fence."""
     xa, xb, z0, z1 = bridge_edges(i)
+    draw_bridge_body(ch, co, v, walls, xa, xb, z0, z1)
     for side in (0, 1):
         x = xb if side else xa
-        # The railing: a post every so often and a rail along the top.
-        z = z0
-        while z <= z1:
-            put_point(ch, co, v, walls, x, 0.95, z, "-", CURB)
-            if int(z / 1.5) % 2 == 0:
-                put_point(ch, co, v, walls, x, 0.5, z, "|", CURB)
-            z += 0.75
         # The lamps, staggered so the two sides are not in step.
         lamps = []
         z = z0 + (BRIDGE_LAMP_GAP * 0.5 if side else 0.0)
