@@ -29,7 +29,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
 - **Weather that runs itself** — rain that comes and goes, storms that are rare, violent, and
   the only thing that brings lightning, and rarer still, snow that settles on the whole city.
 - **A night sky with a different character every night** — clarity, the moon's phase, whether the
-  milky way is up, the odd meteor. Once in a great while, something else entirely.
+  milky way is up, the odd meteor, cloud coming and going. Now and then a night ends in a dawn, the
+  city switching off sign by sign as the sky pales. Once in a great while, something else entirely.
 - **Places you can go into** — a casino with a roulette wheel that spins honestly, a slot machine
   you play for chips and a blackjack table that deals straight, a club with a rave going
   on, ramen counters down the lit lanes where you can sit and wait for your bowl, a cinema
