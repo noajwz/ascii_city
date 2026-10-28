@@ -98,6 +98,19 @@ STORM_SLOT = 210.0     # seconds per slot in which a storm might blow up
 STORM_ODDS = 6         # and only one slot in this many has one
 STORM_SHORT = 35.0     # how long the briefest storm lasts
 STORM_LONG = 80.0      # and the longest
+
+# --- snow ---
+# Rarer than a storm. When it comes it is the whole sky's weather - no rain,
+# the streets dry, the stars gone - and it settles: the pavements, the roads,
+# every roofline and the trees go white while it falls, and it takes a few
+# minutes to melt once it has stopped.
+SNOW_SLOT = 300.0      # seconds per slot in which it might snow
+SNOW_ODDS = 24         # one slot in this many: rarer than a storm
+SNOW_SHORT = 120.0
+SNOW_LONG = 280.0
+SNOW_SETTLE = 90.0     # seconds of snowfall to cover everything
+SNOW_MELT = 240.0      # and to be gone again afterwards
+SNOW_SPEED = 1.6       # how fast a flake falls, world units a second
 STRIKE_EVERY = 2.8     # seconds between strikes once one is overhead
 
 # --- the club, and the casino across town ---
@@ -344,7 +357,7 @@ SIGN_WORDS = [
 PALETTES = {}      # e.g. {"near": [3, 7, 12, ...]} -> lists of curses pair numbers
 NEON = []          # [(lit, unlit), ...] - one entry per neon tube colour
 STAR = STREET = HUD = CURB = HAZE = SMOKE = EMBER = EMBER_HOT = 0
-FIREFLY = EYES = 0
+FIREFLY = EYES = SNOW = 0
 RAIN = RAIN_FAR = BULB = BULB_DIM = FLASH = CONCRETE = 0
 GOLD = GOLD_DIM = ROU_RED = ROU_BLACK = ROU_GREEN = LANE = 0
 GRASS = BARK = ROOF = 0
@@ -355,7 +368,7 @@ def init_colors():
     global PALETTES, NEON, STAR, STREET, HUD, CURB, HAZE, SMOKE, EMBER
     global EMBER_HOT, RAIN, RAIN_FAR, BULB, BULB_DIM, FLASH, CONCRETE
     global GOLD, GOLD_DIM, ROU_RED, ROU_BLACK, ROU_GREEN, LANE, GRASS, BARK
-    global FIREFLY, EYES
+    global FIREFLY, EYES, SNOW
     global ROOF, STAR_DIM, STAR_WARM, STAR_COLD, MOON, MOON_DIM, BAND
 
     curses.start_color()
@@ -390,7 +403,7 @@ def init_colors():
                   "rou_green": 46, "lane": 250, "grass": 22, "bark": 58,
                   "roof": 252, "star_dim": 244, "star_warm": 223,
                   "star_cold": 153, "moon": 231, "moon_dim": 250,
-                  "band": 60, "firefly": 118, "eyes": 190}
+                  "band": 60, "firefly": 118, "eyes": 190, "snow": 255}
         attrs = {}
     else:
         # 8-colour fallback: bold = the "bright" version of a colour.
@@ -426,7 +439,8 @@ def init_colors():
                   "star_warm": curses.COLOR_YELLOW,
                   "star_cold": curses.COLOR_CYAN, "moon": curses.COLOR_WHITE,
                   "moon_dim": curses.COLOR_WHITE, "band": curses.COLOR_BLUE,
-                  "firefly": curses.COLOR_GREEN, "eyes": curses.COLOR_YELLOW}
+                  "firefly": curses.COLOR_GREEN, "eyes": curses.COLOR_YELLOW,
+                  "snow": curses.COLOR_WHITE}
         attrs = {"near": curses.A_BOLD}
 
     pair = 1
@@ -484,6 +498,7 @@ def init_colors():
     MOON_DIM = made["moon_dim"]
     FIREFLY = made["firefly"] | curses.A_BOLD
     EYES = made["eyes"]
+    SNOW = made["snow"] | curses.A_BOLD
     BAND = made["band"]
 
 
@@ -786,6 +801,35 @@ def draw_skyline_rain(ch, co, cam_x, water, now, wet, flash):
                     RAIN if yy > water - 6 else RAIN_FAR)
 
 
+def draw_skyline_snow(ch, co, cam_x, water, tops, now):
+    """Snow across the vista - slow, swaying, locked to the world - and lying
+    white along the top of every building on the far bank."""
+    cover = snow_cover(now)
+    width = len(ch[0])
+    if cover > 0.35:
+        for x in range(width):
+            y = tops[x]
+            if 0 <= y < water and ch[y][x] != " ":
+                co[y][x] = SNOW
+    fall = snowfall(now)
+    if fall < 0.03:
+        return
+    height = len(ch)
+    span = height + 4
+    base = int(cam_x)
+    for wx in range(base - 2, base + width + 2):
+        for salt in (913, 919, 929):
+            m = _mix(wx, salt, 7)
+            if (m & 255) > fall * 120:
+                continue
+            phase = ((m >> 8) & 255) / 256.0
+            y = int((now * 2.2 + phase * span) % span) - 2
+            x = wx - base + int(round(1.5 * math.sin(now * 0.7 + phase * 9.0)))
+            if 0 <= y < height and 0 <= x < width and ch[y][x] == " ":
+                ch[y][x] = "*" if m >> 17 & 3 == 0 else "."
+                co[y][x] = SNOW
+
+
 def draw_skyline_el(ch, co, cam_x, ground, tops, now):
     """The elevated from across the water: a dotted line of track running
     across in front of the middle layer, and now and then a train along it -
@@ -855,7 +899,7 @@ def render_skyline(cam_x, width, height, now):
                     if roof < tops[x]:
                         tops[x] = roof
 
-    draw_stars(ch, co, cam_x, ground, wet, now, tops)
+    draw_stars(ch, co, cam_x, ground, max(wet, snowfall(now) * 0.8), now, tops)
     draw_skyline_el(ch, co, cam_x, ground, tops, now)
 
     draw_flash_sky(ch, co, water, flash)
@@ -870,6 +914,7 @@ def render_skyline(cam_x, width, height, now):
     reflect(ch, co, water, now, wet, flash)
     draw_water(ch, co, water, now, wet)
     draw_skyline_rain(ch, co, cam_x, water, now, wet, flash)
+    draw_skyline_snow(ch, co, cam_x, water, tops, now)
     return ch, co
 
 
@@ -1773,6 +1818,8 @@ class View:
         self.water = set()      # cells the river was drawn into
         self.wet = 0.0          # how hard it is raining, 0..1
         self.roof = None        # the sky-deck tower you are standing on, if any
+        self.snow = 0.0         # how hard it is snowing
+        self.cover = 0.0        # and how much is lying
         self.flash = 0.0        # how bright the lightning is this instant
 
     def ray(self, sx):
@@ -1889,7 +1936,7 @@ def wall_span(v, dist, height):
             int(math.ceil(v.horizon + v.eye * scale)))
 
 
-def roof_colour(b, dist, flash=0.0):
+def roof_colour(b, dist, flash=0.0, cover=0.0):
     """A roofline is the edge of the building against the sky, and it was
     getting the same near-black trim as every other horizontal line on the
     facade - the awning, and the balconies at every storey. On a tall building
@@ -1902,6 +1949,8 @@ def roof_colour(b, dist, flash=0.0):
     the footing and would have the top of a building drawn the same as the
     ground. Far ones still fog out, or every roofline in the city would read as
     equally close."""
+    if cover > 0.35:
+        return SNOW                     # snow lying along every roofline
     if flash > 0.35:
         return FLASH
     if dist < 60.0:
@@ -1990,7 +2039,7 @@ def draw_club_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge, cont,
         return roof, None, foot, None, ()
 
     facade_line(ch, co, sx, roof, cont[0], r_lo, r_hi, "=",
-                roof_colour(b, dist, v.flash))
+                roof_colour(b, dist, v.flash, v.cover))
     facade_line(ch, co, sx, foot, cont[2], r_lo, r_hi, "_", CURB)
 
     # Bare concrete. Speckled rather than filled, so it reads as a mass with
@@ -2052,7 +2101,7 @@ def draw_casino_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
     prev_roof, prev_awn, prev_foot, prev_k = cont[:4]
     awning = int(round(v.horizon - (FLOOR_H - v.eye) * scale))
     facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "=",
-                roof_colour(b, dist, v.flash))
+                roof_colour(b, dist, v.flash, v.cover))
     facade_line(ch, co, sx, awning, prev_awn, r_lo, r_hi, "-", trim)
 
     # Bulbs along the roof and along the canopy over the door.
@@ -2137,6 +2186,11 @@ def draw_tree_column(ch, co, v, sx, dist, b, u, r_lo, r_hi):
         if _mix(sx, y, 11) % 100 < 64:
             ch[y][sx] = "&%*#"[_mix(sx, y, 13) % 4]
             co[y][sx] = leaf
+            # Snow sits on the top of the canopy first, then works down.
+            if v.cover > 0.2 and (_mix(sx, y, 19) % 100
+                                  < v.cover * (70 - 40 * (y - crown)
+                                               / max(1, under - crown))):
+                co[y][sx] = SNOW
     for y in range(max(r_lo, under + 1), r_hi + 1):
         if _mix(sx, y, 17) % 5 == 0:
             ch[y][sx] = "|"
@@ -2182,7 +2236,7 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
 
     prev_roof, prev_awn, prev_foot, prev_k, prev_bands = cont
     facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, d["roof"],
-                roof_colour(b, dist, v.flash))
+                roof_colour(b, dist, v.flash, v.cover))
     if lit:                       # an alley has no shopfronts to put one over
         facade_line(ch, co, sx, awning, prev_awn, r_lo, r_hi, "-", trim)
 
@@ -2539,7 +2593,7 @@ def draw_sky(ch, co, v, walls, wet, now):
     n = night(now)
     # Cloud takes the sky away gradually rather than all at once at a
     # threshold, so a night can be half lost behind it.
-    clear = n["clarity"] * max(0.0, 1.0 - wet / 0.55)
+    clear = n["clarity"] * max(0.0, 1.0 - wet / 0.55 - v.snow * 1.4)
     # walls[3], not walls[1]: a star must clear every roof in its column, not
     # only the nearest one. The part of a far tower that shows above a nearer
     # roof is still a building, and stars were being drawn straight into it.
@@ -2693,7 +2747,8 @@ def draw_river_mist(ch, co, v, walls, now, wet):
     furthest water in each column, which is the one place mist reads as depth
     instead of as dirt on the screen. Rain kills it - you do not get both."""
     n = night(now)
-    amount = n["mist"] * n["clarity"] * max(0.0, 1.0 - wet * 4.0)
+    amount = (n["mist"] * n["clarity"] * max(0.0, 1.0 - wet * 4.0)
+              * (0.0 if v.snow > 0.03 else 1.0))      # snow clears it too
     if amount < 0.12 or not v.water:
         return
     far = {}
@@ -3042,6 +3097,17 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
             elif CELL - fz_ < edge and CELL - fz_ < PAVE and wall_s:
                 edge = CELL - fz_
 
+            if (v.cover > 0.05 and not wet_cell and not deck
+                    and not (PAVE - 0.3 <= edge < PAVE)):
+                # Snow lying, ahead of everything else the ground would draw:
+                # it covers the bare road as well as the texture, by degrees
+                # as it settles - all but the kerb line, which is how you
+                # still tell the street from the pavement under it.
+                h2 = _mix(int(x * 3.0), int(z * 3.0), 41) % 100
+                if h2 < v.cover * 55:
+                    ch[y][sx] = "." if h2 % 4 else "'"
+                    co[y][sx] = SNOW
+                    continue
             g = glow.get(((int(x / GLOW_CELL + BIG) - BIG) * 65536)
                          + (int(z / GLOW_CELL + BIG) - BIG))
             if deck:
@@ -5074,9 +5140,10 @@ def _d2(v, w):
 
 # The cheat menu can pin the weather. Index 0 hands it back to the sky.
 # (name, rain to pin it at or None to let the sky decide, is it a storm)
-WEATHER_STEPS = [("auto", None, False), ("dry", 0.0, False),
-                 ("drizzle", 0.18, False), ("rain", 0.5, False),
-                 ("downpour", 0.95, False), ("storm", 0.98, True)]
+WEATHER_STEPS = [("auto", None, False, 0.0), ("dry", 0.0, False, 0.0),
+                 ("drizzle", 0.18, False, 0.0), ("rain", 0.5, False, 0.0),
+                 ("downpour", 0.95, False, 0.0), ("storm", 0.98, True, 0.0),
+                 ("snow", 0.0, False, 0.8)]
 _weather_i = 0
 _forced_strike = None       # when a strike was called for, rather than due
 
@@ -5118,10 +5185,63 @@ def storm_window(now):
 def storming(now):
     """Is there a storm overhead - either because the sky says so, or because
     the cheat menu is holding one there."""
-    lock, forced = WEATHER_STEPS[_weather_i][1:]
+    lock, forced = WEATHER_STEPS[_weather_i][1:3]
     if lock is not None:
         return forced
     return storm_window(now) is not None
+
+
+def snow_window(now):
+    """(start, length) of the snowfall, or None. Same shape as a storm, on
+    its own slots and longer odds, and a storm always wins."""
+    k = int(now / SNOW_SLOT)
+    for kk in (k, k - 1):
+        m = _mix(kk, 0, 619)
+        if m % SNOW_ODDS:
+            continue
+        start = kk * SNOW_SLOT + ((m >> 8) & 1023) / 1023.0 * SNOW_SLOT * 0.3
+        length = SNOW_SHORT + ((m >> 19) & 255) / 255.0 * (SNOW_LONG - SNOW_SHORT)
+        if start <= now < start + length and storm_window(now) is None:
+            return start, length
+    return None
+
+
+def snowfall(now):
+    """How hard it is snowing, 0..1 - easing in and off over fifteen seconds."""
+    lock = WEATHER_STEPS[_weather_i][1]
+    if lock is not None:
+        return WEATHER_STEPS[_weather_i][3]
+    w = snow_window(now)
+    if w is None:
+        return 0.0
+    start, length = w
+    t = now - start
+    edge = min(1.0, t / 15.0, (length - t) / 15.0)
+    return 0.35 + 0.55 * edge * (0.75 + 0.25 * math.sin(now / 9.0))
+
+
+def snow_cover(now):
+    """How much snow is lying, 0..1. It builds while it falls and melts after,
+    so the city stays white for a while once the sky has cleared."""
+    lock = WEATHER_STEPS[_weather_i][1]
+    if lock is not None:
+        return 1.0 if WEATHER_STEPS[_weather_i][3] > 0 else 0.0
+    k = int(now / SNOW_SLOT)
+    best = 0.0
+    for kk in range(k - int(SNOW_MELT / SNOW_SLOT) - 2, k + 1):
+        m = _mix(kk, 0, 619)
+        if m % SNOW_ODDS:
+            continue
+        start = kk * SNOW_SLOT + ((m >> 8) & 1023) / 1023.0 * SNOW_SLOT * 0.3
+        length = SNOW_SHORT + ((m >> 19) & 255) / 255.0 * (SNOW_LONG - SNOW_SHORT)
+        if now < start:
+            continue
+        fell = min(now, start + length) - start
+        lying = min(1.0, fell / SNOW_SETTLE)
+        if now > start + length:
+            lying *= max(0.0, 1.0 - (now - start - length) / SNOW_MELT)
+        best = max(best, lying)
+    return best
 
 
 def rain_intensity(now):
@@ -5135,6 +5255,8 @@ def rain_intensity(now):
          + 0.42 * math.sin(now / 41.0)
          + 0.26 * math.sin(now / 13.7 + 1.2)
          + 0.13 * math.sin(now / 5.3 + 2.6))
+    if snow_window(now) is not None:
+        return 0.0                      # what is falling is snow
     storm = storm_window(now)
     if storm is not None:
         start, length = storm
@@ -5494,6 +5616,9 @@ def moon_face(phase):
 def weather_word(now, wet):
     if storming(now):
         return "storm"
+    s = snowfall(now)
+    if s > 0.0:
+        return "light snow" if s < 0.5 else ("heavy snow" if s > 0.8 else "snow")
     if wet < 0.04:
         return "dry"
     if wet < 0.3:
@@ -5501,6 +5626,34 @@ def weather_word(now, wet):
     if wet < 0.7:
         return "rain"
     return "downpour"
+
+
+def draw_snow(ch, co, v, walls, now):
+    """Flakes on a world-locked lattice like the rain, but slow, and each on
+    its own sway, so the air is full of things drifting rather than falling.
+    Near ones are stars, far ones dots."""
+    if v.snow < 0.03:
+        return
+    gi = int(v.x / RAIN_LATTICE + BIG) - BIG
+    gj = int(v.z / RAIN_LATTICE + BIG) - BIG
+    top = v.eye + 9.0
+    for a in range(gi - RAIN_REACH, gi + RAIN_REACH + 1):
+        for b in range(gj - RAIN_REACH, gj + RAIN_REACH + 1):
+            m = _mix(a, b, 331)
+            if (m & 1023) > v.snow * 700:
+                continue
+            phase = ((m >> 10) & 255) / 256.0
+            y = top - ((now * SNOW_SPEED + phase * top) % top)
+            sway = 0.7 * math.sin(now * 0.8 + phase * 9.0)
+            x = (a + ((m >> 18) & 63) / 64.0) * RAIN_LATTICE + sway
+            z = (b + ((m >> 24) & 63) / 64.0) * RAIN_LATTICE
+            if not open_at(x, z):
+                continue                  # it is not snowing indoors
+            pr = v.project(x, y, z)
+            if pr is None:
+                continue
+            put_cell(ch, co, v, walls, int(round(pr[0])), int(round(pr[1])), pr[2],
+                     "*" if pr[2] < 6.0 else ("'" if pr[2] < 14.0 else "."), SNOW)
 
 
 def draw_rain(ch, co, v, walls, now, wet):
@@ -5569,6 +5722,8 @@ def render_street(v, now):
     co = [[0] * v.width for _ in range(v.height)]
     wet = v.wet = rain_intensity(now)
     v.flash = lightning(now, wet)
+    v.snow = snowfall(now)
+    v.cover = snow_cover(now)
 
     rave = None
     if rave_window(now) is not None:
@@ -5640,6 +5795,7 @@ def render_street(v, now):
         draw_drawn_in(ch, co, v, walls, rave[0], rave[1], now)
         draw_hollow_rave(ch, co, v, walls, rave[0], rave[1], now, wet)
     draw_rain(ch, co, v, walls, now, wet)
+    draw_snow(ch, co, v, walls, now)
     return ch, co, wet
 
 

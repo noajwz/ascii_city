@@ -47,8 +47,11 @@ for k in range(N):
 share = {w: n / float(N) for w, n in words.items()}
 mins = N * 0.05 / 60.0
 check("storm is one of the weathers", "storm" in share)
-check("and the rarest of them by a distance",
-      share["storm"] == min(share.values()) and share["storm"] * 2 < sorted(share.values())[1],
+snowy = sum(v for w, v in share.items() if "snow" in w)
+rains = {w: v for w, v in share.items() if "snow" not in w}
+check("and the rarest of the rains by a distance",
+      share["storm"] == min(rains.values())
+      and share["storm"] * 2 < sorted(rains.values())[1],
       "  ".join("%s %.1f%%" % (w, 100 * v) for w, v in sorted(share.items(), key=lambda p: p[1])))
 check("storms are rare in time", 12.0 < mins / max(1, storms) < 40.0,
       "one every %.0f min" % (mins / max(1, storms)))
@@ -65,9 +68,12 @@ outside = max(ac.lightning(k * 0.05, ac.rain_intensity(k * 0.05))
               for k in range(N // 6) if not ac.storming(k * 0.05))
 check("no lightning at all outside a storm", outside == 0.0)
 
+check("snow is rarer still", 0.0 < snowy < share["storm"],
+      "%.1f%% against the storm's %.1f%%" % (100 * snowy, 100 * share["storm"]))
 check("rain on auto is otherwise untouched",
       all(ac.rain_intensity(t) == old_rain(t)
-          for t in (k * 0.37 for k in range(20000)) if not ac.storming(t)))
+          for t in (k * 0.37 for k in range(20000))
+          if not ac.storming(t) and ac.snow_window(t) is None))
 
 peaks = []; best = 0.0
 for k in range(200000):
@@ -85,7 +91,7 @@ seen = {}
 for _ in range(len(ac.WEATHER_STEPS)):
     seen[ac.weather_name()] = (ac.rain_intensity(400.0), ac.storming(400.0))
     ac.cycle_weather()
-check("every weather level is reachable", len(seen) == 6, " ".join(sorted(seen)))
+check("every weather level is reachable", len(seen) == 7, " ".join(sorted(seen)))
 check("locking a storm brings the lightning with it",
       seen["storm"][1] and seen["storm"][0] > 0.9)
 check("and locking a downpour does not", not seen["downpour"][1])
@@ -557,6 +563,37 @@ for yaw in (0.0, 1.6, 3.2, 4.7):
     seen.add(ac.can_stand(v2.x, v2.z) or not ac.is_open(int(v2.x / ac.CELL + ac.BIG) - ac.BIG,
                                                           int(v2.z / ac.CELL + ac.BIG) - ac.BIG))
 check("and you stay on your own roof as you turn", seen == {True})
+
+# --- snow ------------------------------------------------------------------
+snow_t = next(k * 5.0 for k in range(200000) if ac.snow_window(k * 5.0) is not None)
+st0, slen = ac.snow_window(snow_t)
+check("when it snows it does not rain", ac.rain_intensity(snow_t + 20) == 0.0
+      and not ac.storming(snow_t + 20) and ac.lightning(snow_t + 20, 0.0) == 0.0)
+check("and the HUD says so", "snow" in ac.weather_word(snow_t + 20, 0.0))
+check("the snow settles as it falls", ac.snow_cover(st0 + 5) < ac.snow_cover(st0 + 60)
+      <= ac.snow_cover(st0 + min(slen, ac.SNOW_SETTLE) - 1) + 1e-9)
+check("and is still lying once it stops", ac.snow_cover(st0 + slen + 30) > 0.3)
+check("then melts", ac.snow_cover(st0 + slen + ac.SNOW_MELT + 5) == 0.0)
+ac._weather_i = [n for n, s in enumerate(ac.WEATHER_STEPS) if s[0] == "snow"][0]
+check("the menu can make it snow", ac.snowfall(300.0) > 0.5
+      and ac.snow_cover(300.0) == 1.0 and ac.rain_intensity(300.0) == 0.0)
+ac.SNOW, ac.ROOF = 1031, 1032
+snow_at = ac.find_place(x0, z0, "street")
+sv = ac.View(snow_at[0], snow_at[1], snow_at[2], 110, 30)
+sgrid, scol, _ = ac.render_street(sv, 300.0)
+white_ground = sum(1 for y in range(sv.horizon + 1, 30) for x in range(110)
+                   if scol[y][x] == 1031)
+white_air = sum(1 for y in range(0, sv.horizon) for x in range(110)
+                if scol[y][x] == 1031)
+check("snow lies on the street", white_ground > 300, "%d cells" % white_ground)
+check("and is in the air", white_air > 15, "%d flakes" % white_air)
+check("and the rooflines are white", sum(1 for r in scol for a in r if a == 1032) == 0)
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
+_, dcol, _ = ac.render_street(sv, 100.0 if ac.snow_cover(100.0) == 0 else 7.0)
+check("and on a night without it there is none",
+      ac.snow_cover(100.0) > 0 or not any(a == 1031 for r in dcol for a in r))
+ac.SNOW = ac.ROOF = 1
 
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
