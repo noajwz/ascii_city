@@ -188,6 +188,18 @@ ROWBOAT_GAP = 260      # cells along the river between one boat and the next
 ROWBOAT_DRIFT = 0.7    # world units a second, with the current
 LANTERN_ODDS = 12      # one night in this many has lanterns on the river
 LANTERN_DRIFT = 0.9
+
+# --- fireworks over the bay ---
+# One night in FIREWORK_ODDS somebody puts on a show over the big bridge's
+# bay: shells going up off the water all night, and a finale every few
+# minutes. Every spark is a world point, so the reflection lays them on the
+# bay and the buildings hide the ones behind them.
+FIREWORK_ODDS = 15
+FW_SLOT = 0.75         # seconds between one launch and the next
+FW_RISE = 1.3          # seconds a shell takes to climb
+FW_LIFE = 2.4          # and how long the sparks last once it bursts
+FW_FINALE = 180.0      # seconds between finales
+FW_REACH = 900.0       # how far off you can see them from
 CASINO_REACH = 2.3     # how close to the door you have to get to be inside
 CASINO_AGAIN = 1.6     # seconds before it deals you another one
 
@@ -841,6 +853,36 @@ def draw_skyline_snow(ch, co, cam_x, water, tops, now):
                 co[y][x] = SNOW
 
 
+def draw_skyline_fireworks(ch, co, cam_x, water, tops, now):
+    """The show from across the water: the same shells, laid out along the
+    far bank on the middle layer's parallax and drawn as rings in screen
+    space - and drawn before the reflection, so they lie on the water too."""
+    if not night(now)["fireworks"]:
+        return
+    width = len(ch[0])
+    for t0, m in shells(now):
+        cx = 6 + ((m >> 12) & 1023) / 1023.0 * (width - 12)
+        t = now - t0
+        top = max(2, water // 4 + ((m >> 2) & 7) - 3)
+        if t < FW_RISE:
+            y = int(water - (water - top) * (1.0 - (1.0 - t / FW_RISE) ** 2))
+            if 0 <= y < water and 0 <= int(cx) < width:
+                ch[y][int(cx)], co[y][int(cx)] = "|", EMBER
+            continue
+        tt = t - FW_RISE
+        r = 9.0 * (1.0 - math.exp(-1.8 * tt)) / 1.8 * 1.6
+        fade = 1.0 - tt / FW_LIFE
+        tone = (m >> 28) & 7
+        attr = NEON[tone % len(NEON)][0 if fade > 0.35 else 1]
+        for k in range(22):
+            a = k * math.tau / 22.0 + (m & 7)
+            x = int(round(cx + math.cos(a) * r * 2.0))
+            y = int(round(top + math.sin(a) * r + tt * tt * 0.8))
+            if 0 <= x < width and 0 <= y < water and y < tops[x]:
+                ch[y][x] = "*" if tt < 0.5 else ("+" if tt < 1.2 else ".")
+                co[y][x] = attr
+
+
 def draw_skyline_el(ch, co, cam_x, ground, tops, now):
     """The elevated from across the water: a dotted line of track running
     across in front of the middle layer, and now and then a train along it -
@@ -922,6 +964,7 @@ def render_skyline(cam_x, width, height, now):
                 if row[x] == " " and _mix(x, y, 97) % 100 < dens:
                     row[x] = ":"
                     rowc[x] = FLASH
+    draw_skyline_fireworks(ch, co, cam_x, water, tops, now)
     reflect(ch, co, water, now, wet, flash)
     draw_water(ch, co, water, now, wet)
     draw_skyline_rain(ch, co, cam_x, water, now, wet, flash)
@@ -4410,6 +4453,99 @@ def draw_river_lanterns(ch, co, v, walls, now, wet):
                     "o", (EMBER_HOT, GOLD, BULB)[s % 3], max(wet, 0.5), now)
 
 
+def bay_centre(i):
+    """(x, z) of the middle of the bay in this stretch of river, or None."""
+    span = grand_avenue(i)
+    if span is None:
+        return None
+    gi = span[0] + span[1] // 2
+    lo, hi = river_span(gi)
+    return (gi + 0.5) * CELL, (lo + hi) * 0.5 * CELL
+
+
+def shells(now):
+    """(launch time, seed) of every shell in the air or bursting now. One a
+    slot, three in four slots - and in the last twenty seconds before each
+    finale, three a slot."""
+    k0 = int((now - FW_RISE - FW_LIFE) / FW_SLOT)
+    for k in range(k0, int(now / FW_SLOT) + 1):
+        finale = (k * FW_SLOT) % FW_FINALE > FW_FINALE - 20.0
+        for n in range(3 if finale else 1):
+            m = _mix(k, n, 2001)
+            if not finale and m % 4 == 0:
+                continue
+            t0 = k * FW_SLOT + (m >> 4 & 255) / 255.0 * FW_SLOT
+            if t0 <= now < t0 + FW_RISE + FW_LIFE:
+                yield t0, m
+
+
+def shell_sparks(bx, bz, t0, m, now):
+    """The points of one shell this instant: (x, y, z, glyph, colour-index,
+    brightness), going up as a trail and then bursting into a sphere of sparks
+    that slow, fall and fade."""
+    ox = bx + ((m >> 12) & 255) / 255.0 * 120.0 - 60.0
+    oz = bz + ((m >> 20) & 63) / 63.0 * 30.0 - 15.0
+    # Just over the bridge's towers: high enough to clear them, low enough to
+    # be in the sky from the bank - at seventy units they went off the top of
+    # the screen from anywhere near enough to see them properly.
+    top = 30.0 + ((m >> 2) & 15)
+    t = now - t0
+    if t < FW_RISE:
+        y = top * (1.0 - (1.0 - t / FW_RISE) ** 2)
+        return [(ox, y - d * 1.5, oz, "|" if d == 0 else ".", -1, 1.0 - d * 0.3)
+                for d in range(3)]
+    tt = t - FW_RISE
+    willow = (m >> 26) % 5 == 0
+    n = 34 if not willow else 24
+    speed = 17.0 if not willow else 10.0
+    out = []
+    reach = speed * (1.0 - math.exp(-1.8 * tt)) / 1.8
+    sink = (0.9 if not willow else 2.2) * tt * tt
+    fade = 1.0 - tt / FW_LIFE
+    for k in range(n):
+        # Spread over the sphere by the golden angle, turned per shell.
+        y_ = 1.0 - 2.0 * (k + 0.5) / n
+        r = math.sqrt(max(0.0, 1.0 - y_ * y_))
+        a = k * 2.399963 + (m >> 8 & 63)
+        dx, dz = r * math.cos(a), r * math.sin(a)
+        x, y, z = ox + dx * reach, top + y_ * reach - sink, oz + dz * reach
+        glyph = "*" if tt < 0.5 else ("+" if tt < 1.2 else ("." if fade > 0.2
+                                                            else "'"))
+        out.append((x, y, z, glyph, -2 if willow else (m >> 28) & 7, fade))
+    return out
+
+
+def draw_fireworks(ch, co, v, walls, now, wet):
+    """The show, if tonight is the night and the bay is in reach."""
+    if not night(now)["fireworks"]:
+        return
+    ci = int(v.x / CELL + BIG) - BIG
+    for k in range(-1, 2):
+        bay = bay_centre(ci + k * GRAND_GAP)
+        if bay is None or (bay[0] - v.x) ** 2 + (bay[1] - v.z) ** 2 > FW_REACH ** 2:
+            continue
+        for t0, m in shells(now):
+            for x, y, z, glyph, tone, b in shell_sparks(bay[0], bay[1], t0, m, now):
+                if b <= 0.0:
+                    continue
+                attr = (EMBER if tone == -1 else GOLD if tone == -2
+                        else NEON[tone % len(NEON)][0] if b > 0.35
+                        else NEON[tone % len(NEON)][1])
+                put_point(ch, co, v, walls, x, y, z, glyph, attr)
+
+
+def fireworks_near(x, z, now):
+    """For the HUD: is there a show on, near enough to see."""
+    if not night(now)["fireworks"]:
+        return False
+    ci = int(x / CELL + BIG) - BIG
+    for k in range(-1, 2):
+        bay = bay_centre(ci + k * GRAND_GAP)
+        if bay is not None and (bay[0] - x) ** 2 + (bay[1] - z) ** 2 < 700.0 ** 2:
+            return True
+    return False
+
+
 def near_lighthouses(v, reach):
     ci = int(v.x / CELL + BIG) - BIG
     for k in range(-1, 2):
@@ -5802,6 +5938,16 @@ def skip_to_alien(now):
     return False
 
 
+def skip_to_fireworks(now):
+    """Straight to the next night with a show over the bay."""
+    global _night_skip
+    for _ in range(FIREWORK_ODDS * 8):
+        _night_skip += NIGHT_LENGTH
+        if night(now)["fireworks"]:
+            return True
+    return False
+
+
 def skip_to_lanterns(now):
     """Straight to the next night with lanterns on the river."""
     global _night_skip
@@ -5850,6 +5996,11 @@ def night(now):
             "lands": ((m >> 2) & 255) / 255.0,     # and when one beam stops
             "lanterns": (m >> 19) % LANTERN_ODDS == 0 and (m >> 24) % ALIEN_ODDS,
         }
+        # On its own hash, so it is not tied to any of the above; and never on
+        # the strange night or the lantern night, which have the sky and the
+        # river to themselves.
+        got["fireworks"] = (_mix(k, 1, 613) % FIREWORK_ODDS == 0
+                            and not got["alien"] and not got["lanterns"])
         if got["alien"]:
             # Whatever the weather was going to be up there, the sky is lit by
             # what is in it tonight.
@@ -6209,6 +6360,7 @@ def render_street(v, now):
         fs = ferry_spot(now, ci_ + k_ * GRAND_GAP)
         if fs is not None and (fs[0] - v.x) ** 2 + (fs[1] - v.z) ** 2 < 220.0 ** 2:
             draw_ferry(ch, co, v, walls, fs[0], fs[1], fs[2], now, wet)
+    draw_fireworks(ch, co, v, walls, now, wet)
     reflect_river(ch, co, v, walls, now, wet)
     if night(now)["lanterns"] and v.water:
         # After the reflection, or the far bank's windows lying on the water
@@ -7394,6 +7546,7 @@ def draw_cheats(ch, co, note):
                ("w", "weather: " + weather_name()),
                ("L", "strike now"), ("n", "next night"),
                ("A", "a strange night"), ("z", "a lantern night"),
+               ("!", "fireworks night"),
                ("s", "sky: " + clouds_name()),
                ("a", "people: " + crowd_name())]
     right = [("", "OUT OF TOWN")]
@@ -7914,6 +8067,9 @@ def main(stdscr):
                     note = "people: " + cycle_crowd()
                 elif key == ord("s"):
                     note = "sky: " + cycle_clouds()
+                elif key == ord("!"):
+                    note = ("fireworks over the bay tonight"
+                            if skip_to_fireworks(now) else "no such night near")
                 elif key == ord("z"):
                     note = ("lanterns on the river tonight"
                             if skip_to_lanterns(now) else "no such night near")
@@ -8146,7 +8302,9 @@ def main(stdscr):
                 or ("  ~ a train overhead ~" if el_overhead(cam_x, cam_z, now)
                     else "")
                 or ("  ~ a fire escape: walk into it to climb ~"
-                    if escape_near(cam_x, cam_z) else ""))
+                    if escape_near(cam_x, cam_z) else "")
+                or ("  ~ fireworks over the bay ~"
+                    if fireworks_near(cam_x, cam_z, now) else ""))
         else:
             ch, co = render_skyline(sky_x, width, height, now)
             hud = SKYLINE_HUD % (sky_x, weather_word(now, rain_intensity(now)))
