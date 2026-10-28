@@ -874,6 +874,28 @@ nothing moves you while it runs, on the roof `a`/`d` look round and `s` calls it
 puts you back outside the door facing the street, a step beyond `CASINO_REACH` so it does not take
 you straight back up. `^` in the menu stands you outside a lobby; one step in and you are riding.
 
+## Up the fire escapes
+
+One fire escape in `CLIMB_ODDS` down the dark alleys goes all the way to the roof, and says so
+with a drop ladder at the bottom (`climbable()`: a real alley face, a real escape on it, three
+storeys at least). The roof is the sky deck's roof view with `kind: "escape"` — an aerial and a
+chimney stack instead of the mast, and the top of the escape over the parapet — so everything
+about seeing the city from up there came for free.
+
+Two things it took. **You climb by walking into the wall at the ladder, not by being near it**
+(`escape_at()` wants you within `CLIMB_REACH` *and* facing the wall): an alley is one cell wide,
+so a trigger by distance alone would have had you halfway up a building every time you walked
+down a lane. The HUD says `~ a fire escape: walk into it to climb ~` when you are near one. And
+**only off a roof nothing near overtops** — every solid cell within two has to be no taller —
+because the first ones put you face to face with the wall of a taller building across the lane.
+That still leaves about one climbable escape every 65 units of alley.
+
+`render_climb()` is the ride: face to the bricks, the wall scrolling down past you with a window
+every storey and a light on behind one now and then, the iron stairs zigzagging across it, a
+landing at every floor and the count in the corner; at the top the sky opens out over the
+parapet. It shares `main()`'s lift state — the same ride, a different picture — and `s` on the
+roof climbs you back down into the alley. `|` in the menu stands you at the foot of one.
+
 ## Inside the club
 
 `render_rave()` is the club's answer to the casino room, and it runs off `club_light()` and the same

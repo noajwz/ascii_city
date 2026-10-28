@@ -200,6 +200,9 @@ TOWER_MIN = 34.0       # how tall, in world units, a building must be to have on
 TOWER_TOP = 72.0       # and how tall it is made: over everything else in town
 ROOF_REACH = 260.0     # how far you can see from up there
 ROOF_STEP = 1.6        # how far from the middle of the roof you stand
+CLIMB_ODDS = 3         # one alley fire escape in this many goes all the way up
+CLIMB_FLOOR = 0.45     # seconds a storey, climbing
+CLIMB_REACH = 1.9      # how close to the ladder you have to be
 LIFT_DOORS = 0.9       # seconds for the doors to close or open
 LIFT_FLOOR = 0.07      # seconds per floor going past
 
@@ -4868,6 +4871,156 @@ LIFT_CAR = [
 ]
 
 
+def climbable(i, j, f):
+    """Does the fire escape on this face go all the way to the roof - the
+    hash first, then that the face really gives onto a dark alley and the
+    building really has an escape on it."""
+    if _mix(i, j * 4 + f, 1931) % CLIMB_ODDS:
+        return False
+    nx, nz = FACES[f]
+    if is_open(i, j) or not is_open(i + nx, j + nz):
+        return False
+    if road_at(i + nx, j + nz) or face_kind(i + nx, j + nz) is not None:
+        return False
+    if woods_at(i, j) or not dry_at((i + nx + 0.5) * CELL, (j + nz + 0.5) * CELL):
+        return False
+    b = lot(i, j)
+    if not (b["faces"][f]["escape"] and b["height"] >= 3 * FLOOR_H
+            and not b["tree"] and b["club"] is None
+            and b["casino"] is None and b["tower"] is None):
+        return False
+    # And only off a roof that is the high point of its corner: climbed from
+    # an alley, the first ones put you face to face with the wall of a taller
+    # building across the lane. Asking the neighbours' lots from here is safe -
+    # lot() never asks climbable().
+    h = b["height"] + 1.0
+    return all(is_open(i + a, j + c) or lot(i + a, j + c)["height"] <= h
+               for a in range(-2, 3) for c in range(-2, 3) if a or c)
+
+
+def escape_roof(i, j, f):
+    """The roof a climbable escape takes you to, in the shape a sky deck's
+    roof has, so the same roof view serves both."""
+    return {"i": i, "j": j, "door": f, "u": CELL * 0.5,
+            "height": lot(i, j)["height"], "kind": "escape"}
+
+
+def escape_at(x, z, yaw):
+    """The climbable escape you are at the foot of and facing, or None.
+    Facing matters: an alley is one cell wide, so anything you could reach
+    by standing near it you would also walk past on the way down the lane -
+    you climb by walking into the wall at the ladder, not by going by it."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    dx, dz = math.sin(yaw), math.cos(yaw)
+    for i in range(ci - 1, ci + 2):
+        for j in range(cj - 1, cj + 2):
+            for f in range(4):
+                if not climbable(i, j, f):
+                    continue
+                px, _, pz = face_point(i, j, f, CELL * 0.5, 1.2, 0.0)
+                if (px - x) ** 2 + (pz - z) ** 2 > CLIMB_REACH ** 2:
+                    continue
+                nx, nz = FACES[f]
+                if dx * -nx + dz * -nz > 0.7:
+                    return escape_roof(i, j, f)
+    return None
+
+
+def escape_near(x, z):
+    """Is there a climbable escape within a few steps - for the HUD."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    for i in range(ci - 1, ci + 2):
+        for j in range(cj - 1, cj + 2):
+            for f in range(4):
+                if not climbable(i, j, f):
+                    continue
+                px, _, pz = face_point(i, j, f, CELL * 0.5, 1.2, 0.0)
+                if (px - x) ** 2 + (pz - z) ** 2 < 4.0 ** 2:
+                    return True
+    return False
+
+
+def climb_times(floors):
+    """(off the ground, at the top, over the parapet) for a climb."""
+    up = 0.4 + floors * CLIMB_FLOOR
+    return 0.4, up, up + 0.7
+
+
+def render_climb(up, floors, t, width, height, now):
+    """On the fire escape, face to the bricks.
+
+    The wall scrolls past - courses of brick, a window every storey with a
+    light on behind one now and then - and the iron stairs zigzag across it
+    in front of you, a landing at every floor. The count goes up in the
+    corner; at the top you swing over the parapet and the sky opens out. Going
+    down it all runs the other way."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    start, top, over = climb_times(floors)
+    p = min(1.0, max(0.0, (t - start) / max(1e-6, top - start)))
+    climbed = p * floors if up else (1.0 - p) * floors
+    floor = 1 + min(floors - 1, int(climbed))
+    if width < 30 or height < 12:
+        _text(ch, co, height // 2, 1, "on the fire escape  %d/%d" % (floor, floors),
+              CURB)
+        return ch, co
+    rows_per_floor = 7
+    scroll = int(climbed * rows_per_floor)
+    cx = width // 2
+    for y in range(height):
+        wy = scroll + (height - 1 - y)                 # world row, up the wall
+        storey, r = divmod(wy, rows_per_floor)
+        for x in range(width):
+            # Brick courses, staggered every other row.
+            if r == 0:
+                ch[y][x], co[y][x] = "=", BARK         # the landing, edge on
+            elif (x + (wy % 2) * 2) % 5 == 0:
+                ch[y][x], co[y][x] = "|", CONCRETE
+            elif wy % 2 == 0:
+                ch[y][x], co[y][x] = "_", CONCRETE
+        # A window either side of the stairs, lit now and then.
+        if 2 <= r <= 5:
+            for wx in (cx - 18, cx + 12):
+                lit = _mix(storey, wx, 1933) % 4 == 0
+                for x in range(wx, wx + 7):
+                    if 0 <= x < width:
+                        ch[y][x] = "#" if lit else (" " if r < 5 else "_")
+                        co[y][x] = tone_colour("warm", 0.4) if lit else CURB
+        # The stairs: a flight going one way between landings, back the next.
+        flight = storey % 2
+        sx = cx - 6 + (r if flight == 0 else rows_per_floor - r)
+        for x in (sx, sx + 1):
+            if 0 <= x < width and r != 0:
+                ch[y][x], co[y][x] = "/" if flight == 0 else "\\", BARK
+        for x in (cx - 8, cx + 4):
+            if 0 <= x < width:
+                ch[y][x], co[y][x] = "|", BARK         # the rails
+    # You: hands on the rail, mid-screen.
+    for k, line in enumerate((" o ", "/|\\", "/ \\")):
+        _text(ch, co, height // 2 - 1 + k, cx - 2, line, STAR)
+    if t >= top:
+        # Over the top: the sky opens out above the parapet.
+        lift_ = int((t - top) / max(1e-6, over - top) * (height // 2))
+        for y in range(min(height, lift_)):
+            for x in range(width):
+                ch[y][x] = "." if _mix(x, y, 1935) % 23 == 0 else " "
+                co[y][x] = STAR
+        if lift_ < height:
+            _text(ch, co, lift_, 0, "=" * width, ROOF)
+    panel = " floor %d / %d " % (floor, floors)
+    for k in range(len(panel)):
+        ch[0][1 + k], co[0][1 + k] = panel[k], GOLD_DIM
+    say = (" climbing " if up else " climbing down ") if t < top else (
+        " the roof " if up else " the alley ")
+    for k, c in enumerate(say):
+        x = cx - len(say) // 2 + k
+        if 0 <= x < width:
+            ch[height - 1][x], co[height - 1][x] = c, GOLD_DIM
+    return ch, co
+
+
 def lift_times(floors):
     """(doors closed, arrived, doors open) as seconds from stepping in."""
     travel = 0.6 + floors * LIFT_FLOOR
@@ -4970,15 +5123,15 @@ def draw_roof_ledge(ch, co, v, walls, t, now, wet):
     cap = h + 1.0
     for sx in range(v.width):
         rdx, rdz = v.ray(sx)
-        t = 1e9
+        out = 1e9                        # how far along the ray it leaves the roof
         for d, lo, hi, p in ((rdx, x0, x1, v.x), (rdz, z0, z1, v.z)):
             if d > 1e-9:
-                t = min(t, (hi - p) / d)
+                out = min(out, (hi - p) / d)
             elif d < -1e-9:
-                t = min(t, (lo - p) / d)
-        if t <= 0.05 or t > 50.0:
+                out = min(out, (lo - p) / d)
+        if out <= 0.05 or out > 50.0:
             continue
-        top = int(round(v.horizon - (cap - v.eye) * v.fy / t))
+        top = int(round(v.horizon - (cap - v.eye) * v.fy / out))
         for y in range(max(0, top), v.height):
             if y == top:
                 ch[y][sx], co[y][sx] = "=", ROOF
@@ -5000,6 +5153,21 @@ def draw_roof_ledge(ch, co, v, walls, t, now, wet):
                       wz + 0.6 * math.sin(ang), "#", BARK)
     put_point(ch, co, v, walls, wx, h + 3.3, wz, "^", BARK)
     mx, mz = x1 - 0.8, z1 - 0.8
+    if t.get("kind") == "escape":
+        # An alley roof: a TV aerial and a chimney stack, and the top of the
+        # fire escape you came up, over the parapet on its side.
+        for y in range(4):
+            put_point(ch, co, v, walls, mx, h + 0.5 + y * 0.8, mz, "|", CONCRETE)
+        for dx in (-0.6, -0.3, 0.3, 0.6):
+            put_point(ch, co, v, walls, mx + dx, h + 3.2, mz, "-", CONCRETE)
+        for y in (h + 0.4, h + 1.0, h + 1.6):
+            put_point(ch, co, v, walls, x1 - 0.8, y, z0 + 0.8, "#", BARK)
+        ex, _, ez = face_point(i, j, t["door"], CELL * 0.5, 0.15, 0.0)
+        for y in (h + 0.6, h + 1.2, h + 1.8):
+            for k in (-0.4, 0.4):
+                ax, az = -FACES[t["door"]][1], FACES[t["door"]][0]
+                put_point(ch, co, v, walls, ex + ax * k, y, ez + az * k, "|", BARK)
+        return
     for y in range(6):
         put_point(ch, co, v, walls, mx, h + 0.5 + y * 0.9, mz, "|", CONCRETE)
     on = int(now * 1.3 + i) % 2 == 0
@@ -5089,11 +5257,19 @@ def draw_props(ch, co, v, walls, now, wet):
                 if fc["bin"] is not None:
                     w = face_point(i, j, f, fc["bin"], 0.9, 0.0)
                     props.append((_d2(v, w), "bin", None, w, (nx, nz)))
+                if fc["escape"] and climbable(i, j, f):
+                    w = face_point(i, j, f, CELL * 0.5, 0.35, 0.0)
+                    props.append((_d2(v, w), "ladder", None, w, (nx, nz)))
     props.sort(key=lambda p: -p[0])
 
     for _, kind, s, world, normal in props:
         if kind == "noren":
             draw_noren(ch, co, v, walls, world, normal, now)
+        elif kind == "ladder":
+            # The drop ladder down to the ground, which is what says this one
+            # goes all the way up - the others stop at the first landing.
+            blit_sprite(ch, co, v, walls, ["|-|", "|-|", "|-|", "|-|"],
+                        world[0], world[2], 0.0, 2.8, 0.7, CURB)
         elif kind == "lobby":
             draw_lobby(ch, co, v, walls, s, now)
         elif kind == "overdoor":
@@ -6479,6 +6655,7 @@ CHEAT_PLACES = [
     ("v", "a ramen counter", "ramen"),
     ("=", "under the el", "el"),
     ("^", "a sky deck", "tower"),
+    ("|", "a fire escape", "escape"),
     ("g", "the woods", "woods"),
     ("x", "the woods rave", "rave"),
     ("e", "the lake", "lake"),
@@ -6799,6 +6976,24 @@ def _doorway(x, z, salt, key):
     return None
 
 
+def _escape_spot(x, z):
+    """In the alley at the foot of a fire escape that goes all the way up,
+    a couple of steps back and facing it: walk forward and you are climbing."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    for i, j in _rings(ci, cj, CHEAT_RINGS):
+        for f in range(4):
+            if _mix(i, j * 4 + f, 1931) % CLIMB_ODDS or not climbable(i, j, f):
+                continue
+            px, _, pz = face_point(i, j, f, CELL * 0.5, 2.4, 0.0)
+            if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+                continue
+            if can_stand(px, pz):
+                nx, nz = FACES[f]
+                return px, pz, math.atan2(-nx, -nz)
+    return None
+
+
 def _tower_spot(x, z):
     """Outside the lobby of the nearest sky deck, a few steps back, facing
     the door: one step forward and you are in the lift."""
@@ -6879,6 +7074,8 @@ def find_place(x, z, kind):
         return _el_spot(x, z)
     if kind == "tower":
         return _tower_spot(x, z)
+    if kind == "escape":
+        return _escape_spot(x, z)
     if kind in ("woods", "rave", "lake"):
         return _woods_spot(x, z, kind)
     if kind in ("bank", "pier", "bridge", "leaner", "carnival", "grand",
@@ -7216,6 +7413,9 @@ ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
 RAVE_HUD = " inside the club at %d,%d  -  s walks back out  -  q quit "
 RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
+CLIMB_HUD = " on the fire escape, climbing %s "
+ESCAPE_ROOF_HUD = (" on a roof in the alleys, %d floors up, %s  -  ad look round  -"
+                   "  s climbs down  -  q quit ")
 ROOF_HUD = (" on the roof, %d floors up, %s  -  ad look round  -  s takes the"
             " lift down  -  q quit ")
 
@@ -7429,13 +7629,16 @@ def main(stdscr):
         if lift is not None:
             venue = None
             floors = max(2, int(lift["t"]["height"] / FLOOR_H))
-            if now - lift["t0"] >= lift_times(floors)[2]:
+            times = (climb_times(floors) if lift["t"].get("kind") == "escape"
+                     else lift_times(floors))
+            if now - lift["t0"] >= times[2]:
                 if lift["up"]:
                     on_roof = lift["t"]
                 else:
                     t_ = lift["t"]
+                    out = 2.6 if t_.get("kind") == "escape" else CASINO_REACH + 1.8
                     ox, _, oz = face_point(t_["i"], t_["j"], t_["door"],
-                                           t_["u"], CASINO_REACH + 1.8, 0.0)
+                                           t_["u"], out, 0.0)
                     if can_stand(ox, oz):
                         cam_x, cam_z = ox, oz
                     nx_, nz_ = FACES[t_["door"]]
@@ -7443,6 +7646,9 @@ def main(stdscr):
                     on_roof = None
                 lift = None
         elif on_roof is not None:
+            venue = None
+        elif street and fwd > 0.0 and escape_at(cam_x, cam_z, yaw) is not None:
+            lift = {"up": True, "t0": now, "t": escape_at(cam_x, cam_z, yaw)}
             venue = None
         elif venue is not None and venue[0] == "tower":
             lift = {"up": True, "t0": now, "t": venue[1]}
@@ -7460,15 +7666,21 @@ def main(stdscr):
         height, width = stdscr.getmaxyx()
         if lift is not None:
             floors = max(2, int(lift["t"]["height"] / FLOOR_H))
-            ch, co = render_lift(lift["up"], floors, now - lift["t0"], width,
-                                 height, now)
-            hud = LIFT_HUD % ("up" if lift["up"] else "down")
+            if lift["t"].get("kind") == "escape":
+                ch, co = render_climb(lift["up"], floors, now - lift["t0"],
+                                      width, height, now)
+                hud = CLIMB_HUD % ("up" if lift["up"] else "down")
+            else:
+                ch, co = render_lift(lift["up"], floors, now - lift["t0"], width,
+                                     height, now)
+                hud = LIFT_HUD % ("up" if lift["up"] else "down")
         elif on_roof is not None:
             v = roof_view(on_roof, yaw, width, height)
             v.roof = on_roof
             ch, co, wet = render_street(v, now)
-            hud = ROOF_HUD % (int(on_roof["height"] / FLOOR_H),
-                              weather_word(now, wet))
+            hud = (ESCAPE_ROOF_HUD if on_roof.get("kind") == "escape"
+                   else ROOF_HUD) % (int(on_roof["height"] / FLOOR_H),
+                                     weather_word(now, wet))
         elif wheel is not None:
             slot.settle(now)
             table.update(now)
@@ -7494,7 +7706,9 @@ def main(stdscr):
                 or ("  ~ something over the city ~" if night(now)["alien"]
                     else "")
                 or ("  ~ a train overhead ~" if el_overhead(cam_x, cam_z, now)
-                    else ""))
+                    else "")
+                or ("  ~ a fire escape: walk into it to climb ~"
+                    if escape_near(cam_x, cam_z) else ""))
         else:
             ch, co = render_skyline(sky_x, width, height, now)
             hud = SKYLINE_HUD % (sky_x, weather_word(now, rain_intensity(now)))

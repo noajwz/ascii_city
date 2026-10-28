@@ -144,7 +144,7 @@ check("every destination lands somewhere you can stand", not bad, ",".join(bad))
 
 blind = []
 for _, name, kind in ac.CHEAT_PLACES:
-    if kind in ("inside", "clubdoor", "club", "ramen", "tower"):
+    if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -637,6 +637,43 @@ ac.STAR = ac.STAR_DIM = ac.STAR_WARM = ac.STAR_COLD = ac.BAND = 1
 ac.MOON = ac.MOON_DIM = 1
 while ac.weather_name() != "auto":
     ac.cycle_weather()
+
+# --- the fire escapes in the dark alleys ----------------------------------
+fe = ac.find_place(x0, z0, "escape")
+check("the menu finds a fire escape that goes up", fe is not None
+      and ac.can_stand(fe[0], fe[1]))
+fei = int((fe[0] + math.sin(fe[2]) * 2.4) / ac.CELL + ac.BIG) - ac.BIG
+foot = (fe[0] + math.sin(fe[2]) * 1.2, fe[1] + math.cos(fe[2]) * 1.2)
+roof_t = ac.escape_at(foot[0], foot[1], fe[2])
+check("walking into it is climbing it", roof_t is not None and roof_t["kind"] == "escape")
+check("walking past it is not", ac.escape_at(foot[0], foot[1], fe[2] + math.pi / 2) is None
+      and ac.escape_at(fe[0], fe[1], fe[2] + math.pi) is None)
+ai, aj = roof_t["i"] + ac.FACES[roof_t["door"]][0], roof_t["j"] + ac.FACES[roof_t["door"]][1]
+check("it is on a dark alley", not ac.road_at(ai, aj) and ac.face_kind(ai, aj) is None)
+check("and on a roof nothing near overtops",
+      all(ac.is_open(roof_t["i"] + a, roof_t["j"] + b)
+          or ac.lot(roof_t["i"] + a, roof_t["j"] + b)["height"] <= roof_t["height"] + 1.0
+          for a in range(-2, 3) for b in range(-2, 3) if a or b))
+nfl = int(roof_t["height"] / ac.FLOOR_H)
+c0, c1, c2 = ac.climb_times(nfl)
+low = "\n".join("".join(r) for r in ac.render_climb(True, nfl, c0 + 0.1, 70, 20, 1.0)[0])
+high = "\n".join("".join(r) for r in ac.render_climb(True, nfl, c1 - 0.1, 70, 20, 1.0)[0])
+check("the climb counts the floors up", "floor 1 / %d" % nfl in low
+      and "floor %d / %d" % (nfl, nfl) in high and "climbing" in low)
+over = "\n".join("".join(r) for r in ac.render_climb(True, nfl, c2 - 0.05, 70, 20, 1.0)[0])
+check("and goes over the parapet", "the roof" in over)
+rv2 = ac.roof_view(roof_t, fe[2] + math.pi, 110, 30)
+rv2.roof = roof_t
+g_, c_, _ = ac.render_street(rv2, 300.0)
+check("up there you look out over the alleys", rv2.eye > roof_t["height"]
+      and sum(1 for y in range(rv2.horizon + 1, 30) for x in range(110) if g_[y][x] != " ") > 150)
+lad = []
+real_prop_blit = ac.blit_sprite
+ac.blit_sprite = lambda ch, co, v, w, art, *a: (lad.append(art), real_prop_blit(ch, co, v, w,
+                                                                                art, *a))
+ac.render_street(ac.View(fe[0], fe[1], fe[2], 110, 30), 300.0)
+ac.blit_sprite = real_prop_blit
+check("and from the alley you can see the drop ladder", ["|-|"] * 4 in lad)
 
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])

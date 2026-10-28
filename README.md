@@ -37,7 +37,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
 - **People out walking** — not many, it is night — under umbrellas when it rains.
 - **An elevated train** over some of the avenues, rattling along with its windows lit, and from
   across the water a row of lights sliding through the town.
-- **Dark alleys**, some of which dead-end, and lit ones lined with tiny bars.
+- **Dark alleys**, some of which dead-end, and lit ones lined with tiny bars — and fire escapes
+  you can climb to the roof.
 - **The woods** — one great block of trees, a long walk from anywhere, with trails you can get
   lost on, a lake with the stars in it, things in the dark with eyes, and once in a while a rave in
   the hollow in the middle that nobody asked permission for. Somebody there is not dancing, and
