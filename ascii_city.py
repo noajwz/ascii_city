@@ -227,12 +227,12 @@ DISTRICTS = [
          glyphs="+:8O", band=None, mullion=False, ground="n", gap=3,
          pal="mid", roof="^", whole_floors=False, cjk=False),
     dict(key="c", name="chinatown", weight=3, scale=0.7, lo=8.0, hi=22.0,
-         dens=(0.38, 0.78), flat=0.80, hung=0.85, smoke=0.30, bulb=0.55,
+         dens=(0.38, 0.78), flat=0.80, hung=0.50, smoke=0.30, bulb=0.55,
          neon=(3, 4, 7), lantern=0.85, park=False,
          glyphs="#8%@", band="=", mullion=False, ground="#", gap=5,
          pal="red", roof="~", whole_floors=False, cjk=True),
     dict(key="m", name="market", weight=3, scale=0.65, lo=7.0, hi=20.0,
-         dens=(0.32, 0.68), flat=0.55, hung=0.45, smoke=0.35, bulb=0.60,
+         dens=(0.32, 0.68), flat=0.55, hung=0.32, smoke=0.35, bulb=0.60,
          neon=(4, 7), lantern=0.70, park=False,
          glyphs="oO0", band=None, mullion=False, ground="A", gap=2,
          pal="warm", roof="=", whole_floors=False, cjk=False),
@@ -1591,6 +1591,19 @@ def make_face(rng, height, d, kind):
     face["over"] = rng.choice(JP_OVER_DOOR)
     face["escape"] = rng.random() < 0.4
     face["bin"] = rng.uniform(1.2, CELL - 1.2) if rng.random() < 0.3 else None
+
+    # One sign per frontage. A five-metre shopfront carrying a flat neon, a
+    # hanging sign and a string of lanterns all at once buries its own corners
+    # and roofline, and a street of them is a wall of light with no buildings
+    # in it - which was reported as "too many lights to make them out". The
+    # hanging sign wins, because it is the one you can read from down the
+    # street. Decided off values already drawn rather than new draws, so no
+    # other face of the lot - nor anything else about the city - moves.
+    if not yoko and face["hung"] is not None:
+        if face["flat"] is not None and face["hung"]["phase"] > 1.0:
+            face["flat"] = None                  # one in five keeps both
+        if face["lanterns"] is not None and face["lanterns"]["phase"] > 1.6:
+            face["lanterns"] = None              # one in four keeps both
     return face
 
 
@@ -2049,9 +2062,12 @@ def draw_casino_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
             else:
                 glyph, attr = "#", gold
         else:
-            # Nobody in a casino ever turns a light off.
+            # Most of the lights on, not all of them: lit wall to wall, the
+            # casino was a gold block with no floors in it, and with the
+            # bulbs chasing round the edge on top you could not see where
+            # the building stopped.
             m = _mix(b["seed"] + face, f, bay)
-            if (m & 0xFFFF) / 65535.0 >= 0.88:
+            if (m & 0xFFFF) / 65535.0 >= 0.62:
                 continue
             glyph, attr = b["glyphs"][(m >> 17) & 1], gold
         for dy in range(thick):
@@ -3386,6 +3402,9 @@ def put_cell_world(ch, co, v, walls, x, y, z, glyph, attr):
     put_point(ch, co, v, walls, x, y, z, glyph, attr)
 
 
+SIGN_LIT_FAR = 55.0    # beyond this a hanging sign is drawn unlit
+
+
 def draw_hung_sign(ch, co, v, walls, s, world, normal, now, wet):
     """A neon sign on a bracket over the pavement, letters stacked downwards.
 
@@ -3427,8 +3446,13 @@ def draw_hung_sign(ch, co, v, walls, s, world, normal, now, wet):
         for ex, y0, y1, ed in edges:
             for y in range(min(y0, y1), max(y0, y1) + 1):
                 put_cell(ch, co, v, walls, ex, y, ed, "|", dark)
+    # Far down the street a sign is a lit tube you cannot read anyway, and a
+    # street of them lit reads as a wall of light with no buildings in it.
+    # Past SIGN_LIT_FAR they are drawn in their unlit colour: the near ones
+    # stay bright and the far end of the street goes quiet behind them.
+    far = dist > SIGN_LIT_FAR and city_sync(now) is None
     for i, letter in enumerate(s["text"]):
-        attr = neon_attr(s, i, now)
+        attr = dark if far else neon_attr(s, i, now)
         if is_wide(letter):
             # Centre it on the bracket rather than hanging it off to the right.
             put_wide(ch, co, v, walls, sx - 1, top + i * step, dist, letter, attr)

@@ -124,6 +124,15 @@ there is no fisheye to correct at the edges.
   strip when you are square in front of it and opens out as you come along the street — which is
   when a sign like that is meant to be read anyway. Drawn edge-on the two sides land in the same
   column, so the frame is suppressed rather than burying the letters behind itself.
+- **One sign per frontage.** Reported as "too many lights to make the buildings out". In
+  Chinatown a five-metre shopfront could carry a flat neon, a hanging sign and a string of
+  lanterns at once, and hanging signs alone were 84% of the lit cells in those streets. A face
+  with a hanging sign now drops its flat sign (one in five keeps it) and its lanterns (one in four
+  keeps them), decided off values already drawn so nothing else moves; Chinatown hangs signs on
+  half its frontages instead of 85%, the market a third. Past `SIGN_LIT_FAR` a hanging sign is
+  drawn in its unlit tube colour, so the near ones stand out and the far end of the street goes
+  quiet. Measure "lights" as the *lit* tube colours and bulbs only — counting the dark tube colour
+  as a light made the first measurement say nothing had changed.
 - **A sign hangs from its top and reads downwards, so where it ends is what matters.** Constraining
   the top alone guarantees nothing: a quarter of them used to finish below eye level and one in
   thirty ran into the pavement. `SIGN_CLEAR` is the floor the last letter has to clear, and a

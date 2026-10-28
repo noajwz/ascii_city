@@ -400,6 +400,23 @@ sky2, _ = ac.render_skyline(100.0, 110, 30, 300.0 + 12)
 check("and from the waterfront a train crosses the town",
       any("oo|oo" in "".join(r) for r in sky) and sky != sky2)
 
+# --- one sign per frontage ------------------------------------------------
+# Reported as "too many lights to make the buildings out": a shopfront with a
+# flat neon, a hanging sign and lanterns at once buries its own outline.
+both = faces = 0
+for i in range(-200, 200, 3):
+    for j in range(-200, 200, 3):
+        if ac.is_open(i, j) or ac.district(i, j)["name"] not in ("chinatown", "market"):
+            continue
+        for fc in ac.lot(i, j)["faces"]:
+            if fc["hung"] is None:
+                continue
+            faces += 1
+            both += fc["flat"] is not None and fc["lanterns"] is not None
+check("a hanging sign rarely shares its frontage with everything else",
+      faces > 50 and both / float(faces) < 0.1, "%d of %d" % (both, faces))
+check("and a far one is drawn unlit", ac.SIGN_LIT_FAR < ac.MAX_VIEW)
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")
