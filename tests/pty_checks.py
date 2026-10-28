@@ -83,5 +83,7 @@ ok &= report("sky deck: lift up, look round, lift down", *run(
 ok &= report("fire escape: climb, look round, climb down", *run(
     [(b"`", .5), (b"|", 1.0), (b"w", 1.0), (b"w", 4.0), (b"d", .5), (b"s", 1.0),
      (b"w", 4.0)], cols=100, rows=30))
+ok &= report("the pictures: go in, watch, walk out", *run(
+    [(b"`", .5), (b"*", 2.5), (b"s", .6), (b"s", .6), (b"w", .4)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

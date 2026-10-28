@@ -206,6 +206,14 @@ CLIMB_REACH = 1.9      # how close to the ladder you have to be
 LIFT_DOORS = 0.9       # seconds for the doors to close or open
 LIFT_FLOOR = 0.07      # seconds per floor going past
 
+# --- the cinema ---
+# As rare as a casino and like one only from the outside: a marquee over the
+# doors with the film's name in it. Inside it is the quietest light in the
+# city - one black-and-white film, on a loop, on the city's own clock, so you
+# walk in on whatever is showing.
+FILM_TITLES = ["THE LONG NIGHT", "NEON RAIN", "LAST TRAIN", "AFTER HOURS",
+               "CITY OF GLASS", "THE QUIET STREET", "BLUE HOUR", "NOWHERE MAN"]
+
 CASINO_NAMES = ["ROYALE", "GOLDEN", "LUCKY", "ACES", "MIRAGE", "JACKPOT",
                 "FORTUNA", "DIAMOND", "SPHINX", "MONTE"]
 
@@ -1760,7 +1768,7 @@ def lot(i, j):
         # Neither belongs in a park: the cell would be a clump of trees, and
         # draw_wall_column() would draw it as one, so the venue would exist
         # and be invisible.
-        b["club"] = b["casino"] = b["tower"] = None
+        b["club"] = b["casino"] = b["tower"] = b["cinema"] = None
         if d["park"]:
             pass
         elif _mix(i, j, 909) % CLUB_ODDS == 0:
@@ -1781,6 +1789,14 @@ def lot(i, j):
                                "tone": rng.random(),
                                "sign_tone": rng.random(),
                                "phase": rng.uniform(0.0, 5.0)}
+        elif _mix(i, j, 1961) % CLUB_ODDS == 0 and not d["park"]:
+            face = _road_face(i, j, _mix(i, j, 1963) % 4)
+            if face is not None:
+                b["height"] = max(b["height"], 10.0)
+                b["cinema"] = {"door": face, "u": CELL * 0.5,
+                               "title": FILM_TITLES[_mix(i, j, 1967)
+                                                    % len(FILM_TITLES)],
+                               "offset": _mix(i, j, 1969) % 997}
         elif b["height"] >= TOWER_MIN and _mix(i, j, 1907) % TOWER_ODDS == 0:
             # A sky deck. Off a hash rather than the lot's rng, so being one
             # moves nothing else about the building; and only with a street
@@ -3541,6 +3557,33 @@ def draw_raver(ch, co, v, walls, p, now, wet):
             y = 1.5 + (0.42 if up else 0.0) + 0.34 * math.cos(a)
             put_point(ch, co, v, walls, x + tx * off, y, z + tz * off,
                       "*o."[m], lit if m == 0 else dark)
+
+
+def draw_cinema_front(ch, co, v, walls, cin, world, now):
+    """NOW SHOWING and the title, in a box ringed with chasing bulbs, in screen
+    space for the casino marquee's reason: unreadable is worse than the wrong
+    size. And the lit doors under it."""
+    pr = v.project(world[0], world[1], world[2])
+    if pr is None or pr[2] > 70.0:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    lines = ["NOW SHOWING", cin["title"]]
+    w = max(len(s) for s in lines) + 4
+    x0, y0 = sx - w // 2, sy - 2
+    for k in range(w):
+        for y in (y0, y0 + 3):
+            lit = chase(k * 0.6 + (y - y0), now)
+            put_cell(ch, co, v, walls, x0 + k, y, dist, "o" if lit else ".",
+                     GOLD if lit else GOLD_DIM)
+    for r, s in enumerate(lines):
+        y = y0 + 1 + r
+        put_cell(ch, co, v, walls, x0, y, dist, "o", GOLD)
+        put_cell(ch, co, v, walls, x0 + w - 1, y, dist, "o", GOLD)
+        for k, c in enumerate(s.center(w - 2)):
+            put_cell(ch, co, v, walls, x0 + 1 + k, y, dist, c,
+                     GOLD_DIM if r == 0 else FLASH)
+    blit_sprite(ch, co, v, walls, ["[|][|]", "[|][|]", "[|][|]"], world[0],
+                world[2], 0.0, 2.4, 2.4, BULB)
 
 
 def draw_marquee(ch, co, v, walls, cas, world, now):
@@ -5393,6 +5436,9 @@ def draw_props(ch, co, v, walls, now, wet):
             nx, nz = FACES[f]
             if not is_open(i + nx, j + nz):
                 continue
+            if b["cinema"] is not None and f == b["cinema"]["door"]:
+                w = face_point(i, j, f, CELL * 0.5, 0.4, 3.9)
+                props.append((_d2(v, w), "cinema", b["cinema"], w, (nx, nz)))
             if b["tower"] is not None and f == b["tower"]["door"]:
                 w = face_point(i, j, f, CELL * 0.5, 0.3, 0.0)
                 props.append((_d2(v, w), "lobby", b["tower"], w, (nx, nz)))
@@ -5468,6 +5514,8 @@ def draw_props(ch, co, v, walls, now, wet):
                         world[0], world[2], 0.0, 2.8, 0.7, CURB)
         elif kind == "lobby":
             draw_lobby(ch, co, v, walls, s, now)
+        elif kind == "cinema":
+            draw_cinema_front(ch, co, v, walls, s, world, now)
         elif kind == "overdoor":
             tone = s[1]["tone"] if s[1] else 0.44
             draw_over_door(ch, co, v, walls, s[0], world, now, tone)
@@ -6664,7 +6712,7 @@ def venue_at(x, z):
             if is_open(i, j):
                 continue
             b = lot(i, j)
-            for kind in ("casino", "club", "tower"):
+            for kind in ("casino", "club", "tower", "cinema"):
                 v = b[kind]
                 if v is None:
                     continue
@@ -6854,6 +6902,7 @@ CHEAT_PLACES = [
     ("^", "a sky deck", "tower"),
     ("|", "a fire escape", "escape"),
     ("_", "a car park", "carpark"),
+    ("*", "the pictures", "cinema"),
     ("g", "the woods", "woods"),
     ("x", "the woods rave", "rave"),
     ("e", "the lake", "lake"),
@@ -7298,6 +7347,8 @@ def find_place(x, z, kind):
         return _escape_spot(x, z)
     if kind == "carpark":
         return _car_park_spot(x, z)
+    if kind == "cinema":
+        return _doorway(x, z, 1961, "cinema")
     if kind in ("woods", "rave", "lake"):
         return _woods_spot(x, z, kind)
     if kind in ("bank", "pier", "bridge", "leaner", "carnival", "grand",
@@ -7329,26 +7380,30 @@ def draw_cheats(ch, co, note):
     """The panel, drawn over the live frame rather than instead of it, so that
     what you change to the weather happens in front of you.
 
-    Two columns, three groups: the city on the left with the weather under
-    it, the parts of town on the right with the river and the woods under
-    them. One list of everything would be taller than most terminals."""
+    Three columns: the places in the city; the parts of town with the sky and
+    the streets under them; and out of town - the river and the woods. It was
+    two, and every new place went into the first until it was taller than a
+    thirty-row terminal and the panel quietly stopped opening at all. There
+    is a test that it opens at 80x24."""
     height, width = len(ch), len(ch[0])
-    left = [("", "CHEATS")]
+    left = [("", "IN THE CITY")]
     left += [(k, name) for k, name, kind in CHEAT_PLACES if kind not in OUT_OF_TOWN]
-    left += [("", ""), ("w", "weather: " + weather_name()),
-             ("L", "strike now"), ("n", "next night"),
-             ("A", "a strange night"), ("z", "a lantern night"),
-             ("s", "sky: " + clouds_name()),
-             ("a", "people: " + crowd_name())]
-    right = [("", "PARTS OF TOWN")]
-    right += [(d["key"], d["name"]) for d in DISTRICTS]
-    right += [("", ""), ("", "OUT OF TOWN")]
+    middle = [("", "PARTS OF TOWN")]
+    middle += [(d["key"], d["name"]) for d in DISTRICTS]
+    middle += [("", ""), ("", "SKY AND STREETS"),
+               ("w", "weather: " + weather_name()),
+               ("L", "strike now"), ("n", "next night"),
+               ("A", "a strange night"), ("z", "a lantern night"),
+               ("s", "sky: " + clouds_name()),
+               ("a", "people: " + crowd_name())]
+    right = [("", "OUT OF TOWN")]
     right += [(k, name) for k, name, kind in CHEAT_PLACES if kind in OUT_OF_TOWN]
     right += [("", ""), ("`", "close")]
+    columns = (left, middle, right)
 
     col = 20
-    rows = max(len(left), len(right))
-    w, h = col * 2 + 3, rows + (3 if note else 2)
+    rows = max(len(c) for c in columns)
+    w, h = col * 3 + 3, rows + (3 if note else 2)
     if width < w + 4 or height < h + 2:
         return                          # no room; the city is more use
     x0, y0 = 2, 1
@@ -7360,7 +7415,7 @@ def draw_cheats(ch, co, note):
                                   "-" if r in (0, h - 1) else
                                   "|" if side else " ")
             co[y0 + r][x0 + c] = GOLD_DIM if side else 0
-    for n, column in enumerate((left, right)):
+    for n, column in enumerate(columns):
         cx = x0 + 2 + n * col
         for r, (k, label) in enumerate(column):
             y = y0 + 1 + r
@@ -7520,6 +7575,163 @@ def render_ramen(shop, width, height, now, since):
     return ch, co
 
 
+FILM_SCENES = 6
+SCENE_LEN = 9.0         # seconds a scene
+FILM_LINES = [("SHE", "You came back."), ("HIM", "I never left."),
+              ("SHE", "The rain won't stop."), ("HIM", "It never does, here."),
+              ("SHE", "Where will you go?"), ("HIM", "Wherever the last train goes.")]
+
+
+def film_frame(title, t, w, h):
+    """One frame of the picture: a list of h strings of w characters, and how
+    bright it is overall (0..1) - which is what lights the audience. Six
+    scenes on a loop: the title, rain on a window, a night drive, two people
+    talking, the city, and THE END."""
+    g = [[" "] * w for _ in range(h)]
+
+    def put(x, y, c):
+        if 0 <= x < w and 0 <= y < h:
+            g[y][x] = c
+
+    def text(y, s):
+        for k, c in enumerate(s):
+            put((w - len(s)) // 2 + k, y, c)
+
+    t = t % (FILM_SCENES * SCENE_LEN)        # a loop, so it is the same film
+    scene, s = divmod(t, SCENE_LEN)
+    scene = int(scene) % FILM_SCENES
+    bright = 0.3
+    if scene == 0:                        # the title, on black, with grain
+        text(h // 2 - 1, title)
+        text(h // 2 + 1, "-" * len(title))
+        for k in range(w * h // 40):
+            m = _mix(k, int(t * 12), 1971)
+            put(m % w, (m >> 8) % h, ".")
+        bright = 0.2
+    elif scene == 1:                      # rain on a window, a lamp outside
+        mx, my = w // 2, h // 2
+        for y in range(h):
+            put(mx, y, "|")
+        for x in range(w):
+            put(x, my, "-")
+        put(w - 6, 2, "o")
+        for k in range(w // 2):
+            m = _mix(k, 0, 1973)
+            x = m % w
+            y = int((t * (6 + m % 5) + (m >> 8) % h)) % h
+            put(x, y, "'")
+            put(x, y - 1, ":")
+        bright = 0.35
+    elif scene == 2:                      # a night drive
+        hz = h // 3
+        for y in range(hz + 1, h):
+            spread = (y - hz) * w // (2 * max(1, h - hz)) + 1
+            put(w // 2 - spread, y, "/")
+            put(w // 2 + spread, y, "\\")
+            if int(y * 2 - t * 8) % 4 < 2:
+                put(w // 2, y, "|")
+        for k in range(w // 3):
+            m = _mix(k, 1, 1975)
+            put((m % w), hz - (m >> 8) % 2, "." if m % 3 else "o")
+        drift = int(2 * math.sin(t * 0.6))
+        put(w // 2 - 2 + drift, hz + 2, "o")
+        put(w // 2 + 2 + drift, hz + 2, "o")
+        bright = 0.45
+    elif scene == 3:                      # two of them, and what they say
+        for (cx, face) in ((w // 3, ">"), (2 * w // 3, "<")):
+            for r, line in enumerate([" ___ ", "(   )", "|" + face * 3 + "|",
+                                      " | | ", "/   \\"]):
+                for k, c in enumerate(line):
+                    if c != " ":
+                        put(cx - 2 + k, h // 2 - 3 + r, c)
+        who, said = FILM_LINES[int(s / (SCENE_LEN / len(FILM_LINES)))
+                               % len(FILM_LINES)]
+        text(h - 2, said)
+        bright = 0.4
+    elif scene == 4:                      # the city, a window going out
+        for x in range(w):
+            top = h // 2 + (_mix(x // 3, 0, 1977) % (h // 2))
+            for y in range(top, h):
+                lit = _mix(x, y, 1979) % 7 == 0 and (_mix(x, y, 1981)
+                                                     + int(t)) % 9
+                put(x, y, "o" if lit else "#")
+            put(x, top, "_")
+        put(w - 8, 2, "(")
+        put(w - 7, 2, ")")
+        bright = 0.5
+    else:                                 # THE END, fading
+        text(h // 2, "THE END")
+        if s > SCENE_LEN * 0.6:
+            g = [[" "] * w for _ in range(h)]
+        bright = 0.15
+    flicker = 0.85 + 0.15 * math.sin(t * 23.0) * math.sin(t * 7.0)
+    return ["".join(r) for r in g], bright * flicker
+
+
+def render_cinema(cin, width, height, now):
+    """In the back rows.
+
+    The screen fills the top of the room between red curtains, the film on it
+    in black and white; the projector's beam comes over your head, dust in it;
+    and the audience sits in rows of silhouettes in front of you, lit by
+    whatever is on the screen - a bright scene throws its light on them, a
+    dark one leaves them as shapes."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    t = now + cin["offset"]
+    if width < 40 or height < 16:
+        frame, _ = film_frame(cin["title"], t, max(10, width - 2), 3)
+        _text(ch, co, 1, 1, cin["title"], GOLD)
+        for r, line in enumerate(frame):
+            _text(ch, co, 3 + r, 1, line, STAR)
+        _text(ch, co, height - 1, 1, "s to leave", GOLD_DIM)
+        return ch, co
+    sx0, sx1 = 6, width - 7
+    sy0, sy1 = 1, int(height * 0.6)
+    fw, fh = sx1 - sx0, sy1 - sy0
+    frame, bright = film_frame(cin["title"], t, fw, fh)
+    for r, line in enumerate(frame):
+        for k, c in enumerate(line):
+            if c != " ":
+                ch[sy0 + r][sx0 + k] = c
+                co[sy0 + r][sx0 + k] = FLASH if bright > 0.42 else STAR
+    for x in range(sx0 - 1, sx1 + 1):            # the screen's edge
+        ch[sy0 - 1][x], co[sy0 - 1][x] = "_", CONCRETE
+        ch[sy1][x], co[sy1][x] = "-", CONCRETE
+    for y in range(0, sy1 + 3):                  # the curtains
+        for x in list(range(0, sx0 - 1)) + list(range(sx1 + 1, width)):
+            ch[y][x] = "|" if (x + y // 3) % 2 else "("
+            co[y][x] = ROU_RED
+    # The beam, from behind you up to the screen, with dust turning in it.
+    px, py = width // 2, height - 1
+    for k in range(70):
+        m = _mix(k, int(now * 3.0), 1983)
+        corner = (sx0 + (m % fw), sy1)
+        f = ((m >> 10) % 100) / 100.0
+        x = int(round(px + (corner[0] - px) * f))
+        y = int(round(py + (corner[1] - py) * f))
+        if sy1 < y < height and ch[y][x] == " ":
+            ch[y][x], co[y][x] = ".", HAZE
+    # The audience: three rows of heads, nearer ones bigger, lit by the film.
+    lit = FLASH if bright > 0.42 else (CURB if bright > 0.25 else BARK)
+    rows = [(sy1 + 3, 9, ["(_)"]), (sy1 + 5, 11, [" ,-. ", "(   )"]),
+            (height - 4, 14, ["  ,--.  ", " (    ) ", "/      \\"])]
+    for k, (y, gap, art) in enumerate(rows):
+        off = (k * 5) % gap
+        for x in range(off, width - len(art[0]), gap):
+            if _mix(x, k, 1985) % 5 == 0:
+                continue                         # an empty seat
+            for r, line in enumerate(art):
+                if 0 <= y + r < height:
+                    _text(ch, co, y + r, x, line, lit if k < 2 else BARK)
+    way = "-- the way out (s) --"
+    for k, c in enumerate(way):
+        x = max(1, width // 2 - 10) + k
+        if x < width:
+            ch[height - 1][x], co[height - 1][x] = c, GOLD_DIM
+    return ch, co
+
+
 def render_rave(club, width, height, now):
     """Inside the club.
 
@@ -7635,6 +7847,7 @@ ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
 RAVE_HUD = " inside the club at %d,%d  -  s walks back out  -  q quit "
 RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
+CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
 CLIMB_HUD = " on the fire escape, climbing %s "
 ESCAPE_ROOF_HUD = (" on a roof in the alleys, %d floors up, %s  -  ad look round  -"
                    "  s climbs down  -  q quit ")
@@ -7911,6 +8124,9 @@ def main(stdscr):
         elif venue is not None and venue[0] == "club":
             ch, co = render_rave(venue[1], width, height, now)
             hud = RAVE_HUD % (cam_x, cam_z)
+        elif venue is not None and venue[0] == "cinema":
+            ch, co = render_cinema(venue[1], width, height, now)
+            hud = CINEMA_HUD % (venue[1]["title"].lower(), cam_x, cam_z)
         elif venue is not None and venue[0] == "ramen":
             if seated is None or seated[0] != venue[1]["seed"]:
                 seated = (venue[1]["seed"], now)    # sat down just now
