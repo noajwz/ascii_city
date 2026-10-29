@@ -1314,7 +1314,8 @@ def tunnel_run(i, j):
     _evict(_tunnel_cache, 40000)
     hit = None
     span = road_span(i, XP, 91)
-    if span is not None and not woods_at(i, j) and not el_at(i) and not grand_at(i):
+    if (span is not None and not woods_at(i, j) and not el_at(i) and not grand_at(i)
+            and not hwy_at(i)):
         a = span[0]
         b = j // ZP
         lng = None
@@ -3617,6 +3618,21 @@ EL_CAR = 9.0           # one car's length
 EL_STATION = 34        # cells between stations
 EL_REACH = 120.0
 
+# --- the highway ---
+# Most of the traffic is not in town at all: it is up on an elevated highway
+# that runs straight through, over one of the wide avenues in HWY_EVERY, on
+# piers down the middle of it - over the river, over the woods, over
+# everything, so it never has to stop at the water. Two lanes each way, cars
+# close together and quick, a river of headlights one way and tail lights the
+# other. Under it the pavement is yours.
+HWY_EVERY = 7          # avenues (of which only the wide ones qualify)
+HWY_H = 9.0            # the deck, above the El and the street lamps
+HWY_SLOT = 11.0        # between slots on a lane
+HWY_ODDS = 2           # one slot in this many has a car
+HWY_PIER = 15.0        # between piers
+HWY_LAMP = 30.0        # between the lamps along the median
+HWY_REACH = 220.0
+
 # People walking. A lane down each pavement of every street, slots along it
 # sliding with time at the lane's pace, and one slot in a few has somebody
 # in it - so nothing is stored, a walker is where they should be whether or
@@ -5221,7 +5237,8 @@ CAR_CLEAR = 3.0        # a car this close to you is not drawn: it never drives
                        # through your face, whatever the arithmetic says
 TRAFFIC = ["some", "busy", "none"]
 _traffic = 0
-TRAFFIC_ODDS = {"some": 3, "busy": 1}  # one slot in this many has a car
+TRAFFIC_ODDS = {"some": 7, "busy": 3}  # one slot in this many has a car
+TRIP_BLOCKS = 3        # a car in town drives this many blocks, then turns off
 POLICE_ODDS = 23       # of the cars, one in this many is a police car
 BUS_ODDS = 11          # and one in this many on an avenue is a bus
 
@@ -5272,11 +5289,14 @@ def near_cars(v, now, reach=CAR_REACH, every=False):
                 along0 = v.z if axis == 0 else v.x
                 shift = now * pace + (m >> 3 & 1023) / 1023.0 * CAR_SLOT
                 k0 = int(math.floor((along0 - reach - shift) / CAR_SLOT))
+                ph = m >> 13 & 3
                 for k in range(k0, k0 + int(2 * reach / CAR_SLOT) + 2):
-                    g = _mix(axis * 7919 + span[0], d * 100003 + k, 2303)
-                    if g % odds:
-                        continue
                     along = k * CAR_SLOT + shift
+                    trip = _trip_of(axis, along, ph)
+                    g = _mix(axis * 7919 + span[0], (d * 100003 + k) * 977 + trip,
+                             2303)
+                    if g % odds or not _trip_ok(axis, span[0], off, trip, ph):
+                        continue
                     x, z = (off, along) if axis == 0 else (along, off)
                     rx, rz = x - v.x, z - v.z
                     d2 = rx * rx + rz * rz
@@ -5296,6 +5316,182 @@ def near_cars(v, now, reach=CAR_REACH, every=False):
                     out.append((d2, x, z, dirv, kind, g))
     out.sort(reverse=True)
     return out
+
+
+def _crossing(axis, b):
+    """Where the cross road numbered b is along a lane on this axis - its
+    middle, in world units - or None if it was built over."""
+    period, salt = (ZP, 137) if axis == 0 else (XP, 91)
+    for r in range(period):
+        span = road_span(b * period + r, period, salt)
+        if span is not None:
+            return (span[0] + span[1] * 0.5) * CELL
+    return None
+
+
+def _trip_of(axis, along, ph):
+    """Which trip a point along a lane is on. A trip is TRIP_BLOCKS blocks,
+    from the middle of one crossing to the middle of another - so a car turns
+    on and off at a junction, never out of thin air mid-block."""
+    period = ZP if axis == 0 else XP
+    b = int(math.floor(along / (period * CELL)))
+    mid = _crossing(axis, b)
+    if mid is not None and along < mid:
+        b -= 1
+    return (b + ph) // TRIP_BLOCKS
+
+
+def _trip_ok(axis, a0, off, trip, ph):
+    """Can a car drive this trip at all: both ends real crossings, and dry
+    road the whole way - no river without a bridge for cars, no footbridge,
+    no lake, no woods. Once a lane every street ran on into the water and
+    the cars vanished at the bank and came up out of it on the far side.
+    The big bridge is the one crossing that carries traffic."""
+    key = (axis, a0, round(off, 1), trip)
+    hit = _trip_cache.get(key)
+    if hit is None:
+        _evict(_trip_cache, 20000)
+        b0 = trip * TRIP_BLOCKS - ph
+        start, end = _crossing(axis, b0), _crossing(axis, b0 + TRIP_BLOCKS)
+        hit = start is not None and end is not None
+        along = start or 0.0
+        while hit and along <= end:
+            x, z = (off, along) if axis == 0 else (along, off)
+            i = int(x / CELL + BIG) - BIG
+            j = int(z / CELL + BIG) - BIG
+            if not road_at(i, j) or (water_at(i, j)
+                                     and not (bridge_at(i, j) and grand_at(i))):
+                hit = False
+            along += CELL * 0.5
+        _trip_cache[key] = hit
+    return hit
+
+
+def hwy_span(k):
+    """(first cell, width) of the avenue the highway runs over, if avenue k
+    is one of those: one of the three-cell-wide ones, and not the El's or
+    the big bridge's."""
+    hit = _hwy_cache.get(k, 0)
+    if hit == 0:
+        hit = None
+        if _mix(k, 0, 2501) % HWY_EVERY == 0 and el_span(k) is None:
+            for r in range(XP):
+                span = road_span(k * XP + r, XP, 91)
+                if span is not None:
+                    if span[1] >= 3 and not grand_at(span[0]):
+                        hit = span
+                    break
+        _hwy_cache[k] = hit
+    return hit
+
+
+def hwy_at(i):
+    span = hwy_span(i // XP)
+    return span is not None and span[0] <= i < span[0] + span[1]
+
+
+def near_hwys(v, reach):
+    """(x0, x1) of each highway avenue within reach across."""
+    k0 = int((v.x - reach) / (XP * CELL)) - 1
+    for k in range(k0, k0 + int(2 * reach / (XP * CELL)) + 3):
+        span = hwy_span(k)
+        if span is None:
+            continue
+        x0, x1 = span[0] * CELL, (span[0] + span[1]) * CELL
+        if abs((x0 + x1) * 0.5 - v.x) < reach:
+            yield x0, x1
+
+
+def hwy_lanes(x0, x1):
+    """(lane x, direction) for the four lanes: two each way, driving on the
+    right of the median as you look along them."""
+    xm = (x0 + x1) * 0.5
+    return ((xm + 1.6, 1), (xm + 4.0, 1), (xm - 1.6, -1), (xm - 4.0, -1))
+
+
+def hwy_cars(x0, x1, z, reach, now):
+    """(z, lane x, direction, seed) of every car on the highway within reach."""
+    if TRAFFIC_ODDS.get(TRAFFIC[_traffic]) is None:
+        return
+    if night(now)["alien"]:
+        now = int((now + _night_skip) / NIGHT_LENGTH) * NIGHT_LENGTH - _night_skip
+    for n, (lx, d) in enumerate(hwy_lanes(x0, x1)):
+        m = _mix(int(x0), n, 2503)
+        fast = 2.5 if abs(lx - (x0 + x1) * 0.5) < 2 else 0.0   # the inside lane
+        pace = (19.0 + (m & 7) * 0.8 + fast) * d
+        shift = now * pace + (m >> 3 & 1023) / 1023.0 * HWY_SLOT
+        k0 = int(math.floor((z - reach - shift) / HWY_SLOT))
+        for k in range(k0, k0 + int(2 * reach / HWY_SLOT) + 2):
+            g = _mix(int(x0) * 4 + n, k, 2505)
+            if g % HWY_ODDS:
+                continue
+            yield k * HWY_SLOT + shift, lx, d, g
+
+
+def hwy_near(x, z):
+    """Close enough to the highway to hear it."""
+    for x0, x1 in near_hwys(View(x, z, 0.0, 2, 2), 40.0):
+        if x0 - 25.0 < x < x1 + 25.0:
+            return True
+    return False
+
+
+def draw_hwy(ch, co, v, walls, x0, x1, now, wet):
+    """The highway: piers down the median, a cross head on each, the deck's
+    two edges and a parapet along them, tall lamps along the middle, and the
+    traffic - headlights coming, tail lights going.
+
+    Points laid only over the stretch in front of you, like the El. From
+    right under it you see the deck and not the cars: they are on top of it."""
+    xm = (x0 + x1) * 0.5
+    dx0, dx1 = x0 + PAVE + 0.4, x1 - PAVE - 0.4
+    reach = HWY_REACH if v.eye < 10.0 else ROOF_REACH
+    zs = v.z - (reach if v.dz < 0 else CELL * 2)
+    ze = v.z + (reach if v.dz >= 0 else CELL * 2)
+    if abs(v.dx) > 0.3:
+        zs, ze = v.z - reach * 0.6, v.z + reach * 0.6
+    z = math.floor(zs / HWY_PIER) * HWY_PIER
+    while z <= ze:
+        for px in (xm - 0.4, xm + 0.4):
+            y = 0.0
+            while y < HWY_H - 0.6:
+                put_point(ch, co, v, walls, px, y, z, "|", CONCRETE)
+                y += 0.7
+        x = dx0
+        while x <= dx1:
+            put_point(ch, co, v, walls, x, HWY_H - 0.5, z, "=", CONCRETE)
+            x += 0.9
+        z += HWY_PIER
+    # The deck's edges: a solid band, not a dotted line - so the points are
+    # spaced by how far off they are, close together near you, where a fixed
+    # spacing left gaps the shop signs behind showed through.
+    for gx in (dx0, dx1):
+        z = zs
+        while z <= ze:
+            for y, g, a in ((HWY_H - 0.3, "=", CURB), (HWY_H, "=", CURB),
+                            (HWY_H + 0.6, "-", CONCRETE)):
+                put_point(ch, co, v, walls, gx, y, z, g, a)
+            z += max(0.3, math.hypot(gx - v.x, z - v.z) * 0.018)
+    z = math.floor(zs / HWY_LAMP) * HWY_LAMP
+    while z <= ze:
+        for y in (HWY_H + 1.2, HWY_H + 2.2):
+            put_point(ch, co, v, walls, xm, y, z, "|", CONCRETE)
+        put_point(ch, co, v, walls, xm, HWY_H + 3.0, z, "o", EMBER_HOT)
+        z += HWY_LAMP
+    if dx0 < v.x < dx1 and v.eye < HWY_H:
+        return                                   # under the deck
+    for cz, lx, d, g in hwy_cars(x0, x1, v.z, reach, now):
+        if not zs - 5 < cz < ze + 5:
+            continue
+        coming = (v.z - cz) * d > 0.0
+        y = HWY_H + 0.9
+        if (cz - v.z) ** 2 + (lx - v.x) ** 2 < 900.0:
+            paint = tone_colour(("mid", "far", "cold", "warm")[g >> 3 & 3], 0.7)
+            for k in range(-2, 3):
+                put_point(ch, co, v, walls, lx, y + 0.5, cz - d * k * 0.6, "_", paint)
+        for hx in (lx - 0.45, lx + 0.45):
+            put_point(ch, co, v, walls, hx, y, cz, "*" if coming else ".",
+                      FLASH if coming else ROU_RED)
 
 
 def police_light(now, seed):
@@ -5412,6 +5608,8 @@ def draw_walkers(ch, co, v, walls, now, wet):
 
 
 _el_cache = {}
+_hwy_cache = {}
+_trip_cache = {}
 
 
 def el_span(k):
@@ -7087,6 +7285,8 @@ def render_street(v, now):
     draw_traffic(ch, co, v, walls, now, wet)
     for ex0, ex1 in near_els(v, EL_REACH):
         draw_el(ch, co, v, walls, ex0, ex1, now, wet)
+    for hx0, hx1 in near_hwys(v, HWY_REACH if v.eye < 10.0 else ROOF_REACH):
+        draw_hwy(ch, co, v, walls, hx0, hx1, now, wet)
     for tx0, tx1, tz0, tz1, kind in tunnels:
         draw_headwall(ch, co, v, walls, tx0, tx1, tz0, -1.0)
         draw_headwall(ch, co, v, walls, tx0, tx1, tz1, 1.0)
@@ -7824,6 +8024,7 @@ CHEAT_PLACES = [
     ("[", "a short tunnel", "tunnel"),
     ("]", "a long tunnel", "longtunnel"),
     ("<", "a police car", "police"),
+    (")", "the highway", "highway"),
     ("g", "the woods", "woods"),
     ("x", "the woods rave", "rave"),
     ("e", "the lake", "lake"),
@@ -8160,9 +8361,11 @@ def _police_spot(x, z, now):
     for reach in (150.0, 400.0, 900.0):
         v = View(x, z, 0.0, 2, 2)
         best = None
-        for d2, cx, cz, (dx, dz), kind, _ in near_cars(v, now, reach, every=True):
-            if kind != "police":
-                continue
+        later = {g for *_, k_, g in near_cars(v, now + 2.5, reach + 30.0, every=True)
+                 if k_ == "police"}
+        for d2, cx, cz, (dx, dz), kind, g in near_cars(v, now, reach, every=True):
+            if kind != "police" or g not in later:
+                continue                  # turning off before it gets to you
             # Stand eighteen units ahead of it, on the pavement beside its lane:
             # at thirty it was three columns wide and lost among the shops.
             px, pz = cx + dx * 18.0, cz + dz * 18.0
@@ -8337,6 +8540,34 @@ def _el_spot(x, z):
     return None
 
 
+def _hwy_spot(x, z):
+    """Out on a cross street, forty units from the highway, looking down the
+    street at it going over: the deck a band across the gap between the
+    buildings, the traffic sliding along the top of it. From right beside
+    it, looking along, it is a wall of beams overhead and reads as nothing;
+    at much of an angle the buildings hide it. The next press, the next
+    highway over."""
+    k0 = int(x / (XP * CELL))
+    b0 = int(z / (ZP * CELL))
+    for step in range(0, 600):
+        k = k0 + (step + 1) // 2 * (1 if step % 2 else -1)
+        span = hwy_span(k)
+        if span is None:
+            continue
+        xm = (span[0] + span[1] * 0.5) * CELL
+        if abs(xm - x) < CHEAT_SKIP + 30.0:
+            continue
+        for b in range(b0, b0 + 12):
+            cz = _crossing(0, b)
+            if cz is None:
+                continue
+            for side in (-1.0, 1.0):
+                px = xm + side * 40.0
+                if can_stand(px, cz):
+                    return px, cz, math.atan2(xm - px, 6.0)
+    return None
+
+
 def _ramen_spot(x, z):
     """At the counter of the nearest ramen shop, facing it. Skips the one you
     are sat at, so a second press finds another."""
@@ -8373,6 +8604,8 @@ def find_place(x, z, kind):
         return _doorway(x, z, 909, "club")
     if kind == "ramen":
         return _ramen_spot(x, z)
+    if kind == "highway":
+        return _hwy_spot(x, z)
     if kind == "el":
         return _el_spot(x, z)
     if kind == "tower":
@@ -9300,6 +9533,8 @@ def main(stdscr):
                 or ("  ~ something over the city ~" if night(now)["alien"]
                     else "")
                 or ("  ~ a train overhead ~" if el_overhead(cam_x, cam_z, now)
+                    else "")
+                or ("  ~ the hum of the highway ~" if hwy_near(cam_x, cam_z)
                     else "")
                 or ("  ~ a fire escape: walk into it to climb ~"
                     if escape_near(cam_x, cam_z) else "")
