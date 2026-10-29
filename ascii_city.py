@@ -400,7 +400,7 @@ SIGN_WORDS = [
 PALETTES = {}      # e.g. {"near": [3, 7, 12, ...]} -> lists of curses pair numbers
 NEON = []          # [(lit, unlit), ...] - one entry per neon tube colour
 STAR = STREET = HUD = CURB = HAZE = SMOKE = EMBER = EMBER_HOT = 0
-FIREFLY = EYES = SNOW = CLOUD = 0
+FIREFLY = EYES = SNOW = 0
 RAIN = RAIN_FAR = BULB = BULB_DIM = FLASH = CONCRETE = 0
 GOLD = GOLD_DIM = ROU_RED = ROU_BLACK = ROU_GREEN = LANE = 0
 GRASS = BARK = ROOF = 0
@@ -411,7 +411,7 @@ def init_colors():
     global PALETTES, NEON, STAR, STREET, HUD, CURB, HAZE, SMOKE, EMBER
     global EMBER_HOT, RAIN, RAIN_FAR, BULB, BULB_DIM, FLASH, CONCRETE
     global GOLD, GOLD_DIM, ROU_RED, ROU_BLACK, ROU_GREEN, LANE, GRASS, BARK
-    global FIREFLY, EYES, SNOW, CLOUD
+    global FIREFLY, EYES, SNOW
     global ROOF, STAR_DIM, STAR_WARM, STAR_COLD, MOON, MOON_DIM, BAND
 
     curses.start_color()
@@ -446,8 +446,7 @@ def init_colors():
                   "rou_green": 46, "lane": 250, "grass": 22, "bark": 58,
                   "roof": 252, "star_dim": 244, "star_warm": 223,
                   "star_cold": 153, "moon": 231, "moon_dim": 250,
-                  "band": 60, "firefly": 118, "eyes": 190, "snow": 255,
-                  "cloud": 239}
+                  "band": 60, "firefly": 118, "eyes": 190, "snow": 255}
         attrs = {}
     else:
         # 8-colour fallback: bold = the "bright" version of a colour.
@@ -484,7 +483,7 @@ def init_colors():
                   "star_cold": curses.COLOR_CYAN, "moon": curses.COLOR_WHITE,
                   "moon_dim": curses.COLOR_WHITE, "band": curses.COLOR_BLUE,
                   "firefly": curses.COLOR_GREEN, "eyes": curses.COLOR_YELLOW,
-                  "snow": curses.COLOR_WHITE, "cloud": curses.COLOR_BLUE}
+                  "snow": curses.COLOR_WHITE}
         attrs = {"near": curses.A_BOLD}
 
     pair = 1
@@ -543,7 +542,6 @@ def init_colors():
     FIREFLY = made["firefly"] | curses.A_BOLD
     EYES = made["eyes"]
     SNOW = made["snow"] | curses.A_BOLD
-    CLOUD = made["cloud"]
     BAND = made["band"]
 
 
@@ -712,25 +710,6 @@ def dawn_glow(col, y, horizon, amount):
     return ".", BAND
 
 
-def cloud_at(col, y, now, cloud):
-    """Is there visible cloud at this sky cell: a slow drifting field, cut at
-    a level set by how much cloud there is, and thinned so it is texture and
-    not a wall. Lit faintly from below by the city, which is all you see of
-    a cloud at night."""
-    f = (math.sin(col * 0.021 + now * 0.015 + y * 0.35)
-         + 0.6 * math.sin(col * 0.047 - now * 0.011 + y * 0.9))
-    return f > 1.55 - cloud * 1.3 and _mix(col, y, 73) % 3 == 0
-
-
-def draw_cloud_skyline(ch, co, cam_x, ground, tops, now, cloud):
-    width = len(ch[0])
-    off = int(cam_x * 0.05)
-    for sx in range(width):
-        for y in range(min(max(1, ground - 3), tops[sx])):
-            if ch[y][sx] == " " and cloud_at(sx + off, y, now, cloud):
-                ch[y][sx], co[y][sx] = ("~" if (sx + y) % 3 else "-"), CLOUD
-
-
 def draw_stars(ch, co, cam_x, ground, wet, now, tops):
     """The same night as the street sees, over the water.
 
@@ -759,8 +738,6 @@ def draw_stars(ch, co, cam_x, ground, wet, now, tops):
                 if (ch[y][sx] not in " |=_-~^:." and _mix(sx + off, y, 2103) % 100
                         < morning * 90):
                     ch[y][sx] = " "
-    if cloud > 0.2 and not n["alien"]:
-        draw_cloud_skyline(ch, co, cam_x, ground, tops, now, cloud)
     if clear <= 0.02:
         return
     width = len(ch[0])
@@ -2928,13 +2905,6 @@ def draw_sky(ch, co, v, walls, wet, now):
                     g = dawn_glow(bearing, y, v.horizon, v.dawn)
                     if g is not None:
                         ch[y][sx], co[y][sx] = g
-    if cloud > 0.2 and not n["alien"]:
-        for sx in range(v.width):
-            cam = 2.0 * sx / (v.width - 1) - 1.0
-            bearing = int((v.yaw + math.atan(cam * PLANE)) * 90.0)
-            for y in range(min(tops[sx], v.horizon - 1)):
-                if ch[y][sx] == " " and cloud_at(bearing, y, now, cloud):
-                    ch[y][sx], co[y][sx] = ("~" if (bearing + y) % 3 else "-"), CLOUD
     if n["alien"] and not overcast_held():
         draw_sky_beams(ch, co, v, tops, now, seen)
         draw_mother(ch, co, v, tops, now, seen)
