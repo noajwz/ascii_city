@@ -88,5 +88,8 @@ ok &= report("the pictures: go in, watch, walk out", *run(
 ok &= report("tunnels: walk through a short one and a long one", *run(
     [(b"`", .5), (b"[", 1.0), (b"w", 2.0), (b"`", .5), (b"]", 1.0), (b"w", 3.0)],
     cols=100, rows=30))
+ok &= report("a police car coming, then traffic off", *run(
+    [(b"`", .5), (b"<", 1.5), (b"`", .5), (b">", .4), (b">", .4), (b"w", .5)],
+    cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

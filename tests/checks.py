@@ -960,6 +960,65 @@ for dd in (3.0, 1.2):
 check("someone standing in front of you is still there at arm's length",
       counts_near[1] > counts_near[0] > 0, "%d cells at 3 units, %d at 1.2" % tuple(counts_near))
 
+# --- traffic ---------------------------------------------------------------
+ac._night_skip = 0.0
+plain_t = next(k * ac.NIGHT_LENGTH + 100 for k in range(200)
+               if not ac.night(k * ac.NIGHT_LENGTH + 100)["alien"])
+tv = ac.View(x0, z0, 0.0, 110, 30)
+cars_all = ac.near_cars(tv, plain_t, 400.0, every=True)
+check("there is traffic", len(cars_all) > 10, "%d cars within 400 units" % len(cars_all))
+bad_road = bad_kerb = 0
+for _, cx_, cz_, (dx_, dz_), _, _ in cars_all:
+    axis_x = dx_ == 0.0                       # driving along z: an avenue
+    c_ = int((cx_ if axis_x else cz_) / ac.CELL + ac.BIG) - ac.BIG
+    span_ = ac.road_span(c_, ac.XP if axis_x else ac.ZP, 91 if axis_x else 137)
+    if span_ is None or span_[1] < 3:
+        bad_road += 1
+        continue
+    across = (cx_ if axis_x else cz_) - span_[0] * ac.CELL
+    if not ac.PAVE + 1.0 < across < span_[1] * ac.CELL - ac.PAVE - 1.0:
+        bad_kerb += 1
+check("only on the wide streets", bad_road == 0, "%d elsewhere" % bad_road)
+check("and only in the road, well off the pavement", bad_kerb == 0, "%d" % bad_kerb)
+lanes = {}
+for _, cx_, cz_, (dx_, dz_), _, _ in cars_all:
+    lanes.setdefault((round(cx_, 2) if dx_ == 0.0 else round(cz_, 2), dx_, dz_), []).append(
+        cz_ if dx_ == 0.0 else cx_)
+gaps = [abs(a - b) for pos in lanes.values() for a in pos for b in pos if a != b]
+check("cars on a lane never run into each other", not gaps or min(gaps) >= ac.CAR_SLOT - 1e-6,
+      "closest %.1f units" % (min(gaps) if gaps else 0))
+later = {g: (x, z) for _, x, z, _, _, g in ac.near_cars(tv, plain_t + 1.0, 400.0, every=True)}
+moved = [g for _, x, z, _, _, g in cars_all if g in later and later[g] != (x, z)]
+check("and they move", len(moved) > 5)
+on_water = [1 for _, x, z, _, _, _ in cars_all
+            if ac.water_at(int(x / ac.CELL + ac.BIG) - ac.BIG, int(z / ac.CELL + ac.BIG) - ac.BIG)
+            and not ac.bridge_at(int(x / ac.CELL + ac.BIG) - ac.BIG,
+                                 int(z / ac.CELL + ac.BIG) - ac.BIG)]
+check("and never drive into the river", not on_water)
+drawn_near = [d2 for d2, *_ in ac.near_cars(tv, plain_t)]
+check("and none is drawn right on top of you", all(d2 >= ac.CAR_CLEAR ** 2 for d2 in drawn_near))
+kinds = {k for *_, k, _ in ac.near_cars(tv, plain_t, 2000.0, every=True)}
+check("cars, buses and police cars", {"car", "bus", "police"} <= kinds, " ".join(sorted(kinds)))
+alien_t = next(k * ac.NIGHT_LENGTH + 100 for k in range(400)
+               if ac.night(k * ac.NIGHT_LENGTH + 100)["alien"])
+a1 = sorted((x, z) for _, x, z, *_ in ac.near_cars(tv, alien_t, 300.0, every=True))
+a2 = sorted((x, z) for _, x, z, *_ in ac.near_cars(tv, alien_t + 5.0, 300.0, every=True))
+check("on the strange night the traffic stops too", a1 == a2 and a1)
+cop = ac._police_spot(x0, z0, plain_t)
+check("the menu stands you on the pavement with a police car coming", cop is not None
+      and ac.can_stand(cop[0], cop[1]))
+cv = ac.View(cop[0], cop[1], cop[2], 110, 30)
+coming = [c_ for c_ in ac.near_cars(cv, plain_t, 40.0) if c_[4] == "police"]
+check("and it is in front of you", coming)
+bars = {ac.police_light(plain_t + k * 0.09, coming[0][5]) for k in range(10)}
+check("its lightbar goes red and blue", len(bars) == 2)
+check("and you can hear it", ac.siren_near(cop[0], cop[1], plain_t))
+check("the menu sets how much traffic", ac.traffic_name() == "some"
+      and ac.cycle_traffic() == "busy"
+      and len(ac.near_cars(tv, plain_t, 400.0, every=True)) > len(cars_all)
+      and ac.cycle_traffic() == "none" and not ac.near_cars(tv, plain_t, 400.0, every=True)
+      and ac.cycle_traffic() == "some")
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")
@@ -967,7 +1026,7 @@ text = "\n".join("".join(r) for r in big[0])
 check("the panel lists everything it does",
       all(n in text for _, n, _ in ac.CHEAT_PLACES)
       and ac.weather_name() in text and "strike now" in text and "people" in text
-      and "sky " in text and "dawn" in text)
+      and "sky " in text and "dawn" in text and "traffic" in text)
 std = ([[" "] * 80 for _ in range(24)], [[0] * 80 for _ in range(24)])
 ac.draw_cheats(std[0], std[1], "-> somewhere")
 check("and it opens on an 80x24 terminal", any("close" in "".join(r) for r in std[0]))

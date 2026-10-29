@@ -2927,6 +2927,10 @@ def collect_glow(v, now, wet):
     reach = 7.0
     for lx, lz in near_park_lamps(v, 60.0):
         _spill(glow, lx, lz, 6.5, EMBER)
+    for _, cx_, cz_, (dx_, dz_), kind, g in near_cars(v, now, 70.0, every=True):
+        _spill(glow, cx_ + dx_ * 5.0, cz_ + dz_ * 5.0, 2.5, BULB_DIM)
+        if kind == "police":
+            _spill(glow, cx_, cz_, 9.0, police_light(now, g))
     for tx0, tx1, tz0, tz1, kind in v.tunnels:
         if kind == "short":
             _spill(glow, *camp_spot(tx0, tx1, tz0, tz1), 5.0, EMBER)
@@ -4988,6 +4992,137 @@ def crowd_name():
     return CROWDS[_crowd]
 
 
+# Traffic. Only on the wide streets - three cells across - and only in two
+# lanes down the middle, so the pavements are the walkers' and nothing comes
+# down an alley or a narrow street. A lane is slots sliding along at its own
+# pace, the way the walkers' are, so cars on a lane never run into each other
+# and nothing is stored.
+CAR_SLOT = 34.0        # world units between slots along a lane
+CAR_REACH = 110.0
+CAR_CLEAR = 3.0        # a car this close to you is not drawn: it never drives
+                       # through your face, whatever the arithmetic says
+TRAFFIC = ["some", "busy", "none"]
+_traffic = 0
+TRAFFIC_ODDS = {"some": 3, "busy": 1}  # one slot in this many has a car
+POLICE_ODDS = 23       # of the cars, one in this many is a police car
+BUS_ODDS = 11          # and one in this many on an avenue is a bus
+
+BUS = [
+    " ______________ ",
+    "|[][][][][][][]|",
+    "|______________|",
+    "'-oo--------oo-'",
+]
+
+
+def cycle_traffic():
+    global _traffic
+    _traffic = (_traffic + 1) % len(TRAFFIC)
+    return TRAFFIC[_traffic]
+
+
+def traffic_name():
+    return TRAFFIC[_traffic]
+
+
+def near_cars(v, now, reach=CAR_REACH, every=False):
+    """(distance^2, x, z, (dx, dz), kind, seed) for every car in front of you,
+    farthest first. kind is "car", "bus" or "police". With every=True, all
+    of them in reach, including any too close to draw and any behind you -
+    for the HUD and the menu."""
+    odds = TRAFFIC_ODDS.get(TRAFFIC[_traffic])
+    if odds is None:
+        return []
+    if night(now)["alien"]:
+        now = int((now + _night_skip) / NIGHT_LENGTH) * NIGHT_LENGTH - _night_skip
+    out = []
+    n = int(reach / CELL) + 1
+    ci = int(v.x / CELL + BIG) - BIG
+    cj = int(v.z / CELL + BIG) - BIG
+    seen = set()
+    for axis, centre, period, salt in ((0, ci, XP, 91), (1, cj, ZP, 137)):
+        for c in range(centre - n, centre + n + 1):
+            span = road_span(c, period, salt)
+            if span is None or span[1] < 3 or (axis, span[0]) in seen:
+                continue
+            seen.add((axis, span[0]))
+            mid = (span[0] + span[1] * 0.5) * CELL
+            for d in (1, -1):
+                m = _mix(axis * 7919 + span[0], d, 2301)
+                pace = (8.0 + (m & 7) * 0.5) * d
+                off = mid + 2.0 * d * (1 if axis == 0 else -1)
+                along0 = v.z if axis == 0 else v.x
+                shift = now * pace + (m >> 3 & 1023) / 1023.0 * CAR_SLOT
+                k0 = int(math.floor((along0 - reach - shift) / CAR_SLOT))
+                for k in range(k0, k0 + int(2 * reach / CAR_SLOT) + 2):
+                    g = _mix(axis * 7919 + span[0], d * 100003 + k, 2303)
+                    if g % odds:
+                        continue
+                    along = k * CAR_SLOT + shift
+                    x, z = (off, along) if axis == 0 else (along, off)
+                    rx, rz = x - v.x, z - v.z
+                    d2 = rx * rx + rz * rz
+                    if d2 > reach * reach:
+                        continue
+                    if not every and (d2 < CAR_CLEAR ** 2
+                                      or rx * v.dx + rz * v.dz < SPRITE_NEAR):
+                        continue
+                    i = int(x / CELL + BIG) - BIG
+                    j = int(z / CELL + BIG) - BIG
+                    if not road_at(i, j) or not dry_at(x, z):
+                        continue                  # the river, the woods
+                    kind = ("police" if (g >> 6) % POLICE_ODDS == 0 else
+                            "bus" if axis == 0 and (g >> 11) % BUS_ODDS == 0
+                            else "car")
+                    dirv = (0.0, float(d)) if axis == 0 else (float(d), 0.0)
+                    out.append((d2, x, z, dirv, kind, g))
+    out.sort(reverse=True)
+    return out
+
+
+def police_light(now, seed):
+    """Which colour the lightbar is showing: red, blue, red, blue, fast."""
+    return ROU_RED if int(now * 6.0 + (seed & 7)) % 2 else NEON[2][0]
+
+
+def draw_traffic(ch, co, v, walls, now, wet):
+    """The cars, farthest first: the body, and the lights at whichever end is
+    towards you - headlights coming, red tail lights going - and a police
+    car's lightbar on top."""
+    for _, x, z, (dx, dz), kind, g in near_cars(v, now):
+        coming = (v.x - x) * dx + (v.z - z) * dz > 0.0
+        paint = tone_colour(("mid", "far", "cold", "warm", "rust")[g >> 3 & 3],
+                            (g >> 8 & 15) / 15.0)
+        if kind == "bus":
+            blit_sprite(ch, co, v, walls, BUS, x, z, 0.0, 2.8, 2.9, paint)
+            half, h = 1.2, 0.7
+            put_lit(ch, co, v, walls, x, 2.0, z, "o", BULB_DIM, wet, now)
+        elif kind == "police":
+            blit_sprite(ch, co, v, walls, CAR, x, z, 0.0, 1.35, 1.9, MOON_DIM)
+            half, h = 0.75, 0.55
+            bar = police_light(now, g)
+            put_lit(ch, co, v, walls, x - 0.25 * dz, 1.55, z - 0.25 * dx, "=",
+                    bar, max(wet, 0.5), now)
+            put_lit(ch, co, v, walls, x + 0.25 * dz, 1.55, z + 0.25 * dx, "=",
+                    NEON[2][0] if bar == ROU_RED else ROU_RED, max(wet, 0.5), now)
+        else:
+            blit_sprite(ch, co, v, walls, CAR, x, z, 0.0, 1.35, 1.9, paint)
+            half, h = 0.75, 0.55
+        end = 1.0 if coming else -1.0
+        ex, ez = x + dx * end * 1.9, z + dz * end * 1.9
+        for s in (-half, half):
+            lx, lz = ex - dz * s, ez + dx * s
+            put_lit(ch, co, v, walls, lx, h, lz, "o" if coming else "*",
+                    FLASH if coming else ROU_RED, max(wet, 0.3), now)
+
+
+def siren_near(x, z, now):
+    """For the HUD: a police car within earshot."""
+    v = View(x, z, 0.0, 2, 2)
+    return any(kind == "police" and d2 < 140.0 ** 2
+               for d2, _, _, _, kind, _ in near_cars(v, now, 140.0, every=True))
+
+
 def near_walkers(v, now):
     """(x, z, phase, colour, umbrella) for everyone walking in front of you.
 
@@ -6726,6 +6861,7 @@ def render_street(v, now):
     draw_props(ch, co, v, walls, now, wet)
     draw_car_park(ch, co, v, walls, now, wet)
     draw_walkers(ch, co, v, walls, now, wet)
+    draw_traffic(ch, co, v, walls, now, wet)
     for ex0, ex1 in near_els(v, EL_REACH):
         draw_el(ch, co, v, walls, ex0, ex1, now, wet)
     for tx0, tx1, tz0, tz1, kind in tunnels:
@@ -7460,6 +7596,7 @@ CHEAT_PLACES = [
     ("*", "the pictures", "cinema"),
     ("[", "a short tunnel", "tunnel"),
     ("]", "a long tunnel", "longtunnel"),
+    ("<", "a police car", "police"),
     ("g", "the woods", "woods"),
     ("x", "the woods rave", "rave"),
     ("e", "the lake", "lake"),
@@ -7780,6 +7917,46 @@ def _doorway(x, z, salt, key):
     return None
 
 
+_clock = [0.0]          # the main loop's time, for the one cheat that needs it
+
+
+def now_hint():
+    return _clock[0]
+
+
+def _police_spot(x, z, now):
+    """On the pavement of a wide street with a police car coming towards you,
+    some way off: look up the street and it is there, lights going. Searched
+    a widening square at a time, so the nearest is the one you get."""
+    if TRAFFIC_ODDS.get(TRAFFIC[_traffic]) is None:
+        return None
+    for reach in (150.0, 400.0, 900.0):
+        v = View(x, z, 0.0, 2, 2)
+        best = None
+        for d2, cx, cz, (dx, dz), kind, _ in near_cars(v, now, reach, every=True):
+            if kind != "police":
+                continue
+            # Stand eighteen units ahead of it, on the pavement beside its lane:
+            # at thirty it was three columns wide and lost among the shops.
+            px, pz = cx + dx * 18.0, cz + dz * 18.0
+            i = int(px / CELL + BIG) - BIG
+            j = int(pz / CELL + BIG) - BIG
+            span = road_span(i if dx == 0.0 else j, XP if dx == 0.0 else ZP,
+                             91 if dx == 0.0 else 137)
+            if span is None:
+                continue
+            edge = span[0] * CELL + 1.3
+            if dx == 0.0:
+                px = edge
+            else:
+                pz = edge
+            if can_stand(px, pz) and (best is None or d2 < best[0]):
+                best = (d2, px, pz, math.atan2(-dx, -dz))
+        if best is not None:
+            return best[1:]
+    return None
+
+
 def _tunnel_spot(x, z, kind):
     """On the avenue a little way short of the mouth, looking in. Avenue by
     avenue outwards, the block hash first."""
@@ -7930,6 +8107,8 @@ def find_place(x, z, kind):
         return _car_park_spot(x, z)
     if kind == "cinema":
         return _doorway(x, z, 1961, "cinema")
+    if kind == "police":
+        return _police_spot(x, z, now_hint())
     if kind in ("tunnel", "longtunnel"):
         return _tunnel_spot(x, z, "short" if kind == "tunnel" else "long")
     if kind in ("woods", "rave", "lake"):
@@ -7983,6 +8162,7 @@ def draw_cheats(ch, co, note):
     sky = [("", "WEATHER & SKY"),
            ("w", weather_name()), ("L", "strike now"),
            ("s", "sky " + clouds_name()), ("a", "people " + crowd_name()),
+           (">", "traffic " + traffic_name()),
            ("", ""), ("", "NIGHTS"),
            ("n", "the next one"), ("A", "a strange night"),
            ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
@@ -8476,6 +8656,7 @@ def main(stdscr):
 
     while True:
         now = time.monotonic()
+        _clock[0] = now
 
         # --- input -----------------------------------------------------
         key = stdscr.getch()
@@ -8498,6 +8679,8 @@ def main(stdscr):
                 elif key == ord("A"):
                     note = ("the sky is busy tonight"
                             if skip_to_alien(now) else "no such night near")
+                elif key == ord(">"):
+                    note = "traffic: " + cycle_traffic()
                 elif key == ord("a"):
                     note = "people: " + cycle_crowd()
                 elif key == ord("s"):
@@ -8745,7 +8928,9 @@ def main(stdscr):
                     if fireworks_near(cam_x, cam_z, now) else "")
                 or ("  ~ dawn ~" if dawn(now) > 0.0 else "")
                 or ("  ~ a fire going under the road ~"
-                    if fire_near(cam_x, cam_z) else ""))
+                    if fire_near(cam_x, cam_z) else "")
+                or ("  ~ a siren somewhere ~"
+                    if siren_near(cam_x, cam_z, now) else ""))
         else:
             ch, co = render_skyline(sky_x, width, height, now)
             hud = SKYLINE_HUD % (sky_x, sky_word(now, rain_intensity(now)))

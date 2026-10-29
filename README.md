@@ -37,6 +37,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   showing a black-and-white film, and sky decks:
   ride the lift to the roof of the tallest towers and look out over the whole city.
 - **People out walking** — not many, it is night — under umbrellas when it rains.
+- **Traffic on the wide streets**, headlights and tail lights, the odd bus — and now and then a
+  police car, its lights washing the street red and blue.
 - **Car parks** here and there, under orange sodium lamps, the bays half full.
 - **Tunnels** under the road decks, short and long — and under the short ones, a fire in a can.
 - **An elevated train** over some of the avenues, rattling along with its windows lit, and from
