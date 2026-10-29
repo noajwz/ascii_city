@@ -741,6 +741,13 @@ window spacing — defined again further down the module, it would have quietly 
 window in the city. Everything here is gated on `car_parks_near()`, a few block hashes, because
 scanning every bay in sight where there is no car park was most of two milliseconds a frame.
 
+**Nothing vanishes as you walk up to it.** Sprites used to stop drawing at 1.6 units, and the walkers
+and parked cars were dropped earlier still, on the theory that a six-row sprite blown up to forty
+rows is porridge. It is not — it is a big, perfectly readable figure — and what read badly was
+people and cars popping out of existence at arm's length, reported as "things disappear when I get
+close". `SPRITE_NEAR` (0.7) is the cut-off for all of them now. A larger terminal makes the old
+behaviour more obvious, because the same distance is more rows of figure.
+
 ## Getting lost is the feature
 
 The layout is deliberately irregular, because the point is to be able to lose yourself in it.
