@@ -87,7 +87,11 @@ there is no fisheye to correct at the edges.
   those columns a taller haze silhouette; without it the vanishing point is a hole.
 - A horizontal line on a facade is a **slope on screen**, so roofs, awnings and footings go through
   `facade_line()`, which fills from the previous column's row to this one's. One cell per column
-  instead and the line breaks into dashes.
+  instead and the line breaks into dashes. Where it steps it is drawn **as a slope**, `/` or `\`,
+  and only the rows the step adds: a run of `=` stacked down a column is a ladder, and a facade seen
+  at an angle had a ladder for a roof, another for the awning and another for the footing — texture
+  where the eye wanted an edge. Not from a roof (`_from_above`): from up there every line below
+  slopes and the view turned into a field of `/\/\`.
 - **The roofline gets its own colour**, brighter than anything else on the building, through
   `roof_colour()`. It used to take the same near-black trim as the awning and the balcony banding
   below it, which on a *low* building — the only kind whose roof is on screen at all, since a tall
@@ -109,7 +113,8 @@ there is no fisheye to correct at the edges.
   tell where a building stops and the street starts, and a line along the bottom settles it
   instantly. It is drawn last in the column so nothing paints over the join, and it is `CURB`
   rather than the building's own trim, which puts it in the same visual language as the kerb: this
-  is ground level, everything below it is street.
+  is ground level, everything below it is street. **With the walls filled it is not drawn**: the
+  bottom of the grey is the footing, and a line along it only doubled the kerb beside it.
 - **Corner bars are only for real corners.** Every cell is its own building, so a naive "the face
   changed, draw a bar" test puts a picket fence down every street. `draw_walls()` first checks
   whether the column to the left was the building *next door on the same plane*; that is a terrace,
@@ -147,6 +152,47 @@ there is no fisheye to correct at the edges.
   building too short for the whole word does not get a sign at all (which costs about 1% of them).
   There is a ceiling too — hang it anywhere in the building's height and every sign on a tall block
   ends up in the sky where nobody in the street is looking.
+
+## Filled walls, and a ground that is quiet
+
+Reported: "sometimes there's so much on the screen you can't really see what's happening", and
+asked for better outlines. Looked at in colour (the SVG screenshots, through `qlmanage` to a PNG)
+the cause was plain: **a wall's surface was empty black**, the same as the sky and the road. A
+building existed only where it had lights, so a street was a cloud of floating windows, signs and
+ground marks with nothing to group them by. More glyphs could not fix that — it was already too
+busy — so the fix is a background colour.
+
+- **`fill_grid()`** turns the wall spans `draw_walls()` already clips (kept per column in `v.fill`)
+  into a grid of levels, and the blit loop draws those cells on a dark grey: `FILL_BG` 235 near
+  (`FILL_NEAR`), 234 middle (`FILL_MID`), 233 far. A building is a solid shape against the black
+  sky and street, and a nearer building is a step lighter than the one behind it — the outline
+  between them, for free. Alley faces are a step darker so the alleys keep their mood; trees are
+  left out (a canopy has a ragged top, and a filled box squares it off); from a roof the levels are
+  measured from street height, or everything is "far". Not under the cheat panel, and not on any
+  screen but the street.
+- **Colour pairs are the budget.** A terminal colours with pairs of text and background, at most
+  256 here, and the city already used about 105. `setup_fill()` gives each distinct text colour
+  (70) a copy on the near grey and one on the middle grey — the far walls borrow the middle ones —
+  plus three bare-wall pairs: 248 in all. If that does not fit, `FILL_ON` stays False and the city
+  is drawn as before, footings and all; so it is on an 8-colour terminal. `fill_attr()` maps an
+  attribute onto its wall, cached. New colours eat the margin: check it still fits.
+- **Off in headless tests** (`FILL_ON` defaults False; `init_colors()` never runs). Run the suite
+  both ways: set `harness.ac.FILL_ON = True` before executing `checks.py` to run it filled. The pty
+  check asserts the greys reach a 256-colour terminal and not an 8-colour one.
+- Far corners lose their bars when filled: the change of shade is edge enough, and a bar on every
+  far corner was a comb of `|||||` at the vanishing point. Near windows are at most three rows,
+  not five — at five a close wall was slabs of `00000` that read as signs.
+
+**The ground** was the other half of the noise. Grain is hashed per third of a unit; near you one
+grain cell covers several columns and every column of it was marked, so the road was `....` runs,
+the pavement `,,,,`, the deck `.....`, snow a solid wall of dots. Now a mark goes only in the
+**first column of its grain cell** (`first`), on every surface; the road grain is one cell in
+thirteen and thins further with distance, because far off every column is a cell of its own and
+the far road came out speckled. **The kerb is a line**: rather than a 0.3-unit band of `=` that
+came out a staircase of blocks, each cell knows whether it is road or pavement (`here`, and `above`
+for the row before), and the kerb glyph goes exactly where they meet — `/` for a left kerb running
+off to the vanishing point, `\` for a right one, `-` across the view; from a roof, a dot. The lane
+line is held to one glyph wide the same way.
 
 ## Parts of town
 
