@@ -238,6 +238,26 @@ CLIMB_REACH = 1.9      # how close to the ladder you have to be
 LIFT_DOORS = 0.9       # seconds for the doors to close or open
 LIFT_FLOOR = 0.07      # seconds per floor going past
 
+# --- the diner, and the billboards ---
+# The diner is open all night and you can see the whole of it from the street:
+# a long lit window with the counter and the backs of a few people sat apart.
+# The billboards are up on the roofs over the wide streets, selling soda.
+DINER_ODDS = 1100      # like the club and the cinema, on its own hash
+DINER_POUR = 5.0       # seconds after you sit down that the coffee comes
+BILL_ODDS = 90         # of the wide-street roofs in the busy parts, one in this
+BILL_W = 11.0          # world units across a board: big, it is an advert
+BILL_ROW = 1.1         # and per row of it
+BILL_SEEN = 170.0
+BILL_DISTRICTS = ("downtown", "market", "docks", "old town", "chinatown")
+ADS = [
+    (["FIZZ COLA", "ICE COLD"], 0),
+    (["SPARKLE", "TASTE THE NIGHT"], 2),
+    (["NOVA SODA", "OUT OF THIS WORLD"], 6),
+    (["KOLA KING", "THE REAL THING"], 3),
+    (["ZAP!", "LEMON-LIME LIGHTNING"], 5),
+    (["DRINK BUBBL", "IT'S A GAS"], 1),
+]
+
 # --- the cinema ---
 # As rare as a casino and like one only from the outside: a marquee over the
 # doors with the film's name in it. Inside it is the quietest light in the
@@ -1885,6 +1905,21 @@ def make_face(rng, height, d, kind):
     return face
 
 
+def _wide_face(i, j, prefer):
+    """A face onto one of the wide streets - three cells across - preferring
+    the one asked for, or None. What the diner and the billboards want: they
+    are for the traffic as much as for the pavement."""
+    for f in [prefer] + [k for k in range(4) if k != prefer]:
+        nx, nz = FACES[f]
+        a, c = i + nx, j + nz
+        if not is_open(a, c) or not road_at(a, c):
+            continue
+        span = road_span(a, XP, 91) if nx else road_span(c, ZP, 137)
+        if span is not None and span[1] >= 3:
+            return f
+    return None
+
+
 def _road_face(i, j, prefer):
     """A face giving onto a proper street, preferring the one asked for, or
     None if the building has no street frontage at all.
@@ -1939,6 +1974,7 @@ def lot(i, j):
         # draw_wall_column() would draw it as one, so the venue would exist
         # and be invisible.
         b["club"] = b["casino"] = b["tower"] = b["cinema"] = None
+        b["diner"] = b["billboard"] = None
         if d["park"]:
             pass
         elif _mix(i, j, 909) % CLUB_ODDS == 0:
@@ -1959,6 +1995,13 @@ def lot(i, j):
                                "tone": rng.random(),
                                "sign_tone": rng.random(),
                                "phase": rng.uniform(0.0, 5.0)}
+        elif _mix(i, j, 2401) % DINER_ODDS == 0:
+            # A diner wants a wide street out front, and only one storey or
+            # two over it: it is a low, long, lit box.
+            face = _wide_face(i, j, _mix(i, j, 2403) % 4)
+            if face is not None:
+                b["height"] = min(b["height"], 7.0)
+                b["diner"] = {"door": face, "u": CELL * 0.5}
         elif _mix(i, j, 1961) % CLUB_ODDS == 0 and not d["park"]:
             face = _road_face(i, j, _mix(i, j, 1963) % 4)
             if face is not None:
@@ -1980,6 +2023,15 @@ def lot(i, j):
                 b["height"] = TOWER_TOP + _mix(i, j, 1913) % 9
                 b["tower"] = {"door": face, "u": CELL * 0.5, "i": i, "j": j,
                               "height": b["height"]}
+        if (b["club"] is None and b["casino"] is None and b["tower"] is None
+                and b["cinema"] is None and b["diner"] is None and not d["park"]
+                and d["name"] in BILL_DISTRICTS and 8.0 <= b["height"] <= 12.0
+                and _mix(i, j, 2405) % BILL_ODDS == 0):
+            face = _wide_face(i, j, _mix(i, j, 2407) % 4)
+            if face is not None:
+                words, tone = ADS[_mix(i, j, 2409) % len(ADS)]
+                b["billboard"] = {"face": face, "words": words, "tone": tone,
+                                  "i": i, "j": j, "height": b["height"]}
         _lots[key] = b
     return b
 
@@ -2657,6 +2709,8 @@ def draw_walls(ch, co, v, now):
                 cont is None and sx > 0,
                 cont or (None, None, None, None, ()),
                 face_kind(i + nx, j + nz), now))
+            if b["diner"] is not None and f == b["diner"]["door"]:
+                diner_window(ch, co, v, sx, dist, u, f, r_lo, r_hi, b)
             if v.tunnels and tunnel_at(i + nx, j + nz):
                 tunnel_lining(ch, co, v, sx, dist, r_lo, r_hi, j, _mix(i, j, 2209))
             cover = r_lo if cover is None else min(cover, r_lo)
@@ -3770,6 +3824,170 @@ def draw_raver(ch, co, v, walls, p, now, wet):
             y = 1.5 + (0.42 if up else 0.0) + 0.34 * math.cos(a)
             put_point(ch, co, v, walls, x + tx * off, y, z + tz * off,
                       "*o."[m], lit if m == 0 else dark)
+
+
+def diner_window(ch, co, v, sx, dist, u, f, r_lo, r_hi, b):
+    """The diner's front from the street: the whole ground floor one long lit
+    window, the counter across it and the backs of three people sat at it
+    well apart from each other. Lit from inside, so they are dark against it
+    - which is the whole of the picture."""
+    scale = v.fy / dist
+    top = int(round(v.horizon - (FLOOR_H * 1.15 - v.eye) * scale))
+    sill = int(round(v.horizon - (0.6 - v.eye) * scale))
+    bar = int(round(v.horizon - (1.05 - v.eye) * scale))
+    light = tone_colour("warm", 0.9)
+    su = sign_u(f, u)
+    sitters = (0.9, 2.6, 4.3)
+    near_one = min(abs(su - s) for s in sitters)
+    cols = 0.5 * v.fx / dist                    # how many columns a person is
+    for y in range(max(r_lo, top), min(r_hi, sill) + 1):
+        if y == top or y == sill:
+            g, a = "=", CURB                    # the frame
+        elif y == bar:
+            g, a = "=", BARK                    # the counter
+        elif y < bar and near_one < 0.25 * max(1.0, 1.0 / max(cols, 1e-6)) and \
+                y >= bar - max(1, int(round(0.7 * scale))):
+            g, a = ("o" if y < bar - max(1, int(round(0.45 * scale))) else "M"), BARK
+        else:
+            g, a = ":", light
+        ch[y][sx], co[y][sx] = g, a
+
+
+def draw_diner_sign(ch, co, v, walls, world, now):
+    """DINER in pink neon over the door, 24 HRS under it and OPEN blinking -
+    in screen space, like the cinema's, so it can be read."""
+    pr = v.project(world[0], world[1], world[2])
+    if pr is None or pr[2] > 80.0:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    pink, blue = NEON[0][0], NEON[2][0]
+    for k, c in enumerate("D I N E R"):
+        put_cell(ch, co, v, walls, sx - 4 + k, sy, dist, c, pink)
+    for k, c in enumerate("24 HRS"):
+        put_cell(ch, co, v, walls, sx - 3 + k, sy + 1, dist, c, blue)
+    if int(now * 1.2) % 3:
+        for k, c in enumerate("OPEN"):
+            put_cell(ch, co, v, walls, sx + 6 + k, sy + 1, dist, c, NEON[5][0])
+
+
+def near_billboards(v, reach):
+    """Billboards in reach, by city block, worked out once a block - the way
+    the sky decks' beacons are, for the same reason."""
+    b0, b1 = int((v.x - reach) // (XP * CELL)), int((v.x + reach) // (XP * CELL))
+    c0, c1 = int((v.z - reach) // (ZP * CELL)), int((v.z + reach) // (ZP * CELL))
+    for bi in range(b0, b1 + 1):
+        for bj in range(c0, c1 + 1):
+            for bb in bills_in_block(bi, bj):
+                rx = (bb["i"] + 0.5) * CELL - v.x
+                rz = (bb["j"] + 0.5) * CELL - v.z
+                if rx * rx + rz * rz < reach * reach:
+                    yield bb
+
+
+_bill_blocks = {}
+
+
+def bills_in_block(bi, bj):
+    key = (bi, bj)
+    hit = _bill_blocks.get(key)
+    if hit is None:
+        _evict(_bill_blocks, 4000)
+        hit = []
+        for i in range(bi * XP, bi * XP + XP):
+            for j in range(bj * ZP, bj * ZP + ZP):
+                if _mix(i, j, 2405) % BILL_ODDS or is_open(i, j):
+                    continue
+                bb = lot(i, j)["billboard"]
+                if bb is not None:
+                    hit.append(bb)
+        _bill_blocks[key] = hit
+    return hit
+
+
+def draw_billboard(ch, co, v, walls, bb, now, wet):
+    """A soda ad hung out over the street from a roof, facing the traffic.
+
+    It stands out from the roof edge at right angles to the frontage, across
+    the road like a gantry board, so it has a face to each end of the street
+    and is read from down the street. Where it is, how big, and what is in
+    front of it are all worked out in the world - its corners projected, the
+    depth checked per column - but the lettering is laid out in screen space
+    across what those corners cover, like the cinema's and the diner's signs.
+    Each letter a point on the board's plane looked right and could not be
+    read: from any way back the brand and the slogan landed on the same rows
+    and overwrote each other. The brand in neon, the slogan under it if there
+    is room, bubbles going up the sides, and lamps along the bottom."""
+    i, j, f = bb["i"], bb["j"], bb["face"]
+    nx, nz = FACES[f]
+    tx, tz = -nz, nx                             # along the street
+    mx, _, mz = face_point(i, j, f, CELL * 0.5, 0.0, 0.0)
+    if abs((v.x - mx) * tx + (v.z - mz) * tz) < 1.0:
+        return                                   # edge on: nothing to read
+    base = bb["height"] + 0.8
+    top = base + BILL_ROW * 5
+    ends = []
+    for out in (0.6, 0.6 + BILL_W):              # out over the street
+        lo = v.project(mx + nx * out, base, mz + nz * out)
+        hi = v.project(mx + nx * out, top, mz + nz * out)
+        if lo is None or hi is None:
+            return
+        ends.append((lo, hi))
+    (la, ha), (lb, hb) = ends
+    if la[0] > lb[0]:
+        (la, ha), (lb, hb) = (lb, hb), (la, ha)
+    x0, x1 = int(round(la[0])), int(round(lb[0]))
+    y0 = int(round(min(ha[1], hb[1])))
+    y1 = int(round(max(la[1], lb[1])))
+    w, h = x1 - x0 + 1, y1 - y0 + 1
+    words = bb["words"]
+    if w < 6 or h < 2 or w > v.width * 2:
+        return
+    lit, dark = NEON[bb["tone"] % len(NEON)]
+    second = NEON[(bb["tone"] + 4) % len(NEON)][0]
+    flick = int(now * 0.7 + i) % 9 != 0           # the brand dips now and then
+    brand = words[0] if len(words[0]) + 2 <= w else words[0][:w - 2]
+    slogan = words[1][:w - 2]
+    mid = y0 + h // 2
+    rows = {mid - (1 if h >= 4 else 0): (brand, lit if flick else dark)}
+    if h >= 4:
+        rows[mid + (1 if h >= 6 else 0)] = (slogan, second)
+    for sx in range(max(0, x0), min(v.width - 1, x1) + 1):
+        frac = (sx - x0) / max(1, x1 - x0)
+        dist = la[2] + (lb[2] - la[2]) * frac
+        for sy in range(max(0, y0), min(v.height - 1, y1) + 1):
+            edge_x, edge_y = sx in (x0, x1), sy in (y0, y1)
+            if edge_x and edge_y:
+                g = "." if sy == y0 else "'"
+            elif edge_y:
+                g = "-"
+            elif edge_x:
+                g = "|"
+            else:
+                g, line = " ", rows.get(sy)
+                if line is not None:
+                    text, attr = line
+                    k = sx - (x0 + 1) - (w - 2 - len(text)) // 2
+                    if 0 <= k < len(text):
+                        g = text[k]
+                side_col = sx - x0 in (2, 3) or x1 - sx in (2, 3)
+                if g == " " and sy not in rows and side_col \
+                        and int(now * 3.0 - sy + sx) % 4 == 0:
+                    g, attr = "o", second       # bubbles, rising
+                if g == " ":
+                    # The board is solid: blank it, or the city shows through.
+                    if not hidden(walls, sx, sy, dist):
+                        ch[sy][sx], co[sy][sx] = " ", 0
+                    continue
+                put_cell(ch, co, v, walls, sx, sy, dist, g, attr)
+                continue
+            put_cell(ch, co, v, walls, sx, sy, dist, g, CONCRETE)
+    for k in range(5):                             # lamps shining up at it
+        out = 0.6 + BILL_W * (k + 0.5) / 5.0
+        put_lit(ch, co, v, walls, mx + nx * out, base - 0.4, mz + nz * out,
+                "o", BULB, max(wet, 0.3), now)
+    for out in (0.6, 0.6 + BILL_W * 0.5):          # the brackets
+        put_point(ch, co, v, walls, mx + nx * out, bb["height"] + 0.3,
+                  mz + nz * out, "/", CONCRETE)
 
 
 def draw_cinema_front(ch, co, v, walls, cin, world, now):
@@ -6028,6 +6246,9 @@ def draw_props(ch, co, v, walls, now, wet):
                 continue
             if tunnel_at(i + nx, j + nz):
                 continue                # nothing hangs inside a tunnel
+            if b["diner"] is not None and f == b["diner"]["door"]:
+                w = face_point(i, j, f, CELL * 0.5, 0.4, 4.6)
+                props.append((_d2(v, w), "diner", b["diner"], w, (nx, nz)))
             if b["cinema"] is not None and f == b["cinema"]["door"]:
                 w = face_point(i, j, f, CELL * 0.5, 0.4, 3.9)
                 props.append((_d2(v, w), "cinema", b["cinema"], w, (nx, nz)))
@@ -6108,6 +6329,8 @@ def draw_props(ch, co, v, walls, now, wet):
             draw_lobby(ch, co, v, walls, s, now)
         elif kind == "cinema":
             draw_cinema_front(ch, co, v, walls, s, world, now)
+        elif kind == "diner":
+            draw_diner_sign(ch, co, v, walls, world, now)
         elif kind == "overdoor":
             tone = s[1]["tone"] if s[1] else 0.44
             draw_over_door(ch, co, v, walls, s[0], world, now, tone)
@@ -6875,6 +7098,8 @@ def render_street(v, now):
                 put_lit(ch, co, v, walls, (tx0 + tx1) * 0.5, TUNNEL_H - 0.15, z,
                         "o", EMBER_HOT, max(wet, 0.3), now)
                 z += TUNNEL_LAMP
+    for bb in near_billboards(v, BILL_SEEN if v.eye < 10.0 else ROOF_REACH):
+        draw_billboard(ch, co, v, walls, bb, now, wet)
     for t_ in near_towers(v, 150.0 if v.eye < 10.0 else ROOF_REACH):
         if v.roof is None or t_["i"] != v.roof["i"] or t_["j"] != v.roof["j"]:
             draw_tower_beacon(ch, co, v, walls, t_, now, wet)
@@ -7403,7 +7628,7 @@ def venue_at(x, z):
             if is_open(i, j):
                 continue
             b = lot(i, j)
-            for kind in ("casino", "club", "tower", "cinema"):
+            for kind in ("casino", "club", "tower", "cinema", "diner"):
                 v = b[kind]
                 if v is None:
                     continue
@@ -7594,6 +7819,8 @@ CHEAT_PLACES = [
     ("|", "a fire escape", "escape"),
     ("_", "a car park", "carpark"),
     ("*", "the pictures", "cinema"),
+    ("(", "the diner", "diner"),
+    ("$", "a billboard", "billboard"),
     ("[", "a short tunnel", "tunnel"),
     ("]", "a long tunnel", "longtunnel"),
     ("<", "a police car", "police"),
@@ -7957,6 +8184,55 @@ def _police_spot(x, z, now):
     return None
 
 
+def _diner_door(x, z):
+    """In the diner's doorway - its own odds, so not _doorway()'s."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    for i, j in _rings(ci, cj, CHEAT_RINGS):
+        if _mix(i, j, 2401) % DINER_ODDS or is_open(i, j):
+            continue
+        dn = lot(i, j)["diner"]
+        if dn is None:
+            continue
+        nx, nz = FACES[dn["door"]]
+        p = face_point(i, j, dn["door"], dn["u"], 1.4, 0.0)
+        if (p[0] - x) ** 2 + (p[2] - z) ** 2 < CHEAT_SKIP ** 2:
+            continue
+        if can_stand(p[0], p[2]):
+            return p[0], p[2], math.atan2(-nx, -nz)
+    return None
+
+
+def _billboard_spot(x, z):
+    """Across the wide street from a billboard, looking up at it."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    for i, j in _rings(ci, cj, CHEAT_RINGS):
+        if _mix(i, j, 2405) % BILL_ODDS or is_open(i, j):
+            continue
+        bb = lot(i, j)["billboard"]
+        if bb is None:
+            continue
+        # Down the street from it, in the road's middle, far enough back to
+        # have the whole board on the screen: it faces along the street.
+        f = bb["face"]
+        mx, _, mz = face_point(i, j, f, CELL * 0.5, 0.0, 0.0)
+        tx, tz = -FACES[f][1], FACES[f][0]          # along the street
+        nx, nz = FACES[f]
+        a, c = i + nx, j + nz
+        span = road_span(a, XP, 91) if nx else road_span(c, ZP, 137)
+        mid_out = (span[1] * CELL * 0.5) if span else 6.0
+        for out in (mid_out, mid_out - 3.0, mid_out + 3.0):
+            for along in (40.0, -40.0, 34.0, -34.0, 28.0, -28.0):
+                px = mx + nx * out + tx * along
+                pz = mz + nz * out + tz * along
+                if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+                    continue
+                if can_stand(px, pz):
+                    return px, pz, math.atan2(mx - px, mz - pz)
+    return None
+
+
 def _tunnel_spot(x, z, kind):
     """On the avenue a little way short of the mouth, looking in. Avenue by
     avenue outwards, the block hash first."""
@@ -8107,6 +8383,10 @@ def find_place(x, z, kind):
         return _car_park_spot(x, z)
     if kind == "cinema":
         return _doorway(x, z, 1961, "cinema")
+    if kind == "diner":
+        return _diner_door(x, z)
+    if kind == "billboard":
+        return _billboard_spot(x, z)
     if kind == "police":
         return _police_spot(x, z, now_hint())
     if kind in ("tunnel", "longtunnel"):
@@ -8436,6 +8716,99 @@ def film_frame(title, t, w, h):
     return ["".join(r) for r in g], bright * flicker
 
 
+def render_diner(width, height, now, since):
+    """On a stool at the counter, at whatever hour it is.
+
+    Lamps hanging over the counter, the menu up on the wall, the coffee urns
+    and the pie case behind, the cook in a paper cap, three others along the
+    counter keeping to themselves, the jukebox in the corner going through
+    its colours, and the big window onto the empty street - rain on it if it
+    is raining. A few seconds after you sit down she comes over with the pot."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    t = now - since
+    warm = tone_colour("warm", 0.85)
+    if width < 44 or height < 18:
+        _text(ch, co, height // 2, 1, "~ at the diner, 24 hrs ~", warm)
+        _text(ch, co, height // 2 + 1, 1, "coffee's coming" if t < DINER_POUR
+              else "a cup of coffee, steaming", GOLD_DIM)
+        return ch, co
+    cx = width // 2
+    # The window, the left third: the dark street, a lamp, the rain on it.
+    wx1 = width // 3
+    for y in range(1, height - 6):
+        _text(ch, co, y, wx1, "|", CURB)
+    for y in range(1, height - 6):
+        for x in range(1, wx1):
+            if y == height - 8:
+                ch[y][x], co[y][x] = "_", STREET           # the kerb outside
+            elif _mix(x, y, 2411) % 41 == 0:
+                ch[y][x], co[y][x] = ".", HAZE
+    _text(ch, co, 3, wx1 // 2, "o", BULB)
+    for y in range(4, height - 8):
+        _text(ch, co, y, wx1 // 2, "|", CONCRETE)
+    if rain_intensity(now) > 0.1:
+        for k in range(wx1 * 2):
+            m = _mix(k, 0, 2413)
+            x = 1 + m % (wx1 - 1)
+            y = 1 + int(now * (5 + m % 4) + (m >> 8) % height) % (height - 8)
+            ch[y][x], co[y][x] = "'", RAIN
+    # The ceiling lamps over the counter.
+    for x in range(wx1 + 4, width - 2, 11):
+        _text(ch, co, 1, x, "|", CONCRETE)
+        _text(ch, co, 2, x - 1, "/o\\", BULB)
+    # The back wall: the menu, the urns, the pie case, the jukebox.
+    menu = ["PIE ........ 2.50", "COFFEE ....... .90", "EGGS ANY STYLE 3.25"]
+    for r, line in enumerate(menu):
+        _text(ch, co, 4 + r, wx1 + 3, line, GOLD_DIM)
+    ux = width - 22
+    for k in range(2):
+        _text(ch, co, 5, ux + k * 6, "[==]", CONCRETE)
+        _text(ch, co, 6, ux + k * 6, "[  ]", CONCRETE)
+        if int(now * 3 + k) % 3:
+            _text(ch, co, 4, ux + 1 + k * 6, "(", HAZE)
+    _text(ch, co, 8, ux - 1, "[/\\ /\\ /\\]", warm)        # pie under glass
+    jx = width - 6
+    for r, line in enumerate((".--.", "|##|", "|##|", "'--'")):
+        _text(ch, co, 6 + r, jx, line, NEON[int(now * 1.5) % len(NEON)][0])
+    # The cook, moving along behind the counter.
+    bar = height - 6
+    kx = wx1 + 6 + int(round((width - wx1 - 20) * (0.5 + 0.5 * math.sin(now * 0.4))))
+    for r, line in enumerate((" ___ ", "(___)", " (o) ", "/|#|\\")):
+        _text(ch, co, bar - 5 + r, kx, line, STAR if r < 2 else CURB)
+    # The counter and its stools, the three others along it.
+    for x in range(wx1 + 1, width):
+        ch[bar][x], co[bar][x] = "=", BARK
+        if (x - wx1) % 7 == 3:
+            _text(ch, co, bar + 2, x, "T", CONCRETE)
+    for k, sx in enumerate((wx1 + 4, wx1 + 18, width - 12)):
+        _text(ch, co, bar - 2, sx, ",-." if k != 1 else "_^_", BARK)
+        _text(ch, co, bar - 1, sx - 1, "(   )", BARK)
+        _text(ch, co, bar - 1, sx + 4, "u", CONCRETE)
+    # Your place, and the pot coming round.
+    ccx = (wx1 + width) // 2
+    _text(ch, co, bar - 1, ccx, "(_)", STAR)
+    if t >= DINER_POUR:
+        if t < DINER_POUR + 2.0:
+            _text(ch, co, bar - 4, ccx + 2, "_[]_", CONCRETE)    # the pot
+            _text(ch, co, bar - 3, ccx + 1, "|", GOLD_DIM)
+            _text(ch, co, bar - 2, ccx + 1, "|", GOLD_DIM)
+            say = "there you go, hon."
+            _text(ch, co, bar - 7, ccx - len(say) // 2, say, BULB)
+        for k in range(2):
+            if int(now * 3 + k) % 3:
+                _text(ch, co, bar - 2 - k, ccx + 1, "(" if k % 2 else ")", HAZE)
+    elif t < 2.5:
+        say = "be right with you."
+        _text(ch, co, bar - 7, ccx - len(say) // 2, say, BULB)
+    way = "-- the way out (s) --"
+    for k, c in enumerate(way):
+        x = max(1, cx - 10) + k
+        if x < width:
+            ch[height - 1][x], co[height - 1][x] = c, GOLD_DIM
+    return ch, co
+
+
 def render_cinema(cin, width, height, now):
     """In the back rows.
 
@@ -8615,6 +8988,7 @@ ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
 RAVE_HUD = " inside the club at %d,%d  -  s walks back out  -  q quit "
 RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
+DINER_HUD = " at the diner, open 24 hrs, at %d,%d  -  s walks back out  -  q quit "
 CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
 CLIMB_HUD = " on the fire escape, climbing %s "
 ESCAPE_ROOF_HUD = (" on a roof in the alleys, %d floors up, %s  -  ad look round  -"
@@ -8865,7 +9239,7 @@ def main(stdscr):
         elif venue is not None and venue[0] == "tower":
             lift = {"up": True, "t0": now, "t": venue[1]}
             venue = None
-        if venue is None or venue[0] != "ramen":
+        if venue is None or venue[0] not in ("ramen", "diner"):
             seated = None               # stood up: the next visit is a new bowl
         if venue is None or venue[0] != "casino":
             wheel = None
@@ -8901,6 +9275,11 @@ def main(stdscr):
         elif venue is not None and venue[0] == "club":
             ch, co = render_rave(venue[1], width, height, now)
             hud = RAVE_HUD % (cam_x, cam_z)
+        elif venue is not None and venue[0] == "diner":
+            if seated is None or seated[0] != ("diner", cam_x // 10, cam_z // 10):
+                seated = (("diner", cam_x // 10, cam_z // 10), now)
+            ch, co = render_diner(width, height, now, seated[1])
+            hud = DINER_HUD % (cam_x, cam_z)
         elif venue is not None and venue[0] == "cinema":
             ch, co = render_cinema(venue[1], width, height, now)
             hud = CINEMA_HUD % (venue[1]["title"].lower(), cam_x, cam_z)

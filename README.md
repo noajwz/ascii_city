@@ -34,11 +34,13 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
 - **Places you can go into** — a casino with a roulette wheel that spins honestly, a slot machine
   you play for chips and a blackjack table that deals straight, a club with a rave going
   on, ramen counters down the lit lanes where you can sit and wait for your bowl, a cinema
-  showing a black-and-white film, and sky decks:
+  showing a black-and-white film, an all-night diner where she comes round with the coffee, and
+  sky decks:
   ride the lift to the roof of the tallest towers and look out over the whole city.
 - **People out walking** — not many, it is night — under umbrellas when it rains.
 - **Traffic on the wide streets**, headlights and tail lights, the odd bus — and now and then a
   police car, its lights washing the street red and blue.
+- **Billboards** hung out over the wide streets, selling soda in neon.
 - **Car parks** here and there, under orange sodium lamps, the bays half full.
 - **Tunnels** under the road decks, short and long — and under the short ones, a fire in a can.
 - **An elevated train** over some of the avenues, rattling along with its windows lit, and from
