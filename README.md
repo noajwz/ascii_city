@@ -8,9 +8,7 @@ An endless, procedurally generated city you can walk around in your terminal.
 python3 ascii_city.py
 ```
 
-Stdlib-only Python — `curses` and some arithmetic, no dependencies, no build step. On a 256-colour
-terminal the buildings are filled in dark grey, nearer ones lighter, so a street reads as a street;
-on anything less they are drawn in outline.
+Stdlib-only Python — `curses` and some arithmetic, no dependencies, no build step.
 
 ![A Chinatown street at night](docs/street.svg)
 

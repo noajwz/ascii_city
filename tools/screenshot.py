@@ -51,11 +51,6 @@ def rgb(attr):
     n = PAIRS.get(attr & 0xFFFF)
     if n is None:
         return (200, 200, 200)
-    return xterm(n)
-
-
-def xterm(n):
-    """An xterm-256 colour number -> (r, g, b)."""
     if n < 16:
         base = [(0, 0, 0), (170, 0, 0), (0, 170, 0), (170, 85, 0),
                 (0, 0, 170), (170, 0, 170), (0, 170, 170), (170, 170, 170),
@@ -81,9 +76,7 @@ def esc(s):
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def to_svg(ch, co, title="", fill=None):
-    """fill, if given, is ascii_city.fill_grid(): the grey the terminal puts
-    behind the walls, drawn as a run of rectangles per row."""
+def to_svg(ch, co, title=""):
     h, w = len(ch), len(ch[0])
     out = ['<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" '
            'viewBox="0 0 %.0f %.0f" font-family="%s" font-size="%.1f">'
@@ -91,19 +84,6 @@ def to_svg(ch, co, title="", fill=None):
     out.append('<rect width="100%%" height="100%%" fill="%s"/>' % BG)
     if title:
         out.append("<title>%s</title>" % esc(title))
-    for y in range(h if fill else 0):
-        x = 0
-        while x < w:
-            level = fill[y][x]
-            run = x + 1
-            while run < w and fill[y][run] == level:
-                run += 1
-            if level:
-                r, g, b = xterm(ac.FILL_BG[level])
-                out.append('<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" '
-                           'fill="#%02x%02x%02x"/>'
-                           % (x * CW, y * LH + 4, (run - x) * CW, LH, r, g, b))
-            x = run
     for y in range(h):
         x = 0
         while x < w:
@@ -154,11 +134,9 @@ def main():
                 for r in g for c in r if c != " ")
         if s > score:
             best, score = sp, s
-    ac.FILL_ON = True          # as on any 256-colour terminal
-    v = ac.View(best[0], best[1], best[2], 108, 26)
-    g, c, _ = ac.render_street(v, 300.0)
+    g, c, _ = ac.render_street(ac.View(best[0], best[1], best[2], 108, 26), 300.0)
     open(os.path.join(docs, "street.svg"), "w").write(
-        to_svg(g, c, "ascii_city - a street", ac.fill_grid(v)))
+        to_svg(g, c, "ascii_city - a street"))
 
     # And the waterfront, on the clearest night with the milky way up.
     night = max(range(300),
