@@ -927,6 +927,37 @@ ac.render_street(inside_v, 300.0)
 ac.put_lit = real_lit
 check("and the long one is lit down the middle", len(lamps) >= 4, "%d lights" % len(lamps))
 
+# --- things do not vanish as you walk up to them ---------------------------
+# Reported as "things disappear when I get close": every sprite stopped
+# drawing at 1.6 units, and the walkers and parked cars were dropped before
+# that. Walk up to a smoker and they must still be there at arm's length.
+near_seen = []
+real_near = ac.blit_sprite
+v_near = ac.View(*ac.find_place(x0, z0, "street"), 200, 55)
+ac.blit_sprite = lambda ch, co, v, w, art, x, z, *a: (near_seen.append((art, x, z)),
+                                                      real_near(ch, co, v, w, art, x, z, *a))
+ac.render_street(v_near, 300.0)
+ac.blit_sprite = real_near
+smk = next(((x, z) for art, x, z in near_seen if art in (ac.SMOKER_REST, ac.SMOKER_DRAG)))
+ny = math.atan2(smk[0] - v_near.x, smk[1] - v_near.z)
+counts_near = []
+for dd in (3.0, 1.2):
+    painted = []
+
+    def paint_spy(ch, co, v, w, art, *a):
+        before = [row[:] for row in ch]
+        real_near(ch, co, v, w, art, *a)
+        if art in (ac.SMOKER_REST, ac.SMOKER_DRAG):
+            painted.append(sum(1 for y in range(len(ch)) for x in range(len(ch[0]))
+                               if ch[y][x] != before[y][x]))
+    ac.blit_sprite = paint_spy
+    ac.render_street(ac.View(smk[0] - math.sin(ny) * dd, smk[1] - math.cos(ny) * dd,
+                             ny, 200, 55), 300.0)
+    ac.blit_sprite = real_near
+    counts_near.append(max(painted) if painted else 0)
+check("someone standing in front of you is still there at arm's length",
+      counts_near[1] > counts_near[0] > 0, "%d cells at 3 units, %d at 1.2" % tuple(counts_near))
+
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])
 ac.draw_cheats(big[0], big[1], "-> casino")

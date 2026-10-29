@@ -3687,15 +3687,22 @@ def put_lit(ch, co, v, walls, x, y, z, glyph, attr, wet, now):
             put_cell(ch, co, v, walls, sx, int(round(ry)), d, ":", attr)
 
 
+SPRITE_NEAR = 0.7      # sprites are drawn until they are this close to your eyes
+
+
 def blit_sprite(ch, co, v, walls, art, x, z, y_bot, y_top, w_world, colour):
     p_top = v.project(x, y_top, z)
     p_bot = v.project(x, y_bot, z)
     if p_top is None or p_bot is None:
         return
     dist = p_top[2]
-    if dist < 1.6:
-        # Close enough that you are standing in it. Blowing a six-row sprite up
-        # to forty rows of nearest-neighbour porridge helps nobody.
+    if dist < SPRITE_NEAR:
+        # Close enough that you are standing in it. This was 1.6 for a long
+        # time, on the theory that a six-row sprite blown up to forty rows was
+        # porridge - and it is not: it is a big, perfectly readable figure, and
+        # what was porridge was people and cars popping out of existence as
+        # you walked up to them, which was reported as "things disappear when
+        # I get close".
         return
     top, bot = p_top[1], p_bot[1]
     half = 0.5 * w_world * v.fx / dist
@@ -5050,7 +5057,7 @@ def near_walkers(v, now):
                     along = k * WALK_SLOT + shift + (g >> 4 & 7) * 0.3
                     x, z = (off, along) if axis == 0 else (along, off)
                     rx, rz = x - v.x, z - v.z
-                    if rx * v.dx + rz * v.dz < NEAR_Z + 1.0:
+                    if rx * v.dx + rz * v.dz < SPRITE_NEAR:
                         continue
                     if rx * rx + rz * rz > WALK_REACH ** 2:
                         continue
@@ -5686,7 +5693,7 @@ def near_parked_cars(v, reach):
                     continue
                 x = (s + 0.5) * PARK_BAY
                 rx, rz = x - v.x, z - v.z
-                if (rx * v.dx + rz * v.dz < NEAR_Z + 1.0
+                if (rx * v.dx + rz * v.dz < SPRITE_NEAR
                         or rx * rx + rz * rz > reach * reach):
                     continue
                 # Only where the whole bay is car park, so no car sits half in
