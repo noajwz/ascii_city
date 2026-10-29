@@ -507,10 +507,12 @@ def init_colors():
         attrs = {"near": curses.A_BOLD}
 
     pair = 1
+    pair_fg = {}               # pair number -> its text colour, for the fill
     for name, colours in groups.items():
         ids = []
         for c in colours:
             curses.init_pair(pair, c, bg)
+            pair_fg[pair] = c
             ids.append(curses.color_pair(pair) | attrs.get(name, 0))
             pair += 1
         PALETTES[name] = ids
@@ -518,9 +520,11 @@ def init_colors():
     NEON = []
     for lit, unlit in neon:
         curses.init_pair(pair, lit, bg)
+        pair_fg[pair] = lit
         on = curses.color_pair(pair) | curses.A_BOLD
         pair += 1
         curses.init_pair(pair, unlit, bg)
+        pair_fg[pair] = unlit
         off = curses.color_pair(pair)
         pair += 1
         NEON.append((on, off))
@@ -528,8 +532,11 @@ def init_colors():
     made = {}
     for name, c in extras.items():
         curses.init_pair(pair, c, bg)
+        pair_fg[pair] = c
         made[name] = curses.color_pair(pair)
         pair += 1
+    if curses.COLORS >= 256:
+        setup_fill(pair, pair_fg)
 
     STAR = made["star"]
     STREET = made["street"]
@@ -2106,6 +2113,7 @@ class View:
         self.dawn = 0.0         # how far into the morning, 0..1
         self.cover = 0.0        # and how much is lying
         self.flash = 0.0        # how bright the lightning is this instant
+        self.fill = []          # per column: (top row, bottom row, distance, tree)
 
     def ray(self, sx):
         cam = 2.0 * sx / (self.width - 1) - 1.0
@@ -2288,6 +2296,82 @@ def neon_attr(s, i, now):
     return lit
 
 
+FILL_ON = False        # set by init_colors when the terminal can do it
+FILL_NEAR = 40.0       # nearer than this a wall is filled the lightest grey
+FILL_MID = 90.0        # then a step darker, and beyond this darker again
+
+
+def fill_grid(v):
+    """Which cells are the face of a building, and how far off: 0 for none,
+    1 near, 2 middle, 3 far. The terminal paints these with a dark background,
+    so a building is a solid shape - against the black sky, the black road,
+    and the building behind it, which is a step darker. Without it a facade
+    was its lit windows and nothing else, and a street was a cloud of floating
+    marks you could not tell the buildings in. Trees are left out: a canopy
+    has a ragged top and a filled box round it would square it off."""
+    grid = [[0] * v.width for _ in range(v.height)]
+    for sx, spans in enumerate(v.fill):
+        for lo, hi, dist, tree, dark in spans:
+            if tree:
+                continue
+            # Measured from street height: from a roof sixty units up even the
+            # building next door is sixty off, and everything came out far.
+            d = dist - (v.eye - EYE_Y)
+            level = 1 if d < FILL_NEAR else (2 if d < FILL_MID else 3)
+            if dark:
+                level = min(3, level + 1)    # the alleys keep their dark
+            for y in range(max(0, lo), min(v.height - 1, hi) + 1):
+                grid[y][sx] = level
+    return grid
+
+
+FILL_BG = {1: 235, 2: 234, 3: 233}    # xterm-256 greys, near to far
+_fill_blank = {}       # level -> the attribute a bare stretch of wall is drawn in
+_fill_pair = {}        # (pair number, level) -> the same text on that wall
+_fill_cache = {}
+
+
+def setup_fill(pair, pair_fg):
+    """Make the colour pairs the filled walls need, if there is room.
+
+    Pairs are what a terminal colours with - text and background together -
+    so a lit window on a grey wall is a pair of its own. There are 256 of them
+    and the city already uses about a hundred: so every text colour gets a
+    copy on the near grey and one on the middle grey, the far walls borrow the
+    middle ones, and if even that does not fit there is no fill at all and the
+    city is drawn the way it always was."""
+    global FILL_ON
+    limit = min(256, getattr(curses, "COLOR_PAIRS", 0))
+    colours = sorted(set(pair_fg.values()))
+    if pair + 3 + 2 * len(colours) > limit:
+        return
+    for level, grey in FILL_BG.items():
+        curses.init_pair(pair, grey, grey)
+        _fill_blank[level] = curses.color_pair(pair)
+        pair += 1
+    made = {}
+    for level in (1, 2):
+        for c in colours:
+            curses.init_pair(pair, c, FILL_BG[level])
+            made[(c, level)] = pair
+            pair += 1
+    for p, c in pair_fg.items():
+        for level in (1, 2, 3):
+            _fill_pair[(p, level)] = made[(c, min(level, 2))]
+    FILL_ON = True
+
+
+def fill_attr(attr, level):
+    """attr, drawn on a wall of this fill level."""
+    key = attr * 4 + level
+    hit = _fill_cache.get(key)
+    if hit is None:
+        p = _fill_pair.get((curses.pair_number(attr), level))
+        hit = attr if p is None else (attr & ~curses.A_COLOR) | curses.color_pair(p)
+        _fill_cache[key] = hit
+    return hit
+
+
 def hidden(walls, sx, sy, dist):
     """Is this cell behind a facade? A facade is a vertical plane, so one
     distance and one row range per column is all the depth anyone needs."""
@@ -2295,13 +2379,28 @@ def hidden(walls, sx, sy, dist):
     return wd is not None and wd < dist and walls[1][sx] <= sy <= walls[2][sx]
 
 
+# From a roof every line in the city below slopes, and drawn as slopes the
+# whole view was a field of /\\/\\ - so from up there they keep their own glyph.
+_from_above = [False]
+
+
 def facade_line(ch, co, sx, row, prev_row, r_lo, r_hi, glyph, attr):
     """A horizontal line on a facade - a roof, an awning - is a slope on
     screen, and a steep one when you are close, so it is drawn as the run of
-    rows between where it was in the previous column and where it is now."""
+    rows between where it was in the previous column and where it is now.
+
+    Where it slopes it is drawn as a slope: / or \\ rather than the line's own
+    glyph. A run of = stacked down a column is a ladder, and a facade seen at
+    an angle had a ladder for a roof, another for the awning, another for the
+    footing, every one of them saying "texture" where the eye wanted "edge"."""
     lo = hi = row
-    if prev_row is not None:
-        lo, hi = min(row, prev_row), max(row, prev_row)
+    if prev_row is not None and prev_row != row and not _from_above[0]:
+        # The previous column already drew its own row: this one draws only
+        # the rows it adds, or a one-row step comes out as a doubled //.
+        if row < prev_row:
+            lo, hi, glyph = row, prev_row - 1, "/"
+        else:
+            lo, hi, glyph = prev_row + 1, row, "\\"
     for y in range(max(r_lo, lo), min(r_hi, hi) + 1):
         ch[y][sx] = glyph
         co[y][sx] = attr
@@ -2471,7 +2570,7 @@ def draw_tree_column(ch, co, v, sx, dist, b, u, r_lo, r_hi):
         if near < 4900.0:
             leaf = lamp
     for y in range(max(r_lo, crown), min(r_hi, under) + 1):
-        if _mix(sx, y, 11) % 100 < 64:
+        if _mix(sx, y, 11) % 100 < 50:
             ch[y][sx] = "&%*#"[_mix(sx, y, 13) % 4]
             co[y][sx] = leaf
             # Snow sits on the top of the canopy first, then works down.
@@ -2517,9 +2616,12 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
         # behind it leaks through the unlit windows. It still reports where its
         # lines are, or the next column would think it was a corner too, and
         # the whole facade would come out as bars.
-        for y in range(r_lo, r_hi + 1):
-            ch[y][sx] = "|"
-            co[y][sx] = trim
+        # Far off, with the walls filled, the change of shade is edge enough:
+        # a bar on every far corner was a comb of ||||| at the vanishing point.
+        if not (FILL_ON and dist >= FILL_MID):
+            for y in range(r_lo, r_hi + 1):
+                ch[y][sx] = "|"
+                co[y][sx] = trim
         return roof, awning, foot, None, ()
 
     prev_roof, prev_awn, prev_foot, prev_k, prev_bands = cont
@@ -2547,7 +2649,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     lit_bay = bay_cols <= 2.0 or 0.30 < frac < 0.70
 
     colour = wall_colour(b, dist, lit, v.flash)
-    thick = max(1, min(5, int(FLOOR_H * scale * 0.45)))   # windows have height
+    # Windows have height, up to three rows: at five a near wall was slabs of
+    # 00000 with no wall between them, which read as signs, not windows.
+    thick = max(1, min(3, int(FLOOR_H * scale * 0.4)))
     density = b["density"] if lit else b["density"] * 0.35
     density *= 1.0 - 0.92 * v.dawn          # the windows going out at dawn
     # The colour a dark window is drawn in, or None for no dot: only on the
@@ -2580,7 +2684,8 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
         for y in range(r_lo, r_hi + 1):
             ch[y][sx] = "|"
             co[y][sx] = trim
-        facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+        if not FILL_ON:
+            facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
         return roof, awning, foot, None, bands
 
     # A fire escape zigzags down the back of an alley building, one landing per
@@ -2657,7 +2762,10 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
                     ch[base - dy][sx] = glyph
                     co[base - dy][sx] = warm
 
-    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    # The footing - unless the walls are filled, when the bottom of the fill
+    # is the footing, and a line along it only doubled the kerb beside it.
+    if not FILL_ON:
+        facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
     return roof, awning, foot, letter_k, bands
 
 
@@ -2677,6 +2785,7 @@ def draw_walls(ch, co, v, now):
     # short one - which is most of a city.
     sky_top = [v.height] * width
     seen = {}          # (cell, face) -> what the column to the left left off at
+    fill = v.fill = [[] for _ in range(width)]
 
     for sx in range(width):
         rdx, rdz = v.ray(sx)
@@ -2714,6 +2823,8 @@ def draw_walls(ch, co, v, now):
                 diner_window(ch, co, v, sx, dist, u, f, r_lo, r_hi, b)
             if v.tunnels and tunnel_at(i + nx, j + nz):
                 tunnel_lining(ch, co, v, sx, dist, r_lo, r_hi, j, _mix(i, j, 2209))
+            fill[sx].append((r_lo, r_hi, dist, b["tree"],
+                             not face_kind(i + nx, j + nz)))
             cover = r_lo if cover is None else min(cover, r_lo)
             sky_top[sx] = cover
             if not n:
@@ -3342,11 +3453,18 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
     # ever needs - at seventy units up the nearest is a hundred away - so the
     # ground goes as far as the view does.
     far = GROUND_FAR if v.eye < 10.0 else v.reach
+    # What each cell of the row above was - road, pavement, or neither - so the
+    # kerb can be drawn where the one meets the other, as a line one glyph
+    # wide, rather than as a band of = that came out a staircase of blocks.
+    above = [None] * width
 
     for y in range(v.horizon + 1, v.height):
         d = v.eye * v.fy / (y - v.horizon)
         if d > far:
             continue
+        here = [None] * width
+        last_tex = None
+        lane_at = -2
         wx = v.x + rdx0 * d
         wz = v.z + rdz0 * d
         stepx = (rdx1 - rdx0) * d / (width - 1)
@@ -3405,6 +3523,9 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
 
             # How far this point is from the nearest wall decides whether it is
             # pavement, the kerb line, or road.
+            tex = (int(x * 3.0), int(z * 3.0))
+            first = tex != last_tex      # the first column of this grain cell
+            last_tex = tex
             fx_ = x - x0
             fz_ = z - y0
             edge = 1e9
@@ -3417,13 +3538,27 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
             elif CELL - fz_ < edge and CELL - fz_ < PAVE and wall_s:
                 edge = CELL - fz_
 
+            kind = None
+            kerb = None
+            if not (wet_cell or hollow or trail or fair or tarmac or rock or green):
+                kind = "pave" if edge < PAVE else "road"
+                here[sx] = kind
+                left = here[sx - 1] if sx else None
+                if left is not None and left != kind:
+                    kerb = "/" if left == "pave" else "\\"
+                elif above[sx] is not None and above[sx] != kind:
+                    kerb = "-"
+                if kerb is not None and v.eye >= 10.0:
+                    kerb = "."       # from a roof the whole grid is kerbs
             if (v.cover > 0.05 and not wet_cell and not deck and not tunnel_at(i, j)
-                    and not (PAVE - 0.3 <= edge < PAVE)):
+                    and kerb is None):
                 # Snow lying, ahead of everything else the ground would draw:
                 # it covers the bare road as well as the texture, by degrees
                 # as it settles - all but the kerb line, which is how you
                 # still tell the street from the pavement under it.
-                h2 = _mix(int(x * 3.0), int(z * 3.0), 41) % 100
+                h2 = _mix(tex[0], tex[1], 41) % 100
+                if not first:
+                    continue          # one flake a grain cell, or it is ......
                 if h2 < v.cover * 55:
                     ch[y][sx] = "." if h2 % 4 else "'"
                     co[y][sx] = SNOW
@@ -3440,7 +3575,7 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 if pier:
                     if (z * 1.4) % 1.0 < 0.2:
                         glyph, attr = "-", CURB
-                    elif _mix(int(x * 3.0), int(z * 3.0), 37) % 13 == 0:
+                    elif first and _mix(tex[0], tex[1], 37) % 13 == 0:
                         glyph, attr = ".", STREET
                     else:
                         continue
@@ -3448,7 +3583,7 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                     glyph, attr = "=", CURB            # the deck's kerb
                 elif CELL - fx_ < 0.5 and not bridge_at(i + 1, j):
                     glyph, attr = "=", CURB
-                elif _mix(int(x * 3.0), int(z * 3.0), 7) % 3 == 0:
+                elif first and _mix(tex[0], tex[1], 7) % 5 == 0:
                     glyph, attr = ".", CURB            # paving, not water
                 else:
                     continue
@@ -3479,13 +3614,13 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 else:
                     continue
             elif trail:
-                h = _mix(int(x * 3.0), int(z * 3.0), 23)
-                if h % 4:
+                h = _mix(tex[0], tex[1], 23)
+                if h % 4 or not first:
                     continue
                 glyph, attr = ("." if h % 3 else ":"), CURB   # beaten earth
             elif fair:
-                h = _mix(int(x * 3.0), int(z * 3.0), 23)
-                if h % 5:
+                h = _mix(tex[0], tex[1], 23)
+                if h % 5 or not first:
                     continue
                 glyph, attr = ",", GOLD_DIM                   # sawdust
             elif tarmac:
@@ -3497,35 +3632,46 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                     glyph, attr = "|", LANE
                 elif abs(along - 5.0) < 0.15 or abs(along - (BAY_ROW - 5.0)) < 0.15:
                     glyph, attr = "-", LANE
-                elif _mix(int(x * 3.0), int(z * 3.0), 47) % 11 == 0:
+                elif first and _mix(tex[0], tex[1], 47) % 11 == 0:
                     glyph, attr = ".", STREET               # the asphalt
                 else:
                     continue
             elif rock:
-                h = _mix(int(x * 3.0), int(z * 3.0), 23)
-                if h % 6:
+                h = _mix(tex[0], tex[1], 23)
+                if h % 6 or not first:
                     continue
                 glyph, attr = ("^" if h % 5 == 0 else "."), CONCRETE
             elif green:
-                h = _mix(int(x * 3.0), int(z * 3.0), 23)
-                if h % 3:
+                h = _mix(tex[0], tex[1], 23)
+                if h % 3 or not first:
                     continue
                 glyph, attr = ('"' if h % 7 == 0 else ","), GRASS
-            elif edge < PAVE - 0.3:
-                if _mix(int(x * 3.0), int(z * 3.0), 11) & 3:
+            elif kerb is not None:
+                glyph, attr = kerb, CURB              # the kerb: a line
+            elif kind == "pave":
+                # Paving grain, one mark at the left edge of its grain cell:
+                # near you a cell is several columns wide and marking all of
+                # them drew ,,,, runs - texture, and loud, right at your feet.
+                if not first or _mix(tex[0], tex[1], 11) % 7:
                     continue
                 glyph, attr = ",", CURB
-            elif edge < 1e8:
-                glyph, attr = "=", CURB               # the kerb
             elif (lane is not None
                   and abs((x if lane[0] == 0 else z) - lane[1]) < 0.34
                   and int((z if lane[0] == 0 else x) / 3.0) % 2 == 0):
+                if lane_at == sx - 1:
+                    lane_at = sx
+                    continue                          # one glyph wide
+                lane_at = sx
                 glyph, attr = "'", LANE               # the line down the middle
             else:
-                h = _mix(int(x * 3.0), int(z * 3.0), 7)
+                h = _mix(tex[0], tex[1], 7)
+                if not first:
+                    continue
                 if ripple and h & 31 == 0:
                     glyph, attr = "~", RAIN_FAR       # rain standing on the road
-                elif h & 7:
+                elif h % 13 or (d > 18.0 and (h >> 8) % int(d / 18.0 + 1.0)):
+                    # Thinner with distance: far off every column is a grain
+                    # cell of its own, and the far road came out speckled.
                     continue
                 else:
                     glyph, attr = ".", STREET
@@ -3535,6 +3681,7 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 attr = FLASH
             ch[y][sx] = glyph
             co[y][sx] = attr
+        above = here
 
 
 # ---------------------------------------------------------------------------
@@ -7273,6 +7420,7 @@ def render_street(v, now):
             v.hollow = (hx, hz + HOLLOW_RJ * CELL * 0.72, beat, lamp)
 
     v.tunnels = near_tunnels(v, 90.0)
+    _from_above[0] = v.eye >= 10.0
     walls = draw_walls(ch, co, v, now)
     draw_sky(ch, co, v, walls, wet, now)
     draw_ground(ch, co, v, walls, collect_glow(v, now, wet), wet, now)
@@ -9553,14 +9701,43 @@ def main(stdscr):
         elif now - note_at < 4.0 and note:
             hud = hud.rstrip() + "  " + note.strip() + " "
 
-        wide = v.wide if (street and wheel is None and venue is None
-                          and lift is None) else ()
+        plain_street = (street and wheel is None and venue is None
+                        and lift is None)
+        wide = v.wide if plain_street else ()
+        # The walls filled in grey - not under the menu, which wants to sit on
+        # plain black, nor anywhere but the street.
+        fill = fill_grid(v) if FILL_ON and plain_street and not cheats else None
         stdscr.erase()
         for y in range(height):
             row_ch, row_co = ch[y], co[y]
+            row_fill = fill[y] if fill is not None else None
             x = 0
             while x < width:
                 c = row_ch[x]
+                level = row_fill[x] if row_fill is not None else 0
+                if level:
+                    corner = y == height - 1 and x >= width - 1
+                    if not corner:
+                        try:
+                            if c == " ":
+                                # A stretch of bare wall in one call.
+                                run = x + 1
+                                while (run < width and row_ch[run] == " "
+                                       and row_fill[run] == level):
+                                    run += 1
+                                if y == height - 1:
+                                    run = min(run, width - 1)
+                                stdscr.addstr(y, x, " " * (run - x),
+                                              _fill_blank[level])
+                                x = run
+                                continue
+                            if not ((y, x) in wide and is_wide(c)):
+                                stdscr.addch(y, x, c, fill_attr(row_co[x], level))
+                                x += 1
+                                continue
+                        except curses.error:
+                            x += 1
+                            continue
                 # The very last cell of the screen can't be written to, and
                 # a wide glyph needs the one after it as well.
                 corner = y == height - 1 and x >= width - 2
