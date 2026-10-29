@@ -2238,6 +2238,10 @@ def roof_colour(b, dist, flash=0.0, cover=0.0):
         return SNOW                     # snow lying along every roofline
     if flash > 0.35:
         return FLASH
+    if clearer():
+        # Held steady into the distance: the far rooflines fading into the
+        # fog is where the buildings and the night sky ran together.
+        return ROOF if dist < 115.0 else CURB
     if dist < 60.0:
         return ROOF
     # And it fades in one step rather than dropping straight into the fog. The
@@ -2444,7 +2448,7 @@ def draw_casino_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
                 ch[yy][sx] = glyph
                 co[yy][sx] = attr
     # Last, so nothing paints over where the wall meets the ground.
-    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", foot_colour())
     return roof, awning, foot, letter_k, ()
 
 
@@ -2580,7 +2584,7 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
         for y in range(r_lo, r_hi + 1):
             ch[y][sx] = "|"
             co[y][sx] = trim
-        facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+        facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", foot_colour())
         return roof, awning, foot, None, bands
 
     # A fire escape zigzags down the back of an alley building, one landing per
@@ -2657,7 +2661,7 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
                     ch[base - dy][sx] = glyph
                     co[base - dy][sx] = warm
 
-    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", foot_colour())
     return roof, awning, foot, letter_k, bands
 
 
@@ -2914,7 +2918,9 @@ def draw_sky(ch, co, v, walls, wet, now):
             # still holds them still while you turn.
             band_mid = (0.5 + n["tilt"] * math.sin(rad - n["swing"])
                         if n["band"] else None)
-            for y in range(min(top, v.horizon)):
+            # Clearer: not in the row right on top of a roof either, or a star
+            # sits on the edge and reads as a light on the building.
+            for y in range(min(top - (STAR_GAP if clearer() else 0), v.horizon)):
                 m = _mix(bearing, y, 71)
                 alt = 1.0 - y / float(max(1, v.horizon - 1))
                 rate = STAR_RATE * clear
@@ -3342,6 +3348,9 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
     # ever needs - at seventy units up the nearest is a hundred away - so the
     # ground goes as far as the view does.
     far = GROUND_FAR if v.eye < 10.0 else v.reach
+    # Clearer: the first rows of ground under each wall are left bare, so the
+    # ground's marks never run right up against the bottom of a building.
+    gap = FOOT_GAP if clearer() and v.eye < 10.0 else -1
 
     for y in range(v.horizon + 1, v.height):
         d = v.eye * v.fy / (y - v.horizon)
@@ -3401,6 +3410,8 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                     elif along_z and along_z[1] >= 3:
                         lane = (1, (along_z[0] + along_z[1] * 0.5) * CELL)
             if solid:
+                continue
+            if y <= wall_base[sx] + gap and not wet_cell:
                 continue
 
             # How far this point is from the nearest wall decides whether it is
@@ -5258,6 +5269,40 @@ def cycle_traffic():
 
 def traffic_name():
     return TRAFFIC[_traffic]
+
+
+# Outlines: "classic" is the city as it has always been drawn; "clearer" is a
+# trial of four small changes, all aimed at telling a building from the sky
+# above it and the street below it, and none of them adding anything to the
+# screen - they take a few marks away or hold an existing edge steady:
+#   - no star in the row right above a roof, so none sits on a roof edge
+#   - rooflines keep their bright colour into the distance, not fading
+#   - a clean strip of ground right under each wall's footing
+#   - the footing itself a little brighter
+# In the menu, so it can be flipped while walking and judged on the spot.
+OUTLINES = ["classic", "clearer"]
+_outline = 0
+STAR_GAP = 1           # rows of empty sky kept above the highest roof
+FOOT_GAP = 2           # rows of bare ground kept under a footing
+
+
+def cycle_outline():
+    global _outline
+    _outline = (_outline + 1) % len(OUTLINES)
+    return OUTLINES[_outline]
+
+
+def outline_name():
+    return OUTLINES[_outline]
+
+
+def clearer():
+    return _outline == 1
+
+
+def foot_colour():
+    """The line where a wall meets the street."""
+    return LANE if clearer() else CURB
 
 
 def near_cars(v, now, reach=CAR_REACH, every=False):
@@ -8676,6 +8721,7 @@ def draw_cheats(ch, co, note):
            ("w", weather_name()), ("L", "strike now"),
            ("s", "sky " + clouds_name()), ("a", "people " + crowd_name()),
            (">", "traffic " + traffic_name()),
+           ("/", "outline " + outline_name()),
            ("", ""), ("", "NIGHTS"),
            ("n", "the next one"), ("A", "a strange night"),
            ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
@@ -9288,6 +9334,8 @@ def main(stdscr):
                             if skip_to_alien(now) else "no such night near")
                 elif key == ord(">"):
                     note = "traffic: " + cycle_traffic()
+                elif key == ord("/"):
+                    note = "outline: " + cycle_outline()
                 elif key == ord("a"):
                     note = "people: " + cycle_crowd()
                 elif key == ord("s"):
