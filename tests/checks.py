@@ -145,7 +145,7 @@ check("every destination lands somewhere you can stand", not bad, ",".join(bad))
 blind = []
 for _, name, kind in ac.CHEAT_PLACES:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
-                "diner", "billboard"):
+                "diner", "billboard", "highway"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -991,11 +991,29 @@ check("cars on a lane never run into each other", not gaps or min(gaps) >= ac.CA
 later = {g: (x, z) for _, x, z, _, _, g in ac.near_cars(tv, plain_t + 1.0, 400.0, every=True)}
 moved = [g for _, x, z, _, _, g in cars_all if g in later and later[g] != (x, z)]
 check("and they move", len(moved) > 5)
-on_water = [1 for _, x, z, _, _, _ in cars_all
-            if ac.water_at(int(x / ac.CELL + ac.BIG) - ac.BIG, int(z / ac.CELL + ac.BIG) - ac.BIG)
-            and not ac.bridge_at(int(x / ac.CELL + ac.BIG) - ac.BIG,
-                                 int(z / ac.CELL + ac.BIG) - ac.BIG)]
-check("and never drive into the river", not on_water)
+on_water = total = 0
+for s in range(40):
+    sv = ac.View(x0 + s * 137.0, z0 + s * 211.0, 0.0, 2, 2)
+    for _, x, z, *_ in ac.near_cars(sv, plain_t + s * 7, 300.0, every=True):
+        i_, j_ = int(x / ac.CELL + ac.BIG) - ac.BIG, int(z / ac.CELL + ac.BIG) - ac.BIG
+        total += 1
+        if ac.water_at(i_, j_) and not (ac.bridge_at(i_, j_) and ac.grand_at(i_)):
+            on_water += 1                       # a footbridge is not for cars
+check("and never drive into the water, nor over a footbridge", on_water == 0,
+      "%d of %d" % (on_water, total))
+check("not too many in town", len(cars_all) < 80, "%d within 400 units" % len(cars_all))
+# A car turns on and off only at a junction: a trip starts and ends at a crossing.
+ends_ok = True
+for _, x, z, (dx_, dz_), _, _ in cars_all[:60]:
+    axis_ = 0 if dx_ == 0.0 else 1
+    along_ = z if axis_ == 0 else x
+    for ph_ in range(4):
+        tr = ac._trip_of(axis_, along_, ph_)
+        b0_ = tr * ac.TRIP_BLOCKS - ph_
+        a_, b_ = ac._crossing(axis_, b0_), ac._crossing(axis_, b0_ + ac.TRIP_BLOCKS)
+        if a_ is not None and b_ is not None and not a_ - 1e-6 <= along_ <= b_ + 1e-6:
+            ends_ok = False
+check("and a car only turns in or off at a junction", ends_ok)
 drawn_near = [d2 for d2, *_ in ac.near_cars(tv, plain_t)]
 check("and none is drawn right on top of you", all(d2 >= ac.CAR_CLEAR ** 2 for d2 in drawn_near))
 kinds = {k for *_, k, _ in ac.near_cars(tv, plain_t, 2000.0, every=True)}
@@ -1019,6 +1037,33 @@ check("the menu sets how much traffic", ac.traffic_name() == "some"
       and len(ac.near_cars(tv, plain_t, 400.0, every=True)) > len(cars_all)
       and ac.cycle_traffic() == "none" and not ac.near_cars(tv, plain_t, 400.0, every=True)
       and ac.cycle_traffic() == "some")
+
+# --- the highway -------------------------------------------------------------
+hwys = [ac.hwy_span(k) for k in range(-300, 300) if ac.hwy_span(k) is not None]
+check("there is a highway every so often", 15 < len(hwys) < 80, "%d in 600 avenues" % len(hwys))
+check("over the wide avenues, never the El's or the big bridge's",
+      all(s[1] == 3 and not ac.el_at(s[0]) and not ac.grand_at(s[0]) for s in hwys))
+check("and no tunnel under it", not any(ac.tunnel_at(s[0] + 1, j) for s in hwys[:10]
+                                        for j in range(-400, 400)))
+hx0, hx1 = hwys[0][0] * ac.CELL, (hwys[0][0] + hwys[0][1]) * ac.CELL
+hc = list(ac.hwy_cars(hx0, hx1, 0.0, 200.0, plain_t))
+check("busy up there: most of the traffic", len(hc) > 40, "%d cars in 400 units" % len(hc))
+check("both ways, two lanes each", {(lx, d) for _, lx, d, _ in hc} == set(ac.hwy_lanes(hx0, hx1)))
+hl = {}
+for cz_, lx, d, _ in hc:
+    hl.setdefault(lx, []).append(cz_)
+hgap = min(abs(a - b) for zs in hl.values() for a in zs for b in zs if a != b)
+check("and nobody runs into anybody", hgap >= ac.HWY_SLOT - 1e-6, "closest %.1f" % hgap)
+hsp = ac.find_place(x0, z0, "highway")
+check("the menu stands you on a street looking at it", hsp is not None
+      and ac.can_stand(hsp[0], hsp[1]))
+old_flash, ac.FLASH = ac.FLASH, 1801
+hg, hco, _ = ac.render_street(ac.View(hsp[0], hsp[1], hsp[2], 110, 30), plain_t)
+check("and the traffic is up there on it", sum(r.count(1801) for r in hco) > 3,
+      "%d headlights" % sum(r.count(1801) for r in hco))
+ac.FLASH = old_flash
+under = ac.View((hx0 + hx1) * 0.5, 3.0, 0.0, 110, 30)
+check("you can hear it", ac.hwy_near(under.x, under.z) and not ac.hwy_near(hx0 - 200.0, 0.0))
 
 # --- the diner -------------------------------------------------------------
 dnr = ac.find_place(x0, z0, "diner")
