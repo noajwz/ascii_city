@@ -95,12 +95,5 @@ ok &= report("the diner: sit, coffee, walk out; then a billboard", *run(
     [(b"`", .5), (b"(", 6.5), (b"s", .8), (b"`", .5), (b"$", 1.0), (b"w", .4)],
     cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
-# The walls filled grey on a 256-colour terminal, and not on an 8-colour one.
-_, o256 = run([(b"w", .6)], cols=100, rows=30)
-_, o8 = run([(b"w", .6)], cols=100, rows=30, term="xterm")
-greys = len(re.findall(rb"48;5;23[345]", o256))
-print("%-34s %s" % ("walls filled on 256 colours", "ok" if greys > 50 and
-                    b"48;5;23" not in o8 else "FAIL (%d)" % greys))
-ok &= greys > 50 and b"48;5;23" not in o8
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

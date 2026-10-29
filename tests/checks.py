@@ -586,9 +586,7 @@ white_ground = sum(1 for y in range(sv.horizon + 1, 30) for x in range(110)
                    if scol[y][x] == 1031)
 white_air = sum(1 for y in range(0, sv.horizon) for x in range(110)
                 if scol[y][x] == 1031)
-# One flake a grain cell now, not a run of ...... across it: fewer cells, and
-# it still reads as lying - 300 was the old runs' count.
-check("snow lies on the street", white_ground > 150, "%d cells" % white_ground)
+check("snow lies on the street", white_ground > 300, "%d cells" % white_ground)
 check("and is in the air", white_air > 15, "%d flakes" % white_air)
 check("and the rooflines are white", sum(1 for r in scol for a in r if a == 1032) == 0)
 while ac.weather_name() != "auto":
@@ -963,88 +961,6 @@ for dd in (3.0, 1.2):
 check("someone standing in front of you is still there at arm's length",
       counts_near[1] > counts_near[0] > 0, "%d cells at 3 units, %d at 1.2" % tuple(counts_near))
 
-# --- outlines: the filled walls, the kerb, the grain -------------------------
-fill_was = ac.FILL_ON
-ac.FILL_ON = True
-fsp = ac.find_place(x0, z0, "street")
-fv = ac.View(fsp[0], fsp[1], fsp[2], 120, 34)
-fgr, fco, _ = ac.render_street(fv, 300.0)
-fgrid = ac.fill_grid(fv)
-walled = sum(1 for r in fgrid for l in r if l)
-check("buildings are filled in: solid shapes, not floating windows",
-      walled > 120 * 34 * 0.25, "%d of %d cells" % (walled, 120 * 34))
-sky_filled = sum(1 for sx in range(120) for y in range(0, fv.horizon)
-                 if fgrid[y][sx] and y < (fv.fill[sx][-1][0] if fv.fill[sx] else 99))
-check("and the sky is not", sky_filled == 0, "%d" % sky_filled)
-near_l = [l for sx, spans in enumerate(fv.fill) for lo, hi, d, tree, dark in spans[:1]
-          for l in [fgrid[max(0, lo)][sx]] if not tree and not dark and d < 20 and l]
-far_l = [l for sx, spans in enumerate(fv.fill) for lo, hi, d, tree, dark in spans
-         for l in [fgrid[min(fv.height - 1, max(0, lo))][sx]]
-         if not tree and not dark and d > 100 and l]
-check("near walls lighter than far ones", near_l and far_l
-      and max(near_l) == 1 and min(far_l) == 3, "%s / %s" % (set(near_l), set(far_l)))
-asp = ac.find_place(x0, z0, "alley")
-av = ac.View(asp[0], asp[1], asp[2], 120, 34)
-ac.render_street(av, 300.0)
-agrid = ac.fill_grid(av)
-dark_near = [agrid[max(0, lo)][sx] for sx, spans in enumerate(av.fill)
-             for lo, hi, d, tree, dark in spans[:1] if dark and d < 20]
-check("and an alley's walls a shade darker than a street's", dark_near
-      and min(dark_near) >= 2, "%s" % set(dark_near))
-ac.CURB, ac.STREET = 611, 612
-kv_runs = grain_runs = kerbs = 0
-for k in range(12):
-    m = ac._mix(k, 9, 31)
-    sx_ = ((m & 0xFFFF) / 65535.0 - 0.5) * 3000
-    sz_ = ((m >> 16) / 65535.0 - 0.5) * 3000
-    if not ac.can_stand(sx_, sz_):
-        continue
-    for yaw in (0.0, 1.57, 3.14, 4.71):
-        # The ground pass on its own: the walkers' art is drawn in the kerb's
-        # colour too, and a // in somebody's legs is not a kerb.
-        kv_ = ac.View(sx_, sz_, yaw, 110, 30)
-        kg = [[" "] * 110 for _ in range(30)]
-        kc = [[0] * 110 for _ in range(30)]
-        kw = ac.draw_walls(kg, kc, kv_, 300.0)
-        kg = [[" "] * 110 for _ in range(30)]
-        kc = [[0] * 110 for _ in range(30)]
-        ac.draw_ground(kg, kc, kv_, kw, {}, 0.0, 300.0)
-        for y in range(14, 30):
-            row, rc = kg[y], kc[y]
-            run_k = run_g = 0
-            for x in range(110):
-                is_k = rc[x] == 611 and row[x] in "/\\"
-                is_g = rc[x] == 612 and row[x] == "."
-                kerbs += is_k
-                run_k = run_k + 1 if is_k else 0
-                run_g = run_g + 1 if is_g else 0
-                kv_runs += run_k == 3
-                grain_runs += run_g == 3
-check("the kerb is a line, one glyph wide, never a band", kerbs > 100 and kv_runs == 0,
-      "%d kerb cells, %d runs" % (kerbs, kv_runs))
-check("and the road grain is single marks, never runs of ....", grain_runs == 0,
-      "%d runs" % grain_runs)
-ac.FILL_ON = fill_was
-# The pairs: there is room, or there is no fill at all.
-real = (ac.curses.init_pair, ac.curses.color_pair, getattr(ac.curses, "COLOR_PAIRS", None))
-made_pairs = {}
-ac.curses.init_pair = lambda p, f, b: made_pairs.__setitem__(p, (f, b))
-ac.curses.color_pair = lambda p: p << 8
-for room, want in ((256, True), (160, False)):
-    ac.FILL_ON = False
-    ac.curses.COLOR_PAIRS = room
-    ac._fill_blank.clear(); ac._fill_pair.clear(); ac._fill_cache.clear()
-    ac.setup_fill(105, {p: 16 + p % 70 for p in range(1, 105)})
-    check("the fill %s in %d colour pairs" % ("fits" if want else "is left off", room),
-          ac.FILL_ON == want and max(made_pairs or [0]) < 256)
-ac.curses.init_pair, ac.curses.color_pair = real[0], real[1]
-if real[2] is None:
-    del ac.curses.COLOR_PAIRS
-else:
-    ac.curses.COLOR_PAIRS = real[2]
-ac.FILL_ON = fill_was
-ac._fill_blank.clear(); ac._fill_pair.clear(); ac._fill_cache.clear()
-
 # --- traffic ---------------------------------------------------------------
 ac._night_skip = 0.0
 plain_t = next(k * ac.NIGHT_LENGTH + 100 for k in range(200)
@@ -1366,17 +1282,11 @@ for k in range(14):
     if not ac.can_stand(sx, sz):
         continue
     for yaw in (0.0, 1.57, 3.14, 4.71):
-        fv_ = ac.View(sx, sz, yaw, 96, 26)
-        grid, colour, _ = ac.render_street(fv_, 400.0)
+        grid, colour, _ = ac.render_street(ac.View(sx, sz, yaw, 96, 26), 400.0)
         for y, row in enumerate(colour):
             for x, c in enumerate(row):
                 if c == 501 and grid[y][x] == "'": lanes += 1
                 if c == 502 and grid[y][x] == "_": feet += 1
-        if ac.FILL_ON:
-            # Filled, the footing is where the grey stops and the ground starts.
-            fg_ = ac.fill_grid(fv_)
-            feet += sum(1 for y in range(13, 25) for x in range(96)
-                        if fg_[y][x] and not fg_[y + 1][x])
 check("wide streets get a line down the middle", lanes > 20, "%d cells" % lanes)
 check("and buildings get one along the bottom", feet > 200, "%d cells" % feet)
 
