@@ -238,17 +238,19 @@ worth staying out for and most nights are not one.
 **Cloud comes and goes on its own.** `cloud_cover()` is three slow waves on their own periods, like
 the rain's, and rain and snow raise it to cover the sky as they come; the sky is
 `clarity * (1 - cloud)`, so it goes by degrees rather than at a threshold. Of the time it is not
-raining the sky is clear about half of it, cloudy a quarter, overcast a fifth — and the HUD says
+raining the sky is clear about three quarters of it, cloudy a fifth, overcast one stretch in twenty
+— `CLOUD_BASE` sets that, and it was half clear at first, which was "too often" — and the HUD says
 which (`sky_word()`). Under cloud the stars and moon go, and nothing is drawn in their place. There
 was a faint drifting texture of `~` and `-` for a while, meant as cloud lit from below; it was
 reported as noisy, twice, and it is gone — a cloudy night is a night with fewer stars, which is what
 one looks like. There is a test that a cloudy frame draws nothing the same frame held clear does
 not. Natural cloud never hides the strange night — that sky is
 lit by what is in it — but the held overcast does. `s` in the menu cycles the sky: as it comes,
-held clear, held overcast. The moon crosses through the night rather than sitting still, and at new
+held clear, held cloudy (a few stars through it), held overcast. The moon crosses through the night rather than sitting still, and at new
 moon there is simply no moon, which is a perfectly good night in its own right.
 
-`s` in the cheat menu cycles the sky (`_sky_mode`): as it comes, held clear, held overcast. Held
+`s` in the cheat menu cycles the sky (`_sky_mode`): as it comes, held clear, held cloudy, held
+overcast. Held
 overcast is a pitch-black sky — no stars, moon, milky way or meteors, from the street or the water,
 and on the strange night nothing up there either, though the city still pulses to it. It is a sky
 setting, not a weather: the rain, snow and lightning go on underneath it, and a strike still lights

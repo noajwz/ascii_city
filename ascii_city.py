@@ -6027,12 +6027,13 @@ _weather_i = 0
 _forced_strike = None       # when a strike was called for, rather than due
 
 
-SKY_MODES = ["as it comes", "clear", "overcast"]
+SKY_MODES = ["as it comes", "clear", "cloudy", "overcast"]
+CLOUD_BASE = 0.05      # where the sky's own cloud sits before its waves
 _sky_mode = 0               # the cheat menu's hold on the cloud
 
 
 def cycle_clouds():
-    """As it comes, then a clear sky held, then overcast held. Overcast is
+    """As it comes, then held clear, held cloudy, held overcast. Overcast is
     pitch black: no stars, no moon, no milky way, no meteors - and on the
     strange night nothing up there either. The weather goes on underneath."""
     global _sky_mode
@@ -6045,7 +6046,7 @@ def clouds_name():
 
 
 def overcast_held():
-    return _sky_mode == 2
+    return _sky_mode == 3
 
 
 def cloud_cover(now):
@@ -6058,8 +6059,10 @@ def cloud_cover(now):
     if _sky_mode == 1:
         return 0.0
     if _sky_mode == 2:
+        return 0.65                     # broken: a few stars through it
+    if _sky_mode == 3:
         return 1.0
-    c = (0.40 + 0.55 * math.sin(now / 233.0 + 0.7)
+    c = (CLOUD_BASE + 0.55 * math.sin(now / 233.0 + 0.7)
          + 0.30 * math.sin(now / 89.0 + 2.1)
          + 0.10 * math.sin(now / 29.0 + 0.3))
     c = max(c, min(1.0, rain_intensity(now) / 0.55), min(1.0, snowfall(now) * 1.4))

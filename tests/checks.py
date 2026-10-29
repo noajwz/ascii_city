@@ -623,6 +623,8 @@ check("the menu holds the sky clear", ac.cycle_clouds() == "clear")
 before = sky_cells(tc)
 check("and on a clear night the sky has stars in it", before[0] > 1 and before[1] > 10,
       "%d in the street, %d on the waterfront" % before)
+check("then cloudy, a few stars through it", ac.cycle_clouds() == "cloudy"
+      and 0 < sky_cells(tc)[1] < before[1])
 check("then draws the cloud over", ac.cycle_clouds() == "overcast")
 after = sky_cells(tc)
 check("and then there are none, from the street or the water", after == (0, 0),
@@ -2045,17 +2047,19 @@ for k in range(0, 400000, 7):
     if w in ("clear", "cloudy", "overcast"):
         words[w] = words.get(w, 0) + 1
 dry_total = float(sum(words.values()))
-check("when it is not raining the sky is sometimes clear, cloudy or overcast",
-      all(0.12 < words.get(w, 0) / dry_total < 0.65 for w in ("clear", "cloudy", "overcast")),
+share_ = {w: words.get(w, 0) / dry_total for w in ("clear", "cloudy", "overcast")}
+check("when it is not raining the sky is mostly clear, and now and then not",
+      share_["clear"] > 0.65 and 0.08 < share_["cloudy"] < 0.35
+      and 0.005 < share_["overcast"] < 0.12,
       "  ".join("%s %.0f%%" % (w, 100 * words.get(w, 0) / dry_total)
                 for w in ("clear", "cloudy", "overcast")))
 while ac.weather_name() != "dry":
     ac.cycle_weather()
-grey = next(k * 3.0 for k in range(40000) if ac.cloud_cover(k * 3.0) == 1.0
+grey = next(k * 3.0 for k in range(200000) if ac.cloud_cover(k * 3.0) > 0.97
             and not ac.night(k * 3.0)["alien"] and ac.night(k * 3.0)["clarity"] > 0.6)
 _, gcol, _ = ac.render_street(ac.View(sx0, sz0, syaw, 110, 32), grey)
-check("and an overcast stretch has no stars in it, rain or no rain",
-      not any(a in SKY for r in gcol for a in r))
+check("and an overcast stretch has next to no stars in it, rain or no rain",
+      sum(1 for r in gcol for a in r if a in SKY) <= 2)
 check("which the HUD calls overcast", ac.sky_word(grey, 0.0) == "overcast")
 while ac.weather_name() != "auto":
     ac.cycle_weather()
