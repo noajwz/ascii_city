@@ -144,7 +144,8 @@ check("every destination lands somewhere you can stand", not bad, ",".join(bad))
 
 blind = []
 for _, name, kind in ac.CHEAT_PLACES:
-    if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema"):
+    if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
+                "diner", "billboard"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -1018,6 +1019,50 @@ check("the menu sets how much traffic", ac.traffic_name() == "some"
       and len(ac.near_cars(tv, plain_t, 400.0, every=True)) > len(cars_all)
       and ac.cycle_traffic() == "none" and not ac.near_cars(tv, plain_t, 400.0, every=True)
       and ac.cycle_traffic() == "some")
+
+# --- the diner -------------------------------------------------------------
+dnr = ac.find_place(x0, z0, "diner")
+dven = ac.venue_at(dnr[0], dnr[1])
+check("the menu stands you in the diner's doorway", dven is not None and dven[0] == "diner")
+diners = sum(1 for i in range(-250, 250) for j in range(-250, 250)
+             if ac._mix(i, j, 2401) % ac.DINER_ODDS == 0 and not ac.is_open(i, j)
+             and ac.lot(i, j)["diner"] is not None)
+check("diners are rare", 2 < diners < 120, "%d in a 2500-unit square" % diners)
+ac.PALETTES["warm"] = [1701] * 5
+dview = ac.View(dnr[0] - math.sin(dnr[2]) * 9, dnr[1] - math.cos(dnr[2]) * 9, dnr[2], 110, 30)
+dg, dc, _ = ac.render_street(dview, 300.0)
+lit_window = sum(1 for r in dc for a in r if a == 1701)
+check("from the street its front is one long lit window", lit_window > 80,
+      "%d lit cells" % lit_window)
+check("with people at the counter", sum("".join(r).count("o") for r in dg) > 2)
+check("and DINER in neon over the door", any("D I N E R" in "".join(r) for r in dg))
+ac.PALETTES["warm"] = list(range(37, 42))
+din0 = "\n".join("".join(r) for r in ac.render_diner(100, 28, 101.0, 100.0)[0])
+din1 = "\n".join("".join(r) for r in ac.render_diner(100, 28, 100.0 + ac.DINER_POUR + 0.5,
+                                                    100.0)[0])
+check("inside: the menu, the counter, the way out", "COFFEE" in din0 and "PIE" in din0
+      and "the way out" in din0)
+check("and a while after you sit down she pours", "be right with you" in din0
+      and "there you go" in din1 and "_[]_" in din1)
+check("and a tiny window still says where you are",
+      "diner" in "\n".join("".join(r) for r in ac.render_diner(30, 10, 101.0, 100.0)[0]))
+
+# --- billboards -------------------------------------------------------------
+bills = [ac.lot(i, j)["billboard"] for i in range(-250, 250) for j in range(-250, 250)
+         if ac._mix(i, j, 2405) % ac.BILL_ODDS == 0 and not ac.is_open(i, j)
+         and ac.lot(i, j)["billboard"] is not None]
+check("there are billboards, not too many", 5 < len(bills) < 200,
+      "%d in a 2500-unit square" % len(bills))
+check("only over the wide streets and on low roofs", all(
+    8.0 <= b["height"] <= 12.0 and ac._wide_face(b["i"], b["j"], b["face"]) == b["face"]
+    for b in bills))
+bsp = ac.find_place(x0, z0, "billboard")
+check("the menu stands you down the street from one", bsp is not None
+      and ac.can_stand(bsp[0], bsp[1]))
+bg, _, _ = ac.render_street(ac.View(bsp[0], bsp[1], bsp[2], 110, 30), 300.0)
+btext = "\n".join("".join(r) for r in bg)
+check("and from there you can read it", any(words[0] in btext for words, _ in ac.ADS),
+      "brands: " + ", ".join(w[0] for w, _ in ac.ADS))
 
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])

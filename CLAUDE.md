@@ -772,6 +772,31 @@ HUD says `~ a siren somewhere ~`. `<` in the menu stands you on the pavement eig
 of one coming towards you — at thirty it was three columns wide and lost among the shopfronts —
 and `>` sets the traffic: some, busy, none. About 0.3 ms a frame.
 
+## The diner, and the billboards
+
+**The diner** is the *Nighthawks* picture: `DINER_ODDS` on its own hash, wanting a wide street
+out front (`_wide_face()`), the building cut down to two storeys. From the street the whole ground
+floor is one lit window (`diner_window()`, in the wall pass) with the counter across it and three
+people sat well apart, dark against the light, which is the point; `DINER` in pink neon over the
+door, `24 HRS` under it, `OPEN` blinking, in screen space like the cinema's sign. Inside
+(`render_diner()`) you are on a stool: lamps over the counter, the menu, the urns, the pie case, a
+jukebox going through its colours, the cook moving behind the counter, the window onto the empty
+street with the rain on it if it is raining, and `DINER_POUR` seconds after you sit down she comes
+round with the pot. The seat is remembered the way the ramen bowl's is. `(` in the menu.
+
+**Billboards** are soda ads (`ADS`, made-up brands) hung out over the wide streets from low roofs
+(8-12 units: on a tall one it is off the top of the screen from anywhere you can stand) in the busy
+districts, one in `BILL_ODDS`. They stand at right angles to the frontage, out over the road like a
+gantry board, so they face along the street: flat against the frontage they could only be read from
+straight across the road, and no street is wide enough to stand back that far — and set over their
+own roof they hid behind the roofline of every building that side. Found per city block and cached
+(`bills_in_block()`), like the sky decks' beacons. The trap: drawing each letter as a world point on
+the board's plane looked right and could not be read — from any way back the brand and the slogan
+rows project onto the same screen rows and overwrite each other. So the corners are projected in the
+world (with the depth per column for occlusion) and the lettering laid out in screen space across
+what they cover, and the board's blank cells are blanked so the city does not show through it. `$`
+in the menu stands you down the middle of the street from one, forty units off.
+
 ## Getting lost is the feature
 
 The layout is deliberately irregular, because the point is to be able to lose yourself in it.
