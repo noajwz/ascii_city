@@ -2060,6 +2060,27 @@ check("which the HUD calls overcast", ac.sky_word(grey, 0.0) == "overcast")
 while ac.weather_name() != "auto":
     ac.cycle_weather()
 
+# Cloud only takes the sky away: reported as noisy with a drifting texture of
+# ~ and - drawn across it, so it draws nothing now. Every cell lit on a
+# cloudy frame must be lit on the same frame held clear.
+while ac.weather_name() != "dry":
+    ac.cycle_weather()
+cloudy_t = next(k * 3.0 for k in range(40000) if 0.45 < ac.cloud_cover(k * 3.0) < 0.9
+                and not ac.night(k * 3.0)["alien"])
+added = 0
+for cam_ in (0.0, 400.0):
+    ac._sky_mode = 0
+    cg, _ = ac.render_skyline(cam_, 110, 26, cloudy_t)
+    ac._sky_mode = 1
+    kg, _ = ac.render_skyline(cam_, 110, 26, cloudy_t)
+    added += sum(1 for y in range(26) for x in range(110)
+                 if cg[y][x] != " " and kg[y][x] == " ")
+ac._sky_mode = 0
+check("cloud adds nothing to the sky, it only takes stars away", added == 0,
+      "%d cells drawn by the cloud" % added)
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
+
 # --- the night the sky has something in it -------------------------------
 ac._night_skip = 0.0
 ac._night_cache.clear()

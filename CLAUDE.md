@@ -239,10 +239,11 @@ worth staying out for and most nights are not one.
 the rain's, and rain and snow raise it to cover the sky as they come; the sky is
 `clarity * (1 - cloud)`, so it goes by degrees rather than at a threshold. Of the time it is not
 raining the sky is clear about half of it, cloudy a quarter, overcast a fifth — and the HUD says
-which (`sky_word()`). Under cloud the stars and moon go, and a faint texture drifts across in its
-own `CLOUD` colour, lit from below the way a cloud over a city is: a slow field cut at a level set
-by how much cloud there is, thinned to texture. It had the haze colour for a minute and the mist
-tests counted it as mist off the river. Natural cloud never hides the strange night — that sky is
+which (`sky_word()`). Under cloud the stars and moon go, and nothing is drawn in their place. There
+was a faint drifting texture of `~` and `-` for a while, meant as cloud lit from below; it was
+reported as noisy, twice, and it is gone — a cloudy night is a night with fewer stars, which is what
+one looks like. There is a test that a cloudy frame draws nothing the same frame held clear does
+not. Natural cloud never hides the strange night — that sky is
 lit by what is in it — but the held overcast does. `s` in the menu cycles the sky: as it comes,
 held clear, held overcast. The moon crosses through the night rather than sitting still, and at new
 moon there is simply no moon, which is a perfectly good night in its own right.
