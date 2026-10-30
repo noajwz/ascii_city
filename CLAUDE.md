@@ -11,7 +11,7 @@ a departure from the premise; prefer stdlib.
 python3 ascii_city.py
 ```
 
-It came out of `noajwz/TUI-CLAUDE`, where it lived alongside a handful of smaller terminal programs
+It came out of `noajwz/TUI` (formerly `TUI-CLAUDE`), where it lived alongside a handful of smaller terminal programs
 until it outgrew them. The history came with it.
 
 Ruff is the linter, run with defaults (`ruff check . && ruff format .`) — there is no
