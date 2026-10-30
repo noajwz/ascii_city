@@ -961,65 +961,6 @@ for dd in (3.0, 1.2):
 check("someone standing in front of you is still there at arm's length",
       counts_near[1] > counts_near[0] > 0, "%d cells at 3 units, %d at 1.2" % tuple(counts_near))
 
-# --- outlines: classic, and the clearer trial ---------------------------------
-check("outlines start classic and the menu flips them", ac.outline_name() == "classic"
-      and ac.cycle_outline() == "clearer" and ac.cycle_outline() == "classic")
-stars_was = (ac.STAR, ac.STAR_DIM, ac.STAR_WARM, ac.STAR_COLD, ac.BAND)
-ac.STAR = ac.STAR_DIM = ac.STAR_WARM = ac.STAR_COLD = ac.BAND = 1451
-# The clearest ordinary night - the clearest of all is the strange one, whose
-# stars are the visitors' lights and not star colours.
-clear_night = max((k for k in range(200)
-                   if not ac.night(k * ac.NIGHT_LENGTH + 100)["alien"]),
-                  key=lambda k: ac.night(k * ac.NIGHT_LENGTH + 100)["clarity"])
-sky_was, ac._sky_mode = ac._sky_mode, 1        # held clear: stars, whatever the cloud
-on_roof = {}
-under_wall = {}
-for mode in (0, 1):
-    ac._outline = mode
-    on_roof[mode] = under_wall[mode] = 0
-    for k in range(10):
-        m = ac._mix(k, 4, 61)
-        ox = ((m & 0xFFFF) / 65535.0 - 0.5) * 3000
-        oz = ((m >> 16) / 65535.0 - 0.5) * 3000
-        if not ac.can_stand(ox, oz):
-            continue
-        for yaw in (0.0, 1.57, 3.14, 4.71):
-            ov = ac.View(ox, oz, yaw, 110, 30)
-            og, oc, _ = ac.render_street(ov, clear_night * ac.NIGHT_LENGTH + 100)
-            # The walls again on a blank screen: the tops and bases they give.
-            ow = ac.draw_walls([[" "] * 110 for _ in range(30)],
-                               [[0] * 110 for _ in range(30)], ov, 300.0)
-            for sx in range(110):
-                top = ow[3][sx]
-                if 0 < top <= ov.horizon and oc[top - 1][sx] == 1451:
-                    on_roof[mode] += 1
-            # And the ground on its own, so a walker standing there is no mark.
-            gg = [[" "] * 110 for _ in range(30)]
-            ac.draw_ground(gg, [[0] * 110 for _ in range(30)], ov, ow, {}, 0.0, 300.0)
-            for sx in range(110):
-                base = ow[2][sx]
-                if base < 0:
-                    continue
-                for y in range(base + 1, min(30, base + 1 + ac.FOOT_GAP)):
-                    if gg[y][sx] != " " and (y, sx) not in ov.water:
-                        under_wall[mode] += 1
-ac._outline = 0
-ac._sky_mode = sky_was
-ac.STAR, ac.STAR_DIM, ac.STAR_WARM, ac.STAR_COLD, ac.BAND = stars_was
-check("clearer: no star sits right on a roof edge", on_roof[1] == 0 and on_roof[0] > 0,
-      "%d classic, %d clearer" % (on_roof[0], on_roof[1]))
-check("clearer: the ground is bare right under a building", under_wall[1] == 0
-      and under_wall[0] > 0, "%d marks classic, %d clearer" % (under_wall[0], under_wall[1]))
-far_b = ac.lot(3, 3)
-fog_was = ac.roof_colour(far_b, 200.0)
-ac._outline = 1
-steady = ac.roof_colour(far_b, 200.0) == ac.CURB and ac.roof_colour(far_b, 90.0) == ac.ROOF
-bright_foot = ac.foot_colour() == ac.LANE
-ac._outline = 0
-check("clearer: far rooflines hold their colour instead of fading",
-      steady and fog_was == ac.tone_colour("far", far_b["tone"]))
-check("clearer: the footing a little brighter", bright_foot and ac.foot_colour() == ac.CURB)
-
 # --- traffic ---------------------------------------------------------------
 ac._night_skip = 0.0
 plain_t = next(k * ac.NIGHT_LENGTH + 100 for k in range(200)
@@ -1175,8 +1116,7 @@ text = "\n".join("".join(r) for r in big[0])
 check("the panel lists everything it does",
       all(n in text for _, n, _ in ac.CHEAT_PLACES)
       and ac.weather_name() in text and "strike now" in text and "people" in text
-      and "sky " in text and "dawn" in text and "traffic" in text
-      and "outline" in text)
+      and "sky " in text and "dawn" in text and "traffic" in text)
 std = ([[" "] * 80 for _ in range(24)], [[0] * 80 for _ in range(24)])
 ac.draw_cheats(std[0], std[1], "-> somewhere")
 check("and it opens on an 80x24 terminal", any("close" in "".join(r) for r in std[0]))

@@ -95,8 +95,5 @@ ok &= report("the diner: sit, coffee, walk out; then a billboard", *run(
     [(b"`", .5), (b"(", 6.5), (b"s", .8), (b"`", .5), (b"$", 1.0), (b"w", .4)],
     cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
-ok &= report("outline clearer, walk, and back", *run(
-    [(b"`", .5), (b"/", .4), (b"`", .4), (b"w", .5), (b"d", .4), (b"`", .4),
-     (b"/", .4), (b"`", .4), (b"w", .4)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
