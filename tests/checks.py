@@ -2598,6 +2598,92 @@ check("the cheat stands you on it", ac.can_stand(fair[0], fair[1])
 check("and one carnival is a long way from the next",
       ac.carnival_col(fc + ac.CARNIVAL_GAP) - fc > 100)
 
+# The firing box on the headland, and the show you fire from it: cues on a
+# bar, a shell up over the bay for every press on the beat, and a finale as
+# big as the show deserved.
+fb = ac.find_place(x0, z0, "firebox")
+box = ac.near_firing_box(fb[0], fb[1], ac.FIRE_REACH)
+check("the cheat stands you at the firing box", box is not None
+      and ac.headland_at(int(box[0] // ac.CELL), int(box[1] // ac.CELL)))
+check("and the HUD says what it is for", "f lights a show" in ac.show_hint(0.0, fb[0], fb[1]))
+ac._show = None
+check("away from the box f lights nothing",
+      not ac.light_show(500.0, fb[0], fb[1] - 40.0) and ac._show is None)
+check("at it, f lights a show, and only one at once",
+      ac.light_show(500.0, fb[0], fb[1]) and not ac.light_show(501.0, fb[0], fb[1]))
+sh = ac._show
+check("which goes up over the water",
+      ac.water_at(int(sh.bay[0] // ac.CELL), int(sh.bay[1] // ac.CELL)))
+check("the first cue comes after the count-in",
+      abs(sh.cues[0]["t"] - (500.0 + ac.SHOW_COUNT * sh.beat)) < 1e-9)
+easy = {tuple(b) for b in ac.SHOW_BARS_EASY}
+check("and the first bars are easy ones", all(
+    ac.SHOW_BARS_EASY[ac._mix(sh.seed, b, 2011) % len(ac.SHOW_BARS_EASY)] in easy
+    for b in range(2)) and len(sh.cues) >= ac.SHOW_BARS)
+grades = []
+for c in sh.cues:
+    sh.update(c["t"])
+    grades.append(sh.press(c["t"] + 0.02))
+sh.update(sh.end + 0.01)
+check("on every beat, every shell is a great one and the score is the best",
+      set(grades) == {"great"} and sh.score == sh.best)
+check("and the finale is the biggest there is",
+      len([s_ for s_ in sh.shots if s_[0] >= sh.end]) == 24)
+check("it is over once the finale has burnt out",
+      not sh.over(sh.end + ac.SHOW_FINALE) and sh.over(sh.end + 20.0))
+check("and f at the box lights another", ac.light_show(sh.end + 20.0, fb[0], fb[1]))
+sh = ac._show
+sh.update(sh.end + 0.01)
+check("left alone, every cue is a miss and the finale is a small one",
+      sh.tally["miss"] == len(sh.cues) and sh.score == 0
+      and len(sh.shots) == 3)
+ac._show = None
+ac.light_show(900.0, fb[0], fb[1])
+sh = ac._show
+c0 = sh.cues[0]["t"]
+check("a press off the beat fizzles", sh.press(c0 - 0.5) == "fizzle"
+      and sh.shots[-1][2] < 0.5)
+check("near enough is good, not great",
+      sh.press(c0 + (ac.SHOW_GREAT + ac.SHOW_GOOD) / 2) == "good")
+check("a fizzle breaks the streak", sh.press(c0 + 0.4) == "fizzle" and sh.streak == 0)
+
+# What goes up has to be seen from the box: from the rock the middle of the
+# bay was near enough that a third of every burst went off the top.
+ac._show = None
+ac.light_show(1000.0, fb[0], fb[1])
+sh = ac._show
+for c in sh.cues:
+    sh.update(c["t"])
+    sh.press(c["t"])
+real_neon, real_gold, real_ember = list(ac.NEON), ac.GOLD, ac.EMBER
+ac.NEON[:] = [(800 + k, 900 + k) for k in range(8)]
+ac.GOLD, ac.EMBER = 990, 991
+sparkc = set(range(800, 808)) | set(range(900, 908)) | {990, 991}
+fv = ac.View(fb[0], fb[1], fb[2], 100, 30)
+t_ = sh.cues[10]["t"] + 1.6
+grid, colour, _ = ac.render_street(fv, t_)
+lit = sum(1 for y in range(30) for x in range(100) if colour[y][x] in sparkc)
+pts = [fv.project(x, y, z) for t0, m, size, w in sh.shots
+       if t0 <= t_ < t0 + ac.FW_RISE + ac.FW_LIFE
+       for x, y, z, *_ in ac.shell_sparks(sh.bay[0], sh.bay[1], t0, m, t_, size,
+                                          ac.SHOW_SPREAD, w)]
+seen = sum(1 for p_ in pts if p_ and 0 <= p_[1] < 30 and 0 <= p_[0] < 100)
+check("from the box you see your shells burst", lit > 60 and seen > 0.85 * len(pts),
+      "%d cells, %d of %d sparks on screen" % (lit, seen, len(pts)))
+ac.NEON[:] = real_neon
+ac.GOLD, ac.EMBER = real_gold, real_ember
+bar = ([[" "] * 80 for _ in range(24)], [[0] * 80 for _ in range(24)])
+ac.draw_show_bar(bar[0], bar[1], sh, sh.cues[3]["t"] - 1.0)
+bar_text = "\n".join("".join(r) for r in bar[0])
+check("the bar fits an 80x24 window", "f on the beat" in bar_text and "|]" in bar_text)
+tiny = ([[" "] * 30 for _ in range(8)], [[0] * 30 for _ in range(8)])
+ac.draw_show_bar(tiny[0], tiny[1], sh, sh.cues[3]["t"])
+check("and stays out of a tiny one", all(c == " " for r in tiny[0] for c in r))
+check("the button is only yours near the box",
+      ac.on_the_button(t_, fb[0], fb[1]) is sh
+      and ac.on_the_button(t_, fb[0] + 200.0, fb[1]) is None)
+ac._show = None
+
 # The claw machine: on the fairground, and honest the way the slot is - the
 # grip is drawn when it drops, and the claw is then shown doing exactly that.
 bx_, bz_ = ac.claw_spot(fc)

@@ -236,6 +236,30 @@ FW_RISE = 1.3          # seconds a shell takes to climb
 FW_LIFE = 2.4          # and how long the sparks last once it bursts
 FW_FINALE = 180.0      # seconds between finales
 FW_REACH = 900.0       # how far off you can see them from
+
+# --- your own show, fired from the headland ---
+# A firing box stands on the rock between the lighthouse and the bay. f at
+# the box lights a show with you on the button: cues come along a bar at the
+# bottom of the screen and every press on the beat sends a real shell up over
+# the bay - on time a big one, near enough a smaller one, off the beat a
+# fizzle. Anybody on the bridge or the far bank sees what you fire. The
+# better you did, the bigger the finale.
+SHOW_BPM = 96
+SHOW_COUNT = 4         # beats of count-in before the first cue
+SHOW_BARS = 12         # four beats a bar
+SHOW_GREAT = 0.09      # seconds either side of a cue that count as on it
+SHOW_GOOD = 0.18       # and as near enough
+SHOW_AHEAD = 3.0       # seconds of cues the bar shows coming
+SHOW_FINALE = 7.0      # seconds of finale after the last cue
+SHOW_SPREAD = 0.5      # how wide over the bay your shells go up, against a show's
+SHOW_OUT = 30.0        # how far past the middle of the bay they go up
+FIRE_REACH = 3.0       # how close to the box to light it
+FIRE_ZONE = 25.0       # and how far from it you can still be on the button
+# One bar of cues per row: 1 a shell, 2 a big one. The first bars come from
+# the easy ones, so the count-in is not followed by a wall of them.
+SHOW_BARS_EASY = [(1, 0, 1, 0), (1, 0, 0, 0), (2, 0, 1, 0)]
+SHOW_BARS_ALL = SHOW_BARS_EASY + [(1, 0, 1, 1), (1, 1, 1, 0), (2, 0, 0, 2),
+                                  (0, 1, 0, 2), (1, 1, 2, 0), (1, 1, 1, 1)]
 CASINO_REACH = 2.3     # how close to the door you have to get to be inside
 CASINO_AGAIN = 1.6     # seconds before it deals you another one
 
@@ -4743,6 +4767,13 @@ def draw_grand_bridge(ch, co, v, walls, i, j, now, wet):
         zf += 9.0
 
 
+FIRING_BOX = [
+    "  =T=  ",
+    " .-|-. ",
+    " |o o| ",
+    " '---' ",
+]
+
 BENCH = [
     "_______",
     "|_____|",
@@ -4917,12 +4948,13 @@ def shells(now):
                 yield t0, m
 
 
-def shell_sparks(bx, bz, t0, m, now):
+def shell_sparks(bx, bz, t0, m, now, size=1.0, spread=1.0, willow=None):
     """The points of one shell this instant: (x, y, z, glyph, colour-index,
     brightness), going up as a trail and then bursting into a sphere of sparks
-    that slow, fall and fade."""
-    ox = bx + ((m >> 12) & 255) / 255.0 * 120.0 - 60.0
-    oz = bz + ((m >> 20) & 63) / 63.0 * 30.0 - 15.0
+    that slow, fall and fade. size scales the burst - a dud is a small one -
+    and spread how far from the middle of the bay it goes up."""
+    ox = bx + (((m >> 12) & 255) / 255.0 * 120.0 - 60.0) * spread
+    oz = bz + (((m >> 20) & 63) / 63.0 * 30.0 - 15.0) * spread
     # Just over the bridge's towers: high enough to clear them, low enough to
     # be in the sky from the bank - at seventy units they went off the top of
     # the screen from anywhere near enough to see them properly.
@@ -4933,9 +4965,10 @@ def shell_sparks(bx, bz, t0, m, now):
         return [(ox, y - d * 1.5, oz, "|" if d == 0 else ".", -1, 1.0 - d * 0.3)
                 for d in range(3)]
     tt = t - FW_RISE
-    willow = (m >> 26) % 5 == 0
-    n = 34 if not willow else 24
-    speed = 17.0 if not willow else 10.0
+    if willow is None:
+        willow = (m >> 26) % 5 == 0
+    n = max(5, int((34 if not willow else 24) * min(1.0, size)))
+    speed = (17.0 if not willow else 10.0) * size
     out = []
     reach = speed * (1.0 - math.exp(-1.8 * tt)) / 1.8
     sink = (0.9 if not willow else 2.2) * tt * tt
@@ -4953,8 +4986,177 @@ def shell_sparks(bx, bz, t0, m, now):
     return out
 
 
+def firing_box(i):
+    """Where the firing box stands on the headland in this stretch: on the
+    rock between the lighthouse and the bay, off the bridge's landing."""
+    spot = lighthouse_spot(i)
+    if spot is None:
+        return None
+    return spot[0] - 14.0, spot[1] + 25.0
+
+
+def near_firing_box(x, z, reach):
+    """(box x, box z, the bay it fires over) if you are within reach of one."""
+    ci = int(x / CELL + BIG) - BIG
+    for k in range(-1, 2):
+        box = firing_box(ci + k * GRAND_GAP)
+        if box is not None and (box[0] - x) ** 2 + (box[1] - z) ** 2 < reach ** 2:
+            return box[0], box[1], bay_centre(ci + k * GRAND_GAP)
+    return None
+
+
+class Show:
+    """One show fired from the box. The cues are laid out when it is lit,
+    one bar at a time from SHOW_BARS_EASY and SHOW_BARS_ALL; press() judges a
+    press against the nearest cue still waiting and puts the shell up, and
+    update() counts the cues that went by and lays out the finale once the
+    last has gone. Every shell is (launch time, seed, size, willow), and
+    draw_fireworks() draws them over the bay the show was lit for."""
+
+    def __init__(self, now, bay, seed):
+        self.t0, self.bay, self.seed = now, bay, seed
+        self.beat = 60.0 / SHOW_BPM
+        self.cues = []
+        for b in range(SHOW_BARS):
+            pool = SHOW_BARS_EASY if b < 2 else SHOW_BARS_ALL
+            for k, cue in enumerate(pool[_mix(seed, b, 2011) % len(pool)]):
+                if cue:
+                    self.cues.append({"t": now + (SHOW_COUNT + b * 4 + k) * self.beat,
+                                      "big": cue == 2, "got": None})
+        self.end = now + (SHOW_COUNT + SHOW_BARS * 4) * self.beat
+        self.shots = []
+        self.score = self.streak = 0
+        self.tally = {"great": 0, "good": 0, "miss": 0, "fizzle": 0}
+        self.said = ("", -1e9)            # the last verdict, and when
+        self.pressed = -1e9               # and the last time you pressed
+        self.best = sum(self.points("great", n) for n in range(len(self.cues)))
+        self.finale = False
+
+    def points(self, grade, streak):
+        return (100 if grade == "great" else 50) + 10 * min(streak, 10)
+
+    def launch(self, now, size, willow=None):
+        self.shots.append((now, _mix(self.seed, len(self.shots), 2013), size, willow))
+
+    def press(self, now):
+        """f, on the button. Returns how it was judged."""
+        if now >= self.end:
+            return None                   # the finale is the show's own
+        self.pressed = now
+        best = None
+        for c in self.cues:
+            if c["got"] is None and abs(c["t"] - now) <= SHOW_GOOD and (
+                    best is None or abs(c["t"] - now) < abs(best["t"] - now)):
+                best = c
+        if best is None:
+            self.tally["fizzle"] += 1
+            self.streak = 0
+            self.launch(now, 0.35)
+            self.said = ("FIZZLE", now)
+            return "fizzle"
+        grade = "great" if abs(best["t"] - now) <= SHOW_GREAT else "good"
+        best["got"] = grade
+        self.score += self.points(grade, self.streak)
+        self.streak += 1
+        self.tally[grade] += 1
+        size = 1.25 if grade == "great" else 0.85
+        self.launch(now, size)
+        if best["big"]:
+            self.launch(now, size, willow=True)      # and a gold willow with it
+        self.said = (grade.upper(), now)
+        return grade
+
+    def update(self, now):
+        global _show_best
+        for c in self.cues:
+            if c["got"] is None and now > c["t"] + SHOW_GOOD:
+                c["got"] = "miss"
+                self.tally["miss"] += 1
+                self.streak = 0
+                self.said = ("MISS", c["t"] + SHOW_GOOD)
+        if not self.finale and now >= self.end:
+            # The better the show went, the more goes up at the end of it.
+            self.finale = True
+            _show_best = max(_show_best, self.score)
+            for k in range(3 + int(round(21 * self.score / max(1, self.best)))):
+                m = _mix(self.seed, k, 2017)
+                t = self.end + (m & 1023) / 1023.0 * (SHOW_FINALE - 2.0)
+                self.shots.append((t, m, 1.2, None))
+
+    def over(self, now):
+        return now >= self.end + SHOW_FINALE + FW_RISE + FW_LIFE
+
+    def word(self, now):
+        """What the bar says: the count-in, the last verdict, the finale."""
+        if now < self.t0 + SHOW_COUNT * self.beat:
+            left = SHOW_COUNT - int((now - self.t0) / self.beat)
+            return "GO" if left == 1 else str(left - 1), GOLD
+        if now >= self.end:
+            return ("FINALE!" if now < self.end + SHOW_FINALE else "SHOW OVER"), FLASH
+        word, at = self.said
+        if now - at < 0.6:
+            return word, {"GREAT": FLASH, "GOOD": GOLD}.get(word, ROU_RED)
+        return "", GOLD
+
+
+_show = None            # the show being fired from a box, if any
+_show_best = 0          # the best score tonight
+
+
+def light_show(now, x, z):
+    """f at the box: light a show, unless one is already going up."""
+    global _show
+    if _show is not None and not _show.over(now):
+        return False
+    box = near_firing_box(x, z, FIRE_REACH)
+    if box is None:
+        return False
+    # Out in front of the box and well over towards the far side: from the
+    # rock the middle of the bay is near enough that the bursts went off
+    # the top of the screen.
+    over = (box[0], box[2][1] + SHOW_OUT)
+    _show = Show(now, over, int(now * 1000.0) & 0xFFFFFF)
+    return True
+
+
+def show_hint(now, x, z):
+    """For the HUD, by the firing box: how to light it, and how it went."""
+    if near_firing_box(x, z, FIRE_ZONE) is None:
+        return ""
+    if _show is None:
+        return "  ~ a firing box: f lights a show ~"
+    if not _show.over(now):
+        return "  ~ your show over the bay ~"
+    return "  ~ your show: %d, best tonight %d - f again ~" % (_show.score, _show_best)
+
+
+def on_the_button(now, x, z):
+    """The show you are firing, if you are near enough the box to fire it."""
+    if _show is None or _show.over(now) or near_firing_box(x, z, FIRE_ZONE) is None:
+        return None
+    return _show
+
+
+def _put_sparks(ch, co, v, walls, sparks):
+    for x, y, z, glyph, tone, b in sparks:
+        if b <= 0.0:
+            continue
+        attr = (EMBER if tone == -1 else GOLD if tone == -2
+                else NEON[tone % len(NEON)][0] if b > 0.35
+                else NEON[tone % len(NEON)][1])
+        put_point(ch, co, v, walls, x, y, z, glyph, attr)
+
+
 def draw_fireworks(ch, co, v, walls, now, wet):
-    """The show, if tonight is the night and the bay is in reach."""
+    """The show, if tonight is the night and the bay is in reach - and the one
+    somebody is firing from the headland, whatever night it is."""
+    if _show is not None and ((_show.bay[0] - v.x) ** 2 + (_show.bay[1] - v.z) ** 2
+                              < FW_REACH ** 2):
+        for t0, m, size, willow in _show.shots:
+            if t0 <= now < t0 + FW_RISE + FW_LIFE:
+                _put_sparks(ch, co, v, walls,
+                            shell_sparks(_show.bay[0], _show.bay[1], t0, m, now,
+                                         size, SHOW_SPREAD, willow))
     if not night(now)["fireworks"]:
         return
     ci = int(v.x / CELL + BIG) - BIG
@@ -4963,13 +5165,60 @@ def draw_fireworks(ch, co, v, walls, now, wet):
         if bay is None or (bay[0] - v.x) ** 2 + (bay[1] - v.z) ** 2 > FW_REACH ** 2:
             continue
         for t0, m in shells(now):
-            for x, y, z, glyph, tone, b in shell_sparks(bay[0], bay[1], t0, m, now):
-                if b <= 0.0:
-                    continue
-                attr = (EMBER if tone == -1 else GOLD if tone == -2
-                        else NEON[tone % len(NEON)][0] if b > 0.35
-                        else NEON[tone % len(NEON)][1])
-                put_point(ch, co, v, walls, x, y, z, glyph, attr)
+            _put_sparks(ch, co, v, walls, shell_sparks(bay[0], bay[1], t0, m, now))
+
+
+SHOW_BAR_W = 60         # the widest the cue bar gets, in columns
+
+
+def draw_show_bar(ch, co, show, now):
+    """The bar along the bottom while you are on the button: cues coming in
+    from the left to the line on the right, the beats between them dotted,
+    and under it how the show is going. Drawn over the view, on a cleared
+    strip so it stays readable over the bay."""
+    height, width = len(ch), len(ch[0])
+    if width < 40 or height < 10:
+        return
+    tw = min(SHOW_BAR_W, width - 18)
+    x0 = (width - tw - 14) // 2
+    hit = x0 + 1 + tw                                # the line you fire on
+    for y in (height - 4, height - 3, height - 2):
+        for x in range(max(0, x0 - 2), min(width, hit + 14)):
+            ch[y][x] = " "
+    y = height - 3
+    _text(ch, co, y, x0, "[", GOLD_DIM)
+    _text(ch, co, y, hit + 1, "]", GOLD_DIM)
+    fired = now - show.pressed < 0.15
+    _text(ch, co, y, hit, "|", FLASH if fired else GOLD)
+
+    def col(t):
+        return int(round(hit - (t - now) / SHOW_AHEAD * tw))
+
+    first = show.t0 + SHOW_COUNT * show.beat
+    k = max(0, int((now - 0.5 - first) / show.beat))
+    while True:
+        t = first + k * show.beat
+        if t > now + SHOW_AHEAD or t >= show.end:
+            break
+        x = col(t)
+        if x0 < x < hit:
+            _text(ch, co, y, x, ".", GOLD_DIM)
+        k += 1
+    for c in show.cues:
+        x = col(c["t"])
+        if not x0 < x <= hit:
+            continue
+        judged = {"great": ("*", FLASH), "good": ("+", GOLD), "miss": ("x", ROU_RED)}
+        glyph, attr = judged.get(c["got"], ("O" if c["big"] else "o", BULB))
+        if x == hit and c["got"] is None:
+            attr = FLASH
+        _text(ch, co, y, x, glyph, attr)
+    word, attr = show.word(now)
+    _text(ch, co, y, hit + 3, word, attr)
+    t = show.tally
+    _text(ch, co, height - 2, x0, "great %d  good %d  miss %d  streak %d  score %d" % (
+        t["great"], t["good"], t["miss"], show.streak, show.score), GOLD_DIM)
+    _text(ch, co, height - 4, x0, "f on the beat", GOLD_DIM)
 
 
 def fireworks_near(x, z, now):
@@ -5046,6 +5295,15 @@ def draw_lighthouse(ch, co, v, walls, lx, lz, now, wet):
     for h in (1.0, 2.0, 2.8):
         put_point(ch, co, v, walls, lx + 6.5, h, lz - 2.5, "|", CONCRETE)
     put_lit(ch, co, v, walls, lx + 6.5, 3.3, lz - 2.5, "o", BULB, max(wet, 0.3), now)
+
+    # The firing box, on the rock towards the bay; its lamp goes red and
+    # blinks while somebody is firing from it.
+    bx, bz = lx - 14.0, lz + 25.0                   # firing_box(), from here
+    blit_sprite(ch, co, v, walls, FIRING_BOX, bx, bz, 0.0, 1.3, 1.4, EMBER_HOT)
+    live = _show is not None and not _show.over(now)
+    put_lit(ch, co, v, walls, bx, 1.6, bz, "o",
+            ROU_RED if live and int(now * 4) % 2 else (BULB_DIM if live else BULB),
+            max(wet, 0.3), now)
 
 
 BRIDGE_LAMP_GAP = 6.0    # world units between lamp posts along the parapet
@@ -8374,6 +8632,7 @@ CHEAT_PLACES = [
     ("&", "a claw machine", "claw"),
     ("u", "the big bridge", "grand"),
     ("h", "the lighthouse", "lighthouse"),
+    ("+", "the firing box", "firebox"),
     ("j", "end of a pier", "pier"),
     ("b", "a bridge", "bridge"),
     ("B", "someone leaning", "leaner"),
@@ -8382,7 +8641,7 @@ CHEAT_PLACES = [
 
 # The river and the woods: listed under the parts of town, not with the city.
 OUT_OF_TOWN = {"woods", "rave", "lake", "bank", "pier", "bridge", "leaner",
-               "carnival", "claw", "grand", "lighthouse"}
+               "carnival", "claw", "grand", "lighthouse", "firebox"}
 
 
 def _rings(ci, cj, limit):
@@ -8762,6 +9021,21 @@ def _claw_spot(x, z):
     return None
 
 
+def _firebox_spot(x, z):
+    """At the firing box on the headland, facing out over the bay."""
+    ci = int(x / CELL + BIG) - BIG
+    for k in range(-1, 3):
+        box = firing_box(ci + k * GRAND_GAP)
+        if box is None:
+            continue
+        px, pz = box[0], box[1] - 1.5
+        if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+            continue
+        if can_stand(px, pz):
+            return px, pz, 0.0
+    return None
+
+
 def claw_near(x, z):
     """Within sight of a claw machine, but not at it."""
     ci = int(x / CELL + BIG) - BIG
@@ -8988,6 +9262,8 @@ def find_place(x, z, kind):
         return _billboard_spot(x, z)
     if kind == "claw":
         return _claw_spot(x, z)
+    if kind == "firebox":
+        return _firebox_spot(x, z)
     if kind == "police":
         return _police_spot(x, z, now_hint())
     if kind in ("tunnel", "longtunnel"):
@@ -9761,6 +10037,12 @@ def main(stdscr):
                     side, last["s"], autopilot = -SIDESTEP, now, False
                 elif key == ord("."):
                     side, last["s"], autopilot = SIDESTEP, now, False
+                elif key in (ord("f"), ord("F")):
+                    show = on_the_button(now, cam_x, cam_z)
+                    if show is not None:
+                        show.press(now)
+                    elif light_show(now, cam_x, cam_z):
+                        autopilot = False
             else:
                 if key in (curses.KEY_LEFT, ord("h")):
                     sky_v, last["sky"], autopilot = -WALK_SPEED, now, False
@@ -9859,6 +10141,9 @@ def main(stdscr):
             wheel = Spin(now, venue[1]["name"])
             wheel_at = now + SPIN_TIME + HOLD_TIME
 
+        if _show is not None:
+            _show.update(now)
+
         # --- draw ------------------------------------------------------
         height, width = stdscr.getmaxyx()
         if lift is not None:
@@ -9906,12 +10191,16 @@ def main(stdscr):
         elif street:
             v = View(cam_x, cam_z, yaw, width, height)
             ch, co, wet = render_street(v, now)
+            show = on_the_button(now, cam_x, cam_z)
+            if show is not None:
+                draw_show_bar(ch, co, show, now)
             hud = STREET_HUD % (
                 cam_x, cam_z,
                 district(int(cam_x / CELL + BIG) - BIG,
                          int(cam_z / CELL + BIG) - BIG)["name"],
                 sky_word(now, wet),
-                rave_hint(v, now)
+                show_hint(now, cam_x, cam_z)
+                or rave_hint(v, now)
                 or ("  ~ something over the city ~" if night(now)["alien"]
                     else "")
                 or ("  ~ a train overhead ~" if el_overhead(cam_x, cam_z, now)
