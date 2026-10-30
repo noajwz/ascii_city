@@ -2597,6 +2597,84 @@ check("the cheat stands you on it", ac.can_stand(fair[0], fair[1])
       and ac.fair_at(int(fair[0] / ac.CELL), int(fair[1] / ac.CELL)))
 check("and one carnival is a long way from the next",
       ac.carnival_col(fc + ac.CARNIVAL_GAP) - fc > 100)
+
+# The claw machine: on the fairground, and honest the way the slot is - the
+# grip is drawn when it drops, and the claw is then shown doing exactly that.
+bx_, bz_ = ac.claw_spot(fc)
+check("the claw machine stands on the fairground",
+      ac.dry_at(bx_, bz_) and ac.fair_at(int(bx_ / ac.CELL), int(bz_ / ac.CELL)))
+cl_at = ac.find_place(x0, z0, "claw")
+check("the cheat stands you at it", cl_at is not None
+      and ac.venue_at(cl_at[0], cl_at[1])[0] == "claw")
+check("and nearby the street says it is there",
+      ac.claw_near(fair[0], fair[1]) and not ac.claw_near(bx_ + 200.0, bz_))
+
+def claw_go(x, claw=None):
+    """One go, dropped at column x."""
+    claw = claw or ac.Claw(fc)
+    claw.press(0.0)
+    t = (x - ac.CLAW_HOME) / ac.CLAW_SWEEP
+    claw.let_go(t)
+    return claw, t
+
+top = max(range(len(ac.CLAW_PILE)), key=lambda k: (ac.CLAW_PILE[k][0], -k))
+tx = ac.CLAW_PILE[top][1] + 1          # square over a prize on top of the heap
+odds = {}
+for off in (0, 1):
+    outs = Counter(claw_go(tx + off)[0].drop["out"] for _ in range(4000))
+    odds[off] = outs["won"] / 4000.0
+check("square on, the claw holds about as often as it says",
+      abs(odds[0] - ac.CLAW_GRIP[0]) < 0.04, "%.2f" % odds[0])
+check("a column out, less often", abs(odds[1] - ac.CLAW_GRIP[1]) < 0.04
+      and odds[1] < odds[0], "%.2f" % odds[1])
+cl, _ = claw_go(ac.CLAW_HOME)
+check("over the chute it goes to the floor and comes up empty",
+      cl.drop["out"] == "miss" and cl.drop["depth"] == ac.CLAW_GLASS - 1)
+
+real_rng = ac._spin_rng
+class _Sure:
+    def random(self): return 0.0
+    def uniform(self, a, b): return a
+ac._spin_rng = _Sure()
+cl, t = claw_go(tx)
+d = cl.drop
+held = cl.moving(t + d["up"] + 0.01)
+check("carried up, it hangs under the claw",
+      held is not None and held[1] == cl.claw_at(t + d["up"] + 0.01)[0] - 1)
+cl.update(t + d["landed"] - 0.05)
+early = len(cl.arms)
+cl.update(t + d["landed"] + 0.05)
+cl.update(t + d["landed"] + 1.0)
+check("a win is handed over once, when it is out of the chute",
+      early == 0 and len(cl.arms) == 1 and cl.pile[d["k"]]["gone"])
+check("and the panel names it", cl.verdict(t + d["landed"] + 0.1)[0]
+      == "WON A %s!" % ac.CLAW_PRIZES[cl.pile[d["k"]]["kind"]][0].upper())
+under = [k for k, p in enumerate(cl.pile) if not p["gone"] and cl.covered(k)]
+xs = [x for x in range(ac.CLAW_HOME, ac.CLAW_FAR + 1)
+      if cl.contact(x) == under[0]]
+cl.press(t + d["done"] + 0.1)
+cl.let_go(t + d["done"] + 0.1 + (xs[0] - ac.CLAW_HOME) / ac.CLAW_SWEEP)
+check("a prize with another sitting on it never comes up",
+      bool(xs) and cl.drop["out"] == "stuck")
+ac._spin_rng = real_rng
+
+cl = ac.Claw(fc)
+cl.press(10.0)
+cl.update(10.0 + ac.CLAW_TIME + 0.01)
+check("left too long, it drops by itself", cl.drop is not None
+      and abs(cl.drop["t"] - (10.0 + ac.CLAW_TIME)) < 1e-9)
+for p in cl.pile:
+    p["gone"] = True
+cl.press(10.0 + ac.CLAW_TIME + cl.drop["done"] + 0.1)
+check("and an empty machine is stocked again",
+      not any(p["gone"] for p in cl.pile))
+check("each carnival has its own heap",
+      [p["kind"] for p in ac.Claw(fc).pile]
+      != [p["kind"] for p in ac.Claw(fc + ac.CARNIVAL_GAP).pile])
+room = "\n".join("".join(r) for r in ac.render_claw(ac.Claw(fc), 80, 24, 5.0)[0])
+check("the cabinet fits an 80x24 window", "GRAB-A-PAL" in room and "p to play" in room)
+room = "\n".join("".join(r) for r in ac.render_claw(ac.Claw(fc), 30, 10, 5.0)[0])
+check("and a small window gets a line of text", "CLAW: p to play" in room)
 wi_ = int(wx / ac.CELL)
 far_lo = ac.river_span(wi_)[0]
 facing = None
