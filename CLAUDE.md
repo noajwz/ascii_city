@@ -148,29 +148,6 @@ there is no fisheye to correct at the edges.
   There is a ceiling too — hang it anywhere in the building's height and every sign on a tall block
   ends up in the sky where nobody in the street is looking.
 
-## Outlines: classic, and a clearer trial
-
-Reported: the street "sometimes looks a bit cluttered, and it becomes difficult to differentiate
-between buildings and the ground and the roof and the night sky" — while liking the lights and
-being hesitant to change much. A wholesale restyle before this (walls filled grey, kerb lines,
-slope glyphs, thinned ground) was rejected and reverted; do not bring it back unasked.
-
-So this is a **trial behind a switch**, `/` in the menu (`OUTLINES`, `clearer()`), default
-**classic** — which renders cell-for-cell what it did before the switch existed (checked against
-the committed renderer over eighteen frames). "Clearer" is four small changes that add nothing to
-the screen, only take a few marks away or hold an edge steady:
-
-- no star in the row right on top of a roof (`STAR_GAP`), so none sits on an edge and reads as a
-  light on the building;
-- rooflines keep `ROOF` out to 115 units and `CURB` beyond, instead of fading into the far tone —
-  the far rooflines fading was where buildings and sky ran together;
-- the first `FOOT_GAP` rows of ground under each wall's base are left bare (water excepted), so
-  ground marks never run up against the bottom of a building;
-- the footing in `LANE` rather than `CURB`, a little brighter (`foot_colour()`).
-
-About 2-3% of a frame's cells change. Tests prove each one happens in clearer and not in classic.
-If it is kept, make it the default; if not, remove it rather than leaving the switch.
-
 ## Parts of town
 
 `DISTRICTS` is a table and `district_at()` picks a row from it. Everything a building is — how tall,
