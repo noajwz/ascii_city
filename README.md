@@ -55,10 +55,11 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
 - **A river**, with a promenade along it, piers, buoys, rowing boats drifting down with lanterns in
   them, mist on cold nights, footbridges with lamps along them, now and then a carnival on the bank
   with a big wheel turning over the water and a claw machine you can play (`p` to start, `p` to
-  drop), and once in a long way a bay with a suspension bridge
-  across it, lights the length of its cables, a ferry crossing beside it, landing on a headland
-  with a lighthouse at the point whose beam goes round over all of it. One night in a dozen the
-  river is lanterns, and now and then there are fireworks over the bay.
+  drop), and once in a long way a bay with a suspension bridge across it, lights the length of its
+  cables, a ferry crossing beside it, landing on a headland with a lighthouse at the point whose
+  beam goes round over all of it, and a firing box on the rock: `f` there lights a show, and you
+  fire it, one shell for every press on the beat. One night in a dozen the river is lanterns, and
+  now and then there are fireworks over the bay.
 
 Nothing is stored. Every street, building, sign and trail is a hash of its own coordinates, so
 the city is infinite, identical every time you walk back to it, and held in no memory at all.

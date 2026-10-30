@@ -537,6 +537,35 @@ that only exists in the air reads as a stick. Drawn from 420 units, further than
 because a moving light is the first thing the eye finds. `h` in the menu puts you at the landing
 looking out to the point.
 
+### The firing box, and firing your own show
+
+A box on the rock between the lighthouse and the bay (`firing_box()`, placed off
+`lighthouse_spot()`), with a lamp on it that goes red and blinks while it is in use. `f` within
+`FIRE_REACH` lights a `Show`; `+` in the menu stands you at the box facing the bay. It is not a
+venue: you stay in the street view, because the point is to watch what you fire, and anybody on
+the bridge or the far bank sees it too, since `draw_fireworks()` draws the show's shells over its
+bay whatever night it is.
+
+**The game is a beat bar**, `draw_show_bar()`, over the bottom of the view while you are within
+`FIRE_ZONE` of the box: cues come in from the left to a line on the right at `SHOW_BPM`, after a
+count-in. The cues are laid out when the show is lit, a bar at a time from `SHOW_BARS_EASY` for the
+first two and `SHOW_BARS_ALL` after; `2` is a big cue and puts a gold willow up as well. `press()`
+judges against the nearest cue still waiting, `SHOW_GREAT` or `SHOW_GOOD` either side, and puts a
+shell up straight away: a great one at 1.25 size, a good one smaller, and a press with no cue near
+it a fizzle that breaks the streak. `update()` marks the cues that went by as misses, and once the
+last has gone lays out a finale of 3 to 24 shells by how near the score came to `best`, the score
+of a perfect run. A press during the finale does nothing; it is the show's own.
+
+It is one key on purpose, the same reason the claw machine is: curses sees key repeats and never a
+key going up, so nothing here can ask you to hold one. And frames are 1/30 s apart, which is why
+`SHOW_GREAT` is as wide as 0.09: a press is only seen at the start of the next frame.
+
+`shell_sparks()` grew `size`, `spread` and `willow` for this, all defaulting to what the night show
+already did. **The show goes up `SHOW_OUT` past the middle of the bay, in line with the box**,
+not over the middle: from the rock the middle is under seventy units off, and measured, a third of
+every burst was above the top of the screen. Moved out, more than 85% of the sparks land on screen,
+and there is a test that holds it there.
+
 ## The bridges
 
 The crossings were building sites for a while — hoardings, a hazard board, a crane — as a
