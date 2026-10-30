@@ -151,6 +151,22 @@ FAIR_DEEP = 4          # and back from the water
 WHEEL_R = 10.0         # the wheel's radius in world units
 WHEEL_RPM = 1.3
 
+# --- the claw machine, at the end of the row of stalls ---
+# One go is one press of p to send the claw sweeping across the glass and a
+# second to drop it. Honest the way the slot is: whether it holds is drawn
+# when it drops, from how square it came down, and the claw is then shown
+# doing it. Square on, it holds a bit under half the time; a column out, a
+# fifth; a prize with another sitting on it, never.
+CLAW_GLASS = 12        # rows of glass inside the cabinet
+CLAW_SWEEP = 7.0       # columns a second the claw travels while you aim
+CLAW_TIME = 10.0       # seconds to aim before it drops by itself
+CLAW_DROP = 6.0        # rows a second going down, and coming back up
+CLAW_FALL = 12.0       # rows a second for a prize that has been let go
+CLAW_MOVE = 8.0        # columns a second, carrying it home to the chute
+CLAW_SHUT = 0.5        # seconds for the claw to close, or to open
+CLAW_HOLD = 2.5        # how long the verdict stays up afterwards
+CLAW_GRIP = [0.45, 0.2]  # chance it holds, square on and one column out
+
 # --- the big bridge ---
 # Once in a long way along the river it opens into a bay, and a suspension
 # bridge crosses it: two towers standing in the water, the main cables slung
@@ -1404,6 +1420,12 @@ def carnival_spots(c):
     carousel = ((c + 7.0) * CELL, z0 + 1.6 * CELL)
     stalls = [((c + k) * CELL, z0 + 3.6 * CELL) for k in (5.5, 7.0, 8.5, 10.0)]
     return wheel, carousel, stalls, z0
+
+
+def claw_spot(c):
+    """The claw machine: in the row with the stalls, before the first of them."""
+    _, _, _, z0 = carnival_spots(c)
+    return (c + 4.2) * CELL, z0 + 3.6 * CELL
 
 
 _open_cache = {}
@@ -4525,6 +4547,14 @@ STALL = [
     "|_______|",
 ]
 
+CLAW_BOOTH = [
+    ".-----.",
+    "|  T  |",
+    "|o^.^o|",
+    "|=====|",
+    "|_[_]_|",
+]
+
 CAROUSEL = [
     "    ^    ",
     "  /   \\  ",
@@ -4606,6 +4636,10 @@ def draw_carnival(ch, co, v, walls, c, now, wet):
                     NEON[(k * 3 + 1) % len(NEON)][0])
         put_lit(ch, co, v, walls, sx_, 1.2, sz_ - 0.3, "*", BULB,
                 max(wet, 0.3), now)
+    bx, bz = claw_spot(c)
+    blit_sprite(ch, co, v, walls, CLAW_BOOTH, bx, bz, 0.0, 2.8, 1.7,
+                NEON[_mix(c, 1, 1307) % len(NEON)][0])
+    put_lit(ch, co, v, walls, bx, 3.1, bz, "*", BULB, max(wet, 0.3), now)
     for k in range(FAIR_LONG + 1):
         px = (c + k) * CELL
         for h in (1.0, 2.0, 3.0):
@@ -7823,6 +7857,11 @@ def venue_at(x, z):
     room drawn around you."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
+    c = carnival_col(ci)
+    if c <= ci < c + FAIR_LONG:                 # the claw machine, on the fair
+        bx, bz = claw_spot(c)
+        if (bx - x) ** 2 + (bz - z) ** 2 < CASINO_REACH ** 2:
+            return "claw", {"col": c}
     for i in range(ci - 2, ci + 3):
         for j in range(cj - 2, cj + 3):
             if is_open(i, j):
@@ -7987,6 +8026,308 @@ def render_casino_room(spin, width, height, now, slot=None, table=None):
     return ch, co
 
 
+# The claw machine at the carnival. A front view through the glass: the
+# rail across the top with the claw hanging off it, a heap of prizes, and the
+# chute in the corner they come out of. What is in the heap is seeded from
+# the carnival, so each one has its own; what you win you carry about.
+CLAW_PRIZES = [
+    ("cat", "^.^", "(_)"),
+    ("bear", "o.o", "(Y)"),
+    ("frog", "@-@", "(_)"),
+    ("duck", "(o>", "/_)"),
+    ("octopus", "(o)", "/|\\"),
+    ("owl", "OvO", "(_)"),
+]
+CLAW_W = 29             # the cabinet's width, in columns
+CLAW_H = CLAW_GLASS + 7  # and its height
+CLAW_HOME = 2           # the column over the chute, where the claw waits
+CLAW_FAR = CLAW_W - 4   # the furthest it goes
+CLAW_REST = 3           # the row its fingers hang at, up on the rail
+# The heap: (row up from the floor, first column), each prize three wide and
+# two tall, every row sitting in the gaps of the one under it.
+CLAW_PILE = ([(0, 7 + 4 * k) for k in range(5)] + [(1, 9 + 4 * k) for k in range(4)]
+             + [(2, 11 + 4 * k) for k in range(3)])
+
+
+class Claw:
+    """One machine. press() puts a coin in, and pressed again drops the claw.
+
+    The outcome is drawn the moment it drops and the rest is a timeline
+    worked out from it, so claw_at() and moving() can say where everything is
+    at any instant without anything being stepped frame by frame."""
+
+    def __init__(self, col, arms=None):
+        self.col = col
+        self.arms = arms if arms is not None else []   # what you have won
+        self.stocked = 0
+        self.restock()
+        self.t0 = None           # when the coin went in
+        self.drop = None         # the plan, once the claw has been let go
+        self.goes = 0
+
+    def restock(self):
+        seed = _mix(self.col, self.stocked, 1311)
+        self.pile = []
+        for n, (row, pos) in enumerate(CLAW_PILE):
+            m = _mix(seed, n, 1313)
+            self.pile.append({"row": row, "pos": pos, "gone": False,
+                              "kind": m % len(CLAW_PRIZES), "colour": (m >> 8) % 8})
+        self.stocked += 1
+
+    def top(self, p):
+        return CLAW_GLASS - 2 * (p["row"] + 1)
+
+    def aiming(self, now):
+        return self.t0 is not None and self.drop is None
+
+    def idle(self, now):
+        return self.t0 is None or (self.drop is not None
+                                   and now - self.drop["t"] >= self.drop["done"])
+
+    def press(self, now):
+        if self.aiming(now):
+            self.let_go(now)
+        elif self.idle(now):
+            if all(p["gone"] for p in self.pile):
+                self.restock()
+            self.t0, self.drop = now, None
+            self.goes += 1
+
+    def sweep_x(self, now):
+        """Across and back, and across again, while you make up your mind."""
+        span = CLAW_FAR - CLAW_HOME
+        d = (now - self.t0) * CLAW_SWEEP % (2 * span)
+        return CLAW_HOME + (d if d <= span else 2 * span - d)
+
+    def contact(self, x):
+        """The prize the fingers come down on at column x: the highest one
+        under them, and of those the one nearest square."""
+        best = None
+        for k, p in enumerate(self.pile):
+            if p["gone"] or p["pos"] > x + 1 or p["pos"] + 2 < x - 1:
+                continue
+            key = (-p["row"], abs(p["pos"] + 1 - x))
+            if best is None or key < best[0]:
+                best = (key, k)
+        return None if best is None else best[1]
+
+    def covered(self, k):
+        p = self.pile[k]
+        return any(not q["gone"] and q["row"] == p["row"] + 1
+                   and abs(q["pos"] - p["pos"]) <= 2 for q in self.pile)
+
+    def let_go(self, now):
+        x = int(round(self.sweep_x(now)))
+        k = self.contact(x)
+        slip = 0.0
+        if k is None:
+            depth, out = CLAW_GLASS - 1, "miss"
+        else:
+            depth = self.top(self.pile[k]) - 1
+            off = abs(self.pile[k]["pos"] + 1 - x)
+            if self.covered(k):
+                out = "stuck"
+            elif off >= len(CLAW_GRIP):
+                out = "miss"             # the fingers only brushed it
+            elif _spin_rng.random() < CLAW_GRIP[off]:
+                out = "won"
+            else:
+                out, slip = "slip", _spin_rng.uniform(0.25, 0.9)
+        travel = (depth - CLAW_REST) / CLAW_DROP
+        d = {"t": now, "x": x, "k": k, "out": out, "depth": depth, "paid": False}
+        d["down"] = travel
+        d["shut"] = travel + CLAW_SHUT
+        d["up"] = d["shut"] + travel
+        d["slip"] = d["shut"] + travel * slip
+        d["home"] = d["up"] + abs(x - CLAW_HOME) / CLAW_MOVE
+        d["open"] = d["home"] + CLAW_SHUT
+        d["landed"] = d["open"] + (CLAW_GLASS - CLAW_REST - 1) / CLAW_FALL
+        if out == "slip":
+            fell = depth - (depth - CLAW_REST) * slip
+            d["landed"] = d["slip"] + (depth - fell) / CLAW_FALL
+        reveal = {"won": d["landed"], "slip": d["slip"]}.get(out, d["shut"])
+        d["reveal"] = reveal
+        d["done"] = max(d["open"], reveal) + CLAW_HOLD
+        self.drop = d
+
+    def update(self, now):
+        """Drop it if you ran out of time; hand the prize over once it is
+        out of the chute."""
+        if self.aiming(now) and now - self.t0 >= CLAW_TIME:
+            self.let_go(self.t0 + CLAW_TIME)
+        d = self.drop
+        if (d is not None and d["out"] == "won" and not d["paid"]
+                and now - d["t"] >= d["landed"]):
+            p = self.pile[d["k"]]
+            p["gone"] = True
+            self.arms.append((p["kind"], p["colour"]))
+            d["paid"] = True
+
+    def claw_at(self, now):
+        """(column, row of the fingers, shut) this instant."""
+        if self.t0 is None or self.idle(now):
+            return CLAW_HOME, CLAW_REST, False
+        if self.drop is None:
+            return int(round(self.sweep_x(now))), CLAW_REST, False
+        d = self.drop
+        t = now - d["t"]
+        reach = d["depth"] - CLAW_REST
+        if t < d["down"]:
+            return d["x"], int(CLAW_REST + reach * t / d["down"]), False
+        if t < d["shut"]:
+            return d["x"], d["depth"], True
+        if t < d["up"]:
+            return d["x"], int(round(d["depth"] - reach * (t - d["shut"])
+                                     / max(1e-6, d["up"] - d["shut"]))), True
+        if t < d["home"]:
+            k = (t - d["up"]) / max(1e-6, d["home"] - d["up"])
+            return int(round(d["x"] + (CLAW_HOME - d["x"]) * k)), CLAW_REST, True
+        return CLAW_HOME, CLAW_REST, t < d["open"]
+
+    def moving(self, now):
+        """The prize off the heap this instant, as (index, first column, top
+        row), or None. Carried, it hangs under the fingers; let go, it falls -
+        back onto the heap, or down the chute and out."""
+        d = self.drop
+        if d is None or d["out"] not in ("won", "slip") or d["paid"]:
+            return None
+        t = now - d["t"]
+        if t < d["shut"] or t >= d["landed"]:
+            return None
+        p = self.pile[d["k"]]
+        x, fy, _ = self.claw_at(now)
+        if d["out"] == "won":
+            if t < d["open"]:
+                return d["k"], x - 1, fy + 1
+            return d["k"], CLAW_HOME - 1, int(CLAW_REST + 1
+                                              + (t - d["open"]) * CLAW_FALL)
+        if t < d["slip"]:
+            return d["k"], x - 1, fy + 1
+        fell = d["depth"] - (d["depth"] - CLAW_REST) * (
+            (d["slip"] - d["shut"]) / max(1e-6, d["up"] - d["shut"]))
+        return d["k"], p["pos"], min(self.top(p),
+                                     int(fell + 1 + (t - d["slip"]) * CLAW_FALL))
+
+    def verdict(self, now):
+        """What the panel says, and whether it is a win."""
+        if self.aiming(now):
+            return "p to drop  %d" % math.ceil(CLAW_TIME - (now - self.t0)), False
+        d = self.drop
+        if d is None or self.idle(now):
+            return "p to play", False
+        if now - d["t"] < d["reveal"]:
+            return "...", False
+        if d["out"] == "won":
+            return "WON A %s!" % CLAW_PRIZES[self.pile[d["k"]]["kind"]][0].upper(), True
+        say = {"slip": "SO CLOSE", "stuck": "STUCK FAST"}.get(d["out"], "MISSED")
+        return say, False
+
+
+def draw_claw(ch, co, claw, x0, y0, now):
+    """The cabinet: a sign in bulbs, the glass with the rail, the claw, the
+    heap and the chute, and under it the flap the prize comes out of, the
+    verdict, and how you are doing."""
+    w, gw = CLAW_W, CLAW_W - 2
+    gy = y0 + 3                                      # the first row of glass
+    _text(ch, co, y0, x0, "." + "-" * gw + ".", GOLD_DIM)
+    name = "GRAB-A-PAL"
+    lo = (w - len(name)) // 2
+    for x in range(1, w - 1):
+        if lo <= x < lo + len(name):
+            _text(ch, co, y0 + 1, x0 + x, name[x - lo], GOLD)
+        elif x % 2 and not lo - 2 < x < lo + len(name) + 1:
+            lit = chase(x * 0.3, now)
+            _text(ch, co, y0 + 1, x0 + x, "o" if lit else ".",
+                  GOLD if lit else GOLD_DIM)
+    for y in (y0 + 1, y0 + 2):
+        _text(ch, co, y, x0, "|", GOLD_DIM)
+        _text(ch, co, y, x0 + w - 1, "|", GOLD_DIM)
+    _text(ch, co, y0 + 2, x0 + 1, "=" * gw, GOLD_DIM)
+    for r in range(CLAW_GLASS):
+        _text(ch, co, gy + r, x0, "|", GOLD_DIM)
+        _text(ch, co, gy + r, x0 + w - 1, "|", GOLD_DIM)
+    _text(ch, co, gy, x0 + 1, "-" * gw, CONCRETE)        # the rail
+    for r in range(CLAW_GLASS - 4, CLAW_GLASS):          # the chute's wall
+        _text(ch, co, gy + r, x0 + 1 + CLAW_HOME + 3, "|", CONCRETE)
+
+    moving = claw.moving(now)
+    for k, p in enumerate(claw.pile):
+        if p["gone"] or (moving is not None and moving[0] == k):
+            continue
+        _, head, body = CLAW_PRIZES[p["kind"]]
+        colour = NEON[p["colour"] % len(NEON)][0]
+        _text(ch, co, gy + claw.top(p), x0 + 1 + p["pos"], head, colour)
+        _text(ch, co, gy + claw.top(p) + 1, x0 + 1 + p["pos"], body, colour)
+    if moving is not None:
+        k, px, py = moving
+        p = claw.pile[k]
+        colour = NEON[p["colour"] % len(NEON)][0]
+        for r, line in enumerate(CLAW_PRIZES[p["kind"]][1:]):
+            if py + r < CLAW_GLASS:
+                _text(ch, co, gy + py + r, x0 + 1 + px, line, colour)
+
+    x, fy, shut = claw.claw_at(now)
+    cx = x0 + 1 + x
+    _text(ch, co, gy, cx - 1, "[#]", GOLD_DIM)
+    for r in range(1, fy - 1):
+        _text(ch, co, gy + r, cx, "|", CONCRETE)
+    _text(ch, co, gy + fy - 1, cx - 1, "-o-", CONCRETE)
+    _text(ch, co, gy + fy, cx - 1, "\\_/" if shut else "/ \\", CONCRETE)
+
+    base = gy + CLAW_GLASS
+    _text(ch, co, base, x0, "|\\   /" + "=" * (gw - 5) + "|", GOLD_DIM)
+    say, won = claw.verdict(now)
+    attr = (FLASH if int(now * 6) % 2 == 0 else GOLD) if won else GOLD_DIM
+    _text(ch, co, base + 1, x0, "|[   ]", GOLD_DIM)
+    _text(ch, co, base + 1, x0 + w - 1, "|", GOLD_DIM)
+    _text(ch, co, base + 1, x0 + 7, say[:gw - 7].center(gw - 7), attr)
+    if won:                                          # out of the flap
+        kind, colour = claw.arms[-1] if claw.arms else (0, 0)
+        _text(ch, co, base + 1, x0 + 2, CLAW_PRIZES[kind][1],
+              NEON[colour % len(NEON)][0])
+    _text(ch, co, base + 2, x0, "|" + ("goes %d   won %d" % (
+        claw.goes, len(claw.arms))).center(gw) + "|", GOLD)
+    _text(ch, co, base + 3, x0, "'" + "-" * gw + "'", GOLD_DIM)
+
+
+def render_claw(claw, width, height, now):
+    """At the claw machine: the cabinet in the middle, a string of bulbs
+    over it, and what you have won so far beside it when there is room. A
+    window too small for the cabinet gets a line of text."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    if width < CLAW_W + 2 or height < CLAW_H + 1:
+        say, _ = claw.verdict(now)
+        _text(ch, co, height // 2, 1, "CLAW: " + say, GOLD)
+        _text(ch, co, min(height - 1, height // 2 + 2), 1, "s to leave", GOLD_DIM)
+        return ch, co
+    y0 = 1
+    if height >= CLAW_H + 4:
+        for x in range(width):                       # bulbs strung overhead
+            lit = chase(x * 0.25, now)
+            ch[1][x] = "o" if lit else "-"
+            co[1][x] = NEON[(x // 6) % len(NEON)][0] if lit else GOLD_DIM
+        y0 = 2
+    x0 = (width - CLAW_W) // 2
+    draw_claw(ch, co, claw, x0, y0, now)
+
+    ax = x0 + CLAW_W + 4
+    if claw.arms and ax + 12 < width:
+        _text(ch, co, y0 + 1, ax, "won tonight", GOLD_DIM)
+        per = max(1, (width - ax) // 5)
+        for n, (kind, colour) in enumerate(claw.arms):
+            r, c = divmod(n, per)
+            y = y0 + 3 + r * 3
+            if y + 1 >= height - 1:
+                break
+            for k, line in enumerate(CLAW_PRIZES[kind][1:]):
+                _text(ch, co, y + k, ax + c * 5, line, NEON[colour % len(NEON)][0])
+    if y0 + CLAW_H < height - 1:
+        _text(ch, co, height - 1, max(1, width // 2 - 10), "-- the way out (s) --",
+              GOLD_DIM)
+    return ch, co
+
+
 # ===========================================================================
 # CHEATS
 #
@@ -8030,6 +8371,7 @@ CHEAT_PLACES = [
     ("e", "the lake", "lake"),
     ("t", "the riverbank", "bank"),
     ("i", "the carnival", "carnival"),
+    ("&", "a claw machine", "claw"),
     ("u", "the big bridge", "grand"),
     ("h", "the lighthouse", "lighthouse"),
     ("j", "end of a pier", "pier"),
@@ -8040,7 +8382,7 @@ CHEAT_PLACES = [
 
 # The river and the woods: listed under the parts of town, not with the city.
 OUT_OF_TOWN = {"woods", "rave", "lake", "bank", "pier", "bridge", "leaner",
-               "carnival", "grand", "lighthouse"}
+               "carnival", "claw", "grand", "lighthouse"}
 
 
 def _rings(ci, cj, limit):
@@ -8406,6 +8748,30 @@ def _diner_door(x, z):
     return None
 
 
+def _claw_spot(x, z):
+    """Stood at the claw machine, at the next carnival along the river."""
+    ci = int(x / CELL + BIG) - BIG
+    for k in range(-1, 3):
+        c = carnival_col(ci + k * CARNIVAL_GAP)
+        bx, bz = claw_spot(c)
+        px, pz = bx, bz - 1.2
+        if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+            continue
+        if can_stand(px, pz):
+            return px, pz, 0.0
+    return None
+
+
+def claw_near(x, z):
+    """Within sight of a claw machine, but not at it."""
+    ci = int(x / CELL + BIG) - BIG
+    c = carnival_col(ci)
+    if not c - 3 <= ci < c + FAIR_LONG + 3:
+        return False
+    bx, bz = claw_spot(c)
+    return (bx - x) ** 2 + (bz - z) ** 2 < 24.0 ** 2
+
+
 def _billboard_spot(x, z):
     """Across the wide street from a billboard, looking up at it."""
     ci = int(x / CELL + BIG) - BIG
@@ -8620,6 +8986,8 @@ def find_place(x, z, kind):
         return _diner_door(x, z)
     if kind == "billboard":
         return _billboard_spot(x, z)
+    if kind == "claw":
+        return _claw_spot(x, z)
     if kind == "police":
         return _police_spot(x, z, now_hint())
     if kind in ("tunnel", "longtunnel"):
@@ -9223,6 +9591,8 @@ RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
 DINER_HUD = " at the diner, open 24 hrs, at %d,%d  -  s walks back out  -  q quit "
 CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
+CLAW_HUD = (" at the claw machine at %d,%d  -  p plays, p again drops  -  s walks"
+            " back out  -  q quit ")
 CLIMB_HUD = " on the fire escape, climbing %s "
 ESCAPE_ROOF_HUD = (" on a roof in the alleys, %d floors up, %s  -  ad look round  -"
                    "  s climbs down  -  q quit ")
@@ -9251,6 +9621,9 @@ def main(stdscr):
     purse = Purse()             # the chips you carry round the casino
     slot = Slot(purse)          # the machine beside the wheel
     table = Blackjack(purse)    # and the table on the other side
+    arms = []                   # what the claw machines have given you
+    claw = None                 # the last claw machine you stood at
+    at_claw = False             # and are you standing at it now
     seated = None               # (which ramen counter, since when)
     lift = None                 # riding a sky-deck lift: {"up", "t0", "t"}
     on_roof = None              # the tower whose roof you are standing on
@@ -9363,6 +9736,8 @@ def main(stdscr):
                 table.hit(now)
             elif wheel is not None and key in (ord("k"), ord("K")):
                 table.stand(now)
+            elif at_claw and key in (ord("p"), ord("P")):
+                claw.press(now)
             elif lift is not None:
                 pass                            # nothing to do but ride
             elif on_roof is not None and key in (curses.KEY_DOWN, ord("s"),
@@ -9474,6 +9849,9 @@ def main(stdscr):
             venue = None
         if venue is None or venue[0] not in ("ramen", "diner"):
             seated = None               # stood up: the next visit is a new bowl
+        at_claw = venue is not None and venue[0] == "claw"
+        if at_claw and (claw is None or claw.col != venue[1]["col"]):
+            claw = Claw(venue[1]["col"], arms)
         if venue is None or venue[0] != "casino":
             wheel = None
         elif wheel is None or (wheel.done(now)
@@ -9513,6 +9891,10 @@ def main(stdscr):
                 seated = (("diner", cam_x // 10, cam_z // 10), now)
             ch, co = render_diner(width, height, now, seated[1])
             hud = DINER_HUD % (cam_x, cam_z)
+        elif at_claw:
+            claw.update(now)
+            ch, co = render_claw(claw, width, height, now)
+            hud = CLAW_HUD % (cam_x, cam_z)
         elif venue is not None and venue[0] == "cinema":
             ch, co = render_cinema(venue[1], width, height, now)
             hud = CINEMA_HUD % (venue[1]["title"].lower(), cam_x, cam_z)
@@ -9538,6 +9920,8 @@ def main(stdscr):
                     else "")
                 or ("  ~ a fire escape: walk into it to climb ~"
                     if escape_near(cam_x, cam_z) else "")
+                or ("  ~ a claw machine: walk up to it to play ~"
+                    if claw_near(cam_x, cam_z) else "")
                 or ("  ~ fireworks over the bay ~"
                     if fireworks_near(cam_x, cam_z, now) else "")
                 or ("  ~ dawn ~" if dawn(now) > 0.0 else "")

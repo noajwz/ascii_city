@@ -462,6 +462,33 @@ ring against the buildings behind it. Everything else on the ground is a billboa
 with riders going round it on their own, four stalls in four colours, a string of bulbs the length
 of the ground sagging between the poles, and a few people looking up. `i` in the menu.
 
+### The claw machine
+
+At the end of the row of stalls, at `claw_spot()`, which is beside `carnival_spots()` rather than
+inside it because four callers already unpack that tuple. The fairground is open ground, so it is
+a trigger the way a ramen counter is: `venue_at()` looks at the carnival in this stretch before the
+5x5 ring of lots, and standing within `CASINO_REACH` of the booth draws `render_claw()` around you.
+`&` in the menu stands you at it; `claw_near()` puts a line in the HUD from across the fairground.
+
+One go is two presses of `p`: the first sends the claw sweeping back and forth along the rail, the
+second drops it, and after `CLAW_TIME` it drops by itself. That is deliberate. Curses only sees
+key repeats, never a key being let go, so a claw you steered by holding a key would lurch about;
+a single press at the right moment works the same in every terminal.
+
+`Claw` is honest the way `Slot` is. `let_go()` works out what the fingers land on and draws the
+outcome right then: the highest prize under them, held `CLAW_GRIP` of the time square on and less
+one column out, never if the fingers only brush it, and **never if another prize is sitting on
+it** (`covered()`), which is what stops you pulling one out from under the heap and leaving the one
+on top floating. From the outcome it lays out a timeline (down, shut, up, home, open, landed) and
+`claw_at()` and `moving()` read the picture off it for any instant. A slip is decided up front
+too, including the height it falls from. The win is handed over in `update()`, once, when the
+prize is out of the chute, so the panel never says WON before you have seen it come out.
+
+The heap is seeded from the carnival's column, so each carnival has its own, and it restocks
+when it is empty. What you win goes into `arms`, a list `main()` owns and gives to every machine,
+so it follows you from one carnival to the next for the session and no further. Like the
+casino's chips, it is never written anywhere.
+
 ## The big bridge
 
 Once every `GRAND_GAP` cells along the river the channel opens into a **bay** and a suspension
