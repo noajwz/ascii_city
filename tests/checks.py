@@ -3640,5 +3640,35 @@ ac.draw_drop_tower, ac.draw_coaster = (
 check("and from there you see both rides", drawn.get("draw_drop_tower", 0) > 15
       and drawn.get("draw_coaster", 0) > 15, "%s" % drawn)
 
+# --- the strength tester ------------------------------------------------------
+sk = ac.find_place(x0, z0, "striker")
+sven = ac.venue_at(sk[0], sk[1])
+check("{ in the menu stands you at a strength tester", ac.can_stand(sk[0], sk[1])
+      and sven is not None and sven[0] == "striker")
+check("which stands on the fair, on the bank or on the pier", all(
+    ac.dry_at(*ac.striker_spot(ac.carnival_col(k * ac.CARNIVAL_GAP + 50)))
+    for k in range(-6, 7)) and ac.dry_at(*ac.striker_spot(ac.carnival_col(gspan[0]))))
+st_ = ac.Striker(sven[1]["col"])
+m_top = next(t / 100.0 for t in range(1000, 3000) if st_.meter(t / 100.0) > 0.97)
+m_low = next(t / 100.0 for t in range(1000, 3000) if 0.3 < st_.meter(t / 100.0) < 0.4)
+st_.swing(m_top)
+check("a swing at the top of the meter sends the puck to the bell",
+      st_.puck(m_top + ac.STRIKE_UP - 0.01) > 0.9 and st_.rang())
+check("and you cannot swing again while it is still going", not st_.swing(m_top + 0.5))
+st_.update(m_top + ac.STRIKE_UP + 0.01)
+st_.update(m_top + ac.STRIKE_UP + 0.5)
+check("the bell wins a prize, once", st_.rings == 1 and len(st_.arms) == 1
+      and st_.verdict(m_top + ac.STRIKE_UP + 0.2) == ("DING!", True))
+st2 = ac.Striker(0)
+st2.swing(m_low)
+st2.update(m_low + 2.0)
+check("a weak one does not", not st2.rang() and not st2.arms
+      and st2.verdict(m_low + ac.STRIKE_UP + 0.2)[0] == "NOT BAD")
+rt = "\n".join("".join(r) for r in ac.render_striker(st_, 80, 24, m_top + 0.9)[0])
+check("the post and the bell fit an 80x24 window", "( O )" in rt and "WEAKLING" in rt
+      and "DING!" in rt)
+check("and a small one gets a line", "STRENGTH TEST" in "".join(
+    "".join(r) for r in ac.render_striker(st_, 30, 10, 1.0)[0]))
+
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

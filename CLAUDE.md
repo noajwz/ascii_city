@@ -509,6 +509,17 @@ is the same thing for a positive `hi` and a row too far for a negative one — s
 whose bank was below row zero a building a cell wide stood between the water and the promenade or
 the fair. A stall standing on that sliver is what found it.
 
+### The strength tester
+
+The hammer and the bell, at the west end of the row the stalls are in (`striker_spot()`), on every
+carnival, bank or pier; walk up to it the way you do the claw machine (`venue_at()` asks for both).
+It is one key for the claw's reason. `Striker.meter()` swings up and down beside the post for ever,
+and `p` swings the hammer, taking whatever the meter says that instant as the power; the puck goes
+up the post that far and comes back (`puck()`, a function of the time since the swing), and from
+`STRIKE_BELL` up the bell rings and a prize goes into the same `arms` the claw machine fills,
+handed over once, when the puck reaches it. `STRIKE_SAYS` is the scale marked on the post. You
+cannot swing again until the puck is down and the verdict has been up a moment. `{` in the menu.
+
 ## The big bridge
 
 Once every `GRAND_GAP` cells along the river the channel opens into a **bay** and a suspension
