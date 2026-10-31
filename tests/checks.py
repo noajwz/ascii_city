@@ -4349,6 +4349,44 @@ for w_, h_ in ((20, 8), (49, 17), (80, 24), (240, 70)):
     ac.render_temple(tin[1], w_, h_, 1.0, said_ * 5)
 check("and any size of window is fine", True)
 
+# --- the confession booth ----------------------------------------------------
+def heard_(text):
+    return ac.absolve(text, 7, {"jumps": 0, "money": ac.STARTING_MONEY})
+
+
+check("the priest hears what you did", "given back" in heard_("I stole a car")
+      and "house always wins" in heard_("the slots took my rent")
+      and "Hunger is no sin" in heard_("I ate a whole pizza")
+      and "press a key" in heard_("I used the cheat menu")
+      and "heard worse" in heard_("nothing really"))
+check("and every time there is a penance, and peace", all(
+    any(p_ in heard_(t_) for p_ in ac.PENANCES) and heard_(t_).endswith("Go in peace.")
+    for t_ in ("I lied", "hello", "i was stealing")))
+check("someone hurting is told to talk to someone",
+      "talk to someone" in heard_("I want to end it"))
+told_ = [ac.absolve("hello", k, {"jumps": 4, "money": 300.0}) for k in range(40)]
+check("and the city tells him what it saw: the jumps, the money",
+      any("4 times tonight" in t_ for t_ in told_)
+      and not any("4 times" in heard_("hello") for _ in range(1)))
+told_ = [ac.absolve("hello", k, {"jumps": 0, "money": 300.0}) for k in range(40)]
+check("and the money", any("you have $300" in t_ for t_ in told_))
+bth = {"t0": 0.0, "text": "i lost", "said": [("you", "I lied to my mother", 3.0),
+                                              ("priest", heard_("I lied"), 5.0)]}
+waiting_ = "\n".join("".join(r) for r in ac.render_confession(100, 30, 4.0, bth)[0])
+answered_ = "\n".join("".join(r) for r in ac.render_confession(100, 30, 6.0, bth)[0])
+check("in the booth: what you said, the priest thinking, then his answer",
+      "I lied to my mother" in waiting_ and "..." in waiting_
+      and "lighter to carry" not in waiting_ and "lighter to carry" in answered_
+      and "> i lost" in answered_)
+check("behind the grille, the panel slid open, the priest",
+      "( + )" in answered_ or "(   )" in answered_)
+nave_ = "\n".join("".join(r) for r in ac.render_temple(
+    {"name": "SANCTUARY", "seed": 3}, 100, 30, 1.0, [])[0])
+check("and the booth stands in the nave", "c: confess" in nave_ and "|#|" in nave_)
+for w_, h_ in ((20, 8), (39, 13), (80, 24), (240, 70)):
+    ac.render_confession(w_, h_, 6.0, bth)
+check("any size of booth is fine", True)
+
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
 cl2 = ac.Claw(0, [], w_)

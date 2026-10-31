@@ -23,6 +23,7 @@ On Windows:  pip install windows-curses
 import curses
 import math
 import random
+import re
 import time
 import unicodedata
 
@@ -14251,6 +14252,152 @@ def god_words(seed, n=GOD_SAY):
     return [rng.choice(GOD_WORDS) for _ in range(n)]
 
 
+# The confession booth. The priest listens for the words he knows, and the
+# city tells him the rest.
+SINS = [
+    (("die", "suicide", "kill myself", "end it", "hurt myself"),
+     "You matter more than you know. If you are hurting, please talk to someone"
+     " you trust, or a helpline near you, tonight."),
+    (("steal", "stole", "rob", "shoplift"),
+     "What was taken can still be given back."),
+    (("lie", "lied", "lying", "liar"),
+     "The truth is lighter to carry. Put the rest down."),
+    (("bet", "gamble", "casino", "slot", "plinko", "horse", "race", "roulette",
+      "jackpot", "blackjack"),
+     "The house always wins, my child. But the house is not God."),
+    (("stock", "shares", "market", "exchange", "money", "rich", "greed"),
+     "Treasure on earth goes up and down every thirty seconds."),
+    (("pizza", "ate", "eat", "ramen", "noodle", "coffee", "hungry", "food"),
+     "Hunger is no sin. I hear there are four down a manhole who would agree."),
+    (("hate", "angry", "anger", "rage", "mad"),
+     "Anger is a fire you hold by the hot end."),
+    (("cheat", "cheated", "menu", "teleport"),
+     "Some of us walk the city. Some of us press a key."),
+    (("love", "lonely", "alone", "miss"),
+     "Nobody walks this city alone, even at four in the morning."),
+    (("kill", "killed", "murder", "hurt"),
+     "That is heavier than this booth can hold. Tell someone who can help you"
+     " carry it."),
+]
+PENANCES = [
+    "walk to the lighthouse without the menu",
+    "buy a stranger a bowl of ramen",
+    "sit through a whole film, the end included",
+    "put one dollar in the plinko machine, and let it go",
+    "say the word of God three times, whatever it turns out to be",
+    "stand in the rain for a minute and think about it",
+    "tip the doorman",
+    "watch the lanterns go down the river on the next lantern night",
+    "climb a fire escape and look at the city you are part of",
+]
+CONFESS_WAIT = 2.0     # seconds the priest thinks before he answers
+CONFESS_LONG = 60      # the most you can type at once
+
+
+def absolve(text, seed, ledger):
+    """What the priest says to this. The first sin he recognises, if any;
+    what the city has told him, now and then; a penance; and peace."""
+    low = " ".join(re.findall(r"[a-z']+", text.lower()))
+    tokens = low.split()
+
+    def heard(w):
+        # Whole words, or the start of one - "cheat" has "eat" in it, and a
+        # man confessing to the menu was told hunger is no sin.
+        if " " in w:
+            return " " + w + " " in " " + low + " "
+        return any(t == w or (len(w) >= 4 and t.startswith(w)) for t in tokens)
+
+    said = "The city has heard worse, my child. So have I."
+    for words, line in SINS:
+        if any(heard(w) for w in words):
+            said = line
+            break
+    rng = random.Random(seed)
+    extra = ""
+    if ledger.get("jumps", 0) and rng.random() < 0.5:
+        extra = (" And the city tells me you crossed it %d time%s tonight without"
+                 " walking." % (ledger["jumps"], "" if ledger["jumps"] == 1 else "s"))
+    elif (ledger.get("money", STARTING_MONEY) < STARTING_MONEY - 50
+          and rng.random() < 0.6):
+        extra = (" You came in with a thousand dollars, I hear, and you have $%d."
+                 % int(ledger["money"]))
+    return "%s%s For your penance, %s. Go in peace." % (
+        said, extra, PENANCES[rng.randrange(len(PENANCES))])
+
+
+def render_confession(width, height, now, booth):
+    """In the booth: dark wood, the lattice between you, a candle somewhere
+    behind it and the shape of the priest against it, the panel sliding open
+    when you sit down - and what has been said, both ways, with what you are
+    typing under it."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    t = now - booth["t0"]
+    lines = []
+    for who, line, at in booth["said"]:
+        if who == "priest" and now < at:
+            lines.append(("priest", "..."))
+            continue
+        words, cur = line.split(), ""
+        wrap = max(10, width - 6)
+        for w in words:
+            if len(cur) + len(w) + 1 > wrap:
+                lines.append((who, cur))
+                cur = ""
+            cur = (cur + " " + w).strip()
+        lines.append((who, cur))
+    typing = "> " + booth["text"] + ("_" if int(now * 2) % 2 else " ")
+    if width < 40 or height < 14:
+        _text(ch, co, 0, 1, "~ the confession booth ~", BARK)
+        for r, (who, line) in enumerate(lines[-max(1, height - 4):]):
+            _text(ch, co, 2 + r, 1, line[:width - 2], STAR if who == "priest" else HUD)
+        _text(ch, co, height - 2, 1, typing[-(width - 2):], GOLD)
+        _text(ch, co, height - 1, 1, "enter: confess  esc: out", GOLD_DIM)
+        return ch, co
+    # The booth round you: wood, top and sides.
+    for x in range(width):
+        ch[0][x], co[0][x] = "=", BARK
+    for y in range(1, height - 1):
+        for x in (0, 1, width - 2, width - 1):
+            ch[y][x], co[y][x] = "|", BARK
+    # The grille, and behind it, as the panel slides back, the priest.
+    gx0, gx1 = width // 2 - 14, width // 2 + 14
+    gy0, gy1 = 2, min(height // 2, 12)
+    opened = min(1.0, t / 1.2)
+    edge = int(gx0 + (gx1 - gx0) * opened)
+    for y in range(gy0, gy1 + 1):
+        for x in range(gx0, gx1 + 1):
+            if y in (gy0, gy1) or x in (gx0, gx1):
+                ch[y][x], co[y][x] = "#", BARK
+            elif x > edge:
+                ch[y][x], co[y][x] = "|", BARK              # the panel
+            elif (x + y) % 2 == 0:
+                ch[y][x], co[y][x] = ("+" if (x - y) % 4 == 0 else "x"), CURB
+    if opened >= 1.0:
+        flick = _mix(0, int(now * 7), 3301) % 4
+        px, py = width // 2, gy0 + 3
+        for r, part in enumerate(("  ___  ", " (   ) ", " /| |\\ ", "/ | | \\")):
+            for k, c in enumerate(part):
+                x, y = px - 3 + k, py + r
+                if c != " " and gy0 < y < gy1 and gx0 < x < gx1:
+                    ch[y][x], co[y][x] = c, STREET     # dark against the light
+        cx_ = gx1 - 4
+        if gy0 < gy1 - 2:
+            _text(ch, co, gy1 - 2, cx_, "*'.,"[flick], EMBER_HOT)
+            _text(ch, co, gy1 - 1, cx_, "|", STAR)
+    # The kneeler, and what has been said.
+    top = gy1 + 2
+    room = height - 3 - top
+    for r, (who, line) in enumerate(lines[-room:] if room > 0 else []):
+        _text(ch, co, top + r, 3, line, STAR if who == "priest" else HUD)
+    _text(ch, co, height - 3, 3, typing[-(width - 6):], GOLD)
+    for x in range(2, width - 2):
+        ch[height - 2][x], co[height - 2][x] = "_", BARK
+    _text(ch, co, height - 1, max(1, width // 2 - 22),
+          "-- type, enter to confess  -  esc steps out --", GOLD_DIM)
+    return ch, co
+
+
 def render_temple(tp, width, height, now, said):
     """Inside: the nave going away from you between its pillars, the pews in
     rows, the stained glass down both sides throwing its colours, candles
@@ -14334,6 +14481,17 @@ def render_temple(tp, width, height, now, said):
         _text(ch, co, sy0 + 2, sx0 + 2, "press g", CROWN_BLUE)
     if int(now * 2) % 2:
         _text(ch, co, sy0 + rows - 1, sx0 + 2, "_", CROWN_BLUE)   # the cursor
+    # The confession booth, against the wall at the side of the nave.
+    bx, by = 2, height - 9
+    if by > vy + 6:
+        for y in range(by, by + 7):             # it stands in front of the pews
+            for x in range(bx, min(width, bx + 14)):
+                ch[y][x], co[y][x] = " ", 0
+        for r, line in enumerate((" ___________ ", "|  _     _  |", "| |#|   |#| |",
+                                  "| |#|   |#| |", "| |_|   |_| |", "|___________|")):
+            _text(ch, co, by + r, bx, line, BARK)
+        _text(ch, co, by + 2, bx + 5, "#", CURB)
+        _text(ch, co, by + 6, bx, "c: confess", GOLD_DIM)
     _text(ch, co, height - 1, max(1, cx - 22),
           "-- g: the word of god  -  the way out (s) --", GOLD_DIM)
     return ch, co
@@ -14560,7 +14718,9 @@ RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
 DINER_HUD = " at the diner, open 24/7, at %d,%d  -  s walks back out  -  q quit "
 CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
-TEMPLE_HUD = " in %s  -  g asks for the word of god  -  s walks out  -  q quit "
+TEMPLE_HUD = (" in %s  -  g asks for the word of god  -  c the confession booth"
+              "  -  s walks out  -  q quit ")
+CONFESS_HUD = " in the confession booth  -  type, enter to confess  -  esc steps out "
 EXCHANGE_HUD = (" on the trading floor  -  b buys, n sells, arrows pick, l lists  -"
                 "  s walks out  -  q quit ")
 ARCADE_HUD = (" in the %s arcade  -  ad choose a game  -  p plays  -  s walks out"
@@ -14590,6 +14750,11 @@ def main(stdscr):
     curses.curs_set(0)          # hide the cursor
     stdscr.nodelay(True)        # don't block waiting for a keypress
     stdscr.keypad(True)         # decode arrow keys into KEY_LEFT / KEY_RIGHT
+    if hasattr(curses, "set_escdelay"):
+        # A bare esc is seen at once, not a second later: curses waits that
+        # long to see whether it starts an arrow key, and in the confession
+        # booth - where every other key is a letter - esc is the way out.
+        curses.set_escdelay(25)
 
     street = True               # which view we are in
     sky_x = 0.0                 # the two views keep their own cameras, so
@@ -14609,6 +14774,8 @@ def main(stdscr):
     races = Races(wallet)       # and the race track, r
     at_races = False
     oracle = {"said": [], "last": time.monotonic()}   # the temple's terminal
+    booth = None                # in the confession booth: {"t0", "text", "said"}
+    ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
     arms = []                   # what the claw machines have given you
@@ -14705,6 +14872,8 @@ def main(stdscr):
                             autopilot = False
                             wheel = None
                             sewer = None
+                            booth = None
+                            ledger["jumps"] += 1
                             street = True
                             note = "-> " + name
                             # And the panel closes: you jumped somewhere to
@@ -14722,6 +14891,23 @@ def main(stdscr):
                                 note = "-> the woods rave (starting)"
                                 note_at = now
                         break
+            elif booth is not None and key != CHEAT_KEY:
+                # Every key is a letter in here, q included; esc steps out.
+                if key == 27:
+                    booth = None
+                elif key in (10, 13, curses.KEY_ENTER):
+                    said_ = booth["text"].strip()
+                    if said_:
+                        booth["said"].append(("you", said_, now))
+                        reply_ = absolve(said_, int(now * 1e6),
+                                         dict(ledger, money=wallet.money))
+                        booth["said"].append(("priest", reply_, now + CONFESS_WAIT))
+                        booth["said"] = booth["said"][-12:]
+                    booth["text"] = ""
+                elif key in (8, 127, curses.KEY_BACKSPACE):
+                    booth["text"] = booth["text"][:-1]
+                elif 32 <= key < 127 and len(booth["text"]) < CONFESS_LONG:
+                    booth["text"] += chr(key)
             elif key in (ord("q"), 27):
                 return
             elif key == CHEAT_KEY:
@@ -14741,6 +14927,9 @@ def main(stdscr):
                 sky_v = fwd = side = spin = 0.0
             elif key == ord(" ") and not at_arcade:
                 autopilot = not autopilot
+            elif at_temple and key in (ord("c"), ord("C")):
+                booth = {"t0": now, "text": "", "said": [
+                    ("priest", "Bless you. Tell me what is on your mind.", now + 1.4)]}
             elif at_temple and key in (ord("g"), ord("G")):
                 # The time since the last time you asked, to the microsecond,
                 # is what picks the words. Nobody can choose that.
@@ -14911,10 +15100,11 @@ def main(stdscr):
             if ((roof_x - hx_) ** 2 + (roof_z - hz_) ** 2 < 1.6 ** 2
                     and (hx_ - roof_x) * ddx + (hz_ - roof_z) * ddz > 0.0):
                 lift = {"up": False, "t0": now, "t": party}
-        if lift is not None or on_roof is not None or sewer is not None:
+        if (lift is not None or on_roof is not None or sewer is not None
+                or booth is not None):
             fwd = side = 0.0            # on the roof you can only look round
             autopilot = False
-            if lift is not None or sewer is not None:
+            if lift is not None or sewer is not None or booth is not None:
                 spin = 0.0
         sky_x += sky_v * frame_time
         yaw += spin * frame_time
@@ -14997,6 +15187,8 @@ def main(stdscr):
                        else False)
         at_arcade = venue is not None and venue[0] == "arcade"
         at_temple = venue is not None and venue[0] == "temple"
+        if not at_temple:
+            booth = None                # out of the temple is out of the booth
         if not at_arcade:
             play["game"] = None
         elif play["arc"] is None or play["arc"]["seed"] != venue[1]["seed"]:
@@ -15101,6 +15293,9 @@ def main(stdscr):
         elif venue is not None and venue[0] == "exchange":
             ch, co = render_exchange(venue[1], broker, width, height, now)
             hud = EXCHANGE_HUD
+        elif venue is not None and venue[0] == "temple" and booth is not None:
+            ch, co = render_confession(width, height, now, booth)
+            hud = CONFESS_HUD
         elif venue is not None and venue[0] == "temple":
             ch, co = render_temple(venue[1], width, height, now, oracle["said"])
             hud = TEMPLE_HUD % venue[1]["name"].lower()
