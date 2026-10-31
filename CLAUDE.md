@@ -452,6 +452,21 @@ way it does for water — and `carnival_spots()` lays the wheel, the carousel an
 along it at the depth of the bank's *middle* column, so the meander cannot put one of them in the
 river. There is a test that they all stand on dry ground.
 
+**Each thing stands back from the bank of its own column** (`bank_z()`), not the middle one's: the
+bank slopes as much as half a cell a column along the meander, and more beside the bay, which over
+the eleven columns of a fair is five cells — the middle column's depth put stalls at one end in the
+river, and the test for it only ever looked at one carnival. Columns from world units go through
+`int(x + BIG) - BIG`, not `int()`: the first try truncated a stall at column -280.5 to -280 and
+stood it back from the wrong bank.
+
+**Every big bridge has the carnival beside it.** In the stretch with the big bridge in it,
+`carnival_col()` puts the fair on the near bank `CARNIVAL_BESIDE` cells west of the bridge, across
+the bay from the headland, so the bridge, the wheel and the lighthouse are in the one view — from
+the rock you have the cables on one side and the wheel on the other. West, because the ferry docks
+nine cells east; east past the ferry only if the west would run out of the stretch. Elsewhere the
+carnival is where its hash puts it, as before. There is a test of both: every big bridge has one
+beside it on dry ground, and from the rock the wheel and the bridge towers are in one frame.
+
 **The wheel is world points, not a sprite**, and its plane faces the water. A ring of 56 bulbs
 chasing round it in the neon colours, eight spokes, eight cabins that hang from the rim and stay
 upright as it turns, an A-frame under the hub. From the far bank and the pier you see the whole
@@ -526,6 +541,17 @@ kind of water in the city and, like the lake, free — `water_at()` is river-or-
 nothing downstream asks which. The far city's avenue stops at the moat, so the only way onto the
 rock is over the bridge, and there is a test for both directions: you can walk off the deck to the
 foot of the lighthouse, and you cannot walk there from the far bank.
+
+**The big bridge is the only way on.** `bridge_at()` gives no ordinary crossing to any avenue within
+the headland's reach of the big one (`HEAD_RI * HEAD_MOAT` cells): one avenue in four used to get a
+footbridge wherever it was, and the ones near the bay landed on the rock or in the water round it.
+And **the water reaches further behind the point than at the sides** — `HEAD_MOAT` at the sides,
+`HEAD_BACK` behind, through `headland_r()`'s `back` stretch — so the far town stands back across
+the water instead of crowding up behind the lighthouse; from the landing, looking out to the
+point, the middle of the view is sky now and not a wall of buildings. Not stretched on the bay
+side: that way it would flood the near bank. `HEAD_BACK` is held where it is by `near_river()`:
+the water's furthest edge, wobble and all, has to stay inside its 48 cells of the river's centre,
+and at 2.7 it went over.
 
 `draw_lighthouse()` is world points: a stack of rings, white with red bands, so it tapers and stays
 round from wherever you see it; the lantern room on top with a light that is never off; a bench
