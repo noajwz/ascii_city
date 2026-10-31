@@ -398,6 +398,23 @@ BLADE_RISE = 3.0       # how far it goes up over the roof
 CARPET_HALF = 0.9      # half the carpet's width
 JACKPOT_LONG = 30.0    # seconds a casino celebrates a 777
 
+# --- the stock exchange, in the financial district ---
+# A classical front among the glass, a ticker running across it with the
+# made-up market going by in green and red, and inside a trading floor with
+# candles for the house stock and an account to buy and sell it with. The
+# prices are a function of time alone: they step every TICK_LEN seconds, and
+# a candle is one of those steps, with the high and the low of the way the
+# price went inside it.
+EXCHANGE_ODDS = 400    # of the financial district's street fronts, one in this
+TICK_LEN = 30.0        # seconds a price stands before the next
+CANDLES = 48           # how many the chart goes back, at most
+LOTS = [1, 10, 100, 0] # how many a trade is: 0 is as many as you can
+STARTING_CASH = 1000.0
+STOCKS = [("NEON", "NEON TUBES CO"), ("RAMN", "RAMEN HOLDINGS"),
+          ("DRFT", "DRIFT MOTORS"), ("BLIP", "BLIP ARCADES"),
+          ("CLAW", "CLAW AND CO"), ("GLOW", "GLOWSTICK INDUSTRIES"),
+          ("LIFT", "SKYDECK LIFTS"), ("NOOD", "NOODLE FUTURES")]
+
 CASINO_NAMES = ["ROYALE", "GOLDEN", "LUCKY", "ACES", "MIRAGE", "JACKPOT",
                 "FORTUNA", "DIAMOND", "SPHINX", "MONTE"]
 
@@ -2400,7 +2417,7 @@ def lot(i, j):
         # draw_wall_column() would draw it as one, so the venue would exist
         # and be invisible.
         b["club"] = b["casino"] = b["tower"] = b["cinema"] = None
-        b["diner"] = b["billboard"] = b["arcade"] = None
+        b["diner"] = b["billboard"] = b["arcade"] = b["exchange"] = None
         if d["park"]:
             pass
         elif _mix(i, j, 909) % CLUB_ODDS == 0:
@@ -2445,6 +2462,14 @@ def lot(i, j):
                                                     % len(FILM_TITLES)],
                                "offset": _mix(i, j, 1969) % 997,
                                "i": i, "j": j, "height": b["height"]}
+        elif d["name"] == "financial" and _mix(i, j, 2701) % EXCHANGE_ODDS == 0 \
+                and _road_face(i, j, _mix(i, j, 2703) % 4) is not None:
+            # The exchange: low and old among the towers, columns and stone.
+            b["height"] = 16.0
+            b["exchange"] = {"door": _road_face(i, j, _mix(i, j, 2703) % 4),
+                             "u": CELL * 0.5, "i": i, "j": j,
+                             "stock": _mix(i, j, 2705) % len(STOCKS),
+                             "seed": _mix(i, j, 2707) % 9973}
         elif _mix(i, j, 2501) % ARCADE_ODDS == 0 and d["name"] != "financial":
             # Low, so the light wall and the sign over the door are where you
             # are looking from across the street, not off the top of it - but
@@ -2473,7 +2498,7 @@ def lot(i, j):
                               "height": b["height"]}
         if (b["club"] is None and b["casino"] is None and b["tower"] is None
                 and b["cinema"] is None and b["diner"] is None
-                and b["arcade"] is None and not d["park"]
+                and b["arcade"] is None and b["exchange"] is None and not d["park"]
                 and d["name"] in BILL_DISTRICTS and 8.0 <= b["height"] <= 12.0
                 and _mix(i, j, 2405) % BILL_ODDS == 0):
             face = _wide_face(i, j, _mix(i, j, 2407) % 4)
@@ -2487,7 +2512,7 @@ def lot(i, j):
             ring = landmark_ring(lm, i, j)
             b["height"] = LANDMARK_BASE if ring == 0 else LANDMARK_H
             b["club"] = b["casino"] = b["cinema"] = b["diner"] = None
-            b["arcade"] = b["billboard"] = b["tower"] = None
+            b["arcade"] = b["billboard"] = b["tower"] = b["exchange"] = None
             b["tree"] = False
             if (i, j) == lm["lobby"]:
                 b["tower"] = {"door": 3, "u": CELL * 0.5, "i": i, "j": j,
@@ -3263,6 +3288,242 @@ def draw_landmark_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
     return roof, None, foot, None, ()
 
 
+def _noise(x, salt):
+    """Smooth value noise in -1..1: a hashed value at every whole x, eased
+    between."""
+    k = math.floor(x)
+    f = x - k
+    f = f * f * (3.0 - 2.0 * f)
+    a = (_mix(int(k), salt, 2711) & 0xFFFF) / 32767.5 - 1.0
+    b = (_mix(int(k) + 1, salt, 2711) & 0xFFFF) / 32767.5 - 1.0
+    return a + (b - a) * f
+
+
+def stock_price(s, t):
+    """What stock s is worth at time t, the way it went in between the
+    ticks. A function of time alone - long slow trends, swings, noise, and
+    now and then a lurch up or down that the noise carries on from - so it
+    is the same market however you come back to it, and nothing is kept."""
+    k = t / TICK_LEN
+    m = _mix(s, 0, 2713)
+    base = 20.0 + (m & 255) * 0.6
+    vol = 0.6 + ((m >> 8) & 255) / 255.0 * 0.8
+    a, b_, c = ((m >> 16) & 63) * 0.1, ((m >> 22) & 63) * 0.1, ((m >> 26) & 31) * 0.2
+    x = (0.45 * math.sin(k / 97.0 + a) + 0.25 * math.sin(k / 31.0 + b_)
+         + 0.12 * math.sin(k / 7.3 + c)
+         + 0.16 * _noise(k / 2.0, s) + 0.035 * _noise(k * 3.0, s + 17)
+         + 0.25 * _noise(k / 11.0, s + 41) ** 3)
+    return base * math.exp(vol * x)
+
+
+def tick_of(now):
+    return int(math.floor(now / TICK_LEN))
+
+
+def stock_now(s, now):
+    """The price you can trade at: the one the last tick set."""
+    return stock_price(s, tick_of(now) * TICK_LEN)
+
+
+def candle(s, k):
+    """(open, high, low, close) of tick k: from its price to the next one's,
+    and how high and low it went on the way."""
+    o, c = stock_price(s, k * TICK_LEN), stock_price(s, (k + 1) * TICK_LEN)
+    path = [stock_price(s, (k + f / 12.0) * TICK_LEN) for f in range(13)]
+    return o, max(path), min(path), c
+
+
+def ticker(now):
+    """The market going by: every stock, its price, and how it did on the
+    last tick, as (text, colour) runs."""
+    out = []
+    k = tick_of(now)
+    for n, (sym, _) in enumerate(STOCKS):
+        p, q = stock_price(n, k * TICK_LEN), stock_price(n, (k - 1) * TICK_LEN)
+        up = p >= q
+        out.append((sym + " ", GOLD))
+        out.append(("%.2f " % p, FLASH))
+        out.append(("%s%.1f%%   " % ("^+" if up else "v-", abs(p / q - 1.0) * 100.0),
+                    ROU_GREEN if up else ROU_RED))
+    return out
+
+
+def draw_exchange_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
+                         cont, now):
+    """One column of the exchange: pale stone among the glass towers, a
+    column standing up the front in every bay, dark between, a cornice along
+    the top and steps at the foot."""
+    scale = v.fy / dist
+    stone = FLASH if v.flash > 0.35 else MOON_DIM
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    if edge:
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx], co[y][sx] = "|", stone
+        return roof, None, foot, None, ()
+    prev_roof, prev_awn, prev_foot = cont[:3]
+    cornice = int(round(v.horizon - (b["height"] - 1.6 - v.eye) * scale))
+    facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "=", ROOF)
+    facade_line(ch, co, sx, cornice, None, r_lo, r_hi, "=", stone)
+    frac = u / BAY_W - int(u / BAY_W)
+    if BAY_W * v.fx / dist > 2.5 and 0.3 < frac < 0.6 or BAY_W * v.fx / dist <= 2.5:
+        for y in range(max(r_lo, cornice + 1), min(r_hi, foot - 1) + 1):
+            ch[y][sx], co[y][sx] = "|", stone                # a column
+    else:
+        for y in range(max(r_lo, cornice + 1), min(r_hi, foot - 1) + 1):
+            if (y + sx) % 5 == 0:
+                ch[y][sx], co[y][sx] = ".", tone_colour("warm", 0.4)
+    steps = int(round(v.horizon - (0.5 - v.eye) * scale))
+    for y in range(max(r_lo, steps), min(r_hi, foot) + 1):
+        ch[y][sx], co[y][sx] = "_" if (y - steps) % 2 == 0 else "=", stone
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, None, foot, None, ()
+
+
+def draw_exchange_front(ch, co, v, walls, ex, world, now):
+    """STOCK EXCHANGE over the columns, and the ticker running across the
+    front under it - the market going by, green when it went up and red when
+    it came down. Screen space, for the casino marquee's reason: a ticker
+    you cannot read is a stripe."""
+    pr = v.project(world[0], world[1], world[2])
+    if pr is None or pr[2] > 90.0:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    word = "STOCK  EXCHANGE"
+    for k, c in enumerate(word):
+        put_cell(ch, co, v, walls, sx - len(word) // 2 + k, sy - 1, dist, c, GOLD)
+    width_ = max(16, min(48, int(CELL * v.fx / dist)))
+    runs = ticker(now)
+    text = "".join(t for t, _ in runs)
+    colours = [a for t, a in runs for _ in t]
+    shift = int(now * 6.0)
+    x0 = sx - width_ // 2
+    for k in range(width_):
+        n = (k + shift) % len(text)
+        put_cell(ch, co, v, walls, x0 + k, sy + 1, dist, text[n], colours[n])
+    for x in (x0 - 1, x0 + width_):
+        put_cell(ch, co, v, walls, x, sy + 1, dist, "|", GOLD_DIM)
+
+
+class Broker:
+    """Your account at the exchange: cash, and how many of each stock you
+    hold and what you paid for them. One for the night, whichever exchange
+    you walk into, the way the casino's chips are one purse."""
+
+    def __init__(self):
+        self.cash = STARTING_CASH
+        self.held = {}               # stock -> shares
+        self.paid = {}               # stock -> what they cost, in all
+        self.lot = 0                 # index into LOTS
+        self.said = ("", -1e9)
+
+    def size(self, s, price, buying):
+        n = LOTS[self.lot]
+        if n:
+            return n
+        return int(self.cash // price) if buying else self.held.get(s, 0)
+
+    def buy(self, s, now):
+        price = stock_now(s, now)
+        n = self.size(s, price, True)
+        if n <= 0 or n * price > self.cash + 1e-9:
+            self.said = ("not enough cash", now)
+            return False
+        self.cash -= n * price
+        self.held[s] = self.held.get(s, 0) + n
+        self.paid[s] = self.paid.get(s, 0.0) + n * price
+        self.said = ("bought %d at %.2f" % (n, price), now)
+        return True
+
+    def sell(self, s, now):
+        price = stock_now(s, now)
+        have = self.held.get(s, 0)
+        n = min(self.size(s, price, False), have)
+        if n <= 0:
+            self.said = ("nothing to sell", now)
+            return False
+        cost = self.paid[s] * n / have
+        self.cash += n * price
+        self.held[s] = have - n
+        self.paid[s] -= cost
+        self.said = ("sold %d at %.2f, %s%.2f" % (n, price, "+" if n * price >= cost
+                                                  else "-", abs(n * price - cost)), now)
+        return True
+
+
+def render_exchange(ex, broker, width, height, now):
+    """The trading floor: the ticker running along the top, the house
+    stock's candles across the middle - green where a tick closed up, red
+    where it closed down, the wick from its high to its low - with the price
+    scale down the side and the time to the next tick, and under it your
+    account and what to press."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    s = ex["stock"]
+    sym, name = STOCKS[s]
+    price = stock_now(s, now)
+    if width < 50 or height < 18:
+        _text(ch, co, height // 2, 1, "%s %.2f" % (sym, price), GOLD)
+        _text(ch, co, min(height - 1, height // 2 + 1), 1, "b buys  n sells  s leaves",
+              GOLD_DIM)
+        return ch, co
+    runs = ticker(now)
+    text = "".join(t for t, _ in runs)
+    colours = [a for t, a in runs for _ in t]
+    shift = int(now * 6.0)
+    for x in range(width):
+        n = (x + shift) % len(text)
+        ch[1][x], co[1][x] = text[n], colours[n]
+    head = "%s  -  %s (%s)" % ("THE EXCHANGE", name, sym)
+    _text(ch, co, 3, 2, head, GOLD)
+    k = tick_of(now)
+    left = int(TICK_LEN - (now - k * TICK_LEN))
+    _text(ch, co, 3, width - 24, "next price in %2ds" % left, GOLD_DIM)
+    # The chart.
+    top, bot = 5, height - 7
+    cols = (width - 14) // 2
+    n = max(4, min(CANDLES, cols))
+    cs = [candle(s, k - n + q) for q in range(n)]
+    hi = max(c[1] for c in cs)
+    lo = min(c[2] for c in cs)
+    span = max(1e-6, hi - lo)
+
+    def row(p):
+        return bot - int(round((p - lo) / span * (bot - top)))
+    for r in range(5):
+        p = lo + span * r / 4.0
+        _text(ch, co, row(p), width - 11, "- %7.2f" % p, CONCRETE)
+    for q, (o, h, l_, c) in enumerate(cs):
+        x = 2 + q * 2
+        up = c >= o
+        attr = ROU_GREEN if up else ROU_RED
+        for y in range(row(h), row(l_) + 1):
+            ch[y][x], co[y][x] = "|", attr
+        for y in range(min(row(o), row(c)), max(row(o), row(c)) + 1):
+            ch[y][x], co[y][x] = "#", attr
+    _text(ch, co, row(price), width - 12, ">", FLASH)
+    # The account.
+    held = broker.held.get(s, 0)
+    worth = broker.cash + sum(n_ * stock_now(t, now) for t, n_ in broker.held.items())
+    cost = broker.paid.get(s, 0.0)
+    pl = held * price - cost
+    lot = LOTS[broker.lot]
+    lines = [
+        ("%s %.2f   you hold %d   avg cost %s   on them %s%.2f" % (
+            sym, price, held, "%.2f" % (cost / held) if held else "-",
+            "+" if pl >= 0 else "-", abs(pl)), ROU_GREEN if pl >= 0 else ROU_RED),
+        ("cash %.2f   worth %.2f   in lots of %s" % (
+            broker.cash, worth, lot if lot else "max"), GOLD),
+        ("b buys  n sells  +/- lot size  s walks out", GOLD_DIM),
+    ]
+    for r, (line, attr) in enumerate(lines):
+        _text(ch, co, height - 5 + r, 2, line, attr)
+    said, at = broker.said
+    if now - at < 3.0:
+        _text(ch, co, height - 6, 2, said, FLASH)
+    return ch, co
+
+
 def draw_tree_column(ch, co, v, sx, dist, b, u, r_lo, r_hi):
     """A clump of trees, which is what a park has instead of buildings.
 
@@ -3324,6 +3585,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
                                  r_lo, r_hi, edge, cont, now)
     if b["landmark"] is not None:
         return draw_landmark_column(ch, co, v, sx, dist, b, face, u,
+                                    r_lo, r_hi, edge, cont, now)
+    if b["exchange"] is not None:
+        return draw_exchange_column(ch, co, v, sx, dist, b, face, u,
                                     r_lo, r_hi, edge, cont, now)
     d = b["district"]
     scale = v.fy / dist
@@ -3848,6 +4112,11 @@ def collect_glow(v, now, wet):
             if b["casino"] is not None:
                 p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
                 _spill(glow, p[0], p[2], 6.0, GOLD_DIM)
+                continue
+            if b["exchange"] is not None:
+                if f == b["exchange"]["door"]:
+                    p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
+                    _spill(glow, p[0], p[2], 5.0, GOLD_DIM)
                 continue
             if b["arcade"] is not None:
                 # The pavement in front takes the colour of whatever the
@@ -7900,7 +8169,7 @@ def climbable(i, j, f):
     if not (b["faces"][f]["escape"] and b["height"] >= 3 * FLOOR_H
             and not b["tree"] and b["club"] is None
             and b["casino"] is None and b["tower"] is None
-            and b["arcade"] is None):
+            and b["arcade"] is None and b["exchange"] is None):
         return False
     # And only off a roof that is the high point of its corner: climbed from
     # an alley, the first ones put you face to face with the wall of a taller
@@ -8565,6 +8834,11 @@ def draw_props(ch, co, v, walls, now, wet):
             if b["tower"] is not None and f == b["tower"]["door"]:
                 w = face_point(i, j, f, CELL * 0.5, 0.3, 0.0)
                 props.append((_d2(v, w), "lobby", b["tower"], w, (nx, nz)))
+            if b["exchange"] is not None:
+                if f == b["exchange"]["door"]:
+                    w = face_point(i, j, f, CELL * 0.5, 0.5, 2.0 * FLOOR_H + 1.2)
+                    props.append((_d2(v, w), "exchange", b["exchange"], w, (nx, nz)))
+                continue
             if b["arcade"] is not None:
                 if f == b["arcade"]["door"]:
                     w = face_point(i, j, f, CELL * 0.5, 0.5, FLOOR_H + 0.6)
@@ -8644,6 +8918,8 @@ def draw_props(ch, co, v, walls, now, wet):
             draw_cinema_front(ch, co, v, walls, s, world, now)
         elif kind == "arcade":
             draw_arcade_front(ch, co, v, walls, s, world, now)
+        elif kind == "exchange":
+            draw_exchange_front(ch, co, v, walls, s, world, now)
         elif kind == "diner":
             draw_diner_sign(ch, co, v, walls, s, world, now)
         elif kind == "overdoor":
@@ -10091,7 +10367,8 @@ def venue_at(x, z):
             if is_open(i, j):
                 continue
             b = lot(i, j)
-            for kind in ("casino", "club", "tower", "cinema", "diner", "arcade"):
+            for kind in ("casino", "club", "tower", "cinema", "diner", "arcade",
+                         "exchange"):
                 v = b[kind]
                 if v is None:
                     continue
@@ -11460,6 +11737,7 @@ CHEAT_PLACES = [
     ("}", "pleasure pier", "pleasurepier"),
     ("{", "strength test", "striker"),
     ("~", "roof party", "roofparty"),
+    (";", "stock exchange", "exchange"),
     ("u", "the big bridge", "grand"),
     ("h", "the lighthouse", "lighthouse"),
     ("+", "lighthouse top", "lighthousedoor"),
@@ -12151,6 +12429,8 @@ def find_place(x, z, kind):
         return _diner_door(x, z)
     if kind == "arcade":
         return _doorway(x, z, 2501, "arcade", ARCADE_ODDS)
+    if kind == "exchange":
+        return _doorway(x, z, 2701, "exchange", EXCHANGE_ODDS)
     if kind == "billboard":
         return _billboard_spot(x, z)
     if kind == "claw":
@@ -12208,11 +12488,13 @@ def draw_cheats(ch, co, note):
                "tunnel", "longtunnel")
     left = [("", "IN THE CITY")]
     left += [(k, name) for k, name, kind in CHEAT_PLACES
-             if kind not in OUT_OF_TOWN and kind not in streets]
+             if kind not in OUT_OF_TOWN and kind not in streets and kind != "exchange"]
     middle = [("", "STREETS")]
     middle += [(k, name) for k, name, kind in CHEAT_PLACES if kind in streets]
     middle += [("", ""), ("", "PARTS OF TOWN")]
     middle += [(d["key"], d["name"]) for d in DISTRICTS]
+    # The exchange is the financial district's, and the first column is full.
+    middle += [(k, name) for k, name, kind in CHEAT_PLACES if kind == "exchange"]
     right = [("", "OUT OF TOWN")]
     right += [(k, name) for k, name, kind in CHEAT_PLACES if kind in OUT_OF_TOWN]
     sky = [("", "WEATHER & SKY"),
@@ -12821,6 +13103,8 @@ RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
 DINER_HUD = " at the diner, open 24/7, at %d,%d  -  s walks back out  -  q quit "
 CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
+EXCHANGE_HUD = (" on the trading floor  -  b buys, n sells, +/- lot size  -  s walks"
+                " out  -  q quit ")
 ARCADE_HUD = (" in the %s arcade  -  ad choose a game  -  p plays  -  s walks out"
               "  -  q quit ")
 GAME_HUD = " playing %s  -  %s  -  x leaves the cabinet  -  q quit "
@@ -12865,6 +13149,8 @@ def main(stdscr):
     claw = None                 # the last claw machine you stood at
     at_claw = False             # and are you standing at it now
     play = {"arc": None, "sel": 0, "game": None, "hi": {}}   # at the arcade
+    broker = Broker()           # your account at the exchange
+    at_exchange = False
     at_arcade = False
     striker = None              # the last strength tester you stood at
     at_striker = False
@@ -12987,6 +13273,12 @@ def main(stdscr):
                 table.hit(now)
             elif wheel is not None and key in (ord("k"), ord("K")):
                 table.stand(now)
+            elif at_exchange and key in (ord("b"), ord("n")):
+                (broker.buy if key == ord("b") else broker.sell)(at_exchange["stock"],
+                                                                 now)
+            elif at_exchange and key in (ord("+"), ord("="), ord("-"), ord("_")):
+                step = 1 if key in (ord("+"), ord("=")) else -1
+                broker.lot = (broker.lot + step) % len(LOTS)
             elif at_arcade and play["game"] is not None:
                 # Playing: the keys are the game's, but for x, which leaves.
                 g_ = play["game"]
@@ -13160,6 +13452,8 @@ def main(stdscr):
             venue = None
         if venue is None or venue[0] not in ("ramen", "diner"):
             seated = None               # stood up: the next visit is a new bowl
+        at_exchange = (venue[1] if venue is not None and venue[0] == "exchange"
+                       else False)
         at_arcade = venue is not None and venue[0] == "arcade"
         if not at_arcade:
             play["game"] = None
@@ -13247,6 +13541,9 @@ def main(stdscr):
             claw.update(now)
             ch, co = render_claw(claw, width, height, now)
             hud = CLAW_HUD % (cam_x, cam_z)
+        elif venue is not None and venue[0] == "exchange":
+            ch, co = render_exchange(venue[1], broker, width, height, now)
+            hud = EXCHANGE_HUD
         elif venue is not None and venue[0] == "arcade":
             g_ = play["game"]
             if g_ is not None:

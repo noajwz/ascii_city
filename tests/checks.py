@@ -145,7 +145,8 @@ check("every destination lands somewhere you can stand", not bad, ",".join(bad))
 blind = []
 for _, name, kind in ac.CHEAT_PLACES:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
-                "diner", "billboard", "highway", "arcade", "claw", "roofparty"):
+                "diner", "billboard", "highway", "arcade", "claw", "roofparty",
+                "exchange"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -3870,6 +3871,68 @@ sel_room = "\n".join("".join(r) for r in ac.render_arcade(ar_, 80, 24, 1.0, 1)[0
 check("in the arcade the cabinet you are on is picked out", "vvv" in sel_room)
 check("and every cabinet in it is a game", all(
     n in ac.GAMES for n in ac.ARCADE_GAMES))
+
+# --- the stock exchange --------------------------------------------------------
+exs = [(i, j) for i in range(-300, 300) for j in range(-300, 300)
+       if ac._mix(i, j, 2701) % ac.EXCHANGE_ODDS == 0 and not ac.is_open(i, j)
+       and ac.lot(i, j)["exchange"] is not None]
+check("there are stock exchanges, and only in the financial district",
+      len(exs) >= 2 and all(ac.lot(i, j)["district"]["name"] == "financial"
+                            for i, j in exs), "%d" % len(exs))
+xsp = ac.find_place(x0, z0, "exchange")
+xven = ac.venue_at(xsp[0], xsp[1])
+check("; in the menu stands you on the trading floor",
+      xven is not None and xven[0] == "exchange")
+xs_ = xven[1]["stock"]
+k_ = 400
+t0_ = k_ * ac.TICK_LEN
+check("a price stands for a tick and then moves",
+      ac.stock_now(xs_, t0_ + 1.0) == ac.stock_now(xs_, t0_ + 29.0)
+      and ac.stock_now(xs_, t0_) != ac.stock_now(xs_, t0_ + ac.TICK_LEN))
+cs_ = [ac.candle(xs_, k_ + q) for q in range(200)]
+check("each candle opens where the last one closed, its wick round its body",
+      all(abs(a[3] - b[0]) < 1e-9 for a, b in zip(cs_, cs_[1:]))
+      and all(c[1] >= max(c[0], c[3]) and c[2] <= min(c[0], c[3]) for c in cs_))
+moves = [c[3] / c[0] - 1.0 for c in cs_]
+check("and it goes both ways, by real amounts, and never to nothing",
+      sum(m > 0 for m in moves) > 40 and sum(m < 0 for m in moves) > 40
+      and max(abs(m) for m in moves) > 0.02
+      and min(ac.stock_price(xs_, t * 7.0) for t in range(20000)) > 1.0)
+br_ = ac.Broker()
+t_ = k_ * ac.TICK_LEN + 5.0
+p_ = ac.stock_now(xs_, t_)
+br_.buy(xs_, t_)
+check("buying takes the price out of your cash and gives you the share",
+      br_.held[xs_] == 1 and abs(br_.cash - (ac.STARTING_CASH - p_)) < 1e-6)
+br_.lot = 3                              # as many as you can
+br_.buy(xs_, t_)
+check("max buys all your cash will run to", br_.cash < p_
+      and br_.held[xs_] == 1 + int((ac.STARTING_CASH - p_) // p_))
+later = (k_ + 40) * ac.TICK_LEN + 5.0
+before = br_.cash
+had = br_.held[xs_]
+br_.sell(xs_, later)
+check("and selling them gives you what they are worth now",
+      br_.held[xs_] == 0
+      and abs(br_.cash - before - had * ac.stock_now(xs_, later)) < 1e-6)
+nb = ac.Broker()
+nb.cash = 1.0
+check("you cannot buy past your cash", not nb.buy(xs_, t_) and not nb.held)
+check("or sell what you have not got", not ac.Broker().sell(xs_, t_))
+floor_ = "\n".join("".join(r) for r in ac.render_exchange(xven[1], br_, 80, 24, t_)[0])
+check("the trading floor fits an 80x24 window: the candles, the ticker, the account",
+      "#" in floor_ and "next price in" in floor_ and "cash" in floor_
+      and ac.STOCKS[0][0] in floor_)
+ac.ROU_GREEN, ac.ROU_RED = 1901, 1902
+gc = ac.render_exchange(xven[1], br_, 100, 30, t_)[1]
+check("green candles up and red ones down", any(1901 in r for r in gc)
+      and any(1902 in r for r in gc))
+ac.ROU_GREEN = ac.ROU_RED = 1
+xv = ac.View(xsp[0] - math.sin(xsp[2]) * 12, xsp[1] - math.cos(xsp[2]) * 12, xsp[2],
+             110, 34)
+xg = "\n".join("".join(r) for r in ac.render_street(xv, 405.0)[0])
+check("from across the street, the ticker going by over the columns",
+      "STOCK  EXCHANGE" in xg and any(sym in xg for sym, _ in ac.STOCKS))
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
