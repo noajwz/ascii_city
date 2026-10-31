@@ -10403,9 +10403,158 @@ _rig_slot = False       # % in the menu: the next pull is 777, once
 
 
 def rig_jackpot():
-    """The one way to see a jackpot without nine thousand pulls."""
-    global _rig_slot
-    _rig_slot = True
+    """The one way to see a jackpot without nine thousand pulls - or, at the
+    plinko machine, two thousand balls."""
+    global _rig_slot, _rig_plinko
+    _rig_slot = _rig_plinko = True
+
+
+# The plinko machine: a ball dropped in at the top bounces left or right off
+# every row of pegs, a fair coin each time, and lands in a bin. Most land in
+# the middle, which pays least; the edges are a long way off and pay most.
+PLINKO_ROWS = 12
+PLINKO_PAYS = [120, 14, 3, 1.5, 1, 0.6, 0.3, 0.6, 1, 1.5, 3, 14, 120]   # ~94%
+PLINKO_BETS = [1, 5, 10, 25, 100]
+PLINKO_STEP = 0.16     # seconds a row
+PLINKO_MAX = 6         # balls in the air at once
+PLINKO_HOLD = 2.5      # how long a landed ball sits in its bin
+_rig_plinko = False    # the menu's jackpot: the next ball goes all the way
+
+
+class Plinko:
+    """The machine. drop() pays the bet and lets a ball go, its bounces drawn
+    there and then and the fall a timeline from them, so where() can say
+    where it is at any moment; settle() pays each out once, as it lands."""
+
+    def __init__(self, wallet=None):
+        self.wallet = wallet if wallet is not None else Wallet()
+        self.bet = PLINKO_BETS[1]
+        self.balls = []
+        self.last = None             # (bin, win, when) of the last to land
+        self.short = False
+        self.drops = 0
+
+    def bet_up(self, step):
+        k = PLINKO_BETS.index(self.bet) if self.bet in PLINKO_BETS else 1
+        self.bet = PLINKO_BETS[max(0, min(len(PLINKO_BETS) - 1, k + step))]
+
+    def drop(self, now):
+        global _rig_plinko
+        if sum(1 for b in self.balls if not b["paid"]) >= PLINKO_MAX:
+            return False
+        self.short = not self.wallet.take(self.bet)
+        if self.short:
+            return False
+        if _rig_plinko:
+            path, _rig_plinko = [_spin_rng.random() < 0.5] * PLINKO_ROWS, False
+        else:
+            path = [_spin_rng.random() < 0.5 for _ in range(PLINKO_ROWS)]
+        self.balls.append({"t0": now, "path": path, "bet": self.bet, "paid": False})
+        self.drops += 1
+        return True
+
+    @staticmethod
+    def landed(ball, now):
+        return now - ball["t0"] >= (PLINKO_ROWS + 1) * PLINKO_STEP
+
+    @staticmethod
+    def bin_of(ball):
+        return sum(ball["path"])
+
+    @staticmethod
+    def where(ball, now):
+        """(across, down): across in pegs from the middle, down in rows from
+        the first peg - the ball sits on top of a peg at a whole row."""
+        t = (now - ball["t0"]) / PLINKO_STEP
+        r = int(min(PLINKO_ROWS, max(0.0, t)))
+        f = min(1.0, max(0.0, t - r)) if r < PLINKO_ROWS else 0.0
+        k = sum(ball["path"][:r])
+        across = k - r / 2.0
+        if r < PLINKO_ROWS:
+            across += (0.5 if ball["path"][r] else -0.5) * f
+        return across, r - 1 + f + (0.0 if f > 0.35 or r == 0 else -0.3 * (1 - f))
+
+    def settle(self, now):
+        """Pay out what has landed; returns the bins that landed just now."""
+        hit = []
+        for b in self.balls:
+            if not b["paid"] and self.landed(b, now):
+                b["paid"] = True
+                k = self.bin_of(b)
+                win = b["bet"] * PLINKO_PAYS[k]
+                self.wallet.give(win)
+                self.last = (k, win, now)
+                hit.append(k)
+        self.balls = [b for b in self.balls if not b["paid"]
+                      or now - b["t0"] < (PLINKO_ROWS + 1) * PLINKO_STEP + PLINKO_HOLD]
+        return hit
+
+
+PLINKO_TALL = PLINKO_ROWS + 4    # rows the board needs, without its title
+PLINKO_SX = 4          # columns between pegs: even, so a half step is a column,
+                       # and wide enough for "120" under its bin
+PLINKO_WIDE = (PLINKO_ROWS + 3) * PLINKO_SX + 2
+
+
+def plinko_colour(k):
+    edge = abs(k - PLINKO_ROWS // 2)
+    return (GOLD if edge == 6 else ROU_RED if edge == 5 else EMBER_HOT if edge >= 3
+            else CURB)
+
+
+def draw_plinko(ch, co, pk, cx, y0, y1, now):
+    """The board between rows y0 and y1, its middle at column cx: the slot at
+    the top, the pegs in a triangle, the bins along the bottom with what each
+    pays under it - lit hotter towards the edges - the balls on their way down,
+    and the bet and the last win."""
+    height, width = len(ch), len(ch[0])
+    sx = PLINKO_SX
+    title = y1 - y0 + 1 >= PLINKO_TALL + 1
+    top = y0 + (1 if title else 0)
+    peg0 = top + 1
+    bins = peg0 + PLINKO_ROWS
+    if title:
+        _text(ch, co, y0, int(cx) - 5, "P L I N K O", GOLD)
+
+    def col(across):
+        return int(round(cx + across * sx))
+
+    _text(ch, co, top, col(0) - 1, "\\v/", GOLD_DIM)
+    for r in range(PLINKO_ROWS):
+        for j in range(-1, r + 2):
+            x = col(j - r / 2.0)
+            if 0 <= x < width:
+                ch[peg0 + r][x], co[peg0 + r][x] = ".", CURB
+    mid = PLINKO_ROWS // 2
+    fresh = pk.last is not None and now - pk.last[2] < PLINKO_HOLD
+    for k in range(PLINKO_ROWS + 1):
+        a = k - mid
+        for side in (-0.5, 0.5):
+            x = col(a + side)
+            if 0 <= x < width:
+                ch[bins][x], co[bins][x] = "|", GOLD_DIM
+        label = "%g" % PLINKO_PAYS[k]
+        attr = plinko_colour(k)
+        if fresh and pk.last[0] == k and int(now * 8) % 2:
+            attr = FLASH
+        _text(ch, co, bins + 1, col(a) - (len(label) - 1) // 2, label, attr)
+    for b in pk.balls:
+        across, down = Plinko.where(b, now)
+        x, y = col(across), peg0 + int(round(down))
+        if Plinko.landed(b, now):
+            y = bins
+        if 0 <= x < width and 0 <= y < height:
+            ch[y][x], co[y][x] = "O", FLASH
+    if pk.short:
+        say = "NOT ENOUGH"
+    elif fresh:
+        k, win, _ = pk.last
+        say = "x%g  +$%s" % (PLINKO_PAYS[k], ("%.2f" % win).rstrip("0").rstrip("."))
+    else:
+        say = "p drops a ball"
+    line = "BET $%d    %s    $%d" % (pk.bet, say, int(pk.wallet.money))
+    _text(ch, co, bins + 2, int(cx - len(line) / 2), line,
+          GOLD if fresh and abs(pk.last[0] - mid) >= 5 else GOLD_DIM)
 
 
 class Slot:
@@ -10786,7 +10935,8 @@ def _big(ch, co, y, x, s, attr):
             col += 2
 
 
-def render_casino_room(spin, width, height, now, slot=None, table=None, party=False):
+def render_casino_room(spin, width, height, now, slot=None, table=None, party=False,
+                       plinko=None):
     """Inside.
 
     The wheel is the middle of a room rather than the whole screen: a ceiling
@@ -10826,8 +10976,11 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
     # The slot machine stands to the right of the wheel and the blackjack
     # table to its left when there is room for them; the wheel moves over
     # and gives up some radius so that all three fit.
-    machine = slot is not None and width >= 62 and height >= SLOT_H + 3
-    cards = roomy and table is not None and width >= 92
+    # With the plinko machine up (`plinko`), it takes the wheel's place and
+    # the slot machine stands aside for it.
+    machine = (slot is not None and plinko is None and width >= 62
+               and height >= SLOT_H + 3)
+    cards = roomy and table is not None and width >= (92 if plinko is None else 108)
     left = 43.0 if cards else 1.0
     right = width - SLOT_W - 3.0 if machine else width - 2.0
     if machine or cards:
@@ -10839,6 +10992,21 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
                   paytable=sy + SLOT_H + 8 < height)
     if cards:
         draw_blackjack(ch, co, table, 1, band_top + 1, now)
+
+    if plinko is not None:
+        y1 = floor - 2
+        y0 = band_top if roomy else top
+        if y1 - y0 + 1 < PLINKO_TALL or right - left < PLINKO_WIDE:
+            last = plinko.last
+            _text(ch, co, height // 2, 1, "PLINKO: " + (
+                "x%g" % PLINKO_PAYS[last[0]] if last else "p drops a ball"), GOLD)
+            _text(ch, co, min(height - 1, height // 2 + 1), 1, "bet $%d" % plinko.bet,
+                  GOLD_DIM)
+        else:
+            y0 += max(0, (y1 - y0 - PLINKO_TALL) // 2)     # in the middle
+            draw_plinko(ch, co, plinko, cx, y0, y1, now)
+        _text(ch, co, floor, max(1, int(cx) - 10), "-- the way out (s) --", GOLD_DIM)
+        return ch, co
 
     if rx < 12 or ry < 3.5:
         say = ("%s: %d" % (spin.name, spin.result) if spin.settled(now)
@@ -12896,7 +13064,7 @@ def draw_cheats(ch, co, note):
     gap = [("", "")]
     left = groups["NIGHTLIFE"] + [("/", "closing time")] + gap + groups["FUN"] \
         + gap + groups["EAT"]
-    middle = groups["MONEY"] + [("+", "+$1000"), ("%", "777 next pull")]
+    middle = groups["MONEY"] + [("+", "+$1000"), ("%", "jackpot next")]
     middle += gap + [("", "PARTS OF TOWN")] + [(d["key"], d["name"]) for d in DISTRICTS]
     right = groups["AROUND TOWN"] + gap + groups["OUT OF TOWN"] + gap + groups["VIEWS"]
     sky = [("", "WEATHER & SKY"),
@@ -13893,7 +14061,9 @@ ARROWS = (curses.KEY_LEFT, curses.KEY_RIGHT, curses.KEY_UP, curses.KEY_DOWN)
 SKYLINE_HUD = " x=%-6d %s  tab view  arrows/hl walk  HL run  space wander  ` cheats "
 STREET_HUD = " %d,%d %s, %s%s  ws walk  ad turn  ,. step  tab view  ` cheats "
 ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
-                " blackjack  -  s walks out  -  q quit ")
+                " blackjack  o plinko  -  s walks out  -  q quit ")
+PLINKO_HUD = (" at the plinko machine, %s casino, %d,%d  -  p drops a ball  +/- bet"
+              "  o back to the wheel  -  s walks out ")
 RAVE_HUD = " inside the club at %d,%d  -  s walks back out  -  q quit "
 RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
@@ -13942,6 +14112,8 @@ def main(stdscr):
     wallet = Wallet()           # your money: one balance for the whole city
     visit, visit_ok = None, True    # what you have paid to be in, this visit
     slot = Slot(wallet)         # the machine beside the wheel
+    plinko = Plinko(wallet)     # and the plinko machine, o to go over to it
+    at_plinko = False
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
     arms = []                   # what the claw machines have given you
@@ -14007,7 +14179,7 @@ def main(stdscr):
                     note = "+$1000"
                 elif key == ord("%"):
                     rig_jackpot()
-                    note = "the next pull is 777"
+                    note = "next pull 777, next plinko ball to the edge"
                 elif key == ord("/"):
                     skip_to_closing(now)
                     note = "closing time - k for a club"
@@ -14073,6 +14245,14 @@ def main(stdscr):
                 sky_v = fwd = side = spin = 0.0
             elif key == ord(" ") and not at_arcade:
                 autopilot = not autopilot
+            elif wheel is not None and key in (ord("o"), ord("O")):
+                at_plinko = not at_plinko
+            elif wheel is not None and at_plinko and key in (ord("p"), ord("P")):
+                plinko.drop(now)
+            elif wheel is not None and at_plinko and key in (ord("+"), ord("=")):
+                plinko.bet_up(1)
+            elif wheel is not None and at_plinko and key in (ord("-"), ord("_")):
+                plinko.bet_up(-1)
             elif wheel is not None and key in (ord("p"), ord("P")):
                 if slot.t0 is None or slot.settled(now):
                     slot.settle(now)
@@ -14371,13 +14551,18 @@ def main(stdscr):
         elif wheel is not None:
             slot.settle(now)
             table.update(now)
+            if any(abs(k_ - PLINKO_ROWS // 2) == PLINKO_ROWS // 2
+                   for k_ in plinko.settle(now)):
+                hit_jackpot(now, venue[1])      # all the way to the edge
             if slot.payout(now) == "JACKPOT" and slot.pulls != jackpot_pull:
                 # 777: this casino goes up in gold, inside and out.
                 hit_jackpot(now, venue[1])
                 jackpot_pull = slot.pulls
             ch, co = render_casino_room(wheel, width, height, now, slot, table,
-                                        jackpot_on(now, venue[1]))
-            hud = ROULETTE_HUD % (wheel.name, cam_x, cam_z)
+                                        jackpot_on(now, venue[1]),
+                                        plinko if at_plinko else None)
+            hud = (PLINKO_HUD if at_plinko else ROULETTE_HUD) % (wheel.name, cam_x,
+                                                                 cam_z)
         elif venue is not None and venue[0] in FEES and not visit_ok:
             ch, co = render_turned_away(venue[0], width, height, now)
             hud = TURNED_HUD

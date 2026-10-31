@@ -33,7 +33,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   city switching off sign by sign as the sky pales. Once in a great while, something else entirely.
 - **Places you can go into** — a casino (a blade sign up the corner, a red carpet and a doorman,
   and the whole building in gold when somebody hits 777) with a roulette wheel that spins
-  honestly, a slot machine and a blackjack table that deals straight, a club
+  honestly, a slot machine, a blackjack table that deals straight and a
+  plinko machine with 120x on its outside edges, a club
   with a rave going
   on, manholes in the streets, some of them steaming, with somebody living down one
   of them, steaming ramen shops down the lit lanes, a neon bowl over the door, where you can sit

@@ -112,6 +112,9 @@ ok &= report("the arcade: choose, play, play keys, leave, walk out", *run(
 ok &= report("the casino: 777 next pull, pull, walk out into the gold", *run(
     [(b"`", .5), (b"c", 1.0)] + IN + [(b"`", .5), (b"%", .4), (b"`", .3), (b"p", 3.5),
      (b"s", .6), (b"s", .6), (b"s", 1.0)], cols=100, rows=30))
+ok &= report("the plinko machine: over to it, bet up, drop three, back, out", *run(
+    [(b"`", .5), (b"c", 1.0)] + IN + [(b"o", .4), (b"+", .2), (b"p", .2), (b"p", .2),
+     (b"p", 3.0), (b"o", .4), (b"s", .6), (b"s", .6)], cols=100, rows=30))
 ok &= report("closing time at the club, outside and in", *run(
     [(b"`", .5), (b"/", .4), (b"k", 4.5)] + IN + [(b"s", .6)], cols=100, rows=30))
 ok &= report("the strength tester: swing, swing again, walk out", *run(
