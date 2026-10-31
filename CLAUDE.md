@@ -1294,6 +1294,28 @@ seconds and leave two (`sewer_slices()`), and `p` takes one — until the box is
 names. `x` in the menu stands you seven units back along the street from a steaming one — nearer
 and the cover is under the bottom of the screen, since the camera cannot look down.
 
+## The temple, and the word of God
+
+`TEMPLE_ODDS` on its own hash, a street front required, never in the financial district, and
+`TEMPLE_H` tall whatever its district — low, so the rose window over the door is in sight from
+across the road, which is the one view a street guarantees. `draw_temple_column()` is pale stone
+with a buttress at every bay's edge and between them tall **pointed windows of stained glass**,
+lit from inside by candles: panes in the city's neon colours with the lead between, flickering,
+narrowing to a point at the top. The front comes up into a gable (the roofline is `/`, `^`, `\`
+over the door face, and the column returns that higher roof, so it occludes properly). The middle
+bay of the front is `draw_temple_front()`: the **rose window** — a ring of stone, twelve spokes of
+glass turning their colours slowly, a gold eye in the middle — the arched door standing open on
+candlelight, a candle either side, and the name over it (`TEMPLE_NAMES`). `*` in the menu stands
+you across the street from one, the way the casino's does; a few steps in is the door.
+
+Inside (`render_temple()`): the vault, the pillars going away down the nave with stained glass
+between them, pews either side of the aisle, candles along the altar — and on the altar a
+terminal, on which `g` asks for **the word of God**. It is Terry A. Davis's oracle from TempleOS,
+and done his way: the random number is the time since the last time you asked, to the
+microsecond (`oracle["last"]` in `main()`), so nobody chooses it, not even the program, and
+`god_words()` turns it into `GOD_SAY` words off `GOD_WORDS` — a list of the city's own, not his.
+The last few utterances stay on the screen, the newest bright. Free to go in; nothing to pay.
+
 ## The sky deck
 
 One building `TOWER_MIN` tall in `TOWER_ODDS` with a street front has a lobby — `SKY DECK` over a

@@ -36,7 +36,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   honestly, a slot machine, a blackjack table that deals straight and a
   plinko machine with 120x on its outside edges, horse races to bet on, a club
   with a rave going
-  on, manholes in the streets, some of them steaming, with somebody living down one
+  on, a temple with stained glass and a rose window, where a terminal on the altar
+  gives you the word of God the way TempleOS did, manholes in the streets, some of them steaming, with somebody living down one
   of them, steaming ramen shops down the lit lanes, a neon bowl over the door, where you can sit
   and wait for your bowl, a cinema
   showing a black-and-white film or a full-colour action picture, with the title up over the doors in big lit letters and
