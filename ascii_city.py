@@ -10650,8 +10650,8 @@ _rig_slot = False       # % in the menu: the next pull is 777, once
 def rig_jackpot():
     """The one way to see a jackpot without nine thousand pulls - or, at the
     plinko machine, two thousand balls."""
-    global _rig_slot, _rig_plinko, _rig_race
-    _rig_slot = _rig_plinko = _rig_race = True
+    global _rig_slot, _rig_plinko, _rig_race, _rig_flyer
+    _rig_slot = _rig_plinko = _rig_race = _rig_flyer = True
 
 
 # The plinko machine: a ball dropped in at the top bounces left or right off
@@ -10993,6 +10993,246 @@ def draw_races(ch, co, rc, x0, x1, y0, y1, now):
 
 RACE_WIDE = 64         # columns the track needs
 RACE_TALL = RACE_FIELD + 5
+
+
+# High Flyer, the crash game: a plane takes off and the multiplier climbs
+# with it, faster and faster, until it flies away. Cash out before it does.
+# Where it goes is drawn when the round starts - the chance it gets past m is
+# FLY_BACK / m - so the game pays back FLY_BACK whatever you do, and a round
+# in 1/(1-FLY_BACK) never leaves the ground.
+FLY_BET = 7.0          # seconds to get a bet on
+FLY_GROW = 0.075       # the multiplier is e to this times the seconds flown
+FLY_BACK = 0.97
+FLY_TOP = 1000.0       # nothing flies further
+FLY_SHOW = 4.0         # how long the result stays up before the next round
+FLY_STAKES = [1, 5, 10, 25, 100]
+FLY_AUTO = [None, 1.5, 2.0, 3.0, 5.0, 10.0, 25.0]
+FLY_PEOPLE = ["ROXY", "DEALER JOE", "MR. LUCKY", "THE KID", "VEGAS VAL", "BIG SAL",
+              "LOU", "MADAME X"]
+_rig_flyer = False     # the menu's jackpot: the next one goes to a hundred
+
+
+def fly_mult(t):
+    """The multiplier t seconds after take-off, to the cent, as the board has it."""
+    return int(100.0 * math.exp(FLY_GROW * max(0.0, t))) / 100.0
+
+
+def fly_time(m):
+    """How long after take-off the multiplier reaches m."""
+    return math.log(max(1.0, m)) / FLY_GROW
+
+
+class Flyer:
+    """The game. update() starts each round, cashes out an automatic target
+    when it is reached, and settles the round when the plane has gone;
+    press() puts the bet on while the bets are open and cashes out while it
+    flies."""
+
+    def __init__(self, wallet=None):
+        self.wallet = wallet if wallet is not None else Wallet()
+        self.stake = FLY_STAKES[1]
+        self.auto = None
+        self.round = None
+        self.number = 0
+        self.history = []            # where the last few went
+        self.last = None             # (what you won or lost, at what, when)
+
+    def stake_up(self, step):
+        k = FLY_STAKES.index(self.stake) if self.stake in FLY_STAKES else 1
+        self.stake = FLY_STAKES[max(0, min(len(FLY_STAKES) - 1, k + step))]
+
+    def auto_up(self):
+        self.auto = FLY_AUTO[(FLY_AUTO.index(self.auto) + 1) % len(FLY_AUTO)]
+
+    def _start(self, t0):
+        global _rig_flyer
+        if _rig_flyer:
+            crash, _rig_flyer = 100.0, False
+        else:
+            crash = int(100.0 * FLY_BACK / (1.0 - _spin_rng.random())) / 100.0
+            crash = min(FLY_TOP, max(1.0, crash))
+        others = [(name, _spin_rng.choice([1.2, 1.5, 1.8, 2.0, 2.5, 3.0, 5.0, 10.0]),
+                   _spin_rng.choice(FLY_STAKES))
+                  for name in _spin_rng.sample(FLY_PEOPLE, 4)]
+        self.number += 1
+        self.round = {"t0": t0, "crash": crash, "n": self.number, "bet": 0,
+                      "cashed": None, "others": others, "done": False}
+
+    def off(self):
+        return self.round["t0"] + FLY_BET
+
+    def gone(self):
+        """When the plane flies away."""
+        return self.off() + fly_time(self.round["crash"])
+
+    def phase(self, now):
+        if now < self.off():
+            return "bets"
+        if now < self.gone():
+            return "fly"
+        return "gone" if now < self.gone() + FLY_SHOW else "next"
+
+    def mult(self, now):
+        if now < self.off():
+            return 1.0
+        return min(self.round["crash"], fly_mult(now - self.off()))
+
+    def _cash(self, m, now):
+        r = self.round
+        r["cashed"] = m
+        win = r["bet"] * m
+        self.wallet.give(win)
+        self.last = (win, m, now)
+        return win
+
+    def update(self, now):
+        """Returns what this call paid out, so a long flight can light the place."""
+        paid = 0.0
+        if self.round is None:
+            self._start(now)
+        r = self.round
+        if r["bet"] and r["cashed"] is None and self.auto is not None \
+                and self.auto <= r["crash"] and now >= self.off() + fly_time(self.auto):
+            paid = self._cash(self.auto, now)    # the target came up
+        if not r["done"] and now >= self.gone():
+            r["done"] = True
+            self.history = (self.history + [r["crash"]])[-10:]
+            if r["bet"] and r["cashed"] is None:
+                self.last = (-r["bet"], r["crash"], now)
+        if self.phase(now) == "next":
+            self._start(now)
+        return paid
+
+    def press(self, now):
+        r = self.round
+        ph = self.phase(now)
+        if ph == "bets" and not r["bet"]:
+            if self.wallet.take(self.stake):
+                r["bet"] = self.stake
+                return "bet"
+            return "short"
+        if ph == "fly" and r["bet"] and r["cashed"] is None:
+            self._cash(self.mult(now), now)
+            return "cashed"
+        return None
+
+
+def draw_flyer(ch, co, fl, x0, x1, y0, y1, now):
+    """The board between columns x0 and x1, rows y0 to y1: the round and what
+    it is doing, the multiplier in big figures, the plane drawing its curve up
+    the graph - and the burst where it went - your bet and what it is worth,
+    the others at the table, and where the last ones went."""
+    r = fl.round
+    ph = fl.phase(now)
+    m = fl.mult(now)
+    w = x1 - x0
+    side = 22 if w >= 70 else 0                  # the others, down the right
+    gx0, gx1 = x0 + 6, x1 - side - 2
+    gy0, gy1 = y0 + 2, y1 - 4
+    head = ("HIGH FLYER  -  ROUND %d  -  BETS CLOSE IN %d"
+            % (r["n"], int(fl.off() - now) + 1) if ph == "bets"
+            else "HIGH FLYER  -  ROUND %d" % r["n"])
+    _text(ch, co, y0, x0 + (w - len(head)) // 2, head, GOLD)
+    # The axes.
+    for y in range(gy0, gy1 + 1):
+        ch[y][gx0 - 1], co[y][gx0 - 1] = "|", CURB
+    for x in range(gx0 - 1, gx1 + 1):
+        ch[gy1 + 1][x], co[gy1 + 1][x] = "-", CURB
+    t_now = max(0.0, min(now, fl.gone()) - fl.off()) if ph != "bets" else 0.0
+    t_max = max(10.0, t_now * 1.15)
+    m_max = max(2.0, m * 1.3)
+    for k_ in (1.0, 2.0, 5.0, 10.0, 50.0, 100.0, 500.0):
+        if k_ <= m_max:
+            y = int(round(gy1 - (math.log(k_) / math.log(m_max)) * (gy1 - gy0)))
+            _text(ch, co, y, gx0 - 6, ("%gx" % k_).rjust(5), GOLD_DIM)
+
+    def at(t):
+        mm = math.exp(FLY_GROW * t)
+        return (int(round(gx0 + t / t_max * (gx1 - gx0))),
+                int(round(gy1 - (math.log(mm) / math.log(m_max)) * (gy1 - gy0))))
+
+    if ph != "bets":
+        steps = max(2, int((gx1 - gx0) * t_now / t_max))
+        for k in range(steps + 1):
+            x, y = at(t_now * k / steps)
+            if gy0 <= y <= gy1:
+                ch[y][x], co[y][x] = ("*" if ph == "fly" else "."), GOLD_DIM
+        x, y = at(t_now)
+        y = max(gy0, y)
+        if ph == "fly":
+            _text(ch, co, y, x - 2, "=>", FLASH)        # the plane
+            _text(ch, co, y, x - 4, "~~", EMBER_HOT if int(now * 10) % 2 else GOLD)
+        else:
+            for k in range(14):                        # gone: a burst where it was
+                a = k * math.tau / 14
+                rr = 1.0 + (now - fl.gone()) * 3.0
+                bx = int(round(x + math.cos(a) * rr * 2))
+                by = int(round(y + math.sin(a) * rr))
+                if gy0 <= by <= gy1 and gx0 <= bx <= gx1:
+                    ch[by][bx], co[by][bx] = "*", ROU_RED
+    else:
+        _text(ch, co, gy1, gx0, "__/>", CURB)          # on the runway
+    # The figure, big.
+    fig = "%.2f" % m
+    if w >= 50 and gy1 - gy0 >= 8:
+        fw = sum(4 for _ in fig)
+        fx = (gx0 + gx1 - fw) // 2
+        attr = (ROU_RED if ph in ("gone", "next") else ROU_GREEN if ph == "fly"
+                else GOLD_DIM)
+        for dx, dy, _ in big_cells(fig):
+            if ch[gy0 + 1 + dy][fx + dx] == " ":
+                ch[gy0 + 1 + dy][fx + dx], co[gy0 + 1 + dy][fx + dx] = "#", attr
+        _text(ch, co, gy0 + 4, fx + fw, "x", attr)
+    if ph in ("gone", "next"):
+        say = " FLEW AWAY AT %.2fx " % r["crash"]
+        sx_ = (gx0 + gx1 - len(say)) // 2
+        for k in range(len(say)):
+            ch[gy0 + 7][sx_ + k] = " "
+        _text(ch, co, gy0 + 7, sx_, say, ROU_RED)
+    # Your bet.
+    if r["cashed"] is not None:
+        mine = "CASHED OUT AT %.2fx  +$%.2f" % (r["cashed"], r["bet"] * r["cashed"])
+        attr = GOLD
+    elif r["bet"] and ph == "fly":
+        mine = "YOUR $%d IS WORTH $%.2f  -  p CASHES OUT" % (r["bet"], r["bet"] * m)
+        attr = FLASH
+    elif r["bet"] and ph in ("gone", "next"):
+        mine, attr = "LOST $%d" % r["bet"], ROU_RED
+    elif r["bet"]:
+        mine, attr = "$%d ON  -  WAIT FOR TAKE-OFF" % r["bet"], GOLD_DIM
+    elif ph == "bets":
+        mine, attr = "p BETS $%d  (+/- the stake)" % fl.stake, HUD
+    else:
+        mine, attr = "NEXT ROUND SOON", GOLD_DIM
+    auto = "AUTO %gx" % fl.auto if fl.auto else "AUTO OFF"
+    _text(ch, co, y1 - 2, x0 + 2, mine, attr)
+    _text(ch, co, y1 - 2, x1 - side - len(auto) - 4, auto + " (u)", GOLD_DIM)
+    # Where the last ones went.
+    hx = x0 + 2
+    for c_ in fl.history[-8:]:
+        lab = "%.2fx" % c_
+        _text(ch, co, y1, hx, lab, ROU_RED if c_ < 2.0 else GOLD if c_ >= 10.0
+              else ROU_GREEN)
+        hx += len(lab) + 2
+    # The others at the table.
+    if side:
+        sx = x1 - side + 1
+        _text(ch, co, gy0, sx, "AT THE TABLE", GOLD_DIM)
+        for k, (name, target, stake) in enumerate(r["others"]):
+            if ph == "bets":
+                state, attr = "$%d on" % stake, CURB
+            elif target <= m:
+                state, attr = "out %.1fx" % target, ROU_GREEN
+            elif ph == "fly":
+                state, attr = "riding", HUD
+            else:
+                state, attr = "lost", ROU_RED
+            _text(ch, co, gy0 + 2 + k * 2, sx, name[:10], HUD)
+            _text(ch, co, gy0 + 3 + k * 2, sx + 1, state, attr)
+
+
+FLY_WIDE = 56
+FLY_TALL = 16
 
 
 PLINKO_SX = 4          # columns between pegs: even, so a half step is a column,
@@ -11456,7 +11696,7 @@ def _big(ch, co, y, x, s, attr):
 
 
 def render_casino_room(spin, width, height, now, slot=None, table=None, party=False,
-                       plinko=None, races=None):
+                       plinko=None, races=None, flyer=None):
     """Inside.
 
     The wheel is the middle of a room rather than the whole screen: a ceiling
@@ -11498,9 +11738,9 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
     # and gives up some radius so that all three fit.
     # With the plinko machine up (`plinko`), it takes the wheel's place and
     # the slot machine stands aside for it.
-    machine = (slot is not None and plinko is None and races is None and width >= 62
-               and height >= SLOT_H + 3)
-    cards = (roomy and table is not None and races is None
+    machine = (slot is not None and plinko is None and races is None and flyer is None
+               and width >= 62 and height >= SLOT_H + 3)
+    cards = (roomy and table is not None and races is None and flyer is None
              and width >= (92 if plinko is None else 108))
     left = 43.0 if cards else 1.0
     right = width - SLOT_W - 3.0 if machine else width - 2.0
@@ -11513,6 +11753,26 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
                   paytable=sy + SLOT_H + 8 < height)
     if cards:
         draw_blackjack(ch, co, table, 1, band_top + 1, now)
+
+    if flyer is not None:
+        y1 = floor - 2
+        y0 = band_top if roomy else top
+        if roomy and y1 - y0 + 1 < FLY_TALL:
+            y0 = top + 1
+            for y in range(y0, y1 + 1):
+                for x in range(int(left), int(right) + 1):
+                    ch[y][x], co[y][x] = " ", 0
+        if y1 - y0 + 1 < FLY_TALL or right - left < FLY_WIDE:
+            ph = flyer.phase(now)
+            _text(ch, co, height // 2, 1, "HIGH FLYER: " + (
+                "bets open" if ph == "bets" else "%.2fx" % flyer.mult(now)
+                if ph == "fly" else "flew away at %.2fx" % flyer.round["crash"]), GOLD)
+            _text(ch, co, min(height - 1, height // 2 + 1), 1,
+                  "p bets / cashes out, stake $%d" % flyer.stake, GOLD_DIM)
+        else:
+            draw_flyer(ch, co, flyer, int(left) + 1, int(right), y0, y1, now)
+        _text(ch, co, floor, max(1, int(cx) - 10), "-- the way out (s) --", GOLD_DIM)
+        return ch, co
 
     if races is not None:
         y1 = floor - 2
@@ -15129,7 +15389,10 @@ SKYLINE_HUD = " x=%-6d %s  tab view  arrows/hl walk  HL run  space wander  ` che
 STREET_HUD = " %d,%d %s, %s%s  ws walk  ad turn  ,. step  t taxi  tab view  ` cheats "
 TAXI_HUD = " in a taxi  -  %s "
 ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
-                " blackjack  o plinko  r races  -  s walks out  -  q quit ")
+                " blackjack  o plinko  r races  f high flyer  -  s walks out"
+                "  -  q quit ")
+FLYER_HUD = (" at High Flyer, %s casino, %d,%d  -  p bets, then cashes out  +/- stake"
+             "  u auto  -  f back to the wheel  -  s walks out ")
 RACES_HUD = (" at the races, %s casino, %d,%d  -  1-6 bet on a horse  +/- stake"
              "  r back to the wheel  -  s walks out ")
 PLINKO_HUD = (" at the plinko machine, %s casino, %d,%d  -  p drops a ball  +/- bet"
@@ -15194,6 +15457,8 @@ def main(stdscr):
     at_plinko = False
     races = Races(wallet)       # and the race track, r
     at_races = False
+    flyer = Flyer(wallet)       # and High Flyer, f
+    at_flyer = False
     # The temple's terminal: the verses so far, when the last word was asked
     # for (to the nanosecond - it is what picks the next) and when.
     oracle = {"said": [], "last_ns": time.perf_counter_ns(), "at": -1e9, "sung": None}
@@ -15397,9 +15662,24 @@ def main(stdscr):
                 oracle["said"] = said_[-20:]
                 oracle["at"], oracle["sung"] = now, word_
             elif wheel is not None and key in (ord("o"), ord("O")):
-                at_plinko, at_races = not at_plinko, False
+                at_plinko, at_races, at_flyer = not at_plinko, False, False
             elif wheel is not None and key in (ord("r"), ord("R")):
-                at_races, at_plinko = not at_races, False
+                at_races, at_plinko, at_flyer = not at_races, False, False
+            elif wheel is not None and key in (ord("f"), ord("F")):
+                at_flyer, at_plinko, at_races = not at_flyer, False, False
+            elif wheel is not None and at_flyer and key in (ord("p"), ord("P")):
+                did_ = flyer.press(now)
+                if did_ == "short":
+                    note, note_at = "not enough for that stake", now
+                elif (did_ == "cashed" and flyer.last[1] >= 20 and venue is not None
+                      and venue[0] == "casino"):
+                    hit_jackpot(now, venue[1])  # rode it all the way up
+            elif wheel is not None and at_flyer and key in (ord("+"), ord("=")):
+                flyer.stake_up(1)
+            elif wheel is not None and at_flyer and key in (ord("-"), ord("_")):
+                flyer.stake_up(-1)
+            elif wheel is not None and at_flyer and key in (ord("u"), ord("U")):
+                flyer.auto_up()
             elif (wheel is not None and at_races
                   and ord("1") <= key < ord("1") + RACE_FIELD):
                 races.bet(key - ord("1"), now)
@@ -15748,6 +16028,8 @@ def main(stdscr):
             paid_ = races.update(now)
             if paid_ and races.last[1] >= 20:
                 hit_jackpot(now, venue[1])      # a long shot came in
+            if flyer.update(now) and flyer.last[1] >= 20:
+                hit_jackpot(now, venue[1])      # rode it all the way up
             if slot.payout(now) == "JACKPOT" and slot.pulls != jackpot_pull:
                 # 777: this casino goes up in gold, inside and out.
                 hit_jackpot(now, venue[1])
@@ -15755,9 +16037,11 @@ def main(stdscr):
             ch, co = render_casino_room(wheel, width, height, now, slot, table,
                                         jackpot_on(now, venue[1]),
                                         plinko if at_plinko else None,
-                                        races if at_races else None)
+                                        races if at_races else None,
+                                        flyer if at_flyer else None)
             hud = (PLINKO_HUD if at_plinko else RACES_HUD if at_races
-                   else ROULETTE_HUD) % (wheel.name, cam_x, cam_z)
+                   else FLYER_HUD if at_flyer else ROULETTE_HUD) % (wheel.name, cam_x,
+                                                                   cam_z)
         elif venue is not None and venue[0] in FEES and not visit_ok:
             ch, co = render_turned_away(venue[0], width, height, now)
             hud = TURNED_HUD

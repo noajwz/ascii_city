@@ -122,6 +122,9 @@ ok &= report("plinko, bigger and harder: rows up, high risk, drop, rows down", *
     [(b"`", .5), (b"c", 1.0)] + IN + [(b"o", .4), (b"]", .2), (b"]", .2), (b"3", .2),
      (b"p", 3.5), (b"[", .3), (b"1", .3), (b"p", 2.5), (b"o", .4), (b"s", .6),
      (b"s", .6)], cols=100, rows=30))
+ok &= report("high flyer: over to it, stake up, bet, auto, watch, cash out, back", *run(
+    [(b"`", .5), (b"c", 1.0)] + IN + [(b"f", .4), (b"+", .2), (b"p", .3), (b"u", .2),
+     (b"u", 9.0), (b"p", .4), (b"f", .4), (b"s", .6), (b"s", .6)], cols=100, rows=30))
 ok &= report("closing time at the club, outside and in", *run(
     [(b"`", .5), (b"/", .4), (b"k", 4.5)] + IN + [(b"s", .6)], cols=100, rows=30))
 ok &= report("the strength tester: swing, swing again, walk out", *run(
