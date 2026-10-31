@@ -10405,8 +10405,8 @@ _rig_slot = False       # % in the menu: the next pull is 777, once
 def rig_jackpot():
     """The one way to see a jackpot without nine thousand pulls - or, at the
     plinko machine, two thousand balls."""
-    global _rig_slot, _rig_plinko
-    _rig_slot = _rig_plinko = True
+    global _rig_slot, _rig_plinko, _rig_race
+    _rig_slot = _rig_plinko = _rig_race = True
 
 
 # The plinko machine: a ball dropped in at the top bounces left or right off
@@ -10488,6 +10488,196 @@ class Plinko:
         self.balls = [b for b in self.balls if not b["paid"]
                       or now - b["t0"] < (PLINKO_ROWS + 1) * PLINKO_STEP + PLINKO_HOLD]
         return hit
+
+
+# The races: six horses round the track every RACE_CYCLE seconds. Each has a
+# real chance of winning, drawn when the race is made up, and the odds on the
+# board are that chance less the house's cut, rounded down onto the ladder
+# a bookmaker uses - so the race is honest and the board is fair, and the
+# house still wins slowly.
+RACE_BET = 15.0        # seconds to get your bets on
+RACE_RUN = 14.0        # the race
+RACE_SHOW = 6.0        # the result, before the next card goes up
+RACE_CYCLE = RACE_BET + RACE_RUN + RACE_SHOW
+RACE_FIELD = 6
+RACE_CUT = 0.98        # a fair price times this, rounded down onto the ladder:
+                       # about 87% back, since the rounding takes its share
+RACE_LADDER = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 25, 33, 50]
+RACE_STAKES = [1, 5, 10, 25, 100]
+RACE_NAMES = ["NEON DANCER", "LAST TRAIN", "RAIN CHECK", "MIDNIGHT OIL", "BACK ALLEY",
+              "HIGH VOLTAGE", "SODIUM LAMP", "PAPER LANTERN", "SLOW BURN", "NIGHT BUS",
+              "DOUBLE DOWN", "BLUE HOUR", "WET ASPHALT", "OPEN ALL HOURS",
+              "FIRE ESCAPE",
+              "STATIC", "ROOF PARTY", "STEAM VENT"]
+HORSE = ("-/\\o>", "-\\/o>")   # galloping, the jockey in the silks colour
+_rig_race = False      # the menu's jackpot: the longest shot wins the next one
+
+
+class Races:
+    """The track. update() puts up the next card when the last one is over,
+    draws the finishing order at the off, and pays the winners once at the
+    line; progress() is where a horse is, a timeline solved from the order
+    so the one drawn to win does - with the lead changing on the way."""
+
+    def __init__(self, wallet=None):
+        self.wallet = wallet if wallet is not None else Wallet()
+        self.stake = RACE_STAKES[1]
+        self.race = None
+        self.number = 0
+        self.last = None             # (winner's name, odds, what you won)
+        self.note = ""
+
+    def stake_up(self, step):
+        k = RACE_STAKES.index(self.stake) if self.stake in RACE_STAKES else 1
+        self.stake = RACE_STAKES[max(0, min(len(RACE_STAKES) - 1, k + step))]
+
+    def _card(self, t0):
+        names = _spin_rng.sample(RACE_NAMES, RACE_FIELD)
+        w = [_spin_rng.lognormvariate(0.0, 0.7) for _ in range(RACE_FIELD)]
+        total = sum(w)
+        horses = []
+        for k in range(RACE_FIELD):
+            q = w[k] / total
+            fair = RACE_CUT / q - 1.0
+            odds = max([o for o in RACE_LADDER if o <= fair] or [RACE_LADDER[0]])
+            horses.append({"name": names[k], "q": q, "odds": odds,
+                           "silk": NEON[(k * 3) % len(NEON)][0] if NEON else 0,
+                           "phase": _spin_rng.random() * math.tau})
+        self.number += 1
+        self.race = {"t0": t0, "horses": horses, "order": None, "bets": {},
+                     "paid": False, "n": self.number}
+
+    def phase(self, now):
+        dt = now - self.race["t0"]
+        return ("bets" if dt < RACE_BET else "run" if dt < RACE_BET + RACE_RUN
+                else "show" if dt < RACE_CYCLE else "next")
+
+    def update(self, now):
+        """Returns what this call paid out, so a long shot can light the place."""
+        global _rig_race
+        if self.race is None:
+            self._card(now)
+        elif self.phase(now) == "next":
+            self._card(now)
+        ph = self.phase(now)
+        hs = self.race["horses"]
+        if ph != "bets" and self.race["order"] is None:
+            left = list(range(RACE_FIELD))
+            order = []
+            if _rig_race:
+                _rig_race = False
+                long_ = max(left, key=lambda k: hs[k]["odds"])
+                order.append(long_)
+                left.remove(long_)
+            while left:                      # by their chances, one place at a time
+                k = _spin_rng.choices(left, [hs[k]["q"] for k in left])[0]
+                order.append(k)
+                left.remove(k)
+            self.race["order"] = order
+        if ph == "show" and not self.race["paid"]:
+            self.race["paid"] = True
+            win = self.race["order"][0]
+            got = self.race["bets"].get(win, 0) * (hs[win]["odds"] + 1)
+            self.wallet.give(got)
+            self.last = (hs[win]["name"], hs[win]["odds"], got)
+            return got
+        return 0
+
+    def bet(self, k, now):
+        if self.race is None or not 0 <= k < RACE_FIELD:
+            return False
+        if self.phase(now) != "bets":
+            self.note = "bets are closed"
+            return False
+        if not self.wallet.take(self.stake):
+            self.note = "not enough"
+            return False
+        self.race["bets"][k] = self.race["bets"].get(k, 0) + self.stake
+        self.note = "$%d on %s" % (self.stake, self.race["horses"][k]["name"].lower())
+        return True
+
+    def progress(self, k, now):
+        """How far round, 0 at the gate and 1 at the line."""
+        if self.race["order"] is None:
+            return 0.0
+        u = (now - self.race["t0"] - RACE_BET) / RACE_RUN
+        if u <= 0.0:
+            return 0.0
+        rank = self.race["order"].index(k)
+        b = min(1.0, u / (0.86 + 0.025 * rank))
+        if b >= 1.0:
+            return 1.0
+        h = self.race["horses"][k]
+        wob = 0.05 * math.sin(math.pi * b) * math.sin(u * 4.5 + h["phase"])
+        return min(0.999, max(0.0, b + wob))
+
+
+def draw_races(ch, co, rc, x0, x1, y0, y1, now):
+    """The board and the track between columns x0 and x1, rows y0 to y1: what
+    race this is and how long to the off, a lane a horse - its number, name,
+    odds and your money on it to the left, the horse galloping along the turf
+    to the chequered line - what the commentator is saying, and how you did."""
+    race = rc.race
+    hs = race["horses"]
+    ph = rc.phase(now)
+    dt = now - race["t0"]
+    head = ("RACE %d  -  BETS CLOSE IN %d" % (race["n"], int(RACE_BET - dt) + 1)
+            if ph == "bets" else "RACE %d  -  AND THEY'RE OFF!" % race["n"]
+            if ph == "run" else "RACE %d  -  RESULT" % race["n"])
+    _text(ch, co, y0, int((x0 + x1 - len(head)) / 2), head,
+          GOLD if ph != "bets" or int(now * 2) % 2 else GOLD_DIM)
+    ts, te = x0 + 29, x1 - 2             # the turf, and the line at the end
+    top = y0 + 2
+    for x in range(ts - 1, te + 2):
+        ch[top - 1][x], co[top - 1][x] = "=", CURB
+        ch[top + RACE_FIELD][x], co[top + RACE_FIELD][x] = "=", CURB
+    for k, h in enumerate(hs):
+        y = top + k
+        _text(ch, co, y, x0, "%d" % (k + 1), GOLD)
+        _text(ch, co, y, x0 + 2, h["name"][:14], h["silk"])
+        _text(ch, co, y, x0 + 17, "%d/1" % h["odds"], GOLD_DIM)
+        mine = race["bets"].get(k, 0)
+        if mine:
+            _text(ch, co, y, x0 + 23, "$%d" % mine, GOLD)
+        for x in range(ts, te):
+            if (x + int(now * 12) * (ph == "run")) % 6 == 0:
+                ch[y][x], co[y][x] = ".", GRASS
+        ch[y][te], co[y][te] = ("#" if (y + int(now * 4)) % 2 else ":"), STAR
+        f = rc.progress(k, now)
+        if f >= 1.0:                     # past the post: where it came
+            _text(ch, co, y, te + 1, "%d" % (race["order"].index(k) + 1),
+                  GOLD if race["order"][0] == k else GOLD_DIM)
+        hx = ts + int(round(f * (te - ts - len(HORSE[0]))))
+        frame = HORSE[int(now * 10 + k) % 2] if ph == "run" and f < 1.0 else HORSE[0]
+        win = ph == "show" and race["order"][0] == k
+        for j, c in enumerate(frame):
+            silk = FLASH if win and int(now * 6) % 2 else h["silk"]
+            _text(ch, co, y, hx + j, c, silk if c == "o" else BARK)
+    # The commentator.
+    say = ""
+    if ph == "bets":
+        fav = min(range(RACE_FIELD), key=lambda k: hs[k]["odds"])
+        say = "%s is the favourite at %d/1. 1-%d bets, +/- the stake ($%d)" % (
+            hs[fav]["name"].title(), hs[fav]["odds"], RACE_FIELD, rc.stake)
+    elif ph == "run":
+        lead = max(range(RACE_FIELD), key=lambda k: rc.progress(k, now))
+        u = (dt - RACE_BET) / RACE_RUN
+        say = ("%s jumps out in front!" if u < 0.2 else "%s leads the field" if u < 0.6
+               else "%s in front as they come into the straight!" if u < 0.85
+               else "and it's %s at the line!") % hs[lead]["name"].title()
+    else:
+        name, odds, got = rc.last
+        say = "WINNER: %s at %d/1  -  %s" % (name, odds, "you win $%d!" % got if got
+                                             else "better luck next race")
+    _text(ch, co, top + RACE_FIELD + 1, int((x0 + x1 - len(say)) / 2), say,
+          GOLD if ph == "show" and rc.last[2] else HUD)
+    if rc.note and y1 > top + RACE_FIELD + 2:
+        _text(ch, co, top + RACE_FIELD + 2, int((x0 + x1 - len(rc.note)) / 2),
+              rc.note, GOLD_DIM)
+
+
+RACE_WIDE = 64         # columns the track needs
+RACE_TALL = RACE_FIELD + 5
 
 
 PLINKO_TALL = PLINKO_ROWS + 4    # rows the board needs, without its title
@@ -10936,7 +11126,7 @@ def _big(ch, co, y, x, s, attr):
 
 
 def render_casino_room(spin, width, height, now, slot=None, table=None, party=False,
-                       plinko=None):
+                       plinko=None, races=None):
     """Inside.
 
     The wheel is the middle of a room rather than the whole screen: a ceiling
@@ -10978,9 +11168,10 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
     # and gives up some radius so that all three fit.
     # With the plinko machine up (`plinko`), it takes the wheel's place and
     # the slot machine stands aside for it.
-    machine = (slot is not None and plinko is None and width >= 62
+    machine = (slot is not None and plinko is None and races is None and width >= 62
                and height >= SLOT_H + 3)
-    cards = roomy and table is not None and width >= (92 if plinko is None else 108)
+    cards = (roomy and table is not None and races is None
+             and width >= (92 if plinko is None else 108))
     left = 43.0 if cards else 1.0
     right = width - SLOT_W - 3.0 if machine else width - 2.0
     if machine or cards:
@@ -10992,6 +11183,23 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
                   paytable=sy + SLOT_H + 8 < height)
     if cards:
         draw_blackjack(ch, co, table, 1, band_top + 1, now)
+
+    if races is not None:
+        y1 = floor - 2
+        y0 = band_top if roomy else top
+        if y1 - y0 + 1 < RACE_TALL or right - left < RACE_WIDE:
+            race = races.race
+            ph = races.phase(now)
+            _text(ch, co, height // 2, 1, "RACE %d: %s" % (race["n"], (
+                "bets open" if ph == "bets" else "running" if ph == "run"
+                else "won by " + races.last[0].lower())), GOLD)
+            _text(ch, co, min(height - 1, height // 2 + 1), 1,
+                  "1-%d bets, stake $%d" % (RACE_FIELD, races.stake), GOLD_DIM)
+        else:
+            y0 += max(0, (y1 - y0 - RACE_TALL) // 2)
+            draw_races(ch, co, races, int(left) + 1, int(right), y0, y1, now)
+        _text(ch, co, floor, max(1, int(cx) - 10), "-- the way out (s) --", GOLD_DIM)
+        return ch, co
 
     if plinko is not None:
         y1 = floor - 2
@@ -14061,7 +14269,9 @@ ARROWS = (curses.KEY_LEFT, curses.KEY_RIGHT, curses.KEY_UP, curses.KEY_DOWN)
 SKYLINE_HUD = " x=%-6d %s  tab view  arrows/hl walk  HL run  space wander  ` cheats "
 STREET_HUD = " %d,%d %s, %s%s  ws walk  ad turn  ,. step  tab view  ` cheats "
 ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
-                " blackjack  o plinko  -  s walks out  -  q quit ")
+                " blackjack  o plinko  r races  -  s walks out  -  q quit ")
+RACES_HUD = (" at the races, %s casino, %d,%d  -  1-6 bet on a horse  +/- stake"
+             "  r back to the wheel  -  s walks out ")
 PLINKO_HUD = (" at the plinko machine, %s casino, %d,%d  -  p drops a ball  +/- bet"
               "  o back to the wheel  -  s walks out ")
 RAVE_HUD = " inside the club at %d,%d  -  s walks back out  -  q quit "
@@ -14114,6 +14324,8 @@ def main(stdscr):
     slot = Slot(wallet)         # the machine beside the wheel
     plinko = Plinko(wallet)     # and the plinko machine, o to go over to it
     at_plinko = False
+    races = Races(wallet)       # and the race track, r
+    at_races = False
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
     arms = []                   # what the claw machines have given you
@@ -14246,7 +14458,16 @@ def main(stdscr):
             elif key == ord(" ") and not at_arcade:
                 autopilot = not autopilot
             elif wheel is not None and key in (ord("o"), ord("O")):
-                at_plinko = not at_plinko
+                at_plinko, at_races = not at_plinko, False
+            elif wheel is not None and key in (ord("r"), ord("R")):
+                at_races, at_plinko = not at_races, False
+            elif (wheel is not None and at_races
+                  and ord("1") <= key < ord("1") + RACE_FIELD):
+                races.bet(key - ord("1"), now)
+            elif wheel is not None and at_races and key in (ord("+"), ord("=")):
+                races.stake_up(1)
+            elif wheel is not None and at_races and key in (ord("-"), ord("_")):
+                races.stake_up(-1)
             elif wheel is not None and at_plinko and key in (ord("p"), ord("P")):
                 plinko.drop(now)
             elif wheel is not None and at_plinko and key in (ord("+"), ord("=")):
@@ -14554,15 +14775,19 @@ def main(stdscr):
             if any(abs(k_ - PLINKO_ROWS // 2) == PLINKO_ROWS // 2
                    for k_ in plinko.settle(now)):
                 hit_jackpot(now, venue[1])      # all the way to the edge
+            paid_ = races.update(now)
+            if paid_ and races.last[1] >= 20:
+                hit_jackpot(now, venue[1])      # a long shot came in
             if slot.payout(now) == "JACKPOT" and slot.pulls != jackpot_pull:
                 # 777: this casino goes up in gold, inside and out.
                 hit_jackpot(now, venue[1])
                 jackpot_pull = slot.pulls
             ch, co = render_casino_room(wheel, width, height, now, slot, table,
                                         jackpot_on(now, venue[1]),
-                                        plinko if at_plinko else None)
-            hud = (PLINKO_HUD if at_plinko else ROULETTE_HUD) % (wheel.name, cam_x,
-                                                                 cam_z)
+                                        plinko if at_plinko else None,
+                                        races if at_races else None)
+            hud = (PLINKO_HUD if at_plinko else RACES_HUD if at_races
+                   else ROULETTE_HUD) % (wheel.name, cam_x, cam_z)
         elif venue is not None and venue[0] in FEES and not visit_ok:
             ch, co = render_turned_away(venue[0], width, height, now)
             hud = TURNED_HUD

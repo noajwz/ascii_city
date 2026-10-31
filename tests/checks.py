@@ -325,6 +325,95 @@ small_ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), 40, 14, 10.6, ac.Slot(),
 check("and a small window says what is going on instead",
       "PLINKO" in "\n".join("".join(r) for r in small_))
 
+# --- the races ---------------------------------------------------------------
+rc_ = ac.Races(ac.Wallet(10 ** 9))
+pay_ = 0.0
+wins_ = Counter()
+fav_wins = 0
+for k in range(3000):
+    rc_._card(0.0)
+    hs_ = rc_.race["horses"]
+    pay_ += sum(h_["q"] * (h_["odds"] + 1) for h_ in hs_) / ac.RACE_FIELD
+    rc_.update(ac.RACE_BET + 0.1)
+    fav_ = min(range(ac.RACE_FIELD), key=lambda j: hs_[j]["odds"])
+    fav_wins += rc_.race["order"][0] == fav_
+    wins_[hs_[rc_.race["order"][0]]["odds"] <= 3] += 1
+pay_ /= 3000
+check("the races pay back most of what goes in, not all of it", 0.8 < pay_ < 0.95,
+      "%.3f" % pay_)
+check("and the favourite wins more than its share of six",
+      fav_wins / 3000.0 > 0.25, "%.2f" % (fav_wins / 3000.0))
+rw = ac.Wallet(100)
+rc2 = ac.Races(rw)
+rc2.update(0.0)
+hs2 = rc2.race["horses"]
+rc2.stake = 10
+check("a bet goes on in the betting, out of the wallet",
+      rc2.bet(2, 1.0) and rc2.bet(2, 2.0) and rw.money == 80
+      and rc2.race["bets"] == {2: 20})
+check("and not once they are off", not rc2.bet(1, ac.RACE_BET + 0.5)
+      and rc2.note == "bets are closed")
+rc2.update(ac.RACE_BET + 0.1)
+order2 = rc2.race["order"]
+check("they are drawn in a finishing order at the off",
+      sorted(order2) == list(range(ac.RACE_FIELD)))
+mid_race = ac.RACE_BET + ac.RACE_RUN * 0.5
+check("everyone is at the gate until then, and on the way in the middle",
+      rc2.progress(0, ac.RACE_BET - 1.0) == 0.0
+      and all(0.0 < rc2.progress(j, mid_race) < 1.0 for j in range(ac.RACE_FIELD)))
+changes_ = 0
+rc5 = ac.Races(ac.Wallet())
+for k in range(200):
+    rc5._card(0.0)
+    rc5.update(ac.RACE_BET + 0.1)
+    leaders_ = {max(range(ac.RACE_FIELD),
+                    key=lambda j: rc5.progress(j, ac.RACE_BET + t))
+                for t in [x * 0.25 for x in range(4, int(ac.RACE_RUN * 4))]}
+    changes_ += len(leaders_) > 1
+check("and the lead changes hands in most races", changes_ > 120,
+      "%d of 200" % changes_)
+crossed_ = sorted(range(ac.RACE_FIELD), key=lambda j: min(
+    [t for t in [x * 0.05 for x in range(int(ac.RACE_RUN * 20) + 2)]
+     if rc2.progress(j, ac.RACE_BET + t) >= 1.0] or [99]))
+check("and they cross the line in that order", crossed_ == order2)
+back_ = []
+for t in [x * 0.05 for x in range(int(ac.RACE_RUN * 20))]:
+    a_ = [rc2.progress(j, ac.RACE_BET + t) for j in range(ac.RACE_FIELD)]
+    if back_ and any(a_[j] < back_[j] - 1e-9 for j in range(ac.RACE_FIELD)):
+        break
+    back_ = a_
+else:
+    back_ = None
+check("nobody runs backwards", back_ is None)
+got2 = rc2.update(ac.RACE_BET + ac.RACE_RUN + 0.5)
+check("winners are paid once at the result, odds plus the stake",
+      got2 == (20 * (hs2[2]["odds"] + 1) if order2[0] == 2 else 0)
+      and rw.money == 80 + got2 and rc2.update(ac.RACE_BET + ac.RACE_RUN + 1.0) == 0)
+rc2.update(ac.RACE_CYCLE + 0.1)
+check("and the next card goes up", rc2.race["n"] == 2 and rc2.phase(ac.RACE_CYCLE + 0.1)
+      == "bets" and rc2.race["bets"] == {})
+ac.rig_jackpot()
+ac._rig_slot = ac._rig_plinko = False
+rc2.update(ac.RACE_CYCLE + ac.RACE_BET + 0.1)
+hs3 = rc2.race["horses"]
+check("the menu's jackpot brings the longest shot home",
+      hs3[rc2.race["order"][0]]["odds"] == max(h_["odds"] for h_ in hs3))
+rc2.bet(0, 0.0)
+for w_, h_, t_ in ((80, 24, 5.0), (100, 30, ac.RACE_BET + 7.0), (130, 40, 30.5)):
+    rc4 = ac.Races(ac.Wallet())
+    rc4.update(0.0)
+    rc4.update(t_)
+    room_, _ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), w_, h_, t_, ac.Slot(),
+                                     ac.Blackjack(), False, None, rc4)
+    rt_ = "\n".join("".join(r) for r in room_)
+    check("the track is in the room at %dx%d" % (w_, h_),
+          "RACE 1" in rt_ and rt_.count("o>") == ac.RACE_FIELD
+          and all(h_["name"] in rt_ for h_ in rc4.race["horses"]))
+small_ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), 50, 14, 5.0, ac.Slot(),
+                               ac.Blackjack(), False, None, rc4)[0]
+check("and a small window says what is going on instead",
+      "RACE 1" in "\n".join("".join(r) for r in small_))
+
 # --- blackjack -----------------------------------------------------------
 check("aces count eleven until that busts",
       ac.hand_value([("A", "^"), ("K", "v")]) == 21
