@@ -2634,6 +2634,7 @@ class View:
         self.snow = 0.0         # how hard it is snowing
         self.dawn = 0.0         # how far into the morning, 0..1
         self.blackout = False   # is tonight the night the power goes
+        self.fog = False        # and is it a fog night
         self.cover = 0.0        # and how much is lying
         self.flash = 0.0        # how bright the lightning is this instant
         self.crown = None       # the sky decks' weather light this instant
@@ -4263,8 +4264,10 @@ def draw_sky(ch, co, v, walls, wet, now):
     # threshold, so a night can be half lost behind it.
     cloud = 1.0 if overcast_held() else (0.0 if n["alien"] else cloud_cover(now))
     clear = n["clarity"] * (1.0 - cloud) * max(0.0, 1.0 - v.dawn * 1.4)
-    if v.blackout and power_off(int(v.x / CELL + BIG) - BIG,
-                                int(v.z / CELL + BIG) - BIG, now):
+    if v.fog:
+        clear = 0.0                            # nothing up there through fog
+    elif v.blackout and power_off(int(v.x / CELL + BIG) - BIG,
+                                  int(v.z / CELL + BIG) - BIG, now):
         clear = min(1.0, clear * 1.8 + 0.2)   # no city in the sky: the stars
     # walls[3], not walls[1]: a star must clear every roof in its column, not
     # only the nearest one. The part of a far tower that shows above a nearer
@@ -7534,6 +7537,15 @@ def draw_lighthouse(ch, co, v, walls, lx, lz, now, wet):
             px, pz = lx + dx * d, lz + dz * d
             put_point(ch, co, v, walls, px, LIGHT_H + 1.0 - 0.012 * d, pz, glyph,
                       attr if d < far * 0.6 else BULB_DIM)
+            if v.fog and d < far * 0.7:
+                # In fog the beam is a thing in the air, not a line: a shaft
+                # of lit fog, widening as it goes.
+                for k in (-1, 1, -2, 2):
+                    put_point(ch, co, v, walls, px - dz * k * 0.02 * d,
+                              LIGHT_H + 1.0 - 0.012 * d + k * 0.05 * d,
+                              pz + dx * k * 0.02 * d,
+                              ":" if abs(k) == 1 else ".", attr if abs(k) == 1
+                              else BULB_DIM)
             # And where it passes over water, it lies on the water.
             if d > 8.0 and water_at(int(px / CELL + BIG) - BIG,
                                     int(pz / CELL + BIG) - BIG):
@@ -9923,6 +9935,9 @@ def night(now):
         # The power going: on its own hash, and never on the strange night,
         # when everything electric in town is busy with the sky.
         got["blackout"] = _mix(k, 3, 613) % BLACKOUT_ODDS == 0 and not got["alien"]
+        # Fog comes in off the water now and then; never on the strange night,
+        # which wants its sky seen.
+        got["fog"] = _mix(k, 7, 613) % FOG_ODDS == 0 and not got["alien"]
         if got["alien"]:
             # Whatever the weather was going to be up there, the sky is lit by
             # what is in it tonight.
@@ -9939,6 +9954,75 @@ BO_BACK = 0.62         # how far through the night it starts coming back
 BO_WAVE = 30.0         # the wave of it coming back takes this long to pass
 BO_WAVE_W = 900.0      # and goes over this many units in that time
 BO_FLICKER = 1.4       # a block flickers this long before it holds
+
+
+FOG_ODDS = 9           # one night in this many the fog comes in
+FOG_NEAR = 9.0         # nearer than this it hardly touches anything
+FOG_FAR = 42.0         # and past this there is nothing but fog
+FOG_ROLL = 0.35        # how much the bank thickens and thins, as a fraction
+
+
+def fog_reach(now):
+    """How far you can see tonight, (near, far), breathing slowly as banks of
+    it roll in and out."""
+    roll = 1.0 + FOG_ROLL * math.sin(now / 37.0) * math.sin(now / 11.0 + 1.0)
+    return FOG_NEAR * roll, FOG_FAR * roll
+
+
+FOG_LIGHTS = set("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                 "abcdefghijklmnopqrstuvwxyz*@+#%$&")
+
+
+def draw_fog(ch, co, v, walls, now):
+    """The fog, over the whole picture. Every cell has a distance - the wall
+    in its column, the ground at its row, the sky beyond everything - and
+    the further it is the more likely the fog has taken it: structure goes
+    to nothing, and a light becomes a blur in its own colour, bigger and
+    softer the further it is, which is what neon does in fog. Over it all, a
+    faint grain of the stuff drifting."""
+    height, width = v.height, v.width
+    near, far = fog_reach(now)
+    wd, wtop, wbase = walls[0], walls[1], walls[2]
+    drift = int(now * 1.5)
+    blooms = []
+    for y in range(height):
+        ground = y > v.horizon
+        dg = v.eye * v.fy / (y - v.horizon) if ground else None
+        for x in range(width):
+            c = ch[y][x]
+            d = wd[x] if wd[x] is not None and wtop[x] <= y <= wbase[x] else None
+            if d is None:
+                if ground:
+                    d = dg
+                elif c != " ":
+                    # Above the nearest roof: something further, or the sky.
+                    d = far * 1.2 if wd[x] is not None and y > wtop[x] - 40 else None
+            h = _mix(x, y + drift // 3, 3601) % 1000 / 1000.0
+            if d is None:                        # the sky
+                if c == " " and h < 0.05:
+                    ch[y][x], co[y][x] = ".", HAZE
+                continue
+            f = (d - near) / (far - near)
+            if f <= 0.0:
+                continue
+            if c != " " and c in FOG_LIGHTS and f < 1.25:
+                # A light: in the fog it goes soft, and spills round itself.
+                blooms.append((y, x, co[y][x], f))
+                ch[y][x] = "o" if f < 0.5 else "*" if f < 0.85 else "."
+                continue
+            if h < f:
+                ch[y][x], co[y][x] = (".", HAZE) if h < f * 0.16 else (" ", 0)
+            elif c != " " and f > 0.3:
+                co[y][x] = HAZE                   # going grey on the way out
+    for y, x, attr, f in blooms[:400]:
+        r = 1 + int(f * 2.5)                     # further off, a bigger blur
+        for dy in (-1, 0, 1):
+            for dx in range(-r, r + 1):
+                yy, xx = y + dy, x + dx
+                if (0 <= yy < height and 0 <= xx < width and ch[yy][xx] == " "
+                        and _mix(xx, yy, 3603) % 3):
+                    ch[yy][xx] = ":" if abs(dx) + abs(dy) <= 1 else "."
+                    co[yy][xx] = attr
 
 
 def power_off(i, j, now):
@@ -9980,6 +10064,16 @@ def blackout_word(x, z, now):
     if t < NIGHT_LENGTH * BO_BACK + BO_WAVE + 4.0:
         return "  ~ the lights are coming back ~"
     return ""
+
+
+def skip_to_fog(now):
+    """Straight to the next night the fog comes in."""
+    global _night_skip
+    for _ in range(FOG_ODDS * 8):
+        _night_skip += NIGHT_LENGTH
+        if night(now)["fog"]:
+            return True
+    return False
 
 
 def skip_to_blackout(now):
@@ -10320,6 +10414,7 @@ def render_street(v, now):
     v.cover = snow_cover(now)
     v.dawn = dawn(now)
     v.blackout = night(now)["blackout"]
+    v.fog = night(now)["fog"] and v.eye < 10.0      # from a roof, you are over it
     v.crown = crown_light(now, wet)
     v.bass = bass_lots(v, now)
 
@@ -10431,6 +10526,8 @@ def render_street(v, now):
     if rave is not None:
         draw_drawn_in(ch, co, v, walls, rave[0], rave[1], now)
         draw_hollow_rave(ch, co, v, walls, rave[0], rave[1], now, wet)
+    if v.fog:
+        draw_fog(ch, co, v, walls, now)
     draw_rain(ch, co, v, walls, now, wet)
     draw_snow(ch, co, v, walls, now)
     return ch, co, wet
@@ -13906,7 +14003,7 @@ def draw_cheats(ch, co, note):
            ("", ""), ("", "NIGHTS"),
            ("n", "the next one"), ("u", "a strange night"),
            ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
-           ("0", "a blackout"),
+           ("0", "a blackout"), ("9", "a fog night"),
            ("", ""), ("`", "close")]
     columns = (left, middle, right, sky)
 
@@ -15535,6 +15632,9 @@ def main(stdscr):
                 elif key == ord("/"):
                     skip_to_closing(now)
                     note = "closing time - k for a club"
+                elif key == ord("9"):
+                    note = ("the fog is coming in" if skip_to_fog(now)
+                            else "no such night near")
                 elif key == ord("0"):
                     note = ("the power goes in a few seconds"
                             if skip_to_blackout(now) else "no such night near")
@@ -16120,6 +16220,7 @@ def main(stdscr):
                 sky_word(now, wet),
                 show_hint(now, cam_x, cam_z)
                 or ("  ~ a taxi is pulling up ~" if taxi is not None else "")
+                or ("  ~ the fog is in ~" if night(now)["fog"] else "")
                 or blackout_word(cam_x, cam_z, now)
                 or landmark_hint(cam_x, cam_z)
                 or rave_hint(v, now)
