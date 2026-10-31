@@ -1073,15 +1073,56 @@ diners = sum(1 for i in range(-250, 250) for j in range(-250, 250)
              if ac._mix(i, j, 2401) % ac.DINER_ODDS == 0 and not ac.is_open(i, j)
              and ac.lot(i, j)["diner"] is not None)
 check("diners are rare", 2 < diners < 120, "%d in a 2500-unit square" % diners)
-ac.PALETTES["warm"] = [1701] * 5
+ac.PALETTES["cold"] = [1701] * 5
 dview = ac.View(dnr[0] - math.sin(dnr[2]) * 9, dnr[1] - math.cos(dnr[2]) * 9, dnr[2], 110, 30)
 dg, dc, _ = ac.render_street(dview, 300.0)
 lit_window = sum(1 for r in dc for a in r if a == 1701)
 check("from the street its front is one long lit window", lit_window > 80,
       "%d lit cells" % lit_window)
 check("with people at the counter", sum("".join(r).count("o") for r in dg) > 2)
-check("and DINER in neon over the door", any("D I N E R" in "".join(r) for r in dg))
-ac.PALETTES["warm"] = list(range(37, 42))
+def reads(row, word):
+    """Is word in this row, give or take a couple of letters the rain is
+    falling across."""
+    return any(sum(a == b for a, b in zip(row[k:k + len(word)], word)) >= len(word) - 2
+               for k in range(len(row) - len(word) + 1))
+
+
+check("and its name in neon over the door",
+      any(reads("".join(r), dven[1]["name"]) for r in dg), dven[1]["name"])
+ac.PALETTES["cold"] = list(range(42, 47))
+check("every diner has a name, and is low", all(
+    ac.lot(i, j)["diner"]["name"] in ac.DINER_NAMES
+    and ac.lot(i, j)["diner"]["height"] <= ac.DINER_H
+    for i in range(-250, 250) for j in range(-250, 250)
+    if ac._mix(i, j, 2401) % ac.DINER_ODDS == 0 and not ac.is_open(i, j)
+    and ac.lot(i, j)["diner"] is not None))
+real_cup = ac.draw_diner_cup
+cup_cells = []
+
+
+def counted_cup(ch, co, v, walls, dn, now):
+    before = [r[:] for r in ch]
+    real_cup(ch, co, v, walls, dn, now)
+    cup_cells.append({(y, x) for y in range(len(ch)) for x in range(len(ch[0]))
+                      if ch[y][x] != before[y][x]})
+
+
+ac.draw_diner_cup = counted_cup
+cview = ac.View(dnr[0] - math.sin(dnr[2]) * 12, dnr[1] - math.cos(dnr[2]) * 12,
+                dnr[2], 110, 34)
+if not ac.can_stand(cview.x, cview.z):
+    cview = ac.View(dnr[0] - math.sin(dnr[2]) * 9, dnr[1] - math.cos(dnr[2]) * 9,
+                    dnr[2], 110, 34)
+for t_ in (300.0, 300.7):
+    cup_cells.clear()
+    ac.render_street(cview, t_)
+    cup_cells_at = set().union(*cup_cells) if cup_cells else set()
+    if t_ == 300.0:
+        first_cup = cup_cells_at
+ac.draw_diner_cup = real_cup
+check("from across the street there is a coffee cup on the roof",
+      len(first_cup) > 60, "%d cells" % len(first_cup))
+check("with its steam going up", first_cup != cup_cells_at)
 din0 = "\n".join("".join(r) for r in ac.render_diner(100, 28, 101.0, 100.0)[0])
 din1 = "\n".join("".join(r) for r in ac.render_diner(100, 28, 100.0 + ac.DINER_POUR + 0.5,
                                                     100.0)[0])
@@ -1389,8 +1430,10 @@ for n, d in enumerate(ac.DISTRICTS):
                 continue                # the woods are placed, not picked
             b = ac.lot(i, j)
             # A club is a squat bunker and a casino a low slab whatever part
-            # of town they are in; they are meant to ignore the district.
-            if b["club"] is None and b["casino"] is None and b["tower"] is None:
+            # of town they are in, and the diner a low box with a cup on it;
+            # they are meant to ignore the district.
+            if (b["club"] is None and b["casino"] is None and b["tower"] is None
+                    and b["diner"] is None):
                 hs.append(b["height"])
             trees += b["tree"]
             for f in range(4):

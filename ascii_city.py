@@ -296,6 +296,15 @@ LIFT_FLOOR = 0.07      # seconds per floor going past
 # The billboards are up on the roofs over the wide streets, selling soda.
 DINER_ODDS = 1100      # like the club and the cinema, on its own hash
 DINER_POUR = 5.0       # seconds after you sit down that the coffee comes
+# Somewhere a few decades on from the rest of the street: gunmetal and neon
+# seams, the window lit cold, and on the roof a coffee cup in neon tube the
+# size of a car with neon steam coming off it. You find one by the cup.
+DINER_NAMES = ["NULL CAFE", "CHROME CUP", "BYTE & BREW", "NEON BREW", "CAFE 2088",
+               "DATA DINER", "OVERCLOCK", "GHOST SHIFT"]
+CUP_REACH = 170.0      # how far off the cup on the roof is seen from
+CUP_SCALE = 0.85       # the cup's size against cup_shape()'s own units
+DINER_H = 5.2          # the tallest a diner is: one tall storey and a band
+CUP_GLITCH = 6.0       # seconds between the tube's flickers, give or take
 BILL_ODDS = 90         # of the wide-street roofs in the busy parts, one in this
 BILL_W = 11.0          # world units across a board: big, it is an advert
 BILL_ROW = 1.1         # and per row of it
@@ -2086,8 +2095,15 @@ def lot(i, j):
             # two over it: it is a low, long, lit box.
             face = _wide_face(i, j, _mix(i, j, 2403) % 4)
             if face is not None:
-                b["height"] = min(b["height"], 7.0)
-                b["diner"] = {"door": face, "u": CELL * 0.5}
+                # Low whatever part of town it is in, the way a club is a
+                # bunker anywhere: the cup on the roof is only in sight
+                # from across the street if the roof is.
+                b["height"] = min(b["height"], DINER_H)
+                b["diner"] = {"door": face, "u": CELL * 0.5, "i": i, "j": j,
+                              "height": b["height"],
+                              "name": DINER_NAMES[_mix(i, j, 2415)
+                                                  % len(DINER_NAMES)],
+                              "seed": _mix(i, j, 2417) % 9973}
         elif _mix(i, j, 1961) % CLUB_ODDS == 0 and not d["park"]:
             face = _road_face(i, j, _mix(i, j, 1963) % 4)
             if face is not None:
@@ -2791,6 +2807,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     if b["arcade"] is not None:
         return draw_arcade_column(ch, co, v, sx, dist, b, face, u,
                                   r_lo, r_hi, edge, cont, now)
+    if b["diner"] is not None:
+        return draw_diner_column(ch, co, v, sx, dist, b, face, u,
+                                 r_lo, r_hi, edge, cont, now)
     d = b["district"]
     scale = v.fy / dist
     trim = tone_colour("dark" if not lit else "far", b["tone"])
@@ -4161,48 +4180,237 @@ def draw_raver(ch, co, v, walls, p, now, wet):
                       "*o."[m], lit if m == 0 else dark)
 
 
+def draw_diner_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
+                      cont, now):
+    """One column of the diner: gunmetal, and seamed with neon.
+
+    A cyan seam up every corner, a magenta strip under the roof, and over the
+    shopfront a cyan band with a bright packet running along it now and then,
+    like data down a line. Upstairs is dark panelling with a small purple
+    window in each bay. The long window itself is diner_window()'s, drawn
+    over the ground floor of the front afterwards."""
+    scale = v.fy / dist
+    dn = b["diner"]
+    cyan, magenta, purple = NEON[2], NEON[1], NEON[6]
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    if edge:
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx], co[y][sx] = "|", FLASH if v.flash > 0.35 else cyan[0]
+        return roof, None, foot, None, ()
+    prev_roof, prev_awn, prev_foot = cont[:3]
+    awning = int(round(v.horizon - (FLOOR_H * 1.2 - v.eye) * scale))
+    strip = int(round(v.horizon - (b["height"] - 0.35 - v.eye) * scale))
+    facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "=",
+                roof_colour(b, dist, v.flash, v.cover))
+    if r_lo <= strip <= r_hi and strip > roof:
+        ch[strip][sx], co[strip][sx] = "-", magenta[0]
+    packet = (u + face * CELL - now * 9.0 - dn["seed"]) % 23.0 < 1.2
+    facade_line(ch, co, sx, awning, prev_awn, r_lo, r_hi, "=",
+                FLASH if packet else cyan[0])
+    # Upstairs: panel seams every other row, and a window in each bay.
+    bay = u / BAY_W - int(u / BAY_W)
+    top = max(r_lo, roof + 1, strip + 1)
+    for y in range(top, min(r_hi, awning - 1) + 1):
+        if 0.35 < bay < 0.65 and (y - top) % 3 == 1:
+            ch[y][sx], co[y][sx] = "#", purple[0 if int(now * 0.7 + u) % 9 else 1]
+        elif (y + sx) % 4 == 0:
+            ch[y][sx], co[y][sx] = ".", CONCRETE
+    # Round the sides, the ground floor is dark glass with the seam's glow.
+    if face != dn["door"]:
+        for y in range(max(r_lo, awning + 1), min(r_hi, foot - 1) + 1):
+            if (y + sx) % 3 == 0:
+                ch[y][sx], co[y][sx] = ":", cyan[1]
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, awning, foot, None, ()
+
+
 def diner_window(ch, co, v, sx, dist, u, f, r_lo, r_hi, b):
-    """The diner's front from the street: the whole ground floor one long lit
-    window, the counter across it and the backs of three people sat at it
-    well apart from each other. Lit from inside, so they are dark against it
-    - which is the whole of the picture."""
+    """The diner's front from the street: the whole ground floor one long
+    window, lit cold from inside and lined like a screen, the counter across
+    it and three people sat at it well apart, dark against the light - and
+    one of them with a red light where an eye would be."""
     scale = v.fy / dist
     top = int(round(v.horizon - (FLOOR_H * 1.15 - v.eye) * scale))
     sill = int(round(v.horizon - (0.6 - v.eye) * scale))
     bar = int(round(v.horizon - (1.05 - v.eye) * scale))
-    light = tone_colour("warm", 0.9)
+    light = tone_colour("cold", 0.9)
+    dim = tone_colour("cold", 0.4)
     su = sign_u(f, u)
     sitters = (0.9, 2.6, 4.3)
     near_one = min(abs(su - s) for s in sitters)
     cols = 0.5 * v.fx / dist                    # how many columns a person is
+    head = bar - max(1, int(round(0.45 * scale)))
     for y in range(max(r_lo, top), min(r_hi, sill) + 1):
         if y == top or y == sill:
-            g, a = "=", CURB                    # the frame
+            g, a = "=", NEON[1][0]              # the frame, in magenta tube
         elif y == bar:
-            g, a = "=", BARK                    # the counter
+            g, a = "=", CONCRETE                # the counter, chrome
         elif y < bar and near_one < 0.25 * max(1.0, 1.0 / max(cols, 1e-6)) and \
                 y >= bar - max(1, int(round(0.7 * scale))):
-            g, a = ("o" if y < bar - max(1, int(round(0.45 * scale))) else "M"), BARK
+            g, a = ("o" if y < head else "M"), BARK
+            if y < head and abs(su - sitters[1]) < 0.3:
+                a = ROU_RED                     # the one with the eye
         else:
-            g, a = ":", light
+            g, a = (":", light) if (y - top) % 2 else (".", dim)
         ch[y][sx], co[y][sx] = g, a
 
 
-def draw_diner_sign(ch, co, v, walls, world, now):
-    """DINER in pink neon over the door, 24 HRS under it and OPEN blinking -
-    in screen space, like the cinema's, so it can be read."""
+def draw_diner_sign(ch, co, v, walls, dn, world, now):
+    """The name over the window in cyan, OPEN 24/7 under it - in screen space,
+    like the cinema's, so it can be read. Every few seconds the sign glitches:
+    the name jumps a column, its letters go to noise in magenta for a frame or
+    two, and comes back."""
     pr = v.project(world[0], world[1], world[2])
     if pr is None or pr[2] > 80.0:
         return
     sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
-    pink, blue = NEON[0][0], NEON[2][0]
-    for k, c in enumerate("D I N E R"):
-        put_cell(ch, co, v, walls, sx - 4 + k, sy, dist, c, pink)
-    for k, c in enumerate("24 HRS"):
-        put_cell(ch, co, v, walls, sx - 3 + k, sy + 1, dist, c, blue)
-    if int(now * 1.2) % 3:
-        for k, c in enumerate("OPEN"):
-            put_cell(ch, co, v, walls, sx + 6 + k, sy + 1, dist, c, NEON[5][0])
+    name = "[ %s ]" % dn["name"]
+    t = (now + dn["seed"] * 0.01) % 5.0
+    glitch = t < 0.18
+    jump = (1 if int(now * 30) % 2 else -1) if glitch else 0
+    for k, c in enumerate(name):
+        m = _mix(k, int(now * 20), dn["seed"])
+        noise = glitch and m % 3 == 0 and c not in " []"
+        put_cell(ch, co, v, walls, sx - len(name) // 2 + k + jump, sy, dist,
+                 "#%/=?"[m % 5] if noise else c,
+                 NEON[1][0] if noise else NEON[2][0])
+    under = "OPEN 24/7"
+    for k, c in enumerate(under):
+        lit = k >= 5 or int(now * 1.2) % 3
+        put_cell(ch, co, v, walls, sx - len(under) // 2 + k, sy + 1, dist, c,
+                 (NEON[5][0] if k < 4 else NEON[6][0]) if lit else NEON[5][1])
+
+
+_diner_blocks = {}
+
+
+def diners_in_block(bi, bj):
+    """The diners in city block (bi, bj), worked out once: the cup on the
+    roof is seen from blocks away, like the cinema's searchlights."""
+    key = (bi, bj)
+    hit = _diner_blocks.get(key)
+    if hit is None:
+        _evict(_diner_blocks, 4000)
+        hit = []
+        for i in range(bi * XP, bi * XP + XP):
+            for j in range(bj * ZP, bj * ZP + ZP):
+                if _mix(i, j, 2401) % DINER_ODDS or is_open(i, j):
+                    continue
+                dn = lot(i, j)["diner"]
+                if dn is not None:
+                    hit.append(dn)
+        _diner_blocks[key] = hit
+    return hit
+
+
+def near_diners(v, reach):
+    b0, b1 = int((v.x - reach) // (XP * CELL)), int((v.x + reach) // (XP * CELL))
+    c0, c1 = int((v.z - reach) // (ZP * CELL)), int((v.z + reach) // (ZP * CELL))
+    for bi in range(b0, b1 + 1):
+        for bj in range(c0, c1 + 1):
+            for dn in diners_in_block(bi, bj):
+                rx = (dn["i"] + 0.5) * CELL - v.x
+                rz = (dn["j"] + 0.5) * CELL - v.z
+                if rx * v.dx + rz * v.dz < -CELL or rx * rx + rz * rz > reach * reach:
+                    continue
+                yield dn
+
+
+def draw_tube(ch, co, v, walls, pts, attr):
+    """A neon tube through world points, each cell's glyph taken from which
+    way the tube runs on screen there - the searchlights' trick - so a curve
+    reads as a curve and not as a row of dots."""
+    prev = None
+    for x, y, z in pts:
+        pr = v.project(x, y, z)
+        if pr is not None and prev is not None:
+            ax, ay = pr[0] - prev[0], (pr[1] - prev[1]) * 2.0
+            if abs(ax) + abs(ay) > 1e-6:
+                glyph = ("|" if abs(ax) < 0.4 * abs(ay) else
+                         "-" if abs(ay) < 0.4 * abs(ax) else
+                         "/" if ax * ay < 0 else "\\")
+                put_cell(ch, co, v, walls, int(round(pr[0])), int(round(pr[1])),
+                         pr[2], glyph, attr)
+        prev = pr
+
+
+def cup_shape():
+    """The cup, in the sign's own (across, up) units: a tapering body, a
+    handle, a saucer with its ends turned up, and the coffee in it. Each is a
+    list of points along the tube, close enough to join up from across the
+    street."""
+    def line(a0, h0, a1, h1, n):
+        return [(a0 + (a1 - a0) * k / n, h0 + (h1 - h0) * k / n) for k in range(n + 1)]
+    body = (line(-1.7, 3.0, -1.25, 0.7, 14) + line(-1.25, 0.7, 1.25, 0.7, 16)
+            + line(1.25, 0.7, 1.7, 3.0, 14) + line(1.7, 3.0, -1.7, 3.0, 20))
+    handle = [(1.6 + 0.75 * math.cos(a), 1.9 + 0.62 * math.sin(a))
+              for a in [-math.pi / 2 + math.pi * k / 16 for k in range(17)]]
+    saucer = (line(-2.5, 0.65, -2.1, 0.35, 4) + line(-2.1, 0.35, 2.1, 0.35, 24)
+              + line(2.1, 0.35, 2.5, 0.65, 4))
+    coffee = line(-1.35, 2.35, 1.35, 2.35, 14)
+    return body, handle, saucer, coffee
+
+
+_CUP = cup_shape()
+
+
+def draw_diner_cup(ch, co, v, walls, dn, now):
+    """The cup on the roof: a coffee cup in neon tube, on a saucer, standing
+    up off the front edge of the roof facing the street, with three strands
+    of neon steam rising off it in pulses. Every so often the tube flickers
+    the way cheap neon does. All world points, so it stands on the roof and
+    the buildings in between hide it."""
+    i, j, f = dn["i"], dn["j"], dn["door"]
+    base = dn["height"] + 0.25
+
+    def world(a, h):
+        return face_point(i, j, f, CELL * 0.5 + a * CUP_SCALE, -0.4,
+                          base + h * CUP_SCALE)
+
+    t = (now + dn["seed"] * 0.37) % CUP_GLITCH
+    flicker = t < 0.25 and int(now * 25) % 2 == 0
+    cyan, magenta = NEON[2], NEON[1]
+    body, handle, saucer, coffee = _CUP
+    tube = cyan[1] if flicker else cyan[0]
+    # Dark inside the cup first, or the facade of whatever stands behind it
+    # shows through the tube and the outline is lost in it.
+    h = 0.75
+    while h < 2.95:
+        half = 1.25 + (h - 0.7) / 2.3 * 0.45 - 0.1
+        a = -half
+        while a <= half:
+            pr = v.project(*world(a, h))
+            if pr is not None:
+                put_cell(ch, co, v, walls, int(round(pr[0])), int(round(pr[1])),
+                         pr[2], " ", tube)
+            a += 0.12
+        h += 0.12
+    for path in (body, handle, saucer):
+        draw_tube(ch, co, v, walls, [world(a, h) for a, h in path], tube)
+    draw_tube(ch, co, v, walls, [world(a, h) for a, h in coffee], EMBER_HOT)
+    # The steam: three strands curling up, lit in pulses that climb them.
+    for k, a0 in enumerate((-0.8, 0.0, 0.8)):
+        pts = []
+        h = 3.3
+        while h < 6.0:
+            # Curling, and drifting off to one side as it goes up.
+            a = (a0 + 0.45 * math.sin(h * 1.7 - now * 2.2 + k * 2.1)
+                 + 0.35 * (h - 3.3))
+            on = (h - now * 1.3 + k * 0.9) % 1.5 < 0.9
+            pts.append((world(a, h), on, h))
+            h += 0.1
+        run = []
+        for w, on, h in pts:
+            if on:
+                run.append(w)
+                continue
+            if len(run) > 1:
+                draw_tube(ch, co, v, walls, run,
+                          magenta[0] if h < 5.4 and not flicker else magenta[1])
+            run = []
+        if len(run) > 1:
+            draw_tube(ch, co, v, walls, run, magenta[1])
 
 
 def near_billboards(v, reach):
@@ -7189,7 +7397,7 @@ def draw_props(ch, co, v, walls, now, wet):
             if tunnel_at(i + nx, j + nz):
                 continue                # nothing hangs inside a tunnel
             if b["diner"] is not None and f == b["diner"]["door"]:
-                w = face_point(i, j, f, CELL * 0.5, 0.4, 4.6)
+                w = face_point(i, j, f, CELL * 0.5, 0.4, 3.9)
                 props.append((_d2(v, w), "diner", b["diner"], w, (nx, nz)))
             if b["cinema"] is not None and f == b["cinema"]["door"]:
                 w = face_point(i, j, f, CELL * 0.5, 0.4, 3.9)
@@ -7267,7 +7475,7 @@ def draw_props(ch, co, v, walls, now, wet):
         elif kind == "arcade":
             draw_arcade_front(ch, co, v, walls, s, world, now)
         elif kind == "diner":
-            draw_diner_sign(ch, co, v, walls, world, now)
+            draw_diner_sign(ch, co, v, walls, s, world, now)
         elif kind == "overdoor":
             tone = s[1]["tone"] if s[1] else 0.44
             draw_over_door(ch, co, v, walls, s[0], world, now, tone)
@@ -8047,6 +8255,8 @@ def render_street(v, now):
     # beam going up behind it.
     for c_ in near_cinemas(v, SEARCH_REACH):
         draw_searchlights(ch, co, v, walls, c_, now)
+    for d_ in near_diners(v, CUP_REACH):
+        draw_diner_cup(ch, co, v, walls, d_, now)
     draw_props(ch, co, v, walls, now, wet)
     draw_car_park(ch, co, v, walls, now, wet)
     draw_walkers(ch, co, v, walls, now, wet)
@@ -10267,91 +10477,131 @@ def film_frame(title, t, w, h):
     return ["".join(r) for r in g], bright * flicker
 
 
-def render_diner(width, height, now, since):
-    """On a stool at the counter, at whatever hour it is.
+DINER_MENU = ["REAL COFFEE ...... 9 CR", "SYNTH-PIE ........ 4 CR",
+              "NOODLES, VAT ..... 6 CR", "EGGS, PRINTED .... 3 CR"]
 
-    Lamps hanging over the counter, the menu up on the wall, the coffee urns
-    and the pie case behind, the cook in a paper cap, three others along the
-    counter keeping to themselves, the jukebox in the corner going through
-    its colours, and the big window onto the empty street - rain on it if it
-    is raining. A few seconds after you sit down she comes over with the pot."""
+
+def render_diner(width, height, now, since):
+    """On a stool at the counter, some decades on.
+
+    Neon strip along the ceiling, one tube on the blink; the window onto a
+    wet street of holo-ads with the odd car going over; the menu board,
+    glitching, priced in credits; the coffee machine, all chrome and little
+    lights; a robot arm working the grill along its rail; three others along
+    the counter keeping to themselves, one in a visor and one with an eye
+    that is not an eye. A few seconds after you sit down the drone comes over
+    with the pot, and says what diners have always said."""
     ch = [[" "] * width for _ in range(height)]
     co = [[0] * width for _ in range(height)]
     t = now - since
-    warm = tone_colour("warm", 0.85)
+    n = len(NEON)
+    cyan, magenta = NEON[2], NEON[1]
     if width < 44 or height < 18:
-        _text(ch, co, height // 2, 1, "~ at the diner, 24 hrs ~", warm)
+        _text(ch, co, height // 2, 1, "~ at the diner, 24/7 ~", cyan[0])
         _text(ch, co, height // 2 + 1, 1, "coffee's coming" if t < DINER_POUR
               else "a cup of coffee, steaming", GOLD_DIM)
         return ch, co
     cx = width // 2
-    # The window, the left third: the dark street, a lamp, the rain on it.
+    # The ceiling: strip lights, one of them going.
+    for x in range(1, width - 1):
+        seg = x // 9
+        if x % 9 == 8:
+            continue
+        dead = seg == 3 and _mix(seg, int(now * 12), 2419) % 4 == 0
+        ch[1][x], co[1][x] = "=", cyan[1] if dead else cyan[0]
+    # The window, the left third: towers, holo-ads, a car going over, rain.
     wx1 = width // 3
-    for y in range(1, height - 6):
-        _text(ch, co, y, wx1, "|", CURB)
-    for y in range(1, height - 6):
-        for x in range(1, wx1):
-            if y == height - 8:
-                ch[y][x], co[y][x] = "_", STREET           # the kerb outside
-            elif _mix(x, y, 2411) % 41 == 0:
-                ch[y][x], co[y][x] = ".", HAZE
-    _text(ch, co, 3, wx1 // 2, "o", BULB)
-    for y in range(4, height - 8):
-        _text(ch, co, y, wx1 // 2, "|", CONCRETE)
+    for y in range(2, height - 6):
+        _text(ch, co, y, wx1, "|", CONCRETE)
+    for x in range(1, wx1):
+        top = 4 + _mix(x // 5, 0, 2421) % 7          # a tower every five columns
+        for y in range(top, height - 8):
+            if x % 5 == 0 or y == top:
+                ch[y][x], co[y][x] = ("|" if x % 5 == 0 else "_"), HAZE
+            elif y % 2 == 0 and _mix(x, y, 2425) % 5 == 0:
+                ch[y][x], co[y][x] = ".", NEON[_mix(x, y, 2427) % n][1]
+    for k, ad in enumerate(("NOODLE", "SYNTH", "EAT")):
+        ax = 2 + (k * 7) % max(1, wx1 - 8)
+        ay = 5 + k * 3
+        if ay < height - 9 and _mix(k, int(now * 3), 2423) % 7:
+            _text(ch, co, ay, ax, ad[:max(0, wx1 - ax - 1)], NEON[(k * 3 + 1) % n][0])
+    car = (now * 14.0) % (wx1 * 3)
+    if car < wx1 - 3:
+        _text(ch, co, 3, 1 + int(car), "=o", FLASH)
+    for y in range(2, height - 6):
+        if y == height - 8:
+            for x in range(1, wx1):
+                ch[y][x], co[y][x] = "_", STREET        # the kerb outside
     if rain_intensity(now) > 0.1:
         for k in range(wx1 * 2):
             m = _mix(k, 0, 2413)
             x = 1 + m % (wx1 - 1)
-            y = 1 + int(now * (5 + m % 4) + (m >> 8) % height) % (height - 8)
+            y = 2 + int(now * (5 + m % 4) + (m >> 8) % height) % (height - 9)
             ch[y][x], co[y][x] = "'", RAIN
-    # The ceiling lamps over the counter.
-    for x in range(wx1 + 4, width - 2, 11):
-        _text(ch, co, 1, x, "|", CONCRETE)
-        _text(ch, co, 2, x - 1, "/o\\", BULB)
-    # The back wall: the menu, the urns, the pie case, the jukebox.
-    menu = ["PIE ........ 2.50", "COFFEE ....... .90", "EGGS ANY STYLE 3.25"]
-    for r, line in enumerate(menu):
-        _text(ch, co, 4 + r, wx1 + 3, line, GOLD_DIM)
-    ux = width - 22
-    for k in range(2):
-        _text(ch, co, 5, ux + k * 6, "[==]", CONCRETE)
-        _text(ch, co, 6, ux + k * 6, "[  ]", CONCRETE)
-        if int(now * 3 + k) % 3:
-            _text(ch, co, 4, ux + 1 + k * 6, "(", HAZE)
-    _text(ch, co, 8, ux - 1, "[/\\ /\\ /\\]", warm)        # pie under glass
-    jx = width - 6
-    for r, line in enumerate((".--.", "|##|", "|##|", "'--'")):
-        _text(ch, co, 6 + r, jx, line, NEON[int(now * 1.5) % len(NEON)][0])
-    # The cook, moving along behind the counter.
+    # The menu board, glitching every few seconds.
+    mx = wx1 + 3
+    glitch = (now % 4.0) < 0.15
+    _text(ch, co, 3, mx - 1, "+" + "-" * (len(DINER_MENU[0]) + 2) + "+", cyan[1])
+    for r, line in enumerate(DINER_MENU):
+        shift = (1 if r % 2 else -1) if glitch else 0
+        _text(ch, co, 4 + r, mx - 1, "|", cyan[1])
+        _text(ch, co, 4 + r, mx + 1 + shift, line, magenta[0] if glitch else cyan[0])
+        _text(ch, co, 4 + r, mx + len(line) + 2, "|", cyan[1])
+    _text(ch, co, 4 + len(DINER_MENU), mx - 1,
+          "+" + "-" * (len(DINER_MENU[0]) + 2) + "+", cyan[1])
+    # The coffee machine: chrome, pipes, little lights, a puff now and then.
+    ux = width - 18
+    for r, line in enumerate(("[=======]", "| [] [] |", "|_o_o_o_|", " |  |  | ")):
+        _text(ch, co, 4 + r, ux, line, CONCRETE)
+    for k in range(3):
+        _text(ch, co, 6, ux + 2 + k * 2, "o", NEON[(k + int(now * 2)) % n][0])
+    if int(now * 2) % 3 == 0:
+        _text(ch, co, 3, ux + 4, "(", HAZE)
+    # The robot arm, along its rail over the grill.
     bar = height - 6
-    kx = wx1 + 6 + int(round((width - wx1 - 20) * (0.5 + 0.5 * math.sin(now * 0.4))))
-    for r, line in enumerate((" ___ ", "(___)", " (o) ", "/|#|\\")):
-        _text(ch, co, bar - 5 + r, kx, line, STAR if r < 2 else CURB)
-    # The counter and its stools, the three others along it.
+    rail = bar - 6
+    for x in range(wx1 + 2, width - 2):
+        ch[rail][x], co[rail][x] = "=", CONCRETE
+    ax = wx1 + 6 + int(round((width - wx1 - 16) * (0.5 + 0.5 * math.sin(now * 0.5))))
+    _text(ch, co, rail, ax, "[o]", magenta[0])
+    _text(ch, co, rail + 1, ax + 1, "\\", CONCRETE)
+    _text(ch, co, rail + 2, ax + 2, "\\_", CONCRETE)
+    if int(now * 6) % 5 == 0:
+        _text(ch, co, rail + 3, ax + 3, "*", EMBER_HOT)
+    # The counter, chrome with a cyan glow under it, and the stools.
     for x in range(wx1 + 1, width):
-        ch[bar][x], co[bar][x] = "=", BARK
+        ch[bar][x], co[bar][x] = "=", CONCRETE
+        ch[bar + 1][x], co[bar + 1][x] = "-", cyan[1]
         if (x - wx1) % 7 == 3:
             _text(ch, co, bar + 2, x, "T", CONCRETE)
+    # The three others: a visor, a hood, and the one with the eye.
     for k, sx in enumerate((wx1 + 4, wx1 + 18, width - 12)):
-        _text(ch, co, bar - 2, sx, ",-." if k != 1 else "_^_", BARK)
+        head = (",-.", "/^\\", ",-.")[k]
+        _text(ch, co, bar - 2, sx, head, BARK)
         _text(ch, co, bar - 1, sx - 1, "(   )", BARK)
+        if k == 0:
+            _text(ch, co, bar - 1, sx, "===", cyan[0])
+        if k == 2:
+            _text(ch, co, bar - 1, sx + 1, "o", ROU_RED)
         _text(ch, co, bar - 1, sx + 4, "u", CONCRETE)
-    # Your place, and the pot coming round.
+    # Your place, and the drone coming round with the pot.
     ccx = (wx1 + width) // 2
     _text(ch, co, bar - 1, ccx, "(_)", STAR)
     if t >= DINER_POUR:
         if t < DINER_POUR + 2.0:
-            _text(ch, co, bar - 4, ccx + 2, "_[]_", CONCRETE)    # the pot
+            hover = int(now * 4) % 2                 # under the arm's rail
+            _text(ch, co, bar - 5 + hover, ccx, "-=o=-", magenta[0])
+            _text(ch, co, bar - 4 + hover, ccx, " _[]_", CONCRETE)    # the pot
             _text(ch, co, bar - 3, ccx + 1, "|", GOLD_DIM)
             _text(ch, co, bar - 2, ccx + 1, "|", GOLD_DIM)
             say = "there you go, hon."
-            _text(ch, co, bar - 7, ccx - len(say) // 2, say, BULB)
+            _text(ch, co, bar - 8, ccx - len(say) // 2, say, cyan[0])
         for k in range(2):
             if int(now * 3 + k) % 3:
                 _text(ch, co, bar - 2 - k, ccx + 1, "(" if k % 2 else ")", HAZE)
     elif t < 2.5:
         say = "be right with you."
-        _text(ch, co, bar - 7, ccx - len(say) // 2, say, BULB)
+        _text(ch, co, bar - 8, ccx - len(say) // 2, say, cyan[0])
     way = "-- the way out (s) --"
     for k, c in enumerate(way):
         x = max(1, cx - 10) + k
@@ -10539,7 +10789,7 @@ ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
 RAVE_HUD = " inside the club at %d,%d  -  s walks back out  -  q quit "
 RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
-DINER_HUD = " at the diner, open 24 hrs, at %d,%d  -  s walks back out  -  q quit "
+DINER_HUD = " at the diner, open 24/7, at %d,%d  -  s walks back out  -  q quit "
 CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
 ARCADE_HUD = (" in the %s arcade at %d,%d  -  the games are on their way  -  s walks"
               " back out  -  q quit ")
