@@ -467,17 +467,33 @@ the bridge's whole 600-cell stretch rather than one of the 200-cell ones: it is 
 the stretch with the bridge in it and of the one it starts in, replacing the hashed one in both,
 and `carnival_over()` asks the stretch before as well, since it may run across the boundary.
 
-And there **the wheel stands out on the water**, `wheel_out()` cells off the bank — `JETTY_OUT`, or
-under a third of the way over where the water is narrow — on a planked platform with bulbs along
-its edge and a gangway back to the fair. Measured, wheel to rock: at a fixed place west of the
-bridge it was 64 to 214 units, because the river meanders away from the headland in some
-stretches; at the nearest place on the bank, a median of 78; out on its jetty, 58, and 37 at the
-closest. The bank is what limits it after that: the bay is as wide as it is so the suspension
-bridge has water worth spanning. Laying the fair out mirrored, wheel at the end nearer the rock,
-was tried and changed nothing — the search already finds the nearest bank, and the wheel lands on
-it either way. From the nearest rock the wheel is a ring of lights a third of the screen high, and
-from further back on the rock the bridge and the wheel are in the one view; there are tests of
-the distance and the view.
+And there **the fair is out on a pier**, the way a pleasure pier's is: `fair_pier_at()` is a deck
+over the water across the width of the fair, `FAIR_PIER` cells out from the bank in each column
+and never more than `FAIR_PIER_MAX` of the way over (`pier_tip()`, per column — a straight end was
+held to a cell or two by the narrowest column). It is in `deck_at()`, so you walk on it and the
+ground pass planks it like any other pier, and everything is laid out from its end: the wheel out
+at the tip, the carousel and the stalls and the claw machine back towards the shore, bulbs along
+the rails with posts down to the water, and PLEASURE PIER over the way on (`draw_pier_sign()`).
+
+**Behind it the town is kept low** (`seafront_cap()`, applied in `lot()` before the faces are
+made): six units at the water, rising a unit and a half a row inland for `SEAFRONT_DEEP` rows.
+That is the reason for the pier as much as the distance is. With towers right behind it the
+wheel's lights were lost in their windows; kept under the line from the headland over the top of
+the wheel, the town leaves it the sky. The height test exempts those lots, as it does the venues.
+
+Measured, wheel to rock: at a fixed place west of the bridge it was 64 to 214 units, because the
+river meanders away from the headland in some stretches; at the nearest place on the bank, a
+median of 78; on a short jetty, 58; out at the end of the pier, 54, and 31 at the closest. Laying
+the fair out mirrored, wheel at the end nearer the rock, was tried and changed nothing — the
+search already finds the nearest bank, and the wheel lands on it either way. There are tests of
+the distance, of walking out along the pier to the wheel, of the town behind being kept low, and
+of the bridge and the wheel being in the one view from the rock.
+
+**Where the dry land starts is `shore_j()`**: `ceil(hi)`, because a row is river while it is under
+`hi`. It used to be `int(hi) + 1` in the fair, the promenade and everything drawn along them, which
+is the same thing for a positive `hi` and a row too far for a negative one — so in every stretch
+whose bank was below row zero a building a cell wide stood between the water and the promenade or
+the fair. A stall standing on that sliver is what found it.
 
 ## The big bridge
 

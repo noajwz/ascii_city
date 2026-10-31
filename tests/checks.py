@@ -1433,7 +1433,7 @@ for n, d in enumerate(ac.DISTRICTS):
             # of town they are in, and the diner a low box with a cup on it;
             # they are meant to ignore the district.
             if (b["club"] is None and b["casino"] is None and b["tower"] is None
-                    and b["diner"] is None):
+                    and b["diner"] is None and ac.seafront_cap(i, j) is None):
                 hs.append(b["height"])
             trees += b["tree"]
             for f in range(4):
@@ -2635,10 +2635,9 @@ check("there is a fairground on the bank", len(ground) >= ac.FAIR_LONG * ac.FAIR
 check("and nothing is built on it", all(ac.is_open(i, j) and not ac.river_at(i, j)
                                         for i, j in ground))
 check("everything on it stands on dry ground",
-      all(ac.dry_at(x, z) for x, z in [(cx, cz)] + stalls
-          + ([] if ac.wheel_out(fc) else [(wx, wz)])))
+      all(ac.dry_at(x, z) for x, z in [(wx, wz), (cx, cz)] + stalls))
 check("the cheat stands you on it", ac.can_stand(fair[0], fair[1])
-      and ac.fair_at(int(fair[0] / ac.CELL), int(fair[1] / ac.CELL)))
+      and ac.fair_at(int(fair[0] // ac.CELL), int(fair[1] // ac.CELL)))
 check("and one carnival is a long way from the next",
       ac.carnival_col(fc + ac.CARNIVAL_GAP) - fc > 100)
 
@@ -2731,8 +2730,10 @@ ac._show = None
 # The claw machine: on the fairground, and honest the way the slot is - the
 # grip is drawn when it drops, and the claw is then shown doing exactly that.
 bx_, bz_ = ac.claw_spot(fc)
-check("the claw machine stands on the fairground",
-      ac.dry_at(bx_, bz_) and ac.fair_at(int(bx_ // ac.CELL), int(bz_ // ac.CELL)))
+check("the claw machine stands on the fairground, or its pier",
+      ac.dry_at(bx_, bz_)
+      and (ac.fair_at(int(bx_ // ac.CELL), int(bz_ // ac.CELL))
+           or ac.fair_pier_at(int(bx_ // ac.CELL), int(bz_ // ac.CELL))))
 cl_at = ac.find_place(x0, z0, "claw")
 check("the cheat stands you at it", cl_at is not None
       and ac.venue_at(cl_at[0], cl_at[1])[0] == "claw")
@@ -2964,6 +2965,38 @@ check("every big bridge has the carnival beside it, its wheel out on the water",
 reach.sort()
 check("and as near the headland as the bay allows", reach[len(reach) // 2] < 70
       and reach[-1] < 130, "wheel to rock: %s units" % [int(r) for r in reach])
+# It is on a pier, like the pleasure piers: you walk off the fair onto the
+# deck and out to the wheel at its end, which never reaches half way over,
+# and behind it the town is kept low so the wheel has the sky behind it.
+pc_ = ac.carnival_col(gspan[0])
+(pwx, pwz), _, _, _ = ac.carnival_spots(pc_)
+start_ = (pc_ + 5, ac.shore_j(pc_ + 5) + 1)
+goal_ = (int(pwx // ac.CELL), int(pwz // ac.CELL))
+seen_ = {start_}
+q_ = _dq([start_])
+walked = False
+while q_:
+    i, j = q_.popleft()
+    if (i, j) == goal_:
+        walked = True
+        break
+    for a, b in ((i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)):
+        if ((a, b) not in seen_ and pc_ - 2 <= a <= pc_ + 13
+                and abs(b - start_[1]) < 14
+                and ac.can_stand((a + 0.5) * ac.CELL, (b + 0.5) * ac.CELL)):
+            seen_.add((a, b))
+            q_.append((a, b))
+check("the fair by the bridge is on a pier you can walk out to the wheel on", walked)
+over = max((ac.shore_j(i) - ac.pier_tip(pc_, k=i - pc_))
+           / max(1e-6, ac.river_span(i)[1] - ac.river_span(i)[0])
+           for i in range(pc_, pc_ + ac.FAIR_LONG))
+check("and it never reaches half way over", over <= 0.5 + 0.1, "%.2f of the way" % over)
+low = [ac.lot(i, j)["height"] - ac.seafront_cap(i, j)
+       for i in range(pc_ - 5, pc_ + 16)
+       for j in range(ac.shore_j(pc_), ac.shore_j(pc_) + 30)
+       if not ac.is_open(i, j) and ac.seafront_cap(i, j) is not None]
+check("and the town behind it is kept low", low and max(low) <= 1e-9,
+      "%d buildings under the line" % len(low))
 flooded = [(i, j) for i in range(li_ - 40, li_ + 41)
            for j in range(int(ac.river_span(i)[1]) + 1, int(ac.river_span(i)[1]) + 10)
            if ac.moat_at(i, j)]
