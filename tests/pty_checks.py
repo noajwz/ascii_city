@@ -147,6 +147,8 @@ ok &= report("the confession booth: in, type with q and s in it, confess, esc, o
                   + [(bytes([c_]), .05) for c_ in b"i quit my job and stole"]
                   + [(b"\x7f", .1), (b"l", .1), (b"\r", 3.0), (b"\x1b", .5), (b"s", .6),
                      (b"s", .6)], cols=100, rows=30))
+ok &= report("a blackout: to the night, the power going, walking in the dark", *run(
+    [(b"`", .5), (b"0", 8.0), (b"w", 1.0), (b"`", .4), (b"c", 1.5)], cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

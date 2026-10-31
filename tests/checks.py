@@ -4408,6 +4408,51 @@ for w_, h_ in ((20, 8), (39, 13), (80, 24), (240, 70)):
     ac.render_confession(w_, h_, 6.0, bth)
 check("any size of booth is fine", True)
 
+# --- the blackout --------------------------------------------------------------
+bo_nights = sum(1 for k in range(2000)
+                if ac.night(k * ac.NIGHT_LENGTH + 1.0)["blackout"])
+check("the power goes one night in a while", 2000 / 30.0 < bo_nights < 2000 / 6.0,
+      "%d nights in 2000" % bo_nights)
+check("and never on the strange night", not any(
+    ac.night(k * ac.NIGHT_LENGTH + 1.0)["blackout"]
+    and ac.night(k * ac.NIGHT_LENGTH + 1.0)["alien"] for k in range(4000)))
+keep_skip = ac._night_skip
+ac.skip_to_blackout(0.0)
+n0 = 0.0 + 4.0                                   # it starts at BO_START
+blocks_ = [(bi * ac.XP, bj * ac.ZP) for bi in range(-6, 6) for bj in range(-6, 6)]
+def dark_(t):
+    return sum(ac.power_off(i, j, t) for i, j in blocks_) / float(len(blocks_))
+check("nothing is out before it starts", dark_(n0 - 2.0) == 0.0)
+check("then the blocks go one by one", 0.1 < dark_(n0 + ac.BO_SPREAD * 0.5) < 0.9,
+      "%.2f out half way" % dark_(n0 + ac.BO_SPREAD * 0.5))
+mid_ = n0 + ac.BO_SPREAD + 30.0
+check("until the whole city is dark", dark_(mid_) == 1.0)
+back0 = n0 - ac.BO_START + ac.NIGHT_LENGTH * ac.BO_BACK
+check("and it comes back as a wave", 0.1 < dark_(back0 + ac.BO_WAVE * 0.5) < 0.9
+      and dark_(back0 + ac.BO_WAVE + 6.0) == 0.0)
+cas_ = ac.find_place(x0, z0, "casino")
+cv = ac.View(cas_[0], cas_[1], cas_[2], 100, 30)
+keep_ = ac.CONCRETE
+ac.CONCRETE = 913
+lit_ch, lit_co = ac.render_street(cv, n0 - 2.0)[:2]
+out_ch, out_co = ac.render_street(cv, mid_)[:2]
+ac.CONCRETE = keep_
+def lights_(ch_, co_):
+    return sum(1 for y in range(30) for x in range(100)
+               if ch_[y][x].isalnum() or ch_[y][x] in "*@#")
+check("on the street the lights go out",
+      lights_(out_ch, out_co) < lights_(lit_ch, lit_co) * 0.5,
+      "%d lights, then %d" % (lights_(lit_ch, lit_co), lights_(out_ch, out_co)))
+check("and the casino's name with them",
+      "LUCKY" in "\n".join("".join(r) for r in lit_ch)
+      and "LUCKY" not in "\n".join("".join(r) for r in out_ch))
+check("the buildings are still there, in the dark",
+      sum(1 for y in range(30) for x in range(100) if out_co[y][x] == 913) > 80)
+check("the HUD says so",
+      ac.blackout_word(cas_[0], cas_[1], mid_) == "  ~ the power is out ~"
+      and ac.blackout_word(cas_[0], cas_[1], n0 - 2.0) == "")
+ac._night_skip = keep_skip
+
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
 cl2 = ac.Claw(0, [], w_)

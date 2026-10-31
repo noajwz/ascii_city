@@ -2633,6 +2633,7 @@ class View:
         self.tunnels = []       # the tunnels in reach this frame, found once
         self.snow = 0.0         # how hard it is snowing
         self.dawn = 0.0         # how far into the morning, 0..1
+        self.blackout = False   # is tonight the night the power goes
         self.cover = 0.0        # and how much is lying
         self.flash = 0.0        # how bright the lightning is this instant
         self.crown = None       # the sky decks' weather light this instant
@@ -4075,6 +4076,10 @@ def draw_walls(ch, co, v, now):
                 face_kind(i + nx, j + nz), now))
             if b["diner"] is not None and f == b["diner"]["door"]:
                 diner_window(ch, co, v, sx, dist, u, f, r_lo, r_hi, b)
+            if (v.blackout and b["temple"] is None and not b["tree"]
+                    and power_off(i, j, now)):
+                # The temple is candlelit anyway; everything else goes dark.
+                unpowered(ch, co, sx, r_lo, r_hi, _mix(i, j, 3405), now)
             if v.tunnels and tunnel_at(i + nx, j + nz):
                 tunnel_lining(ch, co, v, sx, dist, r_lo, r_hi, j, _mix(i, j, 2209))
             cover = r_lo if cover is None else min(cover, r_lo)
@@ -4258,6 +4263,9 @@ def draw_sky(ch, co, v, walls, wet, now):
     # threshold, so a night can be half lost behind it.
     cloud = 1.0 if overcast_held() else (0.0 if n["alien"] else cloud_cover(now))
     clear = n["clarity"] * (1.0 - cloud) * max(0.0, 1.0 - v.dawn * 1.4)
+    if v.blackout and power_off(int(v.x / CELL + BIG) - BIG,
+                                int(v.z / CELL + BIG) - BIG, now):
+        clear = min(1.0, clear * 1.8 + 0.2)   # no city in the sky: the stars
     # walls[3], not walls[1]: a star must clear every roof in its column, not
     # only the nearest one. The part of a far tower that shows above a nearer
     # roof is still a building, and stars were being drawn straight into it.
@@ -4357,6 +4365,8 @@ def collect_glow(v, now, wet):
         _spill(glow, wx, wz, 11.0, NEON[int(now * 5.0) % len(NEON)][1])
         _spill(glow, cx, cz, 4.0, GOLD_DIM)
     for i, j, b in near_lots(v, 60.0):
+        if v.blackout and b["temple"] is None and power_off(i, j, now):
+            continue                    # nothing spills from a dark building
         for f in range(4):
             nx, nz = FACES[f]
             if not is_open(i + nx, j + nz):
@@ -9310,6 +9320,12 @@ def fire_near(x, z):
     return False
 
 
+# What goes out in a blackout: anything on a facade that is lit by the mains.
+LIGHT_PROPS = {"arcade", "blade", "bulb", "cinema", "diner", "exchange", "hung",
+               "lanterns", "lobby", "marquee", "overdoor", "ramenfront", "clubdoor",
+               "bass"}
+
+
 def draw_props(ch, co, v, walls, now, wet):
     """Everything hanging off a facade or standing in front of one, drawn
     farthest first so the near ones win."""
@@ -9317,6 +9333,7 @@ def draw_props(ch, co, v, walls, now, wet):
     for i, j, b in near_lots(v, 62.0):
         if b["tree"]:
             continue                    # nothing is hung on a tree
+        start_ = len(props)
         for f in range(4):
             nx, nz = FACES[f]
             if not is_open(i + nx, j + nz):
@@ -9407,6 +9424,8 @@ def draw_props(ch, co, v, walls, now, wet):
                 if fc["escape"] and climbable(i, j, f):
                     w = face_point(i, j, f, CELL * 0.5, 0.35, 0.0)
                     props.append((_d2(v, w), "ladder", None, w, (nx, nz)))
+        if v.blackout and props[start_:] and power_off(i, j, now):
+            props[start_:] = [p_ for p_ in props[start_:] if p_[1] not in LIGHT_PROPS]
     props.sort(key=lambda p: -p[0])
 
     for _, kind, s, world, normal in props:
@@ -9901,6 +9920,9 @@ def night(now):
         # The strange night does not end in a morning. Whatever that was, it
         # is the one night the city never wakes up from.
         got["dawn"] = _mix(k, 2, 613) % DAWN_ODDS == 0 and not got["alien"]
+        # The power going: on its own hash, and never on the strange night,
+        # when everything electric in town is busy with the sky.
+        got["blackout"] = _mix(k, 3, 613) % BLACKOUT_ODDS == 0 and not got["alien"]
         if got["alien"]:
             # Whatever the weather was going to be up there, the sky is lit by
             # what is in it tonight.
@@ -9908,6 +9930,87 @@ def night(now):
             got["band"] = True
         _night_cache[k] = got
     return got
+
+
+BLACKOUT_ODDS = 14     # one night in this many the power goes
+BO_START = 30.0        # seconds into the night it starts going
+BO_SPREAD = 40.0       # over this long, block by block
+BO_BACK = 0.62         # how far through the night it starts coming back
+BO_WAVE = 30.0         # the wave of it coming back takes this long to pass
+BO_WAVE_W = 900.0      # and goes over this many units in that time
+BO_FLICKER = 1.4       # a block flickers this long before it holds
+
+
+def power_off(i, j, now):
+    """Is this cell's block without power this instant? On a blackout night
+    the blocks go out one by one in no order over BO_SPREAD, stay out, and
+    come back as a wave crossing the city - each block flickering as it
+    catches. Everything is a function of the block and the time."""
+    if not night(now)["blackout"]:
+        return False
+    t = (now + _night_skip) % NIGHT_LENGTH
+    if t < BO_START:
+        return False
+    bi, bj = i // XP, j // ZP
+    out = BO_START + (_mix(bi, bj, 3401) % 1000) / 1000.0 * BO_SPREAD
+    x = (bi * XP + XP * 0.5) * CELL
+    back = (NIGHT_LENGTH * BO_BACK + 3.0 * (_mix(bi, bj, 3403) % 100) / 100.0
+            + (x % BO_WAVE_W) / BO_WAVE_W * BO_WAVE)
+    if t < out or t >= back + BO_FLICKER:
+        return False
+    if t >= back:
+        return int(t * 12.0) % 3 != 0          # catching: on, off, on
+    if t < out + 0.8:
+        return int(t * 15.0) % 2 == 0          # and going: a last flicker
+    return True
+
+
+def blackout_word(x, z, now):
+    """What the HUD says about it, from where you stand."""
+    if not night(now)["blackout"]:
+        return ""
+    t = (now + _night_skip) % NIGHT_LENGTH
+    i, j = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    if t < BO_START:
+        return ""
+    if power_off(i, j, now):
+        return "  ~ the power is out ~"
+    if t < NIGHT_LENGTH * BO_BACK:
+        return "  ~ the lights are going out ~"
+    if t < NIGHT_LENGTH * BO_BACK + BO_WAVE + 4.0:
+        return "  ~ the lights are coming back ~"
+    return ""
+
+
+def skip_to_blackout(now):
+    """To the next night the power goes, a few seconds before it starts."""
+    global _night_skip
+    for _ in range(BLACKOUT_ODDS * 8):
+        _night_skip += NIGHT_LENGTH
+        if night(now)["blackout"]:
+            t = (now + _night_skip) % NIGHT_LENGTH
+            _night_skip += (BO_START - 4.0) - t
+            return True
+    return False
+
+
+def unpowered(ch, co, sx, r_lo, r_hi, seed, now):
+    """One column of a building with the power off: everything that was a
+    light goes out, the structure stays, dark, and here and there where a
+    window was there is a candle."""
+    for y in range(r_lo, r_hi + 1):
+        c = ch[y][sx]
+        if c == " ":
+            continue
+        if c in "|_=-/\\^.'":
+            co[y][sx] = CONCRETE
+            if c in ".'":
+                ch[y][sx] = " "
+        elif _mix(sx // 2, y, seed) % 9 == 0:
+            ch[y][sx] = "."
+            co[y][sx] = EMBER_HOT if _mix(sx, y, int(now * 5.0)) % 4 else EMBER
+        else:
+            ch[y][sx], co[y][sx] = " ", 0
 
 
 def city_sync(now):
@@ -10216,6 +10319,7 @@ def render_street(v, now):
     v.snow = snowfall(now)
     v.cover = snow_cover(now)
     v.dawn = dawn(now)
+    v.blackout = night(now)["blackout"]
     v.crown = crown_light(now, wet)
     v.bass = bass_lots(v, now)
 
@@ -10242,9 +10346,11 @@ def render_street(v, now):
     # Before the props, so a sign out front is never painted over by a
     # beam going up behind it.
     for c_ in near_cinemas(v, SEARCH_REACH):
-        draw_searchlights(ch, co, v, walls, c_, now)
+        if not (v.blackout and power_off(c_["i"], c_["j"], now)):
+            draw_searchlights(ch, co, v, walls, c_, now)
     for d_ in near_diners(v, CUP_REACH):
-        draw_diner_cup(ch, co, v, walls, d_, now)
+        if not (v.blackout and power_off(d_["i"], d_["j"], now)):
+            draw_diner_cup(ch, co, v, walls, d_, now)
     draw_props(ch, co, v, walls, now, wet)
     draw_manhole_steam(ch, co, v, walls, now)
     draw_car_park(ch, co, v, walls, now, wet)
@@ -10266,7 +10372,8 @@ def render_street(v, now):
                         "o", EMBER_HOT, max(wet, 0.3), now)
                 z += TUNNEL_LAMP
     for bb in near_billboards(v, BILL_SEEN if v.eye < 10.0 else ROOF_REACH):
-        draw_billboard(ch, co, v, walls, bb, now, wet)
+        if not (v.blackout and power_off(bb["i"], bb["j"], now)):
+            draw_billboard(ch, co, v, walls, bb, now, wet)
     for lm_ in near_landmarks(v, 320.0):
         draw_spire(ch, co, v, walls, lm_, now, wet)
         if v.roof is not None and v.roof.get("landmark") is lm_:
@@ -13445,6 +13552,7 @@ def draw_cheats(ch, co, note):
            ("", ""), ("", "NIGHTS"),
            ("n", "the next one"), ("u", "a strange night"),
            ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
+           ("0", "a blackout"),
            ("", ""), ("`", "close")]
     columns = (left, middle, right, sky)
 
@@ -14905,6 +15013,9 @@ def main(stdscr):
                 elif key == ord("/"):
                     skip_to_closing(now)
                     note = "closing time - k for a club"
+                elif key == ord("0"):
+                    note = ("the power goes in a few seconds"
+                            if skip_to_blackout(now) else "no such night near")
                 elif key == ord("z"):
                     note = ("lanterns on the river tonight"
                             if skip_to_lanterns(now) else "no such night near")
@@ -15396,6 +15507,7 @@ def main(stdscr):
                          int(cam_z / CELL + BIG) - BIG)["name"],
                 sky_word(now, wet),
                 show_hint(now, cam_x, cam_z)
+                or blackout_word(cam_x, cam_z, now)
                 or landmark_hint(cam_x, cam_z)
                 or rave_hint(v, now)
                 or ("  ~ something over the city ~" if night(now)["alien"]
