@@ -78,7 +78,7 @@ ok &= report("20x8 window with panel", *run(
 ok &= report("240x70 window with panel", *run(
     [(b"`",.5),(b"6",.7),(b"w",.4)], cols=240, rows=70))
 ok &= report("ramen counter, sit and leave", *run(
-    [(b"`", .5), (b"r", 1.0), (b"w", .3), (b"s", .6), (b"s", .6), (b"w", .4)]))
+    [(b"`", .5), (b"r", 1.0)] + IN + [(b"s", .6), (b"s", .6), (b"w", .4)]))
 ok &= report("casino slot: bet up, pull, bet down", *run(
     [(b"`", .5), (b"c", 1.0)] + IN + [(b"+", .3), (b"p", 3.0), (b"-", .3), (b"p", 3.0),
      (b"b", .6), (b"k", 3.0)], cols=100, rows=30))
@@ -127,7 +127,8 @@ ok &= report("the stock exchange: buy, more, sell, walk out", *run(
     cols=100, rows=30))
 ok &= report("money: +1000 in the menu, a film, a bowl, walk out", *run(
     [(b"`", .5), (b"+", .4), (b"m", 2.0), (b"s", .6), (b"s", .6), (b"`", .5),
-     (b"r", 6.0), (b"s", .6), (b"s", .6)], cols=100, rows=30))
+     (b"r", .6)] + IN + [(b"s", .1), (b"w", 5.0), (b"s", .6), (b"s", .6)],
+    cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
