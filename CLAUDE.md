@@ -556,17 +556,33 @@ that only exists in the air reads as a stick. Drawn from 420 units, further than
 because a moving light is the first thing the eye finds. `h` in the menu puts you at the landing
 looking out to the point.
 
-### The firing box, and firing your own show
+### Up the lighthouse, and firing your own show from it
 
-A box on the rock between the lighthouse and the bay (`firing_box()`, placed off
-`lighthouse_spot()`), with a lamp on it that goes red and blinks while it is in use. `f` within
-`FIRE_REACH` lights a `Show`; `+` in the menu stands you at the box facing the bay. It is not a
-venue: you stay in the street view, because the point is to watch what you fire, and anybody on
-the bridge or the far bank sees it too, since `draw_fireworks()` draws the show's shells over its
-bay whatever night it is.
+The lighthouse has a door at its foot, facing the bridge's landing (`LIGHT_DOOR` out from the
+middle), and walking into it is on to the stair: `lighthouse_door()` starts the same lift state
+the sky decks use, with `kind: "lighthouse"`, `climb_times()` for its timing and `render_stairs()`
+for the climb — the steps winding down past you round the post in the middle, slit windows going
+by with the beam crossing them, a count of `STAIR_STEPS`. At the top you are on the gallery:
+`gallery_view()` puts the camera `GALLERY_R` from the middle and `LIGHT_H + 1.5` up, and turning
+walks you round the lantern. `lighthouse_info()` is the one description of all of it — where it
+stands, the door, where you come out again, and where a show goes up. `+` in the menu stands you
+outside the door; one step in and you are climbing; `s` on the gallery climbs back down.
 
-**The game is a beat bar**, `draw_show_bar()`, over the bottom of the view while you are within
-`FIRE_ZONE` of the box: cues come in from the left to a line on the right at `SHOW_BPM`, after a
+From the gallery, `draw_lighthouse()` draws neither the tower under your feet nor the lantern at
+your back, and `draw_gallery()` draws the rail round you, solved per screen column against the
+rail's circle the way the sky deck's parapet is solved against its square. **You stand nearer the
+lantern than the rail on purpose**: at the rail itself the rail is under your chin and off the
+bottom of the screen; a step in, it frames the bottom of the view.
+
+`f` on the gallery lights a `Show`; it used to be a firing box down on the rock, which is gone.
+The show goes up over the bay between the bridge and the carnival's wheel (`lighthouse_info()`'s
+`show`), so from the gallery the three are in the one view, and at that height the bursts are at
+eye level rather than over your head — every spark on screen, measured, where from the rock a
+third went off the top. Anybody on the bridge or the far bank sees it too, since
+`draw_fireworks()` draws the show's shells over its bay whatever night it is.
+
+**The game is a beat bar**, `draw_show_bar()`, over the bottom of the view while you are up on
+the gallery: cues come in from the left to a line on the right at `SHOW_BPM`, after a
 count-in. The cues are laid out when the show is lit, a bar at a time from `SHOW_BARS_EASY` for the
 first two and `SHOW_BARS_ALL` after; `2` is a big cue and puts a gold willow up as well. `press()`
 judges against the nearest cue still waiting, `SHOW_GREAT` or `SHOW_GOOD` either side, and puts a
@@ -580,10 +596,7 @@ key going up, so nothing here can ask you to hold one. And frames are 1/30 s apa
 `SHOW_GREAT` is as wide as 0.09: a press is only seen at the start of the next frame.
 
 `shell_sparks()` grew `size`, `spread` and `willow` for this, all defaulting to what the night show
-already did. **The show goes up `SHOW_OUT` past the middle of the bay, in line with the box**,
-not over the middle: from the rock the middle is under seventy units off, and measured, a third of
-every burst was above the top of the screen. Moved out, more than 85% of the sparks land on screen,
-and there is a test that holds it there.
+already did.
 
 ## The bridges
 

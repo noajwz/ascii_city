@@ -2641,18 +2641,29 @@ check("the cheat stands you on it", ac.can_stand(fair[0], fair[1])
 check("and one carnival is a long way from the next",
       ac.carnival_col(fc + ac.CARNIVAL_GAP) - fc > 100)
 
-# The firing box on the headland, and the show you fire from it: cues on a
-# bar, a shell up over the bay for every press on the beat, and a finale as
-# big as the show deserved.
-fb = ac.find_place(x0, z0, "firebox")
-box = ac.near_firing_box(fb[0], fb[1], ac.FIRE_REACH)
-check("the cheat stands you at the firing box", box is not None
-      and ac.headland_at(int(box[0] // ac.CELL), int(box[1] // ac.CELL)))
-check("and the HUD says what it is for", "f lights a show" in ac.show_hint(0.0, fb[0], fb[1]))
+# Up the lighthouse, and the show you fire from its gallery: cues on a bar,
+# a shell up over the bay for every press on the beat, and a finale as big as
+# the show deserved.
+door_ = ac.find_place(x0, z0, "lighthousedoor")
+check("the cheat stands you outside the lighthouse's door",
+      ac.can_stand(door_[0], door_[1])
+      and ac.headland_at(int(door_[0] // ac.CELL), int(door_[1] // ac.CELL))
+      and ac.lighthouse_door(door_[0], door_[1]) is None)
+lh_ = ac.lighthouse_door(door_[0], door_[1] - 3.0)
+check("and a step in is the door", lh_ is not None and lh_["kind"] == "lighthouse")
+check("and the HUD says you can go up",
+      "climb up" in ac.show_hint(0.0, door_[0], door_[1]))
+check("the stair counts the steps up", "step" in "".join(
+    "".join(r) for r in ac.render_stairs(True, 8, 2.0, 90, 24, 300.0)[0])
+      and "lighthouse" in "".join("".join(r) for r in
+                                  ac.render_stairs(True, 8, 2.0, 20, 8, 300.0)[0]))
+fb = (lh_["x"], lh_["z"], 0.0)          # up on the gallery
+check("up there, the HUD says how to light a show",
+      "f lights a show" in ac.gallery_hint(0.0))
 ac._show = None
-check("away from the box f lights nothing",
-      not ac.light_show(500.0, fb[0], fb[1] - 40.0) and ac._show is None)
-check("at it, f lights a show, and only one at once",
+check("down on the rock f lights nothing",
+      not ac.light_show(500.0, door_[0], door_[1]) and ac._show is None)
+check("on the gallery, f lights a show, and only one at once",
       ac.light_show(500.0, fb[0], fb[1]) and not ac.light_show(501.0, fb[0], fb[1]))
 sh = ac._show
 check("which goes up over the water",
@@ -2674,7 +2685,7 @@ check("and the finale is the biggest there is",
       len([s_ for s_ in sh.shots if s_[0] >= sh.end]) == 24)
 check("it is over once the finale has burnt out",
       not sh.over(sh.end + ac.SHOW_FINALE) and sh.over(sh.end + 20.0))
-check("and f at the box lights another", ac.light_show(sh.end + 20.0, fb[0], fb[1]))
+check("and f up there lights another", ac.light_show(sh.end + 20.0, fb[0], fb[1]))
 sh = ac._show
 sh.update(sh.end + 0.01)
 check("left alone, every cue is a miss and the finale is a small one",
@@ -2690,8 +2701,7 @@ check("near enough is good, not great",
       sh.press(c0 + (ac.SHOW_GREAT + ac.SHOW_GOOD) / 2) == "good")
 check("a fizzle breaks the streak", sh.press(c0 + 0.4) == "fizzle" and sh.streak == 0)
 
-# What goes up has to be seen from the box: from the rock the middle of the
-# bay was near enough that a third of every burst went off the top.
+# What goes up has to be seen from up there.
 ac._show = None
 ac.light_show(1000.0, fb[0], fb[1])
 sh = ac._show
@@ -2702,7 +2712,8 @@ real_neon, real_gold, real_ember = list(ac.NEON), ac.GOLD, ac.EMBER
 ac.NEON[:] = [(800 + k, 900 + k) for k in range(8)]
 ac.GOLD, ac.EMBER = 990, 991
 sparkc = set(range(800, 808)) | set(range(900, 908)) | {990, 991}
-fv = ac.View(fb[0], fb[1], fb[2], 100, 30)
+fv = ac.gallery_view(lh_, math.atan2(sh.bay[0] - fb[0], sh.bay[1] - fb[1]), 100, 30)
+fv.roof = lh_
 t_ = sh.cues[10]["t"] + 1.6
 grid, colour, _ = ac.render_street(fv, t_)
 lit = sum(1 for y in range(30) for x in range(100) if colour[y][x] in sparkc)
@@ -2711,7 +2722,7 @@ pts = [fv.project(x, y, z) for t0, m, size, w in sh.shots
        for x, y, z, *_ in ac.shell_sparks(sh.bay[0], sh.bay[1], t0, m, t_, size,
                                           ac.SHOW_SPREAD, w)]
 seen = sum(1 for p_ in pts if p_ and 0 <= p_[1] < 30 and 0 <= p_[0] < 100)
-check("from the box you see your shells burst", lit > 60 and seen > 0.85 * len(pts),
+check("from the gallery you see your shells burst", lit > 60 and seen > 0.85 * len(pts),
       "%d cells, %d of %d sparks on screen" % (lit, seen, len(pts)))
 ac.NEON[:] = real_neon
 ac.GOLD, ac.EMBER = real_gold, real_ember
@@ -2722,9 +2733,24 @@ check("the bar fits an 80x24 window", "f on the beat" in bar_text and "|]" in ba
 tiny = ([[" "] * 30 for _ in range(8)], [[0] * 30 for _ in range(8)])
 ac.draw_show_bar(tiny[0], tiny[1], sh, sh.cues[3]["t"])
 check("and stays out of a tiny one", all(c == " " for r in tiny[0] for c in r))
-check("the button is only yours near the box",
+check("the button is only yours up there",
       ac.on_the_button(t_, fb[0], fb[1]) is sh
       and ac.on_the_button(t_, fb[0] + 200.0, fb[1]) is None)
+gv_ = ac.gallery_view(lh_, math.atan2(lh_["show"][0] - fb[0], lh_["show"][1] - fb[1]),
+                      110, 30)
+gv_.roof = lh_
+real_neon, real_hot = list(ac.NEON), ac.EMBER_HOT
+ac.NEON[:] = [(800 + k, 900 + k) for k in range(8)]
+ac.EMBER_HOT = 777
+g_, c_, _ = ac.render_street(gv_, 300.0)
+ac.NEON[:] = real_neon
+ac.EMBER_HOT = real_hot
+check("and from the gallery the bridge and the wheel are both in the view",
+      sum(1 for r in c_ for a in r if a == 777) > 10
+      and sum(1 for y in range(30) for x in range(110)
+              if g_[y][x] == "o" and 800 <= c_[y][x] < 808) > 10)
+check("with the gallery's rail along the bottom of it",
+      sum("".join(r).count("=") for r in g_[20:]) > 60)
 ac._show = None
 
 # The claw machine: on the fairground, and honest the way the slot is - the
