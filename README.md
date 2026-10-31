@@ -98,6 +98,8 @@ the city is infinite, identical every time you walk back to it, and held in no m
 
 ```
   w s        walk            a d     turn        , .   sidestep
+  W S        run             + -     pace: normal, brisk, fast, very fast
+  t          hail a taxi     e       lift a manhole cover
   tab        switch view     space   wander on its own
   `          cheat menu      q       quit
 ```

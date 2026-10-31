@@ -30,6 +30,13 @@ on the skyline, and a strike lights both. This is worth a test, and has one: tab
 in a dry, still postcard, which is exactly the kind of break that no amount of looking at one view
 will show you.
 
+**Pace.** `+` and `-` in the street step how fast you walk through `PACES`, from a walk to three
+and a half times one; running (`W`/`S`) is the pace times `RUN_MULTIPLIER`, sidestepping and the
+autopilot go with it, turning does not. At the top that is about five units a frame — a whole
+cell — so the move is cut into steps of `STEP_MAX` and each tested with `can_stand()`: one test
+a frame would carry you clean through the corner of a block. Measured through a pty, running at
+the top pace into the wall ahead of the start stops you at it, nothing crossed.
+
 `wander()`, behind the spacebar, blends every direction it probes by score instead of picking the
 best one. Picking the winner outright makes the walk twitch, because the winner changes from one
 frame to the next: measured over eighty seconds that was 395 hard snaps, some of them a full

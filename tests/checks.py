@@ -4679,6 +4679,15 @@ ac.STAR = keep_star
 check("and no stars through it", not any(sky_co[y][x] == 914 for y in range(lv.horizon)
                                           for x in range(100)))
 
+# --- pace -----------------------------------------------------------------------
+check("paces from a walk to very fast, in order",
+      ac.PACES[0][1] == 1.0 and all(ac.PACES[k][1] < ac.PACES[k + 1][1]
+                                     for k in range(len(ac.PACES) - 1)))
+fastest_ = ac.WALK * ac.PACES[-1][1] * ac.RUN_MULTIPLIER / ac.FPS
+check("and a fast frame is cut into steps no longer than a cell can be tunnelled",
+      ac.STEP_MAX < ac.CELL * 0.5 and fastest_ / ac.STEP_MAX < 12,
+      "%.1f units a frame at the top" % fastest_)
+
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
 cl2 = ac.Claw(0, [], w_)
