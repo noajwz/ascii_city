@@ -149,6 +149,9 @@ ok &= report("the confession booth: in, type with q and s in it, confess, esc, o
                      (b"s", .6)], cols=100, rows=30))
 ok &= report("a blackout: to the night, the power going, walking in the dark", *run(
     [(b"`", .5), (b"0", 8.0), (b"w", 1.0), (b"`", .4), (b"c", 1.5)], cols=100, rows=30))
+ok &= report("a taxi: hail, it pulls up, choose, ride, arrive", *run(
+    [(b"t", 3.6), (b"\x1bOB", .3), (b"s", .3), (b"w", .3), (b"\r", 15.0), (b"w", .5)],
+    cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

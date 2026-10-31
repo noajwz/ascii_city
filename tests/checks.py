@@ -4453,6 +4453,52 @@ check("the HUD says so",
       and ac.blackout_word(cas_[0], cas_[1], n0 - 2.0) == "")
 ac._night_skip = keep_skip
 
+# --- the taxi ------------------------------------------------------------------
+sx_, sz_ = ac.start_position()
+tdests = ac.taxi_dests(sx_, sz_)
+check("a taxi goes to most of the city, each with a fare",
+      len(tdests) >= len(ac.TAXI_DESTS) - 2
+      and all(f_ >= ac.FARE_BASE for _, _, f_ in tdests))
+near_ = min(tdests, key=lambda d: d[2])
+far_ = max(tdests, key=lambda d: d[2])
+check("further costs more", math.hypot(far_[1][0] - sx_, far_[1][1] - sz_)
+      > math.hypot(near_[1][0] - sx_, near_[1][1] - sz_), "%s $%d, %s $%d" % (
+          near_[0], near_[2], far_[0], far_[2]))
+route_ = ac.taxi_route(sx_, sz_, far_[1][0], far_[1][1], 10.0)
+pts_ = [ac.taxi_ride_at(route_, k / 40.0) for k in range(41)]
+check("the ride goes along a street, never through a building",
+      route_[3] > 40.0 and all(ac.is_open(int(px / ac.CELL + ac.BIG) - ac.BIG,
+                                          int(pz / ac.CELL + ac.BIG) - ac.BIG)
+                               for px, pz, _ in pts_), "%.0f units" % route_[3])
+check("easing off at the start and the end", abs(pts_[1][1] - pts_[0][1])
+      < abs(pts_[20][1] - pts_[19][1]) > abs(pts_[40][1] - pts_[39][1]))
+rv = ac.View(pts_[20][0], pts_[20][1], pts_[20][2], 100, 30, eye=2.4)
+rch, rco, rwet = ac.render_street(rv, 300.0)
+ac.draw_cab(rch, rco, 300.0, 0.6, "-> the casino", 7.5, "Busy night.")
+rtext = "\n".join("".join(r) for r in rch)
+check("from the back seat: the mirror, the meter, the driver, the city",
+      "[_________]" in rtext and "FARE $  7.50" in rtext and "Busy night." in rtext
+      and "(   )" in rtext)
+mch = [[" "] * 100 for _ in range(30)]
+mco = [[0] * 100 for _ in range(30)]
+ac.draw_taxi_menu(mch, mco, tdests, 1, 5.0)
+mtext = "\n".join("".join(r) for r in mch)
+check("where to? with the fares", "WHERE TO?" in mtext and "> " + tdests[1][0] in mtext)
+cv_ = ac.View(sx_, sz_, 0.0, 100, 30)
+seen_ = []
+for t_ in (0.2, 1.5, 2.9):
+    tch, _, _ = ac.render_street(cv_, 300.0)
+    ac.draw_taxi_coming(tch, [[0] * 100 for _ in range(30)], cv_, (0.0, 1.0), t_)
+    seen_.append("\n".join("".join(r) for r in tch))
+check("and you see it pull up, bigger as it comes",
+      "TAXI" in seen_[-1] and "(O)" in seen_[-1])
+for w_, h_ in ((20, 8), (40, 14), (240, 70)):
+    g_ = [[" "] * w_ for _ in range(h_)]
+    c_ = [[0] * w_ for _ in range(h_)]
+    ac.draw_cab(g_, c_, 1.0, 0.5, "-> the woods", 12.0, "Rain's good for business.")
+    ac.draw_taxi_menu(g_, c_, tdests, 3, 100.0)
+check("and any size of window is fine", True)
+
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
 cl2 = ac.Claw(0, [], w_)
