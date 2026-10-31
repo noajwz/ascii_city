@@ -1170,7 +1170,8 @@ that casino — by its cell, which the casino dict now carries — into `jackpot
 `JACKPOT_LONG`: every bulb on, every window lit, the blade, the marquee and the doorman flashing gold
 and white, and inside the room's ceiling all lit. Walk out and the building is still going. A 777 is
 about one pull in nine thousand, so `%` in the menu (`rig_jackpot()`) makes the next pull one
-(and the next plinko ball an edge, and the next race the long shot's), once —
+(and the next plinko ball an edge, the next race the long shot's, the next flight a
+hundred), once —
 the one place the slot is not honest, and only when asked.
 
 **It is one of the two buildings you can enter.** `venue_at()` is the trigger for both: stand in a
@@ -1269,6 +1270,21 @@ longest shot home in the next race. `draw_races()` is the board and the track: n
 the silks' colour, odds and your money, the horse galloping to a chequered line, where it came
 once it is past the post, and the commentator; a window without `RACE_WIDE` x `RACE_TALL` gets a
 line of text.
+
+**High Flyer** is the crash game, the sixth, on `f`. A round every so often: `FLY_BET` seconds of
+bets (`p` puts the stake on, `+`/`-` step it), then a plane takes off and the multiplier is
+`fly_mult()` — e to `FLY_GROW` times the seconds flown — until it flies away; `p` again cashes
+you out at whatever it says, and the plane gone first is the stake gone. `Flyer._start()` draws
+where it goes when the round starts, `FLY_BACK / (1 - u)` to the cent and capped at `FLY_TOP`, so
+the chance it gets past m is `FLY_BACK / m` for every m: whatever you cash out at, the game pays
+back 97%, which the tests measure both ways (the distribution, and six thousand rounds at 2x).
+Truncating to the cent puts one round in 25 on 1.00x, off the ground before it leaves. `u` cycles
+an automatic target (`FLY_AUTO`), which `update()` cashes the moment the multiplier passes it —
+whether or not you are looking. `draw_flyer()` is the graph: a log scale up the side, the curve
+drawn behind the plane, a burst where it went, the figure in the big font, green while it flies
+and red when it has gone, what your stake is worth, four others at the table cashing out or not
+(`FLY_PEOPLE`), and where the last ones went. Cashing out at 20x or better lights the building;
+`%` sends the next one to a hundred.
 
 ## The ramen counter
 

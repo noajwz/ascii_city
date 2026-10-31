@@ -368,6 +368,95 @@ for w_, h_ in ((80, 24), (100, 30)):
     check("the sixteen-row board fits at %dx%d" % (w_, h_),
           "1k" in rt_ and "16 ROWS  HIGH RISK" in rt_ and "1000" not in rt_)
 
+# --- High Flyer --------------------------------------------------------------
+fl_ = ac.Flyer(ac.Wallet(10 ** 9))
+crashes_ = []
+for k in range(20000):
+    fl_._start(0.0)
+    crashes_.append(fl_.round["crash"])
+past_ = {m_: sum(c_ >= m_ for c_ in crashes_) / 20000.0 for m_ in (2.0, 5.0, 10.0)}
+check("high flyer: the chance it gets past m is about 0.97 in m",
+      all(abs(past_[m_] * m_ - ac.FLY_BACK) < 0.08 for m_ in past_), str(past_))
+bust_ = sum(c_ == 1.0 for c_ in crashes_) / 20000.0
+check("and a few never leave the ground", 0.015 < bust_ < 0.05, "%.3f" % bust_)
+check("the multiplier climbs, and reaches m when it should",
+      ac.fly_mult(0.0) == 1.0 and ac.fly_mult(10.0) > ac.fly_mult(5.0) > 1.0
+      and abs(ac.fly_mult(ac.fly_time(5.0) + 0.001) - 5.0) < 0.02)
+fw = ac.Wallet(100)
+fl2 = ac.Flyer(fw)
+fl2.update(0.0)
+fl2.round["crash"] = 4.0
+fl2.stake = 10
+check("a bet goes on while the bets are open, once",
+      fl2.press(1.0) == "bet" and fl2.press(2.0) is None and fw.money == 90)
+t_cash = fl2.off() + ac.fly_time(2.5) + 0.01
+check("cash out while it flies: the stake times where it is",
+      fl2.press(t_cash) == "cashed"
+      and abs(fw.money - (90 + 10 * fl2.round["cashed"])) < 1e-9
+      and 2.49 <= fl2.round["cashed"] <= 2.51)
+check("and only once", fl2.press(t_cash + 1.0) is None)
+fl3 = ac.Flyer(ac.Wallet(100))
+fl3.update(0.0)
+fl3.round["crash"] = 1.8
+fl3.press(1.0)
+fl3.update(fl3.gone() + 0.1)
+check("too late and it is gone, and so is the stake",
+      fl3.press(fl3.gone() + 0.2) is None and fl3.last[0] == -5
+      and fl3.wallet.money == 95)
+fl3.update(fl3.gone() + ac.FLY_SHOW + 0.1)
+check("then the next round",
+      fl3.round["n"] == 2 and fl3.phase(fl3.round["t0"]) == "bets"
+      and fl3.history[-1] == 1.8)
+fl4 = ac.Flyer(ac.Wallet(100))
+fl4.auto = 2.0
+fl4.update(0.0)
+fl4.round["crash"] = 3.0
+fl4.press(1.0)
+fl4.update(fl4.gone() + 1.0)            # not even watching, and it still cashes
+check("an automatic target cashes out when it comes up",
+      fl4.round["cashed"] == 2.0 and abs(fl4.wallet.money - (95 + 10.0)) < 1e-9)
+fl5 = ac.Flyer(ac.Wallet(10 ** 9))
+fl5.auto, fl5.stake = 2.0, 1
+t_ = 0.0
+fl5.update(t_)
+for k in range(6000):
+    fl5.press(fl5.round["t0"] + 0.1)
+    t_ = fl5.gone() + ac.FLY_SHOW + 0.01
+    fl5.update(fl5.gone() + 0.001)
+    fl5.update(t_)
+got5 = (fl5.wallet.money - (10 ** 9 - 6000)) / 6000.0
+check("and playing it pays back about 97%, whatever the target", 0.9 < got5 < 1.04,
+      "%.3f at 2x" % got5)
+ac.rig_jackpot()
+ac._rig_slot = ac._rig_plinko = ac._rig_race = False
+fl5._start(0.0)
+check("the menu's jackpot sends the next one to a hundred", fl5.round["crash"] == 100.0)
+for w_, h_, t_ in ((80, 24, 3.0), (100, 30, ac.FLY_BET + 9.0), (130, 40, 30.0)):
+    fl6 = ac.Flyer(ac.Wallet())
+    fl6.update(0.0)
+    fl6.round["crash"] = 3.3
+    fl6.press(1.0)
+    fl6.update(t_)
+    room_, _ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), w_, h_, t_, ac.Slot(),
+                                     ac.Blackjack(), False, None, None, fl6)
+    rt_ = "\n".join("".join(r) for r in room_)
+    check("the flyer is in the room at %dx%d" % (w_, h_),
+          "HIGH FLYER" in rt_ and "AUTO" in rt_ and "L U C K Y" not in rt_)
+fl6 = ac.Flyer(ac.Wallet())
+fl6.update(0.0)
+fl6.round["crash"] = 9.0
+fl6.press(1.0)
+fl6.update(fl6.off() + 6.0)
+fly_ = "\n".join("".join(r) for r in ac.render_casino_room(
+    ac.Spin(0.0, "ROYALE"), 100, 30, fl6.off() + 6.0, ac.Slot(), ac.Blackjack(), False,
+    None, None, fl6)[0])
+check("in flight: the plane, the curve, what your stake is worth",
+      "=>" in fly_ and "IS WORTH" in fly_)
+small_ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), 50, 14, 5.0, ac.Slot(),
+                               ac.Blackjack(), False, None, None, fl6)[0]
+check("and a small window says what is going on instead",
+      "HIGH FLYER" in "\n".join("".join(r) for r in small_))
+
 # --- the races ---------------------------------------------------------------
 rc_ = ac.Races(ac.Wallet(10 ** 9))
 pay_ = 0.0
