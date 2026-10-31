@@ -38,7 +38,9 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   searchlights sweeping the sky from its roof, an arcade with a front that is one big wall of
   flashing coloured lights (the games inside are on their way), an all-night diner where she
   comes round with the coffee, and sky decks:
-  ride the lift to the roof of the tallest towers and look out over the whole city.
+  ride the lift to the roof of the tallest towers and look out over the whole city, where every
+  tower's crown is lit in the colour of the weather. The club still has no sign, but there is a
+  queue, a bouncer and a rope, and now and then the door opens and lets the light out.
 - **People out walking** — not many, it is night — under umbrellas when it rains.
 - **Traffic on the wide streets**, headlights and tail lights, the odd bus — and now and then a
   police car, its lights washing the street red and blue. Most of it is up on **the highway**, an

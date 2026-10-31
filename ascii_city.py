@@ -116,6 +116,12 @@ STRIKE_EVERY = 2.8     # seconds between strikes once one is overhead
 # --- the club, and the casino across town ---
 CLUB_ODDS = 1200       # one building in this many is one, and it is unmarked
 CLUB_BPM = 134.0
+# Every so often the door swings open, light pours out across the street,
+# and the front of the queue goes in. The rest shuffle up.
+CLUB_DOOR = 12.0       # seconds between one opening and the next
+CLUB_OPEN = 1.8        # and how long it stands open
+CLUB_QUEUE = 5         # people waiting
+CLUB_GAP = 0.85        # world units between them in the line
 
 # --- the woods, and the rig in them ---
 # Not a park. The parks are the small green squares the city has everywhere;
@@ -271,6 +277,12 @@ TOWER_ODDS = 9         # of the buildings tall enough, one in this many
 TOWER_MIN = 34.0       # how tall, in world units, a building must be to have one
 TOWER_TOP = 72.0       # and how tall it is made: over everything else in town
 ROOF_REACH = 260.0     # how far you can see from up there
+# The top floors of a sky-deck tower are a weather beacon, the old way:
+#   steady blue, clear view; flashing blue, clouds due;
+#   steady red, rain ahead; flashing red, snow instead -
+# and in a storm, red and white as fast as it will go.
+CROWN_FLOORS = 2       # how many storeys at the top are lit
+CROWN_BLINK = 1.2      # flashes a second, for the flashing ones
 ROOF_STEP = 1.6        # how far from the middle of the roof you stand
 CLIMB_ODDS = 3         # one alley fire escape in this many goes all the way up
 CLIMB_FLOOR = 0.45     # seconds a storey, climbing
@@ -484,7 +496,7 @@ RAIN = RAIN_FAR = BULB = BULB_DIM = FLASH = CONCRETE = 0
 GOLD = GOLD_DIM = ROU_RED = ROU_BLACK = ROU_GREEN = LANE = 0
 GRASS = BARK = ROOF = 0
 STAR_DIM = STAR_WARM = STAR_COLD = MOON = MOON_DIM = BAND = 0
-BEAM = BEAM_DIM = 0
+BEAM = BEAM_DIM = CROWN_BLUE = CROWN_RED = 0
 
 
 def init_colors():
@@ -493,7 +505,7 @@ def init_colors():
     global GOLD, GOLD_DIM, ROU_RED, ROU_BLACK, ROU_GREEN, LANE, GRASS, BARK
     global FIREFLY, EYES, SNOW
     global ROOF, STAR_DIM, STAR_WARM, STAR_COLD, MOON, MOON_DIM, BAND
-    global BEAM, BEAM_DIM
+    global BEAM, BEAM_DIM, CROWN_BLUE, CROWN_RED
 
     curses.start_color()
     try:
@@ -527,7 +539,8 @@ def init_colors():
                   "rou_green": 46, "lane": 250, "grass": 22, "bark": 58,
                   "roof": 252, "star_dim": 244, "star_warm": 223,
                   "star_cold": 153, "moon": 231, "moon_dim": 250,
-                  "band": 60, "firefly": 118, "eyes": 190, "snow": 255}
+                  "band": 60, "firefly": 118, "eyes": 190, "snow": 255,
+                  "crown_blue": 33}
         attrs = {}
     else:
         # 8-colour fallback: bold = the "bright" version of a colour.
@@ -564,7 +577,7 @@ def init_colors():
                   "star_cold": curses.COLOR_CYAN, "moon": curses.COLOR_WHITE,
                   "moon_dim": curses.COLOR_WHITE, "band": curses.COLOR_BLUE,
                   "firefly": curses.COLOR_GREEN, "eyes": curses.COLOR_YELLOW,
-                  "snow": curses.COLOR_WHITE}
+                  "snow": curses.COLOR_WHITE, "crown_blue": curses.COLOR_BLUE}
         attrs = {"near": curses.A_BOLD}
 
     pair = 1
@@ -604,6 +617,8 @@ def init_colors():
     RAIN_FAR = made["rain_far"]
     BULB = made["bulb"] | curses.A_BOLD
     BULB_DIM = made["bulb_dim"]
+    CROWN_BLUE = made["crown_blue"] | curses.A_BOLD
+    CROWN_RED = made["rou_red"]
     # The cinemas' searchlights: the lamp colours, under their own names, so
     # nothing that counts stars or the moon ever counts a beam.
     BEAM, BEAM_DIM = BULB, BULB_DIM
@@ -2191,6 +2206,7 @@ class View:
         self.dawn = 0.0         # how far into the morning, 0..1
         self.cover = 0.0        # and how much is lying
         self.flash = 0.0        # how bright the lightning is this instant
+        self.crown = None       # the sky decks' weather light this instant
 
     def ray(self, sx):
         cam = 2.0 * sx / (self.width - 1) - 1.0
@@ -2392,6 +2408,99 @@ def facade_line(ch, co, sx, row, prev_row, r_lo, r_hi, glyph, attr):
         co[y][sx] = attr
 
 
+def club_door(now, club):
+    """(is the door open, how many have gone in). It opens once every
+    CLUB_DOOR seconds, at a different moment in each, and stands open for
+    CLUB_OPEN; the count goes up smoothly while it is open, which is what
+    walks the front of the queue in and shuffles the rest up."""
+    seed = int(club["tone"] * 1e6)
+    t = now + club["phase"] * 3.0
+    k = int(t // CLUB_DOOR)
+    at = (_mix(k, seed, 1231) & 255) / 255.0 * (CLUB_DOOR - CLUB_OPEN)
+    into = t - k * CLUB_DOOR - at
+    return 0.0 <= into < CLUB_OPEN, k + min(1.0, max(0.0, into / CLUB_OPEN))
+
+
+def club_line(i, j, f, club, now):
+    """Everything standing outside a club, as (kind, what, where): the queue
+    along the wall, the bouncer the other side of the door, the rope between
+    the queue and the street, and the light out of the door.
+
+    Each person is numbered, and their place in the line is their number less
+    how many have gone in - so when the door opens the one at the front walks
+    in, everyone behind steps up, and somebody new joins the back, with no
+    state kept anywhere. Who they are is a hash of the number, so the same
+    person shuffles up the line rather than turning into someone else."""
+    nx, nz = FACES[f]
+    side = -1.0 if club["u"] > CELL * 0.5 else 1.0   # the line runs the long way
+    seed = int(club["tone"] * 1e6)
+    moved = club_door(now, club)[1]
+    out = []
+    for q in range(int(moved) - 1, int(moved) + CLUB_QUEUE + 1):
+        place = q - moved
+        if place <= -0.75 or place > CLUB_QUEUE - 1:
+            continue
+        if place >= 0.0:
+            u, o = club["u"] + side * (1.0 + place * CLUB_GAP), 1.0
+        else:                                       # going in at the door
+            k = place + 1.0
+            u, o = club["u"] + side * k, 0.3 + 0.7 * k
+        w = face_point(i, j, f, u, o, 0.0)
+        m = _mix(seed, q, 1233)
+        if m % 5 < 3:
+            out.append(("raver", {"club": club, "tone": ((m >> 4) % 97) / 97.0,
+                                  "swing": ((m >> 11) % 31) / 31.0,
+                                  "tangent": (-nz, nx)}, w))
+        else:
+            out.append(("smoker", {"phase": ((m >> 4) % 100) / 14.0}, w))
+    out.append(("bouncer", club,
+                face_point(i, j, f, club["u"] - side * 0.95, 0.7, 0.0)))
+    out.append(("rope", (i, j, f, side, club),
+                face_point(i, j, f, club["u"] + side * 2.3, 1.7, 0.0)))
+    out.append(("clubdoor", (i, j, f, club),
+                face_point(i, j, f, club["u"], 0.3, 0.0)))
+    return out
+
+
+def draw_rope(ch, co, v, walls, i, j, f, side, club, now):
+    """Three brass posts between the queue and the street, and the red rope
+    sagging between them."""
+    posts = [club["u"] + side * (0.6 + k * 1.7) for k in range(3)]
+    for k, pu in enumerate(posts):
+        for y in (0.3, 0.6):
+            put_point(ch, co, v, walls, *face_point(i, j, f, pu, 1.7, y), "|", GOLD_DIM)
+        put_point(ch, co, v, walls, *face_point(i, j, f, pu, 1.7, 0.95), "o", GOLD)
+        if k + 1 < len(posts):
+            for n in range(1, 6):
+                t = n / 6.0
+                put_point(ch, co, v, walls,
+                          *face_point(i, j, f, pu + (posts[k + 1] - pu) * t, 1.7,
+                                      0.88 - 0.2 * math.sin(math.pi * t)),
+                          "~", ROU_RED)
+
+
+def draw_door_light(ch, co, v, walls, i, j, f, club, now):
+    """While the door is open, the light inside pours out across the street:
+    a wedge on the ground widening away from the door, in time with the
+    room, thinning out the further it gets."""
+    if not club_door(now, club)[0]:
+        return
+    lamp = club_light(now, club)
+    glow = lamp if lamp is not None else NEON[min(
+        len(NEON) - 1, int(club["tone"] * len(NEON)))][1]
+    d = 0.6
+    while d < 9.0:
+        half = 0.3 + d * 0.22
+        w = -half
+        while w <= half:
+            if _mix(int(d * 10), int(w * 10), 1235) % 4 < (3 if d < 4.0 else 2):
+                put_point(ch, co, v, walls,
+                          *face_point(i, j, f, club["u"] + w, d, 0.03),
+                          ":" if d < 4.0 else ".", glow)
+            w += 0.35
+        d += 0.45
+
+
 def draw_club_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge, cont,
                      now):
     """One column of a windowless concrete slab with a sound system in it.
@@ -2430,12 +2539,22 @@ def draw_club_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge, cont,
         ch[slit][sx] = "=" if lamp is None else "#"
         co[slit][sx] = CONCRETE if lamp is None else lamp
 
-    # The door. Steel, shut most of the time, and blinding when it is not.
+    # The door. Steel, shut most of the time, with the beat leaking out
+    # under it - and blinding when it opens.
     if face == club["door"] and abs(u - club["u"]) < 0.8:
         head = int(round(v.horizon - (2.3 - v.eye) * scale))
-        for y in range(max(r_lo, head), r_hi + 1):
-            ch[y][sx] = "#" if lamp is not None else "]"
-            co[y][sx] = lamp if lamp is not None else CONCRETE
+        sill = int(round(v.horizon - (0.15 - v.eye) * scale))
+        if club_door(now, club)[0]:
+            glow = lamp if lamp is not None else NEON[min(
+                len(NEON) - 1, int(club["tone"] * len(NEON)))][1]
+            for y in range(max(r_lo, head), r_hi + 1):
+                ch[y][sx], co[y][sx] = "#", glow
+        else:
+            for y in range(max(r_lo, head), r_hi + 1):
+                if y >= sill and lamp is not None:
+                    ch[y][sx], co[y][sx] = "_", lamp
+                else:
+                    ch[y][sx], co[y][sx] = "]", CONCRETE
     return roof, None, foot, None, ()
 
 
@@ -2758,11 +2877,18 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     # storey, and is the only thing up there catching any light.
     escape = (not lit) and fc["escape"] and 0.45 < frac < 0.8
 
+    crown = storeys - CROWN_FLOORS if b["tower"] is not None else storeys
     for f in range(storeys):
         y = int(round(v.horizon - ((f + 0.55) * FLOOR_H - v.eye) * scale))
         if y > r_hi or y + thick < r_lo:
             continue
-        if letter_k is not None and sign["floor"] == f:
+        if f >= crown:
+            # The weather beacon: a solid band, every column of it, so it
+            # reads as one light across the top and not as lit windows.
+            if v.crown is None:
+                continue
+            glyph, attr = "#", v.crown
+        elif letter_k is not None and sign["floor"] == f:
             if prev_k == letter_k:
                 continue
             glyph, attr = sign["text"][letter_k], neon_attr(sign, letter_k, now)
@@ -3175,6 +3301,11 @@ def collect_glow(v, now, wet):
                     if lamp is not None:
                         p = face_point(i, j, f, b["club"]["u"], 1.0, 0.0)
                         _spill(glow, p[0], p[2], 5.5, lamp)
+                    if club_door(now, b["club"])[0]:
+                        # The door open: the street in front takes the light.
+                        p = face_point(i, j, f, b["club"]["u"], 4.0, 0.0)
+                        _spill(glow, p[0], p[2], 6.0, lamp or NEON[min(
+                            len(NEON) - 1, int(b["club"]["tone"] * len(NEON)))][1])
                 continue
             if b["casino"] is not None:
                 p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
@@ -3768,6 +3899,17 @@ RAVER_DOWN = [
 # one night there is something to look at - it is the stillness that reads,
 # more than the figure: a street where nobody is doing anything is a street
 # where everybody is looking at the same thing.
+# On the door of the club, arms folded, not dancing, not smoking, and not
+# letting you in yet.
+BOUNCER = [
+    "  ,-.  ",
+    " (-_-) ",
+    "/=====\\",
+    "|#|=|#|",
+    " |   | ",
+    " |_ _| ",
+]
+
 LOOK_UP = [
     " ,-. ",
     "(' ')",
@@ -6417,9 +6559,12 @@ def draw_lobby(ch, co, v, walls, t, now):
     sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
     if dist > 60.0:
         return
+    # In the crown's colour: the crown is seventy units up, over the top of
+    # the screen from anywhere in the street, so the door carries it down.
     word = "SKY DECK"
     for k, c in enumerate(word):
-        put_cell(ch, co, v, walls, sx - len(word) // 2 + k, sy, dist, c, GOLD)
+        put_cell(ch, co, v, walls, sx - len(word) // 2 + k, sy, dist, c,
+                 v.crown if v.crown is not None else GOLD_DIM)
     door = face_point(i, j, f, CELL * 0.5, 0.2, 0.0)
     blit_sprite(ch, co, v, walls, ["[|]", "[|]", "[|]"], door[0], door[2],
                 0.0, 2.4, 1.4, BULB)
@@ -7067,20 +7212,8 @@ def draw_props(ch, co, v, walls, now, wet):
                 # Nobody is getting in for a while. Some of them are dancing
                 # anyway and the rest are smoking about it.
                 if f == b["club"]["door"]:
-                    for q in range(5):
-                        w = face_point(i, j, f, 0.45 + q * 1.0, 1.15, 0.0)
-                        seed = b["seed"] + q * 37
-                        if seed % 5 < 3:
-                            props.append((_d2(v, w), "raver",
-                                          {"club": b["club"],
-                                           "tone": (seed % 97) / 97.0,
-                                           "swing": (seed % 31) / 31.0,
-                                           "tangent": (-nz, nx)},
-                                          w, (nx, nz)))
-                        else:
-                            props.append((_d2(v, w), "smoker",
-                                          {"phase": seed % 100 / 14.0},
-                                          w, (nx, nz)))
+                    for kind_, s_, w in club_line(i, j, f, b["club"], now):
+                        props.append((_d2(v, w), kind_, s_, w, (nx, nz)))
                 continue
             fc = b["faces"][f]
             if fc["lanterns"] is not None:
@@ -7147,6 +7280,13 @@ def draw_props(ch, co, v, walls, now, wet):
         elif kind == "raver":
             s["world"] = world
             draw_raver(ch, co, v, walls, s, now, wet)
+        elif kind == "bouncer":
+            blit_sprite(ch, co, v, walls, BOUNCER, world[0], world[2], 0.05,
+                        SMOKER_H * 1.08, SMOKER_W * 1.4, CURB)
+        elif kind == "rope":
+            draw_rope(ch, co, v, walls, *s, now)
+        elif kind == "clubdoor":
+            draw_door_light(ch, co, v, walls, *s, now)
         elif kind == "smoker":
             draw_smoker(ch, co, v, walls,
                         {"world": world, "normal": normal, "phase": s["phase"]},
@@ -7229,6 +7369,23 @@ def cloud_cover(now):
          + 0.10 * math.sin(now / 29.0 + 0.3))
     c = max(c, min(1.0, rain_intensity(now) / 0.55), min(1.0, snowfall(now) * 1.4))
     return max(0.0, min(1.0, c))
+
+
+def crown_light(now, wet):
+    """The colour the sky decks' crowns are lit this instant, or None in the
+    dark half of a flash. The weather is the whole city's, so it is worked
+    out once a frame and every tower agrees."""
+    word = sky_word(now, wet)
+    blink = int(now * CROWN_BLINK * 2.0) % 2 == 0
+    if word == "storm":
+        return CROWN_RED if int(now * 8.0) % 2 else FLASH
+    if "snow" in word:
+        return CROWN_RED if blink else None
+    if word in ("drizzle", "rain", "downpour"):
+        return CROWN_RED
+    if word in ("cloudy", "overcast"):
+        return CROWN_BLUE if blink else None
+    return CROWN_BLUE
 
 
 def sky_word(now, wet):
@@ -7864,6 +8021,7 @@ def render_street(v, now):
     v.snow = snowfall(now)
     v.cover = snow_cover(now)
     v.dawn = dawn(now)
+    v.crown = crown_light(now, wet)
 
     rave = None
     if rave_window(now) is not None:
