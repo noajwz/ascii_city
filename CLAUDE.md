@@ -1239,7 +1239,17 @@ ball in 2048, and the machine gives back 94% (a test works that out from the tab
 drops six thousand). Up to `PLINKO_MAX` balls in the air at once. `draw_plinko()` lays the pegs
 `PLINKO_SX` apart — even, so a half step is a whole column, and wide enough for "120" under its
 bin; at three the pegs jumbled and the labels ran together — and a window without
-`PLINKO_WIDE` x `PLINKO_TALL` for it gets a line of text. A ball to the edge sets the building
+`plinko_wide()` x `plinko_tall()` for it gets a line of text.
+
+**Bigger and harder are yours to set**: `[`/`]` step the rows through `PLINKO_ROW_SET` (8 to 16)
+and `1`/`2`/`3` the risk (`PLINKO_RISKS`). `plinko_table()` makes every one of the fifteen tables
+rather than anybody typing them: the edge is set by the risk and grows with the rows, since an
+edge on sixteen is one ball in 32768 (high risk tops out at 1000x), the middle is 0.5, 0.3 or
+0.2, and the curve between is solved by bisection so the table pays `PLINKO_BACK`; rounding to
+what a machine would print (`_nice()`) leaves them between 92 and 97%, and a test holds all
+fifteen to it. Each ball carries its own path and table, and the machine refuses to change while
+any are falling. A board too tall for the room goes up over the ceiling and the back wall; 1000
+is printed 1k under its bin, or it runs into the 180 next to it. A ball to the edge sets the building
 off the way a 777 does (`hit_jackpot()`), and `%` in the menu, now *jackpot next*, rigs the next
 ball to go all the way as well as the next pull.
 

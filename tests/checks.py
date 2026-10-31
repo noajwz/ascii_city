@@ -326,6 +326,48 @@ small_ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), 40, 14, 10.6, ac.Slot(),
 check("and a small window says what is going on instead",
       "PLINKO" in "\n".join("".join(r) for r in small_))
 
+# Bigger and harder, if you like: every rows-and-risk table.
+bad_ = []
+for (r_, k_), t_ in ac.PLINKO_TABLES.items():
+    back_ = sum(comb_(r_, i) * t_[i] for i in range(r_ + 1)) / 2.0 ** r_
+    if not (0.90 < back_ < 0.98) or t_ != t_[::-1] or any(
+            t_[i] < t_[i + 1] for i in range(r_ // 2)):
+        bad_.append((r_, ac.PLINKO_RISKS[k_], round(back_, 3)))
+check("every plinko table pays back about the same, edges biggest",
+      len(ac.PLINKO_TABLES) == 15 and not bad_, str(bad_))
+check("more risk is a bigger edge and a meaner middle", all(
+    ac.PLINKO_TABLES[(r_, 2)][0] > ac.PLINKO_TABLES[(r_, 1)][0]
+    > ac.PLINKO_TABLES[(r_, 0)][0]
+    and ac.PLINKO_TABLES[(r_, 2)][r_ // 2] <= ac.PLINKO_TABLES[(r_, 0)][r_ // 2]
+    for r_ in ac.PLINKO_ROW_SET))
+check("and the biggest board goes to a thousand", ac.PLINKO_TABLES[(16, 2)][0] == 1000)
+pk5 = ac.Plinko(ac.Wallet(1000))
+pk5.rows_up(9)
+pk5.set_risk(2)
+check("the rows go up to sixteen, and the risk to high",
+      pk5.rows == 16 and pk5.risk == 2 and pk5.pays == ac.PLINKO_TABLES[(16, 2)])
+pk5.drop(0.0)
+pk5.rows_up(-1)
+pk5.set_risk(0)
+check("but not while a ball is falling", pk5.rows == 16 and pk5.risk == 2
+      and pk5.note == "wait for the balls to land")
+check("and the ball falls the whole sixteen", len(pk5.balls[0]["path"]) == 16
+      and not ac.Plinko.landed(pk5.balls[0], 16 * ac.PLINKO_STEP)
+      and ac.Plinko.landed(pk5.balls[0], 17 * ac.PLINKO_STEP + 0.01))
+k5 = pk5.settle(17 * ac.PLINKO_STEP + 0.01)
+check("paid by its own table", abs(
+    pk5.wallet.money - (995 + 5 * ac.PLINKO_TABLES[(16, 2)][k5[0]])) < 1e-9)
+pk5.rows_up(-9)
+check("and down to eight once it has landed", pk5.rows == 8)
+pk5.rows_up(9)
+pk5.drop(100.0)
+for w_, h_ in ((80, 24), (100, 30)):
+    room_, _ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), w_, h_, 100.6, ac.Slot(),
+                                     ac.Blackjack(), False, pk5)
+    rt_ = "\n".join("".join(r) for r in room_)
+    check("the sixteen-row board fits at %dx%d" % (w_, h_),
+          "1k" in rt_ and "16 ROWS  HIGH RISK" in rt_ and "1000" not in rt_)
+
 # --- the races ---------------------------------------------------------------
 rc_ = ac.Races(ac.Wallet(10 ** 9))
 pay_ = 0.0
