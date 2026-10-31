@@ -155,7 +155,9 @@ CARNIVAL_GAP = 200     # cells along the river between one and the next
 FAIR_LONG = 11         # cells of bank it takes up, along the river
 FAIR_DEEP = 4          # and back from the water
 CARNIVAL_BESIDE = 2    # cells kept clear between it and the big bridge
-JETTY_OUT = 3.0        # cells out over the bay its wheel stands, on a jetty
+FAIR_PIER = 6          # by the big bridge the fair is on a pier this many cells out
+FAIR_PIER_MAX = 0.5    # and never further than half way over
+SEAFRONT_DEEP = 30     # cells inland the town behind that pier is kept low
 WHEEL_R = 10.0         # the wheel's radius in world units
 WHEEL_RPM = 1.3
 
@@ -1345,7 +1347,7 @@ def pier_at(i, j):
 
 def deck_at(i, j):
     """Anything over the water you can put a foot on."""
-    return bridge_at(i, j) or pier_at(i, j)
+    return bridge_at(i, j) or pier_at(i, j) or fair_pier_at(i, j)
 
 
 BRIDGE_ODDS = 4        # one avenue in this many gets a crossing
@@ -1479,13 +1481,23 @@ def near_tunnels(v, reach):
     return out
 
 
+def shore_j(i):
+    """The first row of dry land on the near bank in column i. A row is
+    river while it is under hi, so this is hi rounded up - not int(hi) + 1,
+    which is the same thing for a positive hi and one row too far for a
+    negative one: in every stretch where the bank's row was below zero that
+    left a building a cell wide between the water and the promenade, or the
+    fair."""
+    return math.ceil(river_span(i)[1])
+
+
 def prom_at(i, j):
     """The promenade: open bank on the near side, two cells deep, along two
     stretches in three."""
     if not near_river(i, j) or _mix(i // PROM_STRETCH, 0, 1401) % 3 == 0:
         return False
-    _, hi = river_span(i)
-    return int(hi) + 1 <= j <= int(hi) + PROM_DEEP
+    s = shore_j(i)
+    return s <= j < s + PROM_DEEP
 
 
 _carnival_cache = {}
@@ -1548,9 +1560,8 @@ def _by_the_headland(span):
         if any(span[0] - CARNIVAL_BESIDE <= a < span[0] + span[1] + CARNIVAL_BESIDE
                or abs(a - ferry) <= 2 for a in cols):
             continue
-        lo_, hi_ = river_span(c + 2)
         wx = (c + 2.5) * CELL
-        wz = bank_z(c + 2) - min(JETTY_OUT, (hi_ - lo_) * 0.3) * CELL
+        wz = (pier_tip(c, force=True, k=2.5) + 1.8) * CELL
         d = min((x - wx) ** 2 + (z - wz) ** 2 for x, z in rock) if rock else 0.0
         if best is None or d < best[0]:
             best = (d, c)
@@ -1576,14 +1587,14 @@ def fair_at(i, j):
     a few cells, that nothing is built on."""
     if carnival_over(i) is None:
         return False
-    lo, hi = river_span(i)
-    return int(hi) + 1 <= j <= int(hi) + FAIR_DEEP
+    s = shore_j(i)
+    return s <= j < s + FAIR_DEEP
 
 
 def bank_z(i):
     """The near bank's edge in this column, in world units: where the
     fairground's ground starts."""
-    return (int(river_span(i)[1]) + 1) * CELL
+    return shore_j(i) * CELL
 
 
 def carnival_spots(c):
@@ -1595,30 +1606,88 @@ def carnival_spots(c):
     straight: it slopes as much as half a cell a column along the meander and
     more beside the bay, which over the eleven columns of a fair is five
     cells, and put the stalls at one end in the river."""
+    tip = pier_tip(c)
+    if tip is not None:
+        # Out on the pier: laid out from its far end, the wheel out at the
+        # tip the way the big one on a pleasure pier is, the stalls back
+        # towards the shore.
+        def at(k, d):
+            return (c + k) * CELL, (pier_tip(c, k=k) + d) * CELL
+        stalls = [at(k, 3.8) for k in (5.5, 7.0, 8.5, 10.0)]
+        return at(2.5, 1.8), at(7.5, 2.0), stalls, bank_z(c + FAIR_LONG // 2)
+
     def at(k, back):
         return (c + k) * CELL, bank_z(int(c + k + BIG) - BIG) + back * CELL
     stalls = [at(k, 3.6) for k in (5.5, 7.0, 8.5, 10.0)]
-    wheel = at(2.5, 2.2)
-    out = wheel_out(c)
-    if out:
-        wheel = (wheel[0], bank_z(c + 2) - out * CELL)
-    return wheel, at(7.0, 1.6), stalls, bank_z(c + FAIR_LONG // 2)
+    return at(2.5, 2.2), at(7.0, 1.6), stalls, bank_z(c + FAIR_LONG // 2)
 
 
-def wheel_out(c):
-    """How many cells out over the water the wheel stands, on its jetty: only
-    at the carnival by the big bridge, where it is reaching for the headland
-    across the bay. Three cells, or less where the water is narrow - never a
-    third of the way over."""
+def by_the_bridge(c):
+    """Is this the carnival beside a big bridge, the one on the pier."""
     span = grand_avenue(c)
-    if span is None or _by_the_headland(span) != c:
-        return 0.0
-    lo, hi = river_span(c + 2)
-    return min(JETTY_OUT, (hi - lo) * 0.3)
+    return span is not None and _by_the_headland(span) == c
+
+
+_pier_cache = {}
+
+
+def pier_tip(c, force=False, k=None):
+    """The row the fair's pier reaches out to - in the column k cells along
+    it, or None for a carnival on the bank. FAIR_PIER cells out from the bank
+    in each column, and pulled back so it is never more than FAIR_PIER_MAX of
+    the way over, or in a narrow stretch it would be a bridge to the
+    headland. Per column rather than one straight end: the narrowest column
+    held a straight end to one or two cells across the whole fair. force asks
+    for the one a carnival here would have, while it is still being decided
+    where to put it."""
+    if not force and not by_the_bridge(c):
+        return None
+    hit = _pier_cache.get(c)
+    if hit is None:
+        _evict(_pier_cache, 400)
+        hit = []
+        for i in range(c, c + FAIR_LONG):
+            lo, hi = river_span(i)
+            hit.append(max(shore_j(i) - FAIR_PIER,
+                           math.floor(lo + (hi - lo) * (1.0 - FAIR_PIER_MAX)) + 1))
+        _pier_cache[c] = hit
+    if k is None:
+        return min(hit)
+    return hit[max(0, min(FAIR_LONG - 1, int(k)))]
+
+
+def fair_pier_at(i, j):
+    """The deck of the fair's pier: out over the water from the bank to its
+    end, across the width of the fair. Walkable, and planked by the ground
+    pass like any other pier."""
+    if not river_at(i, j):
+        return False
+    c = carnival_over(i)
+    if c is None:
+        return False
+    tip = pier_tip(c)
+    return tip is not None and j >= pier_tip(c, k=i - c)
+
+
+def seafront_cap(i, j):
+    """How tall a building may be behind the fair's pier, or None. Low at the
+    water and rising inland, so from the headland the town stays under the
+    line over the top of the wheel and the wheel stands against the sky: with
+    towers right behind it, its lights were lost in their windows."""
+    c = carnival_over(i, 10)
+    if c is None or pier_tip(c) is None:
+        return None
+    back = j - shore_j(i) + 1
+    if not 0 < back <= SEAFRONT_DEEP:
+        return None
+    return 6.0 + 1.5 * back
 
 
 def claw_spot(c):
     """The claw machine: in the row with the stalls, before the first of them."""
+    tip = pier_tip(c)
+    if tip is not None:
+        return (c + 4.2) * CELL, (pier_tip(c, k=4.2) + 3.8) * CELL
     return (c + 4.2) * CELL, bank_z(c + 4) + 3.6 * CELL
 
 
@@ -2182,6 +2251,9 @@ def lot(i, j):
         # What is in front of a face decides what goes on it, and asking is
         # safe: face_kind() is a pure function of coordinates and never calls
         # back into lot().
+        cap = seafront_cap(i, j)
+        if cap is not None:
+            b["height"] = min(b["height"], cap)
         b["faces"] = [make_face(rng, b["height"], d,
                                 face_kind(i + FACES[f][0], j + FACES[f][1]))
                       for f in range(4)]
@@ -3828,7 +3900,7 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 # junction - which is also how it works outside.
                 wet_cell = water_at(i, j)
                 deck = wet_cell and deck_at(i, j)
-                pier = wet_cell and pier_at(i, j)
+                pier = wet_cell and (pier_at(i, j) or fair_pier_at(i, j))
                 woods = not wet_cell and woods_at(i, j)
                 green = (not wet_cell and (woods or district(i, j)["park"])
                          and not road_at(i, j))
@@ -5321,25 +5393,29 @@ def draw_carnival(ch, co, v, walls, c, now, wet):
     turn = now * WHEEL_RPM * math.tau / 60.0
     chase = int(now * 5.0)
 
-    # By the big bridge the wheel stands out over the water: a planked
-    # platform under it with bulbs along its edge, and a gangway to the bank.
-    if wheel_out(c):
-        shore = bank_z(c + 2)
-        z = wz - 1.6
-        while z < wz + 1.6:
-            x = wx - 5.5
-            while x <= wx + 5.5:
-                put_point(ch, co, v, walls, x, 0.3, z, "=", BARK)
-                x += 0.7
-            z += 0.6
-        z = wz + 1.6
-        while z < shore:
-            for x in (wx - 0.8, wx, wx + 0.8):
-                put_point(ch, co, v, walls, x, 0.3, z, "=", BARK)
-            z += 0.6
-        for k in range(12):
-            put_lit(ch, co, v, walls, wx - 5.5 + k, 0.55, wz - 1.6, "o",
-                    NEON[(k + chase // 2) % len(NEON)][0], max(wet, 0.3), now)
+    # On the pier: bulbs along its rails, the far end and both sides, with
+    # posts under them down to the water, and the sign over the way on.
+    tip = pier_tip(c)
+    if tip is not None:
+        x0, x1 = c * CELL, (c + FAIR_LONG) * CELL
+        k = 0
+        x = x0
+        while x <= x1:
+            zt = pier_tip(c, k=(x - x0) / CELL) * CELL + 0.3
+            put_lit(ch, co, v, walls, x, 1.1, zt, "o",
+                    NEON[(k // 2 + chase // 2) % len(NEON)][0], max(wet, 0.3), now)
+            if k % 3 == 0:
+                put_point(ch, co, v, walls, x, 0.55, zt, "|", CONCRETE)
+                put_point(ch, co, v, walls, x, 0.05, zt - 0.2, "|", BARK)
+            x += 1.0
+            k += 1
+        for x in (x0 + 0.3, x1 - 0.3):
+            z = pier_tip(c, k=(x - x0) / CELL) * CELL
+            while z < bank_z(int(x / CELL + BIG) - BIG):
+                put_lit(ch, co, v, walls, x, 1.1, z, "o", BULB, max(wet, 0.3), now)
+                z += 1.6
+        draw_pier_sign(ch, co, v, walls, (c + FAIR_LONG * 0.5) * CELL,
+                       bank_z(c + FAIR_LONG // 2) - 0.6, now)
 
     # The A-frame, then the spokes, then the rim over both.
     for h in range(0, int(hub * 2)):
@@ -5386,7 +5462,7 @@ def draw_carnival(ch, co, v, walls, c, now, wet):
     blit_sprite(ch, co, v, walls, CLAW_BOOTH, bx, bz, 0.0, 2.8, 1.7,
                 NEON[_mix(c, 1, 1307) % len(NEON)][0])
     put_lit(ch, co, v, walls, bx, 3.1, bz, "*", BULB, max(wet, 0.3), now)
-    for k in range(FAIR_LONG + 1):
+    for k in range(FAIR_LONG + 1 if tip is None else 0):
         px = (c + k) * CELL
         pz, pz1 = bank_z(c + k) + 0.6 * CELL, bank_z(c + k + 1) + 0.6 * CELL
         for h in (1.0, 2.0, 3.0):
@@ -5403,10 +5479,36 @@ def draw_carnival(ch, co, v, walls, c, now, wet):
     for k in range(4):
         m = _mix(c, k, 1303)
         px = (c + 1.5 + (m & 255) / 255.0 * 8.0) * CELL
-        pz = (bank_z(int(px / CELL + BIG) - BIG)
-              + (0.9 + ((m >> 8) & 255) / 255.0 * 2.0) * CELL)
+        if tip is not None:
+            pz = (pier_tip(c, k=px / CELL - c) + 0.9
+                  + ((m >> 8) & 255) / 255.0 * 2.2) * CELL
+        else:
+            pz = (bank_z(int(px / CELL + BIG) - BIG)
+                  + (0.9 + ((m >> 8) & 255) / 255.0 * 2.0) * CELL)
         blit_sprite(ch, co, v, walls, LOOK_UP, px, pz, 0.0, SMOKER_H, SMOKER_W,
                     CURB)
+
+
+def draw_pier_sign(ch, co, v, walls, x, z, now):
+    """PLEASURE PIER over the way onto it: an arch of bulbs on two posts with
+    the words in neon, in screen space so it reads, for the casino marquee's
+    reason. Drawn for the near half of the city only - from the water it is a
+    line of lights, which is what it should be."""
+    pr = v.project(x, 4.6, z)
+    if pr is None or pr[2] > 90.0:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    word = "PLEASURE PIER"
+    for k, c in enumerate(word):
+        put_cell(ch, co, v, walls, sx - len(word) // 2 + k, sy, dist, c,
+                 NEON[(k + int(now * 2.0)) % len(NEON)][0] if c != " " else GOLD_DIM)
+    for k in range(-len(word) // 2 - 2, len(word) // 2 + 3):
+        lit = chase(k * 0.4, now)
+        put_cell(ch, co, v, walls, sx + k, sy - 1, dist, "o" if lit else ".",
+                 GOLD if lit else GOLD_DIM)
+    for side in (-1.0, 1.0):
+        for h in (0.8, 1.8, 2.8, 3.8):
+            put_point(ch, co, v, walls, x + side * 4.5, h, z, "|", CONCRETE)
 
 
 def _cable_y(zf, za, zt1, zt2, zb):
@@ -5525,7 +5627,7 @@ def near_promenades(v, reach):
     seen = set()
     for i in range(ci - n, ci + n + 1):
         s = i // PROM_STRETCH
-        if s in seen or not prom_at(i, int(river_span(i)[1]) + 1):
+        if s in seen or not prom_at(i, shore_j(i)):
             continue
         seen.add(s)
         yield s * PROM_STRETCH
@@ -5539,7 +5641,7 @@ def draw_promenade(ch, co, v, walls, s, now, wet):
     ci = int(v.x / CELL + BIG) - BIG
     for i in range(max(s, ci - 22), min(s + PROM_STRETCH, ci + 23)):
         _, hi = river_span(i)
-        ze = (int(hi) + 1) * CELL + 0.4                # the water's edge
+        ze = shore_j(i) * CELL + 0.4                   # the water's edge
         x0 = i * CELL
         if (x0 - v.x) * v.dx + (ze - v.z) * v.dz < -CELL * 2:
             continue
@@ -9907,10 +10009,10 @@ def _water_spot(x, z, kind):
                     return px, pz, math.pi
             continue
         # The bank: on the promenade, at the rail, facing the water.
-        if not prom_at(i, int(hi) + 1):
+        if not prom_at(i, shore_j(i)):
             continue
         for out in (1, 2):
-            j = int(hi) + out
+            j = shore_j(i) + out - 1
             px, pz = (i + 0.5) * CELL, (j + 0.5) * CELL
             if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
                 break
@@ -10073,7 +10175,8 @@ def claw_near(x, z):
     if c is None:
         return False
     bx, bz = claw_spot(c)
-    return (bx - x) ** 2 + (bz - z) ** 2 < 24.0 ** 2
+    # Anywhere on the fair, or out on its pier.
+    return (bx - x) ** 2 + (bz - z) ** 2 < 40.0 ** 2
 
 
 def _billboard_spot(x, z):
