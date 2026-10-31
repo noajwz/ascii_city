@@ -139,6 +139,18 @@ BASS_REACH = 2         # cells round a club whose windows rattle on the kick
 # the nearest is a long walk - and once a night, somebody carries a sound
 # system into the hollow and does not ask anyone.
 WOODS_TILE = 480       # cells from one woods to the next
+# The landmark: one skyscraper a whole city block wide in every LANDMARK_TILE
+# square of city, an Art Deco wedding cake - a broad base, the tower set back
+# from it, a spire over that - and a techno party on the roof you can walk
+# about in.
+LANDMARK_TILE = 240    # cells between one and the next, each way
+LANDMARK_MAX = 7       # the most cells across it is, each way
+LANDMARK_BASE = 34.0   # the base's height, round the edge
+LANDMARK_H = 84.0      # the tower's, which is the roof the party is on
+SPIRE_H = 34.0         # and the spire's over that
+PARTY_BPM = 128.0
+LANDMARK_NAMES = ["THE ZENITH", "THE MERIDIAN", "THE APEX", "THE SOVEREIGN",
+                  "THE CORONET"]
 WOODS_HALF_I = 70      # half its size along x, in cells - 700 units across
 WOODS_HALF_J = 42      # and along z
 WOODS_OPEN = 54        # percent of the wood you can walk through, off the trails
@@ -2032,6 +2044,85 @@ def road_at(i, j):
     return _is_road(i, XP, 91) or _is_road(j, ZP, 137)
 
 
+_landmark_cache = {}
+
+
+def landmark_of(ti, tj):
+    """The landmark in tile (ti, tj), worked out once, or None: a city block
+    away from the river, the woods and the parks, wide enough to take it -
+    the footprint is the block's own, held against its south and west
+    streets so the lobby fronts a road, and no more than LANDMARK_MAX across.
+    Pure in its coordinates: road_span and friends never ask is_open()."""
+    key = (ti, tj)
+    if key in _landmark_cache:
+        return _landmark_cache[key]
+    hit = None
+    for n in range(10):
+        m = _mix(ti * 977 + n, tj, 2601)
+        ci = ti * LANDMARK_TILE + 40 + m % (LANDMARK_TILE - 80)
+        cj = tj * LANDMARK_TILE + 40 + (m >> 12) % (LANDMARK_TILE - 80)
+        if (abs(cj - river_centre(ci)) < 70 or _is_road(ci, XP, 91)
+                or _is_road(cj, ZP, 137)):
+            continue
+        i_lo, i_hi, j_lo, j_hi = ci, ci, cj, cj
+        while not _is_road(i_lo - 1, XP, 91) and ci - i_lo < 20:
+            i_lo -= 1
+        while not _is_road(i_hi + 1, XP, 91) and i_hi - ci < 20:
+            i_hi += 1
+        while not _is_road(j_lo - 1, ZP, 137) and cj - j_lo < 20:
+            j_lo -= 1
+        while not _is_road(j_hi + 1, ZP, 137) and j_hi - cj < 20:
+            j_hi += 1
+        i1 = min(i_hi, i_lo + LANDMARK_MAX - 1)
+        j0 = max(j_lo, j_hi - LANDMARK_MAX + 1)
+        if i1 - i_lo < 5 or j_hi - j0 < 5:
+            continue
+        cells = [(a, b) for a in range(i_lo, i1 + 1) for b in range(j0, j_hi + 1)]
+        if any(woods_at(a, b) or DISTRICTS[district_at(a, b)]["park"]
+               or car_park_at(a, b) or near_river(a, b) for a, b in cells):
+            continue
+        hit = {"i0": i_lo, "i1": i1, "j0": j0, "j1": j_hi,
+               "name": LANDMARK_NAMES[m % len(LANDMARK_NAMES)],
+               "lobby": ((i_lo + i1) // 2, j_hi), "seed": m % 9973}
+        break
+    if len(_landmark_cache) > 400:
+        _landmark_cache.clear()
+    _landmark_cache[key] = hit
+    return hit
+
+
+def landmark_at(i, j):
+    """The landmark this cell is part of, or None."""
+    lm = landmark_of(i // LANDMARK_TILE, j // LANDMARK_TILE)
+    if lm is None or not (lm["i0"] <= i <= lm["i1"] and lm["j0"] <= j <= lm["j1"]):
+        return None
+    return lm
+
+
+def landmark_ring(lm, i, j):
+    """How far in from the landmark's edge a cell is: 0 is the base."""
+    return min(i - lm["i0"], lm["i1"] - i, j - lm["j0"], lm["j1"] - j)
+
+
+def party_roof(lm):
+    """(x0, z0, x1, z1) of the tower's roof, where the party is."""
+    return ((lm["i0"] + 1) * CELL, (lm["j0"] + 1) * CELL,
+            lm["i1"] * CELL, lm["j1"] * CELL)
+
+
+def near_landmarks(v, reach):
+    ti, tj = int(v.x // (LANDMARK_TILE * CELL)), int(v.z // (LANDMARK_TILE * CELL))
+    for a in (ti - 1, ti, ti + 1):
+        for b in (tj - 1, tj, tj + 1):
+            lm = landmark_of(a, b)
+            if lm is None:
+                continue
+            x0, z0, x1, z1 = party_roof(lm)
+            dx, dz = (x0 + x1) * 0.5 - v.x, (z0 + z1) * 0.5 - v.z
+            if dx * dx + dz * dz < reach * reach:
+                yield lm
+
+
 def is_open(i, j):
     key = i * 1048576 + j
     hit = _open_cache.get(key)
@@ -2039,6 +2130,8 @@ def is_open(i, j):
         _evict(_open_cache, 60000)
         if water_at(i, j):
             hit = True          # you can see across it; standing is elsewhere
+        elif landmark_at(i, j) is not None:
+            hit = False         # the landmark: solid, a whole block of it
         elif (fair_at(i, j) or headland_at(i, j) or prom_at(i, j)
               or car_park_at(i, j)):
             hit = True          # fairground, headland, promenade: nothing built
@@ -2388,6 +2481,18 @@ def lot(i, j):
                 words, tone = ADS[_mix(i, j, 2409) % len(ADS)]
                 b["billboard"] = {"face": face, "words": words, "tone": tone,
                                   "i": i, "j": j, "height": b["height"]}
+        lm = landmark_at(i, j)
+        if lm is not None:
+            # The landmark, over whatever else this cell was going to be.
+            ring = landmark_ring(lm, i, j)
+            b["height"] = LANDMARK_BASE if ring == 0 else LANDMARK_H
+            b["club"] = b["casino"] = b["cinema"] = b["diner"] = None
+            b["arcade"] = b["billboard"] = b["tower"] = None
+            b["tree"] = False
+            if (i, j) == lm["lobby"]:
+                b["tower"] = {"door": 3, "u": CELL * 0.5, "i": i, "j": j,
+                              "height": LANDMARK_H, "kind": "party", "landmark": lm}
+        b["landmark"] = lm
         _lots[key] = b
     return b
 
@@ -2463,6 +2568,7 @@ class View:
         self.flash = 0.0        # how bright the lightning is this instant
         self.crown = None       # the sky decks' weather light this instant
         self.bass = set()       # the lots by a club whose windows shake this instant
+        self.skip = None        # cells not to draw: the landmark whose roof you are on
 
     def ray(self, sx):
         cam = 2.0 * sx / (self.width - 1) - 1.0
@@ -3110,6 +3216,53 @@ def draw_arcade_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
     return roof, awning, foot, None, ()
 
 
+def draw_landmark_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
+                         cont, now):
+    """One column of the landmark: pale stone with a pier up every bay, lit
+    windows between, a line of lights along every setback, and the top
+    floors of the tower floodlit in a colour that changes every so often, the
+    way the real ones are."""
+    scale = v.fy / dist
+    lm = b["landmark"]
+    stone = FLASH if v.flash > 0.35 else MOON_DIM
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    if edge:
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx], co[y][sx] = "|", stone
+        return roof, None, foot, None, ()
+    prev_roof, prev_awn, prev_foot = cont[:3]
+    facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "=", ROOF)
+    if r_lo <= roof + 1 <= r_hi and chase(u, now):
+        ch[roof + 1][sx], co[roof + 1][sx] = "o", BULB      # lights along it
+    frac = u / BAY_W - int(u / BAY_W)
+    pier = BAY_W * v.fx / dist > 2.5 and not 0.2 < frac < 0.8
+    floors = int(b["height"] / FLOOR_H)
+    flood = NEON[(int(now / 8.0) + lm["seed"]) % len(NEON)][0]
+    bay = int(u / BAY_W)
+    thick = max(1, min(4, int(FLOOR_H * scale * 0.45)))
+    for f in range(floors):
+        y = int(round(v.horizon - ((f + 0.55) * FLOOR_H - v.eye) * scale))
+        if y > r_hi or y + thick < r_lo:
+            continue
+        if pier:
+            glyph, attr = "|", stone
+            thick_ = int(FLOOR_H * scale) + 1
+        elif b["height"] >= LANDMARK_H and f >= floors - 4:
+            glyph, attr, thick_ = "#", flood, int(FLOOR_H * scale) + 1
+        else:
+            m = _mix(b["seed"] + face, f, bay)
+            if (m & 0xFFFF) / 65535.0 >= 0.5:
+                continue
+            glyph, attr, thick_ = "#", tone_colour("warm", 0.7), thick
+        for dy in range(thick_):
+            yy = y + dy
+            if r_lo <= yy <= r_hi:
+                ch[yy][sx], co[yy][sx] = glyph, attr
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, None, foot, None, ()
+
+
 def draw_tree_column(ch, co, v, sx, dist, b, u, r_lo, r_hi):
     """A clump of trees, which is what a park has instead of buildings.
 
@@ -3169,6 +3322,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     if b["diner"] is not None:
         return draw_diner_column(ch, co, v, sx, dist, b, face, u,
                                  r_lo, r_hi, edge, cont, now)
+    if b["landmark"] is not None:
+        return draw_landmark_column(ch, co, v, sx, dist, b, face, u,
+                                    r_lo, r_hi, edge, cont, now)
     d = b["district"]
     scale = v.fy / dist
     trim = tone_colour("dark" if not lit else "far", b["tone"])
@@ -3359,6 +3515,8 @@ def draw_walls(ch, co, v, now):
         rdx, rdz = v.ray(sx)
         cover = None
         for n, (dist, i, j, f, u) in enumerate(cast(v, rdx, rdz, v.depth)):
+            if v.skip and (i, j) in v.skip:
+                continue                 # the building you are standing on
             b = lot(i, j)
             top, base = wall_span(v, dist, b["height"])
             r_lo = max(0, top)
@@ -4289,6 +4447,26 @@ DOORMAN = [
     " |[#]| ",
     "  | |  ",
     " _| |_ ",
+]
+
+PARTY_BOOTH = [
+    "  _________  ",
+    " |o  DJ   o| ",
+    "[=====-=====]",
+]
+
+PARTY_STACK = [
+    "[OO]",
+    "[OO]",
+    "[OO]",
+    "[__]",
+]
+
+LIFT_HUT = [
+    ".------.",
+    "| LIFT |",
+    "| [||] |",
+    "|_[||]_|",
 ]
 
 BOUNCER = [
@@ -7490,6 +7668,173 @@ def draw_searchlights(ch, co, v, walls, cin, now):
             s += 0.8 + (0.012 * pr[2] if pr is not None else 2.0)
 
 
+def party_light(now):
+    """The roof party's lights this instant: white on the kick, the bar's
+    colour for a little after, dark between - and the strobe let go for the
+    last bar of every eight. On the strange night it plays to the sky, like
+    the club."""
+    sync = city_sync(now)
+    if sync is not None:
+        return FLASH if sync == "flash" else (None if sync == "off" else NEON[1][0])
+    t = now * PARTY_BPM / 60.0
+    if (int(t) // 4) % 8 == 7 and int(t * 8) % 2:
+        return FLASH
+    beat = t % 1.0
+    if beat < 0.1:
+        return FLASH
+    if beat < 0.4:
+        return NEON[(int(t) // 4) % len(NEON)][0]
+    return None
+
+
+def draw_spire(ch, co, v, walls, lm, now, wet):
+    """The spire over the tower's roof: a tapering mast in the middle of it,
+    banded, with the red light on top - and the party's lasers going out over
+    the city from the booth, which is how you know from the street there is
+    one."""
+    x0, z0, x1, z1 = party_roof(lm)
+    cx, cz = (x0 + x1) * 0.5, z0 + 1.2
+    y = LANDMARK_H
+    while y < LANDMARK_H + SPIRE_H:
+        r = 1.4 * (1.0 - (y - LANDMARK_H) / SPIRE_H) + 0.15
+        for a in range(6):
+            ang = a * math.tau / 6.0
+            put_point(ch, co, v, walls, cx + math.cos(ang) * r, y,
+                      cz + math.sin(ang) * r, "|", MOON_DIM)
+        y += 0.8
+    on = int(now * 1.1) % 2 == 0
+    put_lit(ch, co, v, walls, cx, LANDMARK_H + SPIRE_H + 0.5, cz, "*" if on else ".",
+            ROU_RED if on else CONCRETE, max(wet, 0.3), now)
+    # The lasers: four of them fanned out from the booth, sweeping, climbing
+    # out over the city, a new colour every bar.
+    t = now * PARTY_BPM / 60.0
+    bx, by, bz = cx, LANDMARK_H + 3.2, z0 + 3.0
+    for k in range(4):
+        az = math.pi * 0.5 + 0.9 * math.sin(now * 0.6 + k * 1.6)
+        el = 0.06 + 0.1 * math.sin(now * 0.45 + k)      # out over the city
+        dx, dz = math.cos(az) * math.cos(el), math.sin(az) * math.cos(el)
+        dy = math.sin(el)
+        attr = NEON[(k * 2 + int(t) // 4) % len(NEON)][0]
+        prev = v.project(bx, by, bz)
+        d = 1.0
+        while d < 150.0:
+            pr = v.project(bx + dx * d, by + dy * d, bz + dz * d)
+            if pr is not None and prev is not None:
+                ax, ay = pr[0] - prev[0], (pr[1] - prev[1]) * 2.0
+                glyph = ("|" if abs(ax) < 0.4 * abs(ay) else
+                         "-" if abs(ay) < 0.4 * abs(ax) else
+                         "/" if ax * ay < 0 else "\\")
+                put_cell(ch, co, v, walls, int(round(pr[0])), int(round(pr[1])),
+                         pr[2], glyph, attr)
+            prev = pr
+            d += 0.7 + (0.012 * pr[2] if pr is not None else 2.0)
+
+
+def draw_party_floor(ch, co, v, lm, now):
+    """Standing on the tower's roof: the parapet round it and the floor under
+    your feet, solved per screen column the way the sky deck's parapet is -
+    where each column's ray leaves the roof, the coping and the wall below
+    it, and nearer than that the floor, a dance floor of tiles that light on
+    the beat. The floor is what this needs that the sky decks never did: they
+    stand you at the parapet, and from the middle of a roof the street a
+    hundred units down showed straight through it."""
+    x0, z0, x1, z1 = party_roof(lm)
+    h = LANDMARK_H
+    cap = h + 1.0
+    t = now * PARTY_BPM / 60.0
+    lamp = party_light(now)
+    for sx in range(v.width):
+        rdx, rdz = v.ray(sx)
+        out = 1e9
+        for d, lo, hi, p in ((rdx, x0, x1, v.x), (rdz, z0, z1, v.z)):
+            if d > 1e-9:
+                out = min(out, (hi - p) / d)
+            elif d < -1e-9:
+                out = min(out, (lo - p) / d)
+        if out <= 0.05 or out > 80.0:
+            continue
+        top = int(round(v.horizon - (cap - v.eye) * v.fy / out))
+        base = int(round(v.horizon + (v.eye - h) * v.fy / out))
+        for y in range(max(0, top), v.height):
+            if y <= base:
+                if y == top:
+                    ch[y][sx], co[y][sx] = "=", ROOF
+                elif (y - top) % 2 == 0:
+                    ch[y][sx], co[y][sx] = "-", CONCRETE
+                else:
+                    ch[y][sx], co[y][sx] = " ", 0
+                continue
+            d = (v.eye - h) * v.fy / max(1e-6, y - v.horizon)
+            wx, wz = v.x + rdx * d, v.z + rdz * d
+            tx, tz = int((wx - x0) / 2.0), int((wz - z0) / 2.0)
+            dance = x0 + 4.0 < wx < x1 - 4.0 and z0 + 5.0 < wz < z1 - 4.0
+            if dance and (tx + tz + int(t)) % 3 == 0:
+                ch[y][sx] = "#"
+                co[y][sx] = (lamp if lamp is not None
+                             else NEON[(tx * 3 + tz) % len(NEON)][1])
+            elif _mix(int(wx * 2.0), int(wz * 2.0), 2603) % 9 == 0:
+                ch[y][sx], co[y][sx] = ".", CONCRETE
+            else:
+                ch[y][sx], co[y][sx] = " ", 0
+
+
+def party_dancers(lm):
+    """Where everybody at the party is standing, worked out from the
+    landmark: a crowd on the dance floor in front of the booth."""
+    x0, z0, x1, z1 = party_roof(lm)
+    out = []
+    for k in range(22):
+        m = _mix(lm["seed"], k, 2605)
+        out.append((x0 + 5.0 + (m & 255) / 255.0 * (x1 - x0 - 10.0),
+                    z0 + 6.0 + ((m >> 8) & 255) / 255.0 * (z1 - z0 - 11.0), m))
+    return out
+
+
+def lift_hut(lm):
+    """Where the lift comes up onto the roof: by the south parapet."""
+    x0, z0, x1, z1 = party_roof(lm)
+    return x0 + 4.0, z1 - 1.8
+
+
+def draw_party(ch, co, v, walls, lm, now, wet):
+    """The party on the roof: the booth at the north end with the DJ and the
+    stacks either side, a lighting tower on every corner with a head turning
+    on top, the crowd on the floor in front of the booth all going up on the
+    kick, and the lift hut by the south parapet. The whole roof goes white
+    on the strobe."""
+    x0, z0, x1, z1 = party_roof(lm)
+    h = LANDMARK_H
+    lamp = party_light(now)
+    t = now * PARTY_BPM / 60.0
+    up = t % 1.0 < 0.5
+    lit = lamp if lamp is not None else CURB
+    cx = (x0 + x1) * 0.5
+    blit_sprite(ch, co, v, walls, PARTY_BOOTH, cx, z0 + 2.6, h, h + 2.0, 6.0,
+                lamp if lamp is not None else CONCRETE)
+    blit_sprite(ch, co, v, walls, RAVER_UP if up else RAVER_DOWN, cx, z0 + 2.2,
+                h + 1.2, h + 1.2 + SMOKER_H, SMOKER_W, lit)
+    for side in (-1.0, 1.0):
+        blit_sprite(ch, co, v, walls, PARTY_STACK, cx + side * 4.5, z0 + 2.4, h,
+                    h + 3.0, 1.6, lamp if lamp is not None else CONCRETE)
+    for px, pz in ((x0 + 1.0, z0 + 1.0), (x1 - 1.0, z0 + 1.0),
+                   (x0 + 1.0, z1 - 1.0), (x1 - 1.0, z1 - 1.0)):
+        y = h + 0.3
+        while y < h + 5.0:
+            put_point(ch, co, v, walls, px, y, pz, "|", CONCRETE)
+            y += 0.6
+        put_point(ch, co, v, walls, px, h + 5.3, pz, "V" if up else "v",
+                  NEON[(int(t) + int(px)) % len(NEON)][0])
+    for px, pz, m in party_dancers(lm):
+        offset = (m >> 16) & 3
+        arms = (t + offset * 0.08) % 1.0 < 0.5
+        blit_sprite(ch, co, v, walls, RAVER_UP if arms else RAVER_DOWN, px, pz,
+                    h + 0.05, h + SMOKER_H, SMOKER_W,
+                    lamp if lamp is not None else
+                    NEON[(m >> 20) % len(NEON)][1])
+    hx, hz = lift_hut(lm)
+    blit_sprite(ch, co, v, walls, LIFT_HUT, hx, hz, h, h + 2.8, 2.6, CONCRETE)
+
+
 def draw_lobby(ch, co, v, walls, t, now):
     """The lit lobby door and SKY DECK over it, in screen space so it can be
     read - the casino marquee's reasoning, at a smaller size."""
@@ -7503,6 +7848,18 @@ def draw_lobby(ch, co, v, walls, t, now):
         return
     # In the crown's colour: the crown is seventy units up, over the top of
     # the screen from anywhere in the street, so the door carries it down.
+    if t.get("kind") == "party":
+        # The landmark's door: its name, and what is going on up there.
+        for row, (word, attr) in enumerate(((t["landmark"]["name"], GOLD),
+                                            ("ROOF PARTY TONIGHT",
+                                             party_light(now) or NEON[1][1]))):
+            for k, c in enumerate(word):
+                put_cell(ch, co, v, walls, sx - len(word) // 2 + k, sy - 1 + row,
+                         dist, c, attr)
+        door = face_point(i, j, f, CELL * 0.5, 0.2, 0.0)
+        blit_sprite(ch, co, v, walls, ["[|]", "[|]", "[|]"], door[0], door[2],
+                    0.0, 2.4, 1.4, BULB)
+        return
     word = "SKY DECK"
     for k, c in enumerate(word):
         put_cell(ch, co, v, walls, sx - len(word) // 2 + k, sy, dist, c,
@@ -7834,8 +8191,8 @@ def draw_roof_ledge(ch, co, v, walls, t, now, wet):
     """Your own roof: a parapet round the edge at waist height, a water tower
     on one corner and the mast with its red light on another. Drawn in world
     space, so it turns with you and frames whichever way you look."""
-    if t.get("kind") == "lighthouse":
-        return                          # its rail is draw_gallery()'s
+    if t.get("kind") in ("lighthouse", "party"):
+        return                          # the gallery's rail, or the party's parapet
     h = t["height"]
     i, j = t["i"], t["j"]
     x0, z0 = i * CELL, j * CELL
@@ -9124,6 +9481,14 @@ def render_street(v, now):
                 z += TUNNEL_LAMP
     for bb in near_billboards(v, BILL_SEEN if v.eye < 10.0 else ROOF_REACH):
         draw_billboard(ch, co, v, walls, bb, now, wet)
+    for lm_ in near_landmarks(v, 320.0):
+        draw_spire(ch, co, v, walls, lm_, now, wet)
+        if v.roof is not None and v.roof.get("landmark") is lm_:
+            draw_party_floor(ch, co, v, lm_, now)
+        x0_, z0_, x1_, z1_ = party_roof(lm_)
+        if (((x0_ + x1_) * 0.5 - v.x) ** 2 + ((z0_ + z1_) * 0.5 - v.z) ** 2
+                < 160.0 ** 2 and v.eye > LANDMARK_H - 10.0):
+            draw_party(ch, co, v, walls, lm_, now, wet)
     for t_ in near_towers(v, 150.0 if v.eye < 10.0 else ROOF_REACH):
         if v.roof is None or t_["i"] != v.roof["i"] or t_["j"] != v.roof["j"]:
             draw_tower_beacon(ch, co, v, walls, t_, now, wet)
@@ -10500,6 +10865,7 @@ CHEAT_PLACES = [
     ("&", "a claw machine", "claw"),
     ("}", "pleasure pier", "pleasurepier"),
     ("{", "strength test", "striker"),
+    ("~", "roof party", "roofparty"),
     ("u", "the big bridge", "grand"),
     ("h", "the lighthouse", "lighthouse"),
     ("+", "lighthouse top", "lighthousedoor"),
@@ -10897,6 +11263,39 @@ def _claw_spot(x, z, where=None):
     return None
 
 
+def _roof_party_spot(x, z):
+    """Outside the landmark's lobby, facing the door: one step in and you are
+    in the lift up to the party."""
+    ti, tj = int(x // (LANDMARK_TILE * CELL)), int(z // (LANDMARK_TILE * CELL))
+    best = None
+    for a in range(ti - 2, ti + 3):
+        for b in range(tj - 2, tj + 3):
+            lm = landmark_of(a, b)
+            if lm is None:
+                continue
+            li, lj = lm["lobby"]
+            px, _, pz = face_point(li, lj, 3, CELL * 0.5, CASINO_REACH + 2.4, 0.0)
+            d = (px - x) ** 2 + (pz - z) ** 2
+            if d < CHEAT_SKIP ** 2 or not can_stand(px, pz):
+                continue
+            if best is None or d < best[0]:
+                best = (d, px, pz)
+    return None if best is None else (best[1], best[2], math.pi)
+
+
+def landmark_hint(x, z):
+    """For the HUD, outside the landmark: what is on up there."""
+    ti, tj = int(x // (LANDMARK_TILE * CELL)), int(z // (LANDMARK_TILE * CELL))
+    lm = landmark_of(ti, tj)
+    if lm is None:
+        return ""
+    li, lj = lm["lobby"]
+    dx, dz = (li + 0.5) * CELL - x, (lj + 1.0) * CELL - z
+    if dx * dx + dz * dz < 30.0 ** 2:
+        return "  ~ %s: roof party, lift in the lobby ~" % lm["name"].lower()
+    return ""
+
+
 def _pleasure_pier_spot(x, z):
     """On the bank beside the pleasure pier, looking along the shore at it:
     the drop tower, the coaster and the wheel side by side."""
@@ -11164,6 +11563,8 @@ def find_place(x, z, kind):
         return _claw_spot(x, z)
     if kind == "striker":
         return _claw_spot(x, z, striker_spot)
+    if kind == "roofparty":
+        return _roof_party_spot(x, z)
     if kind == "lighthousedoor":
         return _lighthouse_door_spot(x, z)
     if kind == "pleasurepier":
@@ -11834,6 +12235,8 @@ CLAW_HUD = (" at the claw machine at %d,%d  -  p plays, p again drops  -  s walk
             " back out  -  q quit ")
 CLIMB_HUD = " on the fire escape, climbing %s "
 STAIRS_HUD = " on the lighthouse stair, climbing %s "
+PARTY_HUD = (" on the roof of %s, %s  -  ws walk  ad turn  -  into the lift hut to go"
+             " down  -  q quit ")
 GALLERY_HUD = " up the lighthouse, %s  -  ad round  -  s down  -  q quit "
 ESCAPE_ROOF_HUD = (" on a roof in the alleys, %d floors up, %s  -  ad look round  -"
                    "  s climbs down  -  q quit ")
@@ -11871,6 +12274,7 @@ def main(stdscr):
     seated = None               # (which ramen counter, since when)
     lift = None                 # riding a sky-deck lift: {"up", "t0", "t"}
     on_roof = None              # the tower whose roof you are standing on
+    roof_x = roof_z = 0.0       # where you are on the landmark's roof
     wheel_at = 0.0
     cheats = False              # is the cheat panel up
     note = ""                   # and what did it last do
@@ -12000,11 +12404,11 @@ def main(stdscr):
                     show.press(now)
                 else:
                     light_show(now, on_roof["x"], on_roof["z"])
-            elif on_roof is not None and key in (curses.KEY_DOWN, ord("s"),
-                                                 ord("S")):
+            elif (on_roof is not None and on_roof.get("kind") != "party"
+                  and key in (curses.KEY_DOWN, ord("s"), ord("S"))):
                 lift = {"up": False, "t0": now, "t": on_roof}
-            elif on_roof is not None and key in (curses.KEY_UP, ord("w"),
-                                                 ord("W")):
+            elif (on_roof is not None and on_roof.get("kind") != "party"
+                  and key in (curses.KEY_UP, ord("w"), ord("W"))):
                 pass                            # the parapet is right there
             elif street:
                 if key in (curses.KEY_UP, ord("w"), ord("W")):
@@ -12055,6 +12459,22 @@ def main(stdscr):
             if now - last["t"] > KEY_GRACE:
                 spin = 0.0
 
+        party = (on_roof if on_roof is not None and on_roof.get("kind") == "party"
+                 else None)
+        if party is not None and lift is None:
+            # On the landmark's roof you can walk about: inside the parapet,
+            # and back into the lift hut to go down.
+            x0_, z0_, x1_, z1_ = party_roof(party["landmark"])
+            ddx = math.sin(yaw) * fwd + math.cos(yaw) * side
+            ddz = math.cos(yaw) * fwd - math.sin(yaw) * side
+            roof_x = min(x1_ - 1.2, max(x0_ + 1.2, roof_x + ddx * frame_time))
+            roof_z = min(z1_ - 1.2, max(z0_ + 1.2, roof_z + ddz * frame_time))
+            hx_, hz_ = lift_hut(party["landmark"])
+            # Into the hut, which ever way you are facing: from where the lift
+            # leaves you it is right behind you, and s backs you into it.
+            if ((roof_x - hx_) ** 2 + (roof_z - hz_) ** 2 < 1.6 ** 2
+                    and (hx_ - roof_x) * ddx + (hz_ - roof_z) * ddz > 0.0):
+                lift = {"up": False, "t0": now, "t": party}
         if lift is not None or on_roof is not None:
             fwd = side = 0.0            # on the roof you can only look round
             autopilot = False
@@ -12089,6 +12509,10 @@ def main(stdscr):
             if now - lift["t0"] >= times[2]:
                 if lift["up"]:
                     on_roof = lift["t"]
+                    if on_roof.get("kind") == "party":
+                        # Out of the lift hut, facing the booth.
+                        hx_, hz_ = lift_hut(on_roof["landmark"])
+                        roof_x, roof_z, yaw = hx_, hz_ - 2.4, math.pi
                 elif lift["t"].get("kind") == "lighthouse":
                     cam_x, cam_z, yaw = lift["t"]["exit"]   # out of the door
                     on_roof = None
@@ -12149,6 +12573,15 @@ def main(stdscr):
                 ch, co = render_lift(lift["up"], floors, now - lift["t0"], width,
                                      height, now)
                 hud = LIFT_HUD % ("up" if lift["up"] else "down")
+        elif on_roof is not None and on_roof.get("kind") == "party":
+            lm_ = on_roof["landmark"]
+            v = View(roof_x, roof_z, yaw, width, height, eye=LANDMARK_H + 1.7,
+                     reach=ROOF_REACH)
+            v.roof = on_roof
+            v.skip = {(a, b) for a in range(lm_["i0"], lm_["i1"] + 1)
+                      for b in range(lm_["j0"], lm_["j1"] + 1)}
+            ch, co, wet = render_street(v, now)
+            hud = PARTY_HUD % (lm_["name"].lower(), sky_word(now, wet))
         elif on_roof is not None and on_roof.get("kind") == "lighthouse":
             v = gallery_view(on_roof, yaw, width, height)
             v.roof = on_roof
@@ -12210,6 +12643,7 @@ def main(stdscr):
                          int(cam_z / CELL + BIG) - BIG)["name"],
                 sky_word(now, wet),
                 show_hint(now, cam_x, cam_z)
+                or landmark_hint(cam_x, cam_z)
                 or rave_hint(v, now)
                 or ("  ~ something over the city ~" if night(now)["alien"]
                     else "")

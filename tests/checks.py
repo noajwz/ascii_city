@@ -145,7 +145,7 @@ check("every destination lands somewhere you can stand", not bad, ",".join(bad))
 blind = []
 for _, name, kind in ac.CHEAT_PLACES:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
-                "diner", "billboard", "highway", "arcade", "claw"):
+                "diner", "billboard", "highway", "arcade", "claw", "roofparty"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -1433,7 +1433,8 @@ for n, d in enumerate(ac.DISTRICTS):
             # of town they are in, and the diner a low box with a cup on it;
             # they are meant to ignore the district.
             if (b["club"] is None and b["casino"] is None and b["tower"] is None
-                    and b["diner"] is None and ac.seafront_cap(i, j) is None):
+                    and b["diner"] is None and ac.seafront_cap(i, j) is None
+                    and b["landmark"] is None):
                 hs.append(b["height"])
             trees += b["tree"]
             for f in range(4):
@@ -3669,6 +3670,79 @@ check("the post and the bell fit an 80x24 window", "( O )" in rt and "WEAKLING" 
       and "DING!" in rt)
 check("and a small one gets a line", "STRENGTH TEST" in "".join(
     "".join(r) for r in ac.render_striker(st_, 30, 10, 1.0)[0]))
+
+# --- the landmark, and the party on its roof -----------------------------------
+lms = [ac.landmark_of(a, b) for a in range(-3, 4) for b in range(-3, 4)]
+lms = [m for m in lms if m is not None]
+check("there is a landmark in nearly every tile of the city", len(lms) >= 40,
+      "%d of 49" % len(lms))
+lm_ = lms[0]
+cells_ = [(a, b) for a in range(lm_["i0"], lm_["i1"] + 1)
+          for b in range(lm_["j0"], lm_["j1"] + 1)]
+check("a whole block wide, every cell of it solid",
+      lm_["i1"] - lm_["i0"] >= 5 and lm_["j1"] - lm_["j0"] >= 5
+      and not any(ac.is_open(a, b) for a, b in cells_))
+check("a broad base and the tower set back from it, over everything near",
+      {ac.lot(a, b)["height"] for a, b in cells_} == {ac.LANDMARK_BASE, ac.LANDMARK_H}
+      and ac.LANDMARK_H > ac.TOWER_TOP + 8)
+li_, lj_ = lm_["lobby"]
+check("its lobby fronts a street", ac.road_at(li_, lj_ + 1)
+      and ac.lot(li_, lj_)["tower"]["kind"] == "party")
+rp_ = ac.find_place(x0, z0, "roofparty")
+rv_ = ac.venue_at(rp_[0], rp_[1] - 3.0)
+check("~ in the menu stands you outside one, and a step in is its lift",
+      ac.can_stand(rp_[0], rp_[1]) and rv_ is not None and rv_[0] == "tower"
+      and rv_[1]["kind"] == "party")
+plm = rv_[1]["landmark"]
+hx_, hz_ = ac.lift_hut(plm)
+pv = ac.View(hx_, hz_ - 2.4, math.pi, 110, 34, eye=ac.LANDMARK_H + 1.7,
+             reach=ac.ROOF_REACH)
+pv.roof = rv_[1]
+pv.skip = {(a, b) for a in range(plm["i0"], plm["i1"] + 1)
+           for b in range(plm["j0"], plm["j1"] + 1)}
+pg_, pc_, _ = ac.render_street(pv, 405.03)
+ptext = "\n".join("".join(r) for r in pg_)
+check("up there there is a party: the stacks, the crowd, the parapet",
+      "[OO" in ptext and ",-." in ptext and "===" in ptext)
+low_rows = ["".join(r) for r in pg_[26:]]
+check("and a floor under your feet, not the street a hundred units down",
+      sum(r.count(" ") for r in low_rows) < len(low_rows) * 110
+      and not any("_" * 20 in r for r in low_rows))
+lit_floor = [ac.party_light(405.0 + k * 0.05) for k in range(60)]
+check("on the beat", len(set(lit_floor)) >= 3 and None in lit_floor)
+# Lasers over the city, seen from the street.
+real_neon = list(ac.NEON)
+ac.NEON[:] = [(800 + k, 900 + k) for k in range(8)]
+real_sp = ac.draw_spire
+laser_cells = []
+
+
+def spy_spire(ch, co, v, walls, lm, now, wet):
+    before = [r[:] for r in co]
+    real_sp(ch, co, v, walls, lm, now, wet)
+    laser_cells.append(sum(1 for y in range(len(co)) for x in range(len(co[0]))
+                           if co[y][x] != before[y][x] and 800 <= co[y][x] < 808))
+
+
+ac.draw_spire = spy_spire
+seen_lasers = 0
+px_ = (plm["i0"] + plm["i1"]) * 0.5 * ac.CELL
+pz_ = (plm["j0"] + plm["j1"]) * 0.5 * ac.CELL
+for k in range(24):
+    a_ = k * math.tau / 24
+    sx_, sz_ = px_ + math.cos(a_) * 250, pz_ + math.sin(a_) * 250
+    if not ac.can_stand(sx_, sz_):
+        continue
+    laser_cells.clear()
+    ac.render_street(ac.View(sx_, sz_, math.atan2(px_ - sx_, pz_ - sz_), 110, 30),
+                     405.0)
+    seen_lasers += sum(laser_cells) > 10
+ac.draw_spire = real_sp
+ac.NEON[:] = real_neon
+# From nearer than this they are over the top of the screen: the street
+# camera does not tilt, the sky-deck crowns' trouble.
+check("and from across town you can see its lasers over the city", seen_lasers >= 2,
+      "from %d spots" % seen_lasers)
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
