@@ -145,7 +145,7 @@ check("every destination lands somewhere you can stand", not bad, ",".join(bad))
 blind = []
 for _, name, kind in ac.CHEAT_PLACES:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
-                "diner", "billboard", "highway", "arcade"):
+                "diner", "billboard", "highway", "arcade", "claw"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -2910,7 +2910,7 @@ while q:
         got = True
         break
     for a, b in ((i - 1, j), (i + 1, j), (i, j - 1), (i, j + 1)):
-        if (a, b) in seen or abs(a - li_) > 24 or abs(b - lj_) > 16:
+        if (a, b) in seen or abs(a - li_) > 32 or abs(b - lj_) > 26:
             continue
         if ac.can_stand((a + 0.5) * ac.CELL, (b + 0.5) * ac.CELL):
             seen.add((a, b))
@@ -2918,7 +2918,63 @@ while q:
 check("you can walk off the bridge to the lighthouse", got)
 check("but not from the far city", not any(
     not ac.headland_at(i, j) and not ac.bridge_at(i, j) and not ac.river_at(i, j)
-    and ac.headland_r(i, j) > ac.HEAD_MOAT for i, j in seen))
+    and ac.headland_r(i, j, ac.HEAD_BACK / ac.HEAD_MOAT) >= ac.HEAD_MOAT
+    for i, j in seen))
+# Only the big bridge goes there: no ordinary crossing lands anywhere the
+# rock and its water reach.
+others = [i for i in range(li_ - 40, li_ + 41)
+          if not ac.grand_at(i)
+          and any(ac.bridge_at(i, j) for j in range(lj_ - 30, lj_ + 40))
+          and abs(i - li_) <= ac.HEAD_RI * ac.HEAD_MOAT + 2]
+check("and no other bridge goes to the headland", not others,
+      "bridges at %s" % others[:5])
+# Behind the point the far town keeps its distance across the water.
+gaps = []
+for di in range(-12, 13, 4):
+    jj = lj_ - int(ac.HEAD_RJ)
+    while ac.headland_at(li_ + di, jj):
+        jj -= 1
+    edge = jj
+    while (ac.water_at(li_ + di, jj) or ac.is_open(li_ + di, jj)) and jj > lj_ - 60:
+        jj -= 1
+    gaps.append(edge - jj)
+check("and the town behind it stands well back across the water", min(gaps) >= 8,
+      "%s cells of water behind the rock" % gaps)
+# Every big bridge has the carnival beside it on the near bank, across the bay
+# from the headland, and from the rock the wheel and the bridge are in one view.
+beside = []
+for k in range(-4, 5):
+    sp_ = ac.grand_avenue(k * ac.GRAND_GAP + 1)
+    if sp_ is None:
+        continue
+    c_ = ac.carnival_col(sp_[0])
+    (wx_, wz_), cz_, st_, z0_ = ac.carnival_spots(c_)
+    beside.append(abs(c_ - sp_[0]) < 30
+                  and all(ac.dry_at(x, z) for x, z in [(wx_, wz_), cz_] + st_)
+                  and not any(ac.grand_at(i) for i in range(c_, c_ + ac.FAIR_LONG)))
+check("every big bridge has the carnival beside it", beside and all(beside),
+      "%d of %d" % (sum(beside), len(beside)))
+cc_ = ac.carnival_col(gspan[0])
+(wx_, wz_), _, _, _ = ac.carnival_spots(cc_)
+gx_ = (gspan[0] + gspan[1] / 2.0) * ac.CELL
+real_neon, real_hot = list(ac.NEON), ac.EMBER_HOT
+ac.NEON[:] = [(800 + k, 900 + k) for k in range(8)]
+ac.EMBER_HOT = 777
+both = False
+for di in range(-14, 15, 2):
+    for dj in range(-6, 9, 2):
+        px_, pz_ = (li_ + di + 0.5) * ac.CELL, (lj_ + dj + 0.5) * ac.CELL
+        if both or not (ac.headland_at(li_ + di, lj_ + dj) and ac.can_stand(px_, pz_)):
+            continue
+        yaw_ = (math.atan2(wx_ - px_, wz_ - pz_) + math.atan2(gx_ - px_, wz_ - pz_)) / 2
+        g_, c_, _ = ac.render_street(ac.View(px_, pz_, yaw_, 110, 30), 300.0)
+        bulbs = sum(1 for y in range(30) for x in range(110)
+                    if g_[y][x] == "o" and 800 <= c_[y][x] < 808)
+        tower = sum(1 for y in range(30) for x in range(110) if c_[y][x] == 777)
+        both = bulbs > 10 and tower > 20
+ac.NEON[:] = real_neon
+ac.EMBER_HOT = real_hot
+check("and from the rock the bridge and the wheel are in the one view", both)
 light = ac.find_place(x0, z0, "lighthouse")
 check("the cheat stands you on the rock", ac.can_stand(light[0], light[1])
       and ac.headland_at(int(light[0] / ac.CELL + ac.BIG) - ac.BIG,

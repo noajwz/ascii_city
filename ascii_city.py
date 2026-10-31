@@ -154,6 +154,7 @@ LAKE_RJ = 5.0
 CARNIVAL_GAP = 200     # cells along the river between one and the next
 FAIR_LONG = 11         # cells of bank it takes up, along the river
 FAIR_DEEP = 4          # and back from the water
+CARNIVAL_BESIDE = 5    # cells between it and the big bridge, where there is one
 WHEEL_R = 10.0         # the wheel's radius in world units
 WHEEL_RPM = 1.3
 
@@ -192,7 +193,8 @@ GRAND_SEEN = 340.0     # how far off it is drawn from
 # beam goes round over the bay, the bridge and the town every few seconds.
 HEAD_RI = 16.0         # the headland's radii, in cells
 HEAD_RJ = 8.0
-HEAD_MOAT = 1.5        # the water round it reaches this far out, in radii
+HEAD_MOAT = 1.75       # the water round it reaches this far out, in radii
+HEAD_BACK = 2.5        # and this far behind the point, so the far town keeps off
 LIGHT_H = 21.0         # the lighthouse, in world units
 BEAM_TURN = 7.0        # seconds for the beam to go round once
 BEAM_REACH = 150.0
@@ -1235,9 +1237,11 @@ def headland_home(i):
     return li, int(lo) - 6
 
 
-def headland_r(i, j):
+def headland_r(i, j, back=1.0):
     """Distance from the headland's centre in units of its own radius: under
-    one is rock, up to HEAD_MOAT is the water round it."""
+    one is rock, up to HEAD_MOAT is the water round it. back stretches the
+    shape out behind the point (away from the bay), which is how the water
+    reaches further there than at the sides."""
     home = headland_home(i)
     if home is None:
         return 9.0
@@ -1245,11 +1249,12 @@ def headland_r(i, j):
     di, dj = i - li, j - lj
     # The box first: nearly every cell asked about is nowhere near, and the
     # trig below was most of what road_at() cost near the river.
-    if abs(di) > HEAD_RI * HEAD_MOAT + 1.0 or abs(dj) > HEAD_RJ * HEAD_MOAT + 1.0:
+    if abs(di) > HEAD_RI * HEAD_MOAT + 1.0 or abs(dj) > HEAD_RJ * HEAD_BACK + 1.0:
         return 9.0
     a = math.atan2(dj, di)
     wob = 1.0 + 0.10 * math.sin(a * 4.0 + li) + 0.06 * math.sin(a * 7.0 + lj)
-    return math.sqrt((di / (HEAD_RI * wob)) ** 2 + (dj / (HEAD_RJ * wob)) ** 2)
+    rj = HEAD_RJ * wob * (back if dj < 0 else 1.0)
+    return math.sqrt((di / (HEAD_RI * wob)) ** 2 + (dj / rj) ** 2)
 
 
 def headland_at(i, j):
@@ -1257,7 +1262,12 @@ def headland_at(i, j):
 
 
 def moat_at(i, j):
-    return near_river(i, j) and 1.0 <= headland_r(i, j) < HEAD_MOAT
+    """The water round the headland: out to HEAD_MOAT at the sides, and out
+    to HEAD_BACK behind the point, so the far town's buildings stand well
+    back across the water instead of crowding the rock. Not on the bay side,
+    which is the bay's - stretched that way it would flood the near bank."""
+    return (near_river(i, j) and headland_r(i, j) >= 1.0
+            and headland_r(i, j, HEAD_BACK / HEAD_MOAT) < HEAD_MOAT)
 
 
 def lighthouse_spot(i):
@@ -1345,8 +1355,17 @@ def bridge_at(i, j):
     is what makes a bridge worth having.
 
     A footbridge: railings, warm lamps, a string of lights between them."""
-    return (river_at(i, j) and _is_road(i, XP, 91)
-            and (_mix(i // XP, 0, 719) % BRIDGE_ODDS == 0 or grand_at(i)))
+    if not (river_at(i, j) and _is_road(i, XP, 91)):
+        return False
+    if grand_at(i):
+        return True
+    # The big bridge is the only way onto the headland: no ordinary crossing
+    # anywhere the rock and its water reach along the far bank.
+    span = grand_avenue(i)
+    reach = HEAD_RI * HEAD_MOAT + 2
+    if span is not None and abs(i - (span[0] + span[1] // 2)) <= reach:
+        return False
+    return _mix(i // XP, 0, 719) % BRIDGE_ODDS == 0
 
 
 PARK_ODDS = 26         # one city block in this many is a car park
@@ -1465,9 +1484,22 @@ def prom_at(i, j):
 
 
 def carnival_col(i):
-    """The first cell along the river of the carnival in this stretch."""
+    """The first cell along the river of the carnival in this stretch.
+
+    In the stretch with the big bridge in it, the carnival stands on the
+    near bank just beside the bridge, across the bay from the headland - so
+    the bridge, the wheel and the lighthouse are in the one view. West of it,
+    because the ferry docks to the east; east, past the ferry, only if the
+    west side would run out of the stretch."""
     k = i // CARNIVAL_GAP
-    return k * CARNIVAL_GAP + 30 + _mix(k, 0, 1301) % (CARNIVAL_GAP - 70)
+    lo = k * CARNIVAL_GAP
+    span = grand_avenue(lo)
+    if span is not None and lo <= span[0] < lo + CARNIVAL_GAP:
+        c = span[0] - CARNIVAL_BESIDE - FAIR_LONG
+        if c < lo:
+            c = span[0] + span[1] + 14
+        return c
+    return lo + 30 + _mix(k, 0, 1301) % (CARNIVAL_GAP - 70)
 
 
 def fair_at(i, j):
@@ -1480,24 +1512,31 @@ def fair_at(i, j):
     return int(hi) + 1 <= j <= int(hi) + FAIR_DEEP
 
 
+def bank_z(i):
+    """The near bank's edge in this column, in world units: where the
+    fairground's ground starts."""
+    return (int(river_span(i)[1]) + 1) * CELL
+
+
 def carnival_spots(c):
     """Where things stand, given the carnival's first column: the wheel, the
-    carousel, and the stalls, in world units. Laid out along the bank at the
-    depth of the bank's middle column so the meander cannot put one in the
-    water."""
-    mid = c + FAIR_LONG // 2
-    _, hi = river_span(mid)
-    z0 = (int(hi) + 1) * CELL           # the water's edge
-    wheel = ((c + 2.5) * CELL, z0 + 2.2 * CELL)
-    carousel = ((c + 7.0) * CELL, z0 + 1.6 * CELL)
-    stalls = [((c + k) * CELL, z0 + 3.6 * CELL) for k in (5.5, 7.0, 8.5, 10.0)]
-    return wheel, carousel, stalls, z0
+    carousel, and the stalls, in world units, and the middle column's bank.
+
+    Each one stands back from the bank of its own column. They used to be laid
+    out from the middle column's, and that held only while the bank ran
+    straight: it slopes as much as half a cell a column along the meander and
+    more beside the bay, which over the eleven columns of a fair is five
+    cells, and put the stalls at one end in the river."""
+    wheel = ((c + 2.5) * CELL, bank_z(c + 2) + 2.2 * CELL)
+    carousel = ((c + 7.0) * CELL, bank_z(c + 7) + 1.6 * CELL)
+    stalls = [((c + k) * CELL, bank_z(int(c + k + BIG) - BIG) + 3.6 * CELL)
+              for k in (5.5, 7.0, 8.5, 10.0)]
+    return wheel, carousel, stalls, bank_z(c + FAIR_LONG // 2)
 
 
 def claw_spot(c):
     """The claw machine: in the row with the stalls, before the first of them."""
-    _, _, _, z0 = carnival_spots(c)
-    return (c + 4.2) * CELL, z0 + 3.6 * CELL
+    return (c + 4.2) * CELL, bank_z(c + 4) + 3.6 * CELL
 
 
 _open_cache = {}
@@ -5246,13 +5285,14 @@ def draw_carnival(ch, co, v, walls, c, now, wet):
     put_lit(ch, co, v, walls, bx, 3.1, bz, "*", BULB, max(wet, 0.3), now)
     for k in range(FAIR_LONG + 1):
         px = (c + k) * CELL
+        pz, pz1 = bank_z(c + k) + 0.6 * CELL, bank_z(c + k + 1) + 0.6 * CELL
         for h in (1.0, 2.0, 3.0):
-            put_point(ch, co, v, walls, px, h, z0 + 0.6 * CELL, "|", CONCRETE)
+            put_point(ch, co, v, walls, px, h, pz, "|", CONCRETE)
         if k < FAIR_LONG:
             for step in range(1, 5):
                 t = step / 5.0
                 y = 3.1 - 0.5 * math.sin(math.pi * t)
-                put_lit(ch, co, v, walls, px + t * CELL, y, z0 + 0.6 * CELL, "o",
+                put_lit(ch, co, v, walls, px + t * CELL, y, pz + (pz1 - pz) * t, "o",
                         NEON[(k + step + chase // 2) % len(NEON)][0],
                         max(wet, 0.2), now)
 
@@ -5260,7 +5300,8 @@ def draw_carnival(ch, co, v, walls, c, now, wet):
     for k in range(4):
         m = _mix(c, k, 1303)
         px = (c + 1.5 + (m & 255) / 255.0 * 8.0) * CELL
-        pz = z0 + (0.9 + ((m >> 8) & 255) / 255.0 * 2.0) * CELL
+        pz = (bank_z(int(px / CELL + BIG) - BIG)
+              + (0.9 + ((m >> 8) & 255) / 255.0 * 2.0) * CELL)
         blit_sprite(ch, co, v, walls, LOOK_UP, px, pz, 0.0, SMOKER_H, SMOKER_W,
                     CURB)
 
@@ -9719,12 +9760,16 @@ def _water_spot(x, z, kind):
         # On the fairground, near the water, looking down the length of it.
         for k in range(-1, 3):
             c = carnival_col(ci + k * CARNIVAL_GAP)
-            _, _, _, z0 = carnival_spots(c)
-            px, pz = (c + 0.5) * CELL, z0 + 1.2 * CELL
-            if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
-                continue
-            if can_stand(px, pz):
-                return px, pz, math.pi * 0.5
+            # Looking down the length of it, from whichever end has room:
+            # the bank slopes, and looking the way it runs out you look
+            # into the river two steps on.
+            for end, yaw in ((c, math.pi * 0.5), (c + FAIR_LONG - 1, -math.pi * 0.5)):
+                for back in (1.2, 2.0, 2.8):
+                    px, pz = (end + 0.5) * CELL, bank_z(end) + back * CELL
+                    if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+                        continue
+                    if can_stand(px, pz) and probe(px, pz, yaw, 60.0) >= 20.0:
+                        return px, pz, yaw
         return None
     for step in range(0, CHEAT_RINGS * 3):
         i = ci + (step + 1) // 2 * (1 if step % 2 else -1)
