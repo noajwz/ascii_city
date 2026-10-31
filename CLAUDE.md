@@ -1147,7 +1147,7 @@ that casino — by its cell, which the casino dict now carries — into `jackpot
 `JACKPOT_LONG`: every bulb on, every window lit, the blade, the marquee and the doorman flashing gold
 and white, and inside the room's ceiling all lit. Walk out and the building is still going. A 777 is
 about one pull in nine thousand, so `%` in the menu (`rig_jackpot()`) makes the next pull one
-(and the next plinko ball an edge), once —
+(and the next plinko ball an edge, and the next race the long shot's), once —
 the one place the slot is not honest, and only when asked.
 
 **It is one of the two buildings you can enter.** `venue_at()` is the trigger for both: stand in a
@@ -1219,6 +1219,23 @@ bin; at three the pegs jumbled and the labels ran together — and a window with
 `PLINKO_WIDE` x `PLINKO_TALL` for it gets a line of text. A ball to the edge sets the building
 off the way a 777 does (`hit_jackpot()`), and `%` in the menu, now *jackpot next*, rigs the next
 ball to go all the way as well as the next pull.
+
+**The races** are the fifth, on `r`, taking the middle of the room the way plinko does (the slot
+machine and the table stand aside). `Races` puts up a card of `RACE_FIELD` horses every
+`RACE_CYCLE`: `RACE_BET` seconds of betting — `1`-`6` puts the stake on a horse, `+`/`-` step it
+through `RACE_STAKES`, out of the one wallet — then `RACE_RUN` of race and `RACE_SHOW` of result.
+Each horse's real chance (`q`) is drawn when the card is made, and the board's odds are a fair
+price times `RACE_CUT` rounded **down** onto `RACE_LADDER`, so the board is honest and pays back
+about 87% (the rounding takes more than you would think: at a cut of 0.88 it was 79%). At the off
+`update()` draws the whole finishing order from those chances, one place at a time, and
+`progress()` is solved from it — each horse's line time set by where it finishes, with a wobble
+that vanishes at the gate and the post, small enough that nobody runs backwards and big enough
+that the lead changes in nearly every race (there are tests of all three). Winners are paid once
+at the result; a winner at 20/1 or longer lights the building, and `%` in the menu brings the
+longest shot home in the next race. `draw_races()` is the board and the track: number, name in
+the silks' colour, odds and your money, the horse galloping to a chequered line, where it came
+once it is past the post, and the commentator; a window without `RACE_WIDE` x `RACE_TALL` gets a
+line of text.
 
 ## The ramen counter
 
