@@ -256,6 +256,75 @@ check("it pays back most of what goes in, not all of it", 0.70 < back < 0.95,
 room, _ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), 80, 24, end, slot, None)
 check("and an 80x24 room has it", "L U C K Y" in "\n".join("".join(r) for r in room))
 
+# --- plinko ----------------------------------------------------------------
+from math import comb as comb_
+back_ = sum(comb_(ac.PLINKO_ROWS, k) * ac.PLINKO_PAYS[k]
+            for k in range(ac.PLINKO_ROWS + 1)) / 2.0 ** ac.PLINKO_ROWS
+check("plinko pays back most of what goes in, not all of it", 0.85 < back_ < 0.97,
+      "%.3f" % back_)
+mid_ = ac.PLINKO_ROWS // 2
+check("and the big multipliers are on the outside",
+      ac.PLINKO_PAYS == ac.PLINKO_PAYS[::-1]
+      and all(ac.PLINKO_PAYS[k] > ac.PLINKO_PAYS[k + 1] for k in range(mid_)))
+pw = ac.Wallet(10 ** 9)
+pk = ac.Plinko(pw)
+pk.bet = 1
+landed_ = Counter()
+for k in range(6000):
+    t_ = k * 10.0
+    pk.drop(t_)
+    across_, _ = ac.Plinko.where(pk.balls[-1], t_ + 100.0)
+    if across_ != ac.Plinko.bin_of(pk.balls[-1]) - mid_:
+        landed_["wrong"] += 1
+    for b_ in pk.settle(t_ + 9.0):
+        landed_[b_] += 1
+check("a ball comes to rest over the bin it is paid for", not landed_["wrong"])
+check("most land in the middle and the edges hardly ever",
+      landed_[mid_] > landed_[mid_ - 3] > landed_[0] + landed_[ac.PLINKO_ROWS]
+      and landed_[0] + landed_[ac.PLINKO_ROWS] < 20, str(sorted(landed_.items())))
+got_ = (pw.money - (10 ** 9 - 6000)) / 6000.0
+check("and over six thousand balls it pays back about that", 0.8 < got_ < 1.08,
+      "%.3f" % got_)
+pk2 = ac.Plinko(ac.Wallet(100))
+pk2.bet = 10
+pk2.drop(0.0)
+check("a ball costs the bet, and pays nothing until it lands",
+      pk2.wallet.money == 90 and pk2.settle(0.5) == [])
+fall_ = (ac.PLINKO_ROWS + 1) * ac.PLINKO_STEP
+k_ = pk2.settle(fall_ + 0.01)
+check("then pays once, bet times its bin", len(k_) == 1
+      and abs(pk2.wallet.money - (90 + 10 * ac.PLINKO_PAYS[k_[0]])) < 1e-9
+      and pk2.settle(fall_ + 1.0) == [])
+ac.rig_jackpot()
+ac._rig_slot = False
+pk3 = ac.Plinko(ac.Wallet(100))
+pk3.drop(0.0)
+edge_ = pk3.settle(fall_ + 0.01)
+check("the menu's jackpot sends the next ball all the way to the edge",
+      edge_ and abs(edge_[0] - mid_) == mid_ and pk3.wallet.money == 95 + 5 * 120)
+for k in range(ac.PLINKO_MAX + 2):
+    pk3.drop(10.0 + k * 0.01)
+check("only so many balls in the air at once",
+      sum(1 for b_ in pk3.balls if not b_["paid"]) == ac.PLINKO_MAX)
+broke_ = ac.Plinko(ac.Wallet(2))
+broke_.bet = 5
+check("and broke is broke", not broke_.drop(0.0) and broke_.short)
+pk3.settle(10.5)
+for w_, h_ in ((80, 24), (100, 30), (130, 40)):
+    room_, _ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), w_, h_, 10.6, ac.Slot(),
+                                     ac.Blackjack(), False, pk3)
+    rt_ = "\n".join("".join(r) for r in room_)
+    check("the board is in the room at %dx%d, the slot stood aside" % (w_, h_),
+          "120" in rt_ and "0.3" in rt_ and rt_.count("O") >= 1
+          and "L U C K Y" not in rt_ and "BET $" in rt_)
+for w_, h_ in ((30, 10), (60, 18), (20, 8)):
+    room_, _ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), w_, h_, 10.6, ac.Slot(),
+                                     ac.Blackjack(), False, pk3)
+small_ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), 40, 14, 10.6, ac.Slot(),
+                               ac.Blackjack(), False, pk3)[0]
+check("and a small window says what is going on instead",
+      "PLINKO" in "\n".join("".join(r) for r in small_))
+
 # --- blackjack -----------------------------------------------------------
 check("aces count eleven until that busts",
       ac.hand_value([("A", "^"), ("K", "v")]) == 21

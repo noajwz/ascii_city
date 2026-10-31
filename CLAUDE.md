@@ -1146,7 +1146,8 @@ to the kerb between brass posts and a red rope, and a `DOORMAN` in braid stands 
 that casino — by its cell, which the casino dict now carries — into `jackpot_on()` for
 `JACKPOT_LONG`: every bulb on, every window lit, the blade, the marquee and the doorman flashing gold
 and white, and inside the room's ceiling all lit. Walk out and the building is still going. A 777 is
-about one pull in nine thousand, so `%` in the menu (`rig_jackpot()`) makes the next pull one, once —
+about one pull in nine thousand, so `%` in the menu (`rig_jackpot()`) makes the next pull one
+(and the next plinko ball an edge), once —
 the one place the slot is not honest, and only when asked.
 
 **It is one of the two buildings you can enter.** `venue_at()` is the trigger for both: stand in a
@@ -1203,6 +1204,21 @@ hits, `k` stands — `s` is taken, it walks you out. The dealer's second card st
 you stand, and the dealer then takes a card every `BJ_DEAL` seconds rather than all at once: a
 hand that resolves in one frame is a number, not a game. The one thing that bit: `now - t >= 0.8`
 is false at `t + 0.8` in floating point, so the timer compares with an epsilon.
+
+**The plinko machine** is the casino's fourth game, and `o` goes over to it: it takes the
+wheel's place in the room, the slot machine stands aside, and blackjack stays if the window is
+108 wide. `Plinko` is honest the way `Spin` and `Slot` are: `drop()` pays the bet and draws every
+bounce there and then — `PLINKO_ROWS` fair coins off `_spin_rng` — and the fall is a timeline from
+them, so `where()` says where the ball is at any moment and `settle()` pays it once, as it lands,
+`PLINKO_PAYS[rights]` times the bet. The pays are symmetric and climb to the outside, 120x at the
+edges against 0.3x in the middle, which is where the binomial puts most of them: an edge is one
+ball in 2048, and the machine gives back 94% (a test works that out from the table, and another
+drops six thousand). Up to `PLINKO_MAX` balls in the air at once. `draw_plinko()` lays the pegs
+`PLINKO_SX` apart — even, so a half step is a whole column, and wide enough for "120" under its
+bin; at three the pegs jumbled and the labels ran together — and a window without
+`PLINKO_WIDE` x `PLINKO_TALL` for it gets a line of text. A ball to the edge sets the building
+off the way a 777 does (`hit_jackpot()`), and `%` in the menu, now *jackpot next*, rigs the next
+ball to go all the way as well as the next pull.
 
 ## The ramen counter
 
