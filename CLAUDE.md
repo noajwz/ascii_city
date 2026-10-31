@@ -1310,11 +1310,22 @@ you across the street from one, the way the casino's does; a few steps in is the
 
 Inside (`render_temple()`): the vault, the pillars going away down the nave with stained glass
 between them, pews either side of the aisle, candles along the altar — and on the altar a
-terminal, on which `g` asks for **the word of God**. It is Terry A. Davis's oracle from TempleOS,
-and done his way: the random number is the time since the last time you asked, to the
-microsecond (`oracle["last"]` in `main()`), so nobody chooses it, not even the program, and
-`god_words()` turns it into `GOD_SAY` words off `GOD_WORDS` — a list of the city's own, not his.
-The last few utterances stay on the screen, the newest bright. Free to go in; nothing to pay.
+terminal, on which `g` asks for **the word of God** — one word a press. It is Terry A. Davis's
+oracle from TempleOS, done his way: the random number is the time since the last word was asked
+for, in nanoseconds (`oracle["last_ns"]`, `time.perf_counter_ns()`), and `god_word()` is that
+gap modulo `GOD_WORDS` — a list of the city's own, not his, each word once (it had duplicates,
+which made "behold" likelier). It gave twelve words a press at first, a generator seeded with
+the gap; that was asked to change "so it's truly random", and rightly: twelve words from one
+seed are one random number's worth, the other eleven decided by the generator. Now nothing
+stands between the moment you press and the word. Words build up into a verse; `GOD_PAUSE`
+without one, or `GOD_VERSE` words, and the next starts a new verse. The last few verses stay on the screen, the newest bright. Free to go in; nothing to pay.
+
+**The choir** (`draw_choir()`) stands on risers across the nave from the booth: two rows in white
+robes, mouths opening on `CHOIR_BPM` a breath apart along the row, a director side on with his
+hands going, ASCII notes (`CHOIR_NOTES`) floating up and fading — and over them, in gold on the
+beat, **the last word the terminal gave, sung**, cut up by `syllables()` (hal-le-lu-jah, mer-cy);
+until it has given one they hold a long a-men. Visual only: the standard library has no sound
+but the terminal bell.
 
 **The confession booth** stands against the side of the nave; `c` steps into it (`booth` in
 `main()`, cleared when you leave the temple or jump). `render_confession()` is the inside: dark

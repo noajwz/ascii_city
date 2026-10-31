@@ -10,6 +10,7 @@ no rendering at all.
 Runs a few hundred thousand simulated seconds of weather, so it takes a minute.
 """
 import math
+import random
 import sys
 
 from harness import ac
@@ -4330,13 +4331,24 @@ while step_ < 12.0 and ac.venue_at(tsp[0] + math.sin(tsp[2]) * step_,
 tin = ac.venue_at(tsp[0] + math.sin(tsp[2]) * step_, tsp[1] + math.cos(tsp[2]) * step_)
 check("walk across and in at the door is inside",
       tin is not None and tin[0] == "temple")
-w1, w2 = ac.god_words(123456), ac.god_words(123457)
-check("the word of god: words from the list, the same for the same moment",
-      len(w1) == ac.GOD_SAY and all(w_ in ac.GOD_WORDS for w_ in w1)
-      and w1 == ac.god_words(123456) and w1 != w2)
-spread_ = Counter(w_ for k in range(400) for w_ in ac.god_words(k * 7919))
-check("and any word can come up", len(spread_) > len(set(ac.GOD_WORDS)) * 0.9,
-      "%d of %d" % (len(spread_), len(set(ac.GOD_WORDS))))
+check("the word of god: one word a press, off the gap between presses",
+      ac.god_word(123456789) in ac.GOD_WORDS
+      and ac.god_word(123456789) == ac.god_word(123456789)
+      and ac.god_word(123456789) != ac.god_word(123456790))
+check("and every word on the list once, so none is likelier than the rest",
+      len(ac.GOD_WORDS) == len(set(ac.GOD_WORDS)))
+gaps_ = random.Random(5)                # gaps like a person's, a second or two
+spread_ = Counter(ac.god_word(gaps_.randrange(3 * 10 ** 8, 2 * 10 ** 9))
+                  for k in range(len(ac.GOD_WORDS) * 30))
+check("and any word can come up, about as often as any other",
+      len(spread_) == len(ac.GOD_WORDS)        # 30 expected each; noise is +-16
+      and max(spread_.values()) < 60 and min(spread_.values()) > 10,
+      "%d words, %d to %d each" % (len(spread_), min(spread_.values()),
+                                   max(spread_.values())))
+w1, w2 = ["light", "mercy", "taxi"], ["river"]
+check("words cut up for singing", ac.syllables("hallelujah") == "hal-le-lu-jah"
+      and ac.syllables("mercy") == "mer-cy" and ac.syllables("amen") == "a-men"
+      and ac.syllables("light") == "light")
 said_ = [" ".join(w1), " ".join(w2)]
 inside_ = "\n".join("".join(r) for r in
                     ac.render_temple(tin[1], 100, 30, 1.0, said_)[0])
@@ -4345,6 +4357,15 @@ check("inside: the terminal on the altar says it, and the way out",
 check("and before you ask, it says how",
       "press g" in "\n".join("".join(r) for r in ac.render_temple(
           tin[1], 100, 30, 1.0, [])[0]))
+quiet_ = "\n".join("".join(r) for r in ac.render_temple(tin[1], 100, 30, 1.0, [])[0])
+singing_ = ["\n".join("".join(r) for r in ac.render_temple(
+    tin[1], 100, 30, 1.0 + k * 0.3, said_, "hallelujah")[0]) for k in range(6)]
+check("a choir sings the last word it said, and a-men until then",
+      "a-a-a-men" in quiet_ and all("hal-le-lu-jah" in f_ for f_ in singing_)
+      and all(f_.count("/|H|") >= 6 for f_ in singing_))
+check("mouths opening and closing, notes going up",
+      len({f_.count("(o)") for f_ in singing_}) > 1
+      and any(n_ in f_ for f_ in singing_ for n_ in "dJb"))
 for w_, h_ in ((20, 8), (49, 17), (80, 24), (240, 70)):
     ac.render_temple(tin[1], w_, h_, 1.0, said_ * 5)
 check("and any size of window is fine", True)
