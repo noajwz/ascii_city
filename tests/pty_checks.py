@@ -122,6 +122,9 @@ ok &= report("the stock exchange: buy, more, sell, walk out", *run(
      (b"l", .4), (b"\x1bOB", .3), (b"\x1bOB", .3), (b"b", .4), (b"\x1bOA", .3),
      (b"l", .4), (b"\x1bOC", .3), (b"-", .3), (b"s", .6), (b"s", .6)],
     cols=100, rows=30))
+ok &= report("money: +1000 in the menu, a film, a bowl, walk out", *run(
+    [(b"`", .5), (b":", .4), (b"*", 2.0), (b"s", .6), (b"s", .6), (b"`", .5),
+     (b"v", 6.0), (b"s", .6), (b"s", .6)], cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

@@ -409,7 +409,14 @@ EXCHANGE_ODDS = 400    # of the financial district's street fronts, one in this
 TICK_LEN = 30.0        # seconds a price stands before the next
 CANDLES = 48           # how many the chart goes back, at most
 LOTS = [1, 10, 100, 0] # how many a trade is: 0 is as many as you can
-STARTING_CASH = 1000.0
+STARTING_MONEY = 1000.0  # dollars, to start the night with
+# What things cost, out of the one wallet.
+FEES = {"cinema": 12, "club": 20, "ramen": 14, "diner": 4}
+LIFT_FEES = {None: 15, "party": 30}   # the sky decks, and the roof party
+SHOW_FEE = 50          # a show fired from the lighthouse
+CLAW_COST = 2
+STRIKE_COST = 1
+ARCADE_COST = 1
 SECTORS = ["TECH", "FOOD", "TRANSPORT", "LEISURE"]
 STOCKS = [("NEON", "NEON TUBES CO", 0), ("BLIP", "BLIP ARCADES", 0),
           ("GLOW", "GLOWSTICK INDUSTRIES", 0), ("HOLO", "HOLO SIGNAGE", 0),
@@ -3489,10 +3496,18 @@ def draw_exchange_front(ch, co, v, walls, ex, world, now):
 class Broker:
     """Your account at the exchange: cash, and how many of each stock you
     hold and what you paid for them. One for the night, whichever exchange
-    you walk into, the way the casino's chips are one purse."""
+    you walk into. The cash is the one wallet's."""
 
-    def __init__(self):
-        self.cash = STARTING_CASH
+    @property
+    def cash(self):
+        return self.wallet.money
+
+    @cash.setter
+    def cash(self, n):
+        self.wallet.money = n
+
+    def __init__(self, wallet=None):
+        self.wallet = wallet if wallet is not None else Wallet()
         self.held = {}               # stock -> shares
         self.paid = {}               # stock -> what they cost, in all
         self.lot = 0                 # index into LOTS
@@ -10128,27 +10143,26 @@ SLOT_BETS = [1, 5, 10, 25]
 # the house wins slowly, which is what a slot machine is.
 SLOT_PAYS = [100, 40, 20, 10, 6, 4]
 SLOT_PAIR = 1
-STAKE = 100            # what the house gives you when you have run out
+class Wallet:
+    """Your money: one balance for the whole city. The slot and the table
+    play out of it, the exchange trades with it, the arcade, the claw and
+    the hammer take their dollar from it, and so do the films, the noodles,
+    the coffee, the lifts and the fireworks. No house tops it up when it is
+    gone - money that came back for nothing would not be money - but the
+    menu can (`:`)."""
 
-
-class Purse:
-    """The chips you carry round the room - the slot and the blackjack
-    table play out of the same pocket."""
-
-    def __init__(self):
-        self.chips = STAKE
-        self.staked = 0          # times the house has topped you up
+    def __init__(self, money=None):
+        self.money = STARTING_MONEY if money is None else money
 
     def take(self, n):
-        """Pay n in, or False if you cannot. Broke, the house stakes you
-        again - nobody is turned away from a casino for having lost."""
-        if self.chips < n:
-            if self.chips > 0:
-                return False
-            self.chips = STAKE
-            self.staked += 1
-        self.chips -= n
+        """Pay n, or False - and nothing taken - if you cannot."""
+        if self.money + 1e-9 < n:
+            return False
+        self.money -= n
         return True
+
+    def give(self, n):
+        self.money += n
 
 
 _rig_slot = False       # % in the menu: the next pull is 777, once
@@ -10165,11 +10179,11 @@ class Slot:
     says what is showing in a reel this instant, and the payline is the
     middle row."""
 
-    def __init__(self, purse=None):
+    def __init__(self, wallet=None):
         self.t0 = None
         self.result = None
         self.pulls = 0
-        self.purse = purse if purse is not None else Purse()
+        self.wallet = wallet if wallet is not None else Wallet()
         self.bet = SLOT_BETS[1]
         self.won = 0             # what the last pull paid, once it settles
         self.paid = True
@@ -10182,7 +10196,7 @@ class Slot:
     def pull(self, now):
         """Pay the bet and spin; refused, and it says so, if you cannot
         cover it."""
-        self.short = not self.purse.take(self.bet)
+        self.short = not self.wallet.take(self.bet)
         if self.short:
             return False
         global _rig_slot
@@ -10206,7 +10220,7 @@ class Slot:
             self.won = self.bet * SLOT_PAYS[a]
         elif a == b or b == c or a == c:
             self.won = self.bet * SLOT_PAIR
-        self.purse.chips += self.won
+        self.wallet.give(self.won)
         self.paid = True
 
     def stop_at(self, k):
@@ -10281,7 +10295,7 @@ def draw_slot(ch, co, slot, x0, y0, now, paytable=True):
     _text(ch, co, y0 + 7, x0, "|" + say[:w - 2].center(w - 2) + "|", attr)
     _text(ch, co, y0 + 8, x0, bar, GOLD_DIM)
     _text(ch, co, y0 + 9, x0,
-          "|" + ("chips %5d" % slot.purse.chips).center(w - 2) + "|", GOLD)
+          "|" + ("$%d" % slot.wallet.money).center(w - 2) + "|", GOLD)
     _text(ch, co, y0 + 10, x0,
           "|" + ("bet %-3d  - +" % slot.bet).center(w - 2) + "|", GOLD_DIM)
     _text(ch, co, y0 + 11, x0, "'" + "-" * (w - 2) + "'", GOLD_DIM)
@@ -10314,8 +10328,8 @@ def hand_value(cards):
 
 
 class Blackjack:
-    def __init__(self, purse=None):
-        self.purse = purse if purse is not None else Purse()
+    def __init__(self, wallet=None):
+        self.wallet = wallet if wallet is not None else Wallet()
         self.shoe = []
         self.player = []
         self.dealer = []
@@ -10330,20 +10344,20 @@ class Blackjack:
         return self.shoe.pop()
 
     @property
-    def chips(self):
-        return self.purse.chips
+    def money(self):
+        return self.wallet.money
 
-    @chips.setter
-    def chips(self, n):
-        self.purse.chips = n
+    @money.setter
+    def money(self, n):
+        self.wallet.money = n
 
     def deal(self, now):
         if self.phase in ("player", "dealer"):
             return
-        if not self.purse.take(BJ_BET):
+        if not self.wallet.take(BJ_BET):
             self.outcome = "NOT ENOUGH"
             return
-        self.purse.chips += BJ_BET       # only checking: it is settled at the end
+        self.wallet.give(BJ_BET)         # only checking: it is settled at the end
         self.player = [self._draw(), self._draw()]
         self.dealer = [self._draw(), self._draw()]
         self.phase = "player"
@@ -10390,7 +10404,7 @@ class Blackjack:
             self.outcome, win = "DEALER WINS", -BJ_BET
         else:
             self.outcome, win = "PUSH", 0
-        self.chips += win
+        self.money += win
         self.phase = "done"
         self.t_phase = now
 
@@ -10417,7 +10431,7 @@ def draw_blackjack(ch, co, bj, x0, y0, now):
         _text(ch, co, y0 + r, x0 + w - 1, "|", GOLD_DIM)
     _text(ch, co, y0 + 12, x0, "'" + "-" * (w - 2) + "'", GOLD_DIM)
     _text(ch, co, y0 + 1, x0 + 2, "BLACKJACK", GOLD)
-    _text(ch, co, y0 + 1, x0 + w - 13, "chips %4d" % bj.chips, GOLD)
+    _text(ch, co, y0 + 1, x0 + w - 13, "$%-8d" % bj.money, GOLD)
     showing = bj.phase in ("dealer", "done")
     for row, (who, cards) in enumerate((("dealer", bj.dealer), ("you", bj.player))):
         y = y0 + 2 + row * 4
@@ -10681,9 +10695,11 @@ class Claw:
     worked out from it, so claw_at() and moving() can say where everything is
     at any instant without anything being stepped frame by frame."""
 
-    def __init__(self, col, arms=None):
+    def __init__(self, col, arms=None, wallet=None):
         self.col = col
         self.arms = arms if arms is not None else []   # what you have won
+        self.wallet = wallet if wallet is not None else Wallet()
+        self.short = False       # the last go was refused: no money
         self.stocked = 0
         self.restock()
         self.t0 = None           # when the coin went in
@@ -10713,6 +10729,9 @@ class Claw:
         if self.aiming(now):
             self.let_go(now)
         elif self.idle(now):
+            self.short = not self.wallet.take(CLAW_COST)
+            if self.short:
+                return
             if all(p["gone"] for p in self.pile):
                 self.restock()
             self.t0, self.drop = now, None
@@ -10839,7 +10858,7 @@ class Claw:
             return "p to drop  %d" % math.ceil(CLAW_TIME - (now - self.t0)), False
         d = self.drop
         if d is None or self.idle(now):
-            return "p to play", False
+            return ("$%d A GO" % CLAW_COST if self.short else "p to play"), False
         if now - d["t"] < d["reveal"]:
             return "...", False
         if d["out"] == "won":
@@ -10922,9 +10941,11 @@ class Striker:
     worked out at the swing, so the puck's height is a function of the time
     since, like the claw."""
 
-    def __init__(self, col, arms=None):
+    def __init__(self, col, arms=None, wallet=None):
         self.col = col
         self.arms = arms if arms is not None else []
+        self.wallet = wallet if wallet is not None else Wallet()
+        self.short = False
         self.hit = None              # (when, power)
         self.goes = self.rings = 0
         self.paid = True
@@ -10937,6 +10958,9 @@ class Striker:
 
     def swing(self, now):
         if not self.ready(now):
+            return False
+        self.short = not self.wallet.take(STRIKE_COST)
+        if self.short:
             return False
         self.hit = (now, self.meter(now))
         self.goes += 1
@@ -10971,7 +10995,7 @@ class Striker:
 
     def verdict(self, now):
         if self.hit is None or self.ready(now):
-            return "p to swing", False
+            return ("$%d A SWING" % STRIKE_COST if self.short else "p to swing"), False
         if now - self.hit[0] < STRIKE_UP:
             return "...", False
         say = [w for at, w in STRIKE_SAYS if self.hit[1] >= at][-1]
@@ -11157,7 +11181,7 @@ def draw_cabinet(ch, co, x0, y0, game, colour, now):
         _text(ch, co, y, x0 + 2, line, colour if line in demo else FLASH)
     _text(ch, co, y0 + 3 + sh, x0, "|" + "=" * (w - 2) + "|", GOLD_DIM)
     _text(ch, co, y0 + 4 + sh, x0, "/  o   o o o  \\", CONCRETE)
-    _text(ch, co, y0 + 5 + sh, x0, "|    [ 25c ]  |"[:w], GOLD_DIM)
+    _text(ch, co, y0 + 5 + sh, x0, "|    [ $1  ]  |"[:w], GOLD_DIM)
     _text(ch, co, y0 + 5 + sh, x0 + 6, "[", FLASH if int(now * 1.5) % 2 else GOLD_DIM)
     _text(ch, co, y0 + 6 + sh, x0, "|" + "_" * (w - 2) + "|", CONCRETE)
 
@@ -12627,7 +12651,7 @@ def draw_cheats(ch, co, note):
            ("", ""), ("", "NIGHTS"),
            ("n", "the next one"), ("A", "a strange night"),
            ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
-           ("%", "777 next pull"), ("/", "closing time"),
+           ("%", "777 next pull"), ("/", "closing time"), (":", "+$1000"),
            ("", ""), ("`", "close")]
     columns = (left, middle, right, sky)
 
@@ -13031,6 +13055,24 @@ def render_diner(width, height, now, since):
     return ch, co
 
 
+TURNED = {
+    "cinema": ["the usher holds out a hand.", "$%d a seat." % FEES["cinema"]],
+    "club": ["the bouncer doesn't move.", "twenty at the door. not tonight."],
+    "ramen": ["the cook taps the sign: cash only.", "$%d a bowl." % FEES["ramen"]],
+    "diner": ["the drone hovers over your cup.", "$%d a coffee, hon." % FEES["diner"]],
+}
+
+
+def render_turned_away(kind, width, height, now):
+    """What you get instead when you cannot pay for it."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    for k, line in enumerate(TURNED[kind] + ["", "s walks back out"]):
+        _text(ch, co, height // 2 - 2 + k, max(1, (width - len(line)) // 2), line,
+              GOLD if k < 2 else GOLD_DIM)
+    return ch, co
+
+
 def render_cinema(cin, width, height, now):
     """In the back rows.
 
@@ -13237,6 +13279,7 @@ CLAW_HUD = (" at the claw machine at %d,%d  -  p plays, p again drops  -  s walk
             " back out  -  q quit ")
 CLIMB_HUD = " on the fire escape, climbing %s "
 STAIRS_HUD = " on the lighthouse stair, climbing %s "
+TURNED_HUD = " turned away  -  s walks back out  -  q quit "
 PARTY_HUD = (" on the roof of %s, %s  -  ws walk  ad turn  -  into the lift hut to go"
              " down  -  q quit ")
 GALLERY_HUD = " up the lighthouse, %s  -  ad round  -  s down  -  q quit "
@@ -13264,15 +13307,16 @@ def main(stdscr):
     steer = 0.0                 # the autopilot's heading, eased not snapped
     blocked = False             # did the last step run into something
     wheel = None                # the roulette, while you stand in a casino
-    purse = Purse()             # the chips you carry round the casino
-    slot = Slot(purse)          # the machine beside the wheel
+    wallet = Wallet()           # your money: one balance for the whole city
+    visit, visit_ok = None, True    # what you have paid to be in, this visit
+    slot = Slot(wallet)         # the machine beside the wheel
     jackpot_pull = None         # the pull that last paid 777, so it is had once
-    table = Blackjack(purse)    # and the table on the other side
+    table = Blackjack(wallet)   # and the table on the other side
     arms = []                   # what the claw machines have given you
     claw = None                 # the last claw machine you stood at
     at_claw = False             # and are you standing at it now
     play = {"arc": None, "sel": 0, "game": None, "hi": {}}   # at the arcade
-    broker = Broker()           # your account at the exchange
+    broker = Broker(wallet)     # your account at the exchange
     at_exchange = False
     at_arcade = False
     striker = None              # the last strength tester you stood at
@@ -13325,6 +13369,9 @@ def main(stdscr):
                 elif key == ord("!"):
                     note = ("fireworks over the bay tonight"
                             if skip_to_fireworks(now) else "no such night near")
+                elif key == ord(":"):
+                    wallet.give(1000)
+                    note = "+$1000"
                 elif key == ord("%"):
                     rig_jackpot()
                     note = "the next pull is 777"
@@ -13414,7 +13461,10 @@ def main(stdscr):
                 if key in (ord("x"), ord("X")):
                     play["game"] = None
                 elif g_.over and key in (ord("p"), ord("P")):
-                    play["game"] = type(g_)(_spin_rng.randrange(1 << 30), now)
+                    if wallet.take(ARCADE_COST):
+                        play["game"] = type(g_)(_spin_rng.randrange(1 << 30), now)
+                    else:
+                        note, note_at = "a game is $%d" % ARCADE_COST, now
                 else:
                     g_.key({curses.KEY_UP: "up", ord("w"): "up", ord("W"): "up",
                             curses.KEY_DOWN: "down", ord("s"): "down",
@@ -13429,7 +13479,10 @@ def main(stdscr):
             elif at_arcade and key in (ord("p"), ord("P")):
                 name = arcade_order(play["arc"], stdscr.getmaxyx()[1])[
                     play["sel"] % len(arcade_order(play["arc"], stdscr.getmaxyx()[1]))]
-                play["game"] = GAMES[name](_spin_rng.randrange(1 << 30), now)
+                if wallet.take(ARCADE_COST):
+                    play["game"] = GAMES[name](_spin_rng.randrange(1 << 30), now)
+                else:
+                    note, note_at = "a game is $%d" % ARCADE_COST, now
             elif at_striker and key in (ord("p"), ord("P")):
                 striker.swing(now)
             elif at_claw and key in (ord("p"), ord("P")):
@@ -13442,8 +13495,11 @@ def main(stdscr):
                 show = on_the_button(now, on_roof["x"], on_roof["z"])
                 if show is not None:
                     show.press(now)
+                elif wallet.money >= SHOW_FEE and light_show(now, on_roof["x"],
+                                                             on_roof["z"]):
+                    wallet.take(SHOW_FEE)
                 else:
-                    light_show(now, on_roof["x"], on_roof["z"])
+                    note, note_at = "a show is $%d" % SHOW_FEE, now
             elif (on_roof is not None and on_roof.get("kind") != "party"
                   and key in (curses.KEY_DOWN, ord("s"), ord("S"))):
                 lift = {"up": False, "t0": now, "t": on_roof}
@@ -13573,7 +13629,11 @@ def main(stdscr):
             lift = {"up": True, "t0": now, "t": escape_at(cam_x, cam_z, yaw)}
             venue = None
         elif venue is not None and venue[0] == "tower":
-            lift = {"up": True, "t0": now, "t": venue[1]}
+            fee = LIFT_FEES.get(venue[1].get("kind"), 0)
+            if wallet.take(fee):
+                lift = {"up": True, "t0": now, "t": venue[1]}
+            else:
+                note, note_at = "the lift is $%d" % fee, now
             venue = None
         elif street and fwd > 0.0 and lighthouse_door(cam_x, cam_z) is not None:
             # In at the lighthouse's door is on to its stair.
@@ -13581,6 +13641,16 @@ def main(stdscr):
             venue = None
         if venue is None or venue[0] not in ("ramen", "diner"):
             seated = None               # stood up: the next visit is a new bowl
+        # Paying for what you came in for, once a visit: a seat at the
+        # pictures, the club's cover, the bowl, the coffee.
+        here = None
+        if venue is not None and venue[0] in FEES:
+            here = (venue[0],) + tuple(sorted(
+                (k_, v_) for k_, v_ in venue[1].items()
+                if isinstance(v_, (int, float, str))))
+        if here != visit:
+            visit = here
+            visit_ok = here is None or wallet.take(FEES[venue[0]])
         if venue is not None and venue[0] == "exchange" and not at_exchange:
             broker.sel = venue[1]["stock"]          # its own stock, on the way in
         at_exchange = (venue[1] if venue is not None and venue[0] == "exchange"
@@ -13592,10 +13662,10 @@ def main(stdscr):
             play.update(arc=venue[1], sel=0, game=None)
         at_striker = venue is not None and venue[0] == "striker"
         if at_striker and (striker is None or striker.col != venue[1]["col"]):
-            striker = Striker(venue[1]["col"], arms)
+            striker = Striker(venue[1]["col"], arms, wallet)
         at_claw = venue is not None and venue[0] == "claw"
         if at_claw and (claw is None or claw.col != venue[1]["col"]):
-            claw = Claw(venue[1]["col"], arms)
+            claw = Claw(venue[1]["col"], arms, wallet)
         if venue is None or venue[0] != "casino":
             wheel = None
         elif wheel is None or (wheel.done(now)
@@ -13656,6 +13726,9 @@ def main(stdscr):
             ch, co = render_casino_room(wheel, width, height, now, slot, table,
                                         jackpot_on(now, venue[1]))
             hud = ROULETTE_HUD % (wheel.name, cam_x, cam_z)
+        elif venue is not None and venue[0] in FEES and not visit_ok:
+            ch, co = render_turned_away(venue[0], width, height, now)
+            hud = TURNED_HUD
         elif venue is not None and venue[0] == "club":
             ch, co = render_rave(venue[1], width, height, now)
             hud = RAVE_HUD % (cam_x, cam_z)
@@ -13726,6 +13799,7 @@ def main(stdscr):
         else:
             ch, co = render_skyline(sky_x, width, height, now)
             hud = SKYLINE_HUD % (sky_x, sky_word(now, rain_intensity(now)))
+        hud = " $%d " % int(wallet.money) + hud       # what you have, everywhere
         if cheats:
             draw_cheats(ch, co, note)
         elif now - note_at < 4.0 and note:
