@@ -162,6 +162,9 @@ ok &= report("a taxi: hail, it pulls up, choose, ride, arrive", *run(
 ok &= report("a fog night: to it, walk, a taxi through it", *run(
     [(b"`", .5), (b"9", 1.0), (b"w", 1.0), (b"W", 1.0), (b"t", 3.6), (b"\r", 8.0)],
     cols=100, rows=30))
+ok &= report("pace: up to very fast, walk, run into a wall, back down", *run(
+    [(b"+", .2)] * 4 + [(b"w", .5), (b"W", .2), (b"W", 1.0)] + [(b"-", .2)] * 3
+    + [(b"w", .5)], cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

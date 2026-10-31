@@ -34,6 +34,11 @@ import unicodedata
 FPS = 30
 KEY_GRACE = 0.15       # how long a keypress keeps you moving (smooths key repeat)
 RUN_MULTIPLIER = 3.0
+# How fast you walk, which + and - step through in the street. Running is the
+# pace times RUN_MULTIPLIER, so it gets faster with it; turning does not.
+PACES = [("normal", 1.0), ("brisk", 1.6), ("fast", 2.4), ("very fast", 3.5)]
+STEP_MAX = 1.0         # the most one collision test moves you: a fast frame is
+                       # several, or you could go through the corner of a block
 BIG = 1 << 30          # added before int() so truncation floors negatives too
 
 # --- skyline view ---
@@ -15483,7 +15488,8 @@ def render_rave(club, width, height, now):
 ARROWS = (curses.KEY_LEFT, curses.KEY_RIGHT, curses.KEY_UP, curses.KEY_DOWN)
 
 SKYLINE_HUD = " x=%-6d %s  tab view  arrows/hl walk  HL run  space wander  ` cheats "
-STREET_HUD = " %d,%d %s, %s%s  ws walk  ad turn  ,. step  t taxi  tab view  ` cheats "
+STREET_HUD = (" %d,%d %s, %s%s  ws walk  ad turn  ,. step  +- pace  t taxi  tab view"
+              "  ` cheats ")
 TAXI_HUD = " in a taxi  -  %s "
 ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
                 " blackjack  o plinko  r races  f high flyer  -  s walks out"
@@ -15584,6 +15590,7 @@ def main(stdscr):
     note = ""                   # and what did it last do
     note_at = -1e9              # when, so the HUD can show it after the panel closes
     autopilot = False
+    pace = PACES[0][1]          # how fast you walk: + and - in the street
     frame_time = 1.0 / FPS
 
     while True:
@@ -15893,19 +15900,25 @@ def main(stdscr):
                 pass                            # the parapet is right there
             elif street:
                 if key in (curses.KEY_UP, ord("w"), ord("W")):
-                    fwd = WALK * (RUN_MULTIPLIER if key == ord("W") else 1.0)
+                    fwd = WALK * pace * (RUN_MULTIPLIER if key == ord("W") else 1.0)
                     last["f"], autopilot = now, False
                 elif key in (curses.KEY_DOWN, ord("s"), ord("S")):
-                    fwd = -WALK * (RUN_MULTIPLIER if key == ord("S") else 1.0)
+                    fwd = -WALK * pace * (RUN_MULTIPLIER if key == ord("S") else 1.0)
                     last["f"], autopilot = now, False
+                elif key in (ord("+"), ord("="), ord("-"), ord("_")):
+                    k_ = [p_ for _, p_ in PACES].index(pace)
+                    k_ = max(0, min(len(PACES) - 1,
+                                    k_ + (1 if key in (ord("+"), ord("=")) else -1)))
+                    pace = PACES[k_][1]
+                    note, note_at = "pace: " + PACES[k_][0], now
                 elif key in (curses.KEY_LEFT, ord("a")):
                     spin, last["t"], autopilot = -TURN, now, False
                 elif key in (curses.KEY_RIGHT, ord("d")):
                     spin, last["t"], autopilot = TURN, now, False
                 elif key == ord(","):
-                    side, last["s"], autopilot = -SIDESTEP, now, False
+                    side, last["s"], autopilot = -SIDESTEP * pace, now, False
                 elif key == ord("."):
-                    side, last["s"], autopilot = SIDESTEP, now, False
+                    side, last["s"], autopilot = SIDESTEP * pace, now, False
             else:
                 if key in (curses.KEY_LEFT, ord("h")):
                     sky_v, last["sky"], autopilot = -WALK_SPEED, now, False
@@ -15926,7 +15939,7 @@ def main(stdscr):
             steer += ((wander(cam_x, cam_z, yaw, now) - steer)
                       * min(1.0, frame_time * (7.0 if blocked else 3.0)))
             spin = max(-TURN, min(TURN, steer * 2.0))
-            want = WALK * (0.66 - 0.30 * min(1.0, abs(steer)))
+            want = WALK * pace * (0.66 - 0.30 * min(1.0, abs(steer)))
             fwd += (want - fwd) * min(1.0, frame_time * 2.5)
             side = 0.0
             sky_v += (WALK_SPEED * 0.6 - sky_v) * min(1.0, frame_time * 2.5)
@@ -15979,13 +15992,15 @@ def main(stdscr):
         # you along it instead of stopping you dead.
         dx = math.sin(yaw) * fwd + math.cos(yaw) * side
         dz = math.cos(yaw) * fwd - math.sin(yaw) * side
-        nx = cam_x + dx * frame_time
         moved = False
-        if can_stand(nx, cam_z):
-            cam_x, moved = nx, True
-        nz = cam_z + dz * frame_time
-        if can_stand(cam_x, nz):
-            cam_z, moved = nz, True
+        steps_ = 1 + int(max(abs(dx), abs(dz)) * frame_time / STEP_MAX)
+        for _ in range(steps_):
+            nx = cam_x + dx * frame_time / steps_
+            if can_stand(nx, cam_z):
+                cam_x, moved = nx, True
+            nz = cam_z + dz * frame_time / steps_
+            if can_stand(cam_x, nz):
+                cam_z, moved = nz, True
         blocked = not moved and (fwd or side)
 
         # Walking into a casino doorway is the one way into a building in
