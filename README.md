@@ -36,9 +36,10 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   on, ramen counters down the lit lanes where you can sit and wait for your bowl, a cinema
   showing a black-and-white film, with the title up over the doors in big lit letters and
   searchlights sweeping the sky from its roof, an arcade with a front that is one big wall of
-  flashing coloured lights (the games inside are on their way), an all-night diner where she
-  comes round with the coffee, and sky decks:
-  ride the lift to the roof of the tallest towers and look out over the whole city, where every
+  flashing coloured lights (the games inside are on their way), an all-night cyberpunk diner
+  with a giant neon coffee cup steaming on its roof, where a drone comes round with the coffee,
+  and sky decks: ride the lift to the roof of the tallest towers and look out over the whole city,
+  where every
   tower's crown is lit in the colour of the weather. The club still has no sign, but there is a
   queue, a bouncer and a rope, and now and then the door opens and lets the light out.
 - **People out walking** — not many, it is night — under umbrellas when it rains.

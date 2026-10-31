@@ -855,15 +855,43 @@ at an angle the buildings hide it. The HUD says `~ the hum of the highway ~` nea
 
 ## The diner, and the billboards
 
-**The diner** is the *Nighthawks* picture: `DINER_ODDS` on its own hash, wanting a wide street
-out front (`_wide_face()`), the building cut down to two storeys. From the street the whole ground
-floor is one lit window (`diner_window()`, in the wall pass) with the counter across it and three
-people sat well apart, dark against the light, which is the point; `DINER` in pink neon over the
-door, `24 HRS` under it, `OPEN` blinking, in screen space like the cinema's sign. Inside
-(`render_diner()`) you are on a stool: lamps over the counter, the menu, the urns, the pie case, a
-jukebox going through its colours, the cook moving behind the counter, the window onto the empty
-street with the rain on it if it is raining, and `DINER_POUR` seconds after you sit down she comes
-round with the pot. The seat is remembered the way the ramen bowl's is. `(` in the menu.
+**The diner** used to be the *Nighthawks* picture and is now a few decades on from the rest of
+the street: `DINER_ODDS` on its own hash, wanting a wide street out front (`_wide_face()`), cut down
+to `DINER_H` whatever its district — like the club and the casino it ignores the district's
+heights, and the height test exempts it for the same reason. It has its own wall column,
+`draw_diner_column()`: gunmetal, a cyan seam up every corner, a magenta strip under the roof, and
+over the shopfront a cyan band with a bright packet running along it now and then, like data down
+a line; upstairs is panelling with a purple window in each bay. The ground floor of the front is
+still one long window (`diner_window()`, in the wall pass), now lit cold and lined like a screen,
+with the counter across it and three people dark against the light, one with a red eye. Its name
+(`DINER_NAMES`, hashed per diner) is over the window in cyan, `OPEN 24/7` under it, and every few
+seconds the sign glitches — the name jumps a column and its letters go to noise for a frame or
+two (`draw_diner_sign()`).
+
+**The cup on the roof** is the thing you find one by. `draw_diner_cup()` draws a coffee cup in neon
+tube standing on the front edge of the roof — a tapering body, a handle, a saucer with its ends
+turned up, the coffee in amber — and three strands of magenta steam curling up off it in pulses
+that climb them, drifting to one side as they go. It is world points, through `draw_tube()`, which
+picks each cell's glyph from which way the tube runs on screen there (the searchlights' trick), and
+it is filled dark first, or the facade of whatever stands behind shows through the tube and the
+outline is lost. Every `CUP_GLITCH` seconds or so the tube flickers. Diners are found per city
+block and cached (`diners_in_block()`), like the cinemas, for `CUP_REACH`.
+
+**Where it can be seen from was measured, and it drove the design.** The street camera does not
+tilt, so a sign on a roof is only in frame from far enough back — and from far enough back down the
+street the diner's taller neighbours are in the way. At two storeys a good view of the cup came
+from 7 of 277 street spots nearby; a pylon to lift it over the neighbours did not help (8 of 277),
+because from anywhere near it went off the top of the screen instead. Cut to one tall storey and
+the cup a little smaller, it sits whole in frame from across the street in an ordinary terminal,
+which is the one view a wide street guarantees, with the steam rising off the top of it.
+
+Inside (`render_diner()`) you are on a stool: strip lights along the ceiling with one tube on the
+blink, the window onto a wet street of towers and holo-ads with the odd car going over, the menu
+board (`DINER_MENU`, in credits) glitching, a chrome coffee machine with its little lights, a
+robot arm working the grill along its rail, three others along the counter — a visor, a hood, an
+eye that is not an eye — and `DINER_POUR` seconds after you sit down a drone comes round with the
+pot and says what diners have always said. The seat is remembered the way the ramen bowl's is. `(`
+in the menu.
 
 **Billboards** are soda ads (`ADS`, made-up brands) hung out over the wide streets from low roofs
 (8-12 units: on a tall one it is off the top of the screen from anywhere you can stand) in the busy
