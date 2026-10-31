@@ -35,7 +35,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   and the whole building in gold when somebody hits 777) with a roulette wheel that spins
   honestly, a slot machine and a blackjack table that deals straight, a club
   with a rave going
-  on, steaming ramen shops down the lit lanes, a neon bowl over the door, where you can sit
+  on, manholes in the streets, some of them steaming, with somebody living down one
+  of them, steaming ramen shops down the lit lanes, a neon bowl over the door, where you can sit
   and wait for your bowl, a cinema
   showing a black-and-white film or a full-colour action picture, with the title up over the doors in big lit letters and
   searchlights sweeping the sky from its roof, an arcade with a front that is one big wall of

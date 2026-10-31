@@ -4068,6 +4068,67 @@ check("and buys what is picked", lb.held.get(13) == 1)
 check("the floor says which way the market is going",
       ac.mood(t_) in ("BULL MARKET", "BEAR MARKET", "FLAT MARKET"))
 
+# --- manholes, and who is down there ---------------------------------------
+mhs = street_ = 0
+bad = []
+for i in range(-160, 160):
+    for j in range(-160, 160):
+        if ac.road_at(i, j) and ac.is_open(i, j) and not ac.water_at(i, j):
+            street_ += 1
+        m_ = ac.manhole_at(i, j)
+        if m_ is None:
+            continue
+        mhs += 1
+        ci_ = int(m_[0] / ac.CELL + ac.BIG) - ac.BIG
+        cj_ = int(m_[1] / ac.CELL + ac.BIG) - ac.BIG
+        if ((ci_, cj_) != (i, j) or not ac.road_at(i, j)
+                or not ac.can_stand(m_[0], m_[1])):
+            bad.append((i, j))
+gap_ = street_ * ac.CELL / float(max(1, mhs))
+check("manholes, but not too many", 100.0 < gap_ < 300.0,
+      "one every %.0f units of street" % gap_)
+check("each in its own street cell, where you can stand", not bad, str(bad[:3]))
+mspot = ac.find_place(x0, z0, "manhole")
+mh_ = ac.manhole_near(mspot[0], mspot[1], 8.0) if mspot else None
+check("the menu finds a steaming one and stands you back from it",
+      mspot is not None and ac.can_stand(mspot[0], mspot[1]) and mh_ is not None
+      and mh_[2] and ac.manhole_under(mspot[0], mspot[1]) is None)
+check("and standing on it is what lifts it", ac.manhole_under(mh_[0], mh_[1]) == mh_
+      and ac.manhole_under(mh_[0] + ac.MANHOLE_ON + 0.2, mh_[1]) is None)
+mv = ac.View(mspot[0], mspot[1], mspot[2], 100, 30)
+mch, mco = ac.render_street(mv, 300.0)[:2]
+pr_ = mv.project(mh_[0], 0.0, mh_[1])
+cy_, cx_ = int(round(pr_[1])), int(round(pr_[0]))
+grate = sum(1 for y in range(cy_ - 2, cy_ + 3) for x in range(cx_ - 6, cx_ + 7)
+            if 0 <= y < 30 and 0 <= x < 100 and mch[y][x] in "#+o")
+check("from there the cover is on screen", 0 < pr_[1] < 30 and grate >= 5,
+      "row %.1f, %d cells" % (pr_[1], grate))
+puffs = sum(1 for y in range(30) for x in range(100)
+            if mch[y][x] in "~()" and mco[y][x] in (ac.SNOW, ac.SMOKE, ac.HAZE))
+check("with steam coming up out of it", puffs >= 6, str(puffs))
+# The stub gives the colours one value; the bands need telling apart.
+keep_ = (ac.ROU_RED, ac.CROWN_BLUE, ac.EMBER_HOT)
+ac.ROU_RED, ac.CROWN_BLUE, ac.EMBER_HOT = 901, 902, 903
+sw, sco = ac.render_sewer(110, 32, 320.0, 300.0, 0)
+stext = "\n".join("".join(r) for r in sw)
+bands = {c_ for r_, row in enumerate(sw) for x_, g_ in enumerate(row)
+         if g_ == "=" and sco[r_][x_] in (ac.ROU_RED, ac.CROWN_BLUE, ac.EMBER_HOT,
+                                          ac.NEON[6][0])
+         for c_ in [sco[r_][x_]]}
+check("down there: four turtles, a pizza, the ladder up",
+      stext.count("[###]") == 4 and "PIZZA" in stext and "|-|" in stext)
+check("each with their own headband", len(bands) == 4, str(len(bands)))
+ac.ROU_RED, ac.CROWN_BLUE, ac.EMBER_HOT = keep_
+check("and they look up when you come down",
+      "pizza?" in "\n".join("".join(r) for r in
+                             ac.render_sewer(110, 32, 302.0, 300.0, 0)[0]))
+check("eating as they go, leaving two, less what you took",
+      ac.sewer_slices(0.0, 0) == 8 and ac.sewer_slices(999.0, 0) == 2
+      and ac.sewer_slices(999.0, 2) == 0 and ac.sewer_slices(999.0, 5) == 0)
+for w_, h_ in ((20, 8), (43, 15), (240, 70)):
+    ac.render_sewer(w_, h_, 330.0, 300.0, 1)
+check("and any size of window is fine", True)
+
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
 cl2 = ac.Claw(0, [], w_)

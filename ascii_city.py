@@ -4578,6 +4578,80 @@ def reflect_river(ch, co, v, walls, now, wet):
                 co[ty][tx] = attr
 
 
+MANHOLE_ODDS = 34      # one street cell in this many has a manhole in it
+MANHOLE_R = 0.6        # the cover's radius
+MANHOLE_ON = 2.0       # how near you have to be to lift it: a tap of w is 2.3
+
+
+def manhole_at(i, j):
+    """The manhole in this cell, if there is one: (x, z, steaming). Only in a
+    proper street, never on a bridge or in the water, in the middle of the
+    roadway - the hash first, since nearly every cell has none."""
+    m = _mix(i, j, 3101)
+    if m % MANHOLE_ODDS or not road_at(i, j) or not is_open(i, j) or water_at(i, j):
+        return None
+    x, z = (i + 0.5) * CELL, (j + 0.5) * CELL
+    # Off the middle along the street, where there is street on both sides.
+    shift = ((m >> 8) % 3 - 1) * 1.1
+    if is_open(i - 1, j) and is_open(i + 1, j):
+        x += shift
+    elif is_open(i, j - 1) and is_open(i, j + 1):
+        z += shift
+    return x, z, (m >> 12) % 3 == 0
+
+
+def manhole_under(x, z):
+    """The manhole you are standing on, if you are."""
+    for i in (int(x / CELL + BIG) - BIG,):
+        for j in (int(z / CELL + BIG) - BIG,):
+            for a in (i - 1, i, i + 1):
+                for b in (j - 1, j, j + 1):
+                    mh = manhole_at(a, b)
+                    if mh and (mh[0] - x) ** 2 + (mh[1] - z) ** 2 < MANHOLE_ON ** 2:
+                        return mh
+    return None
+
+
+def manhole_near(x, z, reach=4.0):
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    n = int(reach / CELL) + 1
+    for a in range(ci - n, ci + n + 1):
+        for b in range(cj - n, cj + n + 1):
+            mh = manhole_at(a, b)
+            if mh and (mh[0] - x) ** 2 + (mh[1] - z) ** 2 < reach * reach:
+                return mh
+    return None
+
+
+def draw_manhole_steam(ch, co, v, walls, now):
+    """Steam out of the covers that have it, curling up into the street
+    light: puffs that grow and thin from white to haze as they rise."""
+    n = 8
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    for i in range(ci - n, ci + n + 1):
+        for j in range(cj - n, cj + n + 1):
+            if _mix(i, j, 3101) % MANHOLE_ODDS:
+                continue
+            rx, rz = (i + 0.5) * CELL - v.x, (j + 0.5) * CELL - v.z
+            if rx * v.dx + rz * v.dz < -CELL:
+                continue
+            mh = manhole_at(i, j)
+            if mh is None or not mh[2]:
+                continue
+            seed = _mix(i, j, 3103)
+            for k in range(9):
+                age = (now * 0.3 + k / 9.0 + (seed % 7) * 0.1) % 1.0
+                drift = 0.5 * math.sin(now * 0.4 + k * 1.3 + seed % 5) * age
+                r = 0.15 + age * 0.7
+                y = 0.15 + age * 4.2
+                tone = SNOW if age < 0.25 else SMOKE if age < 0.6 else HAZE
+                for da, dh, g in ((0.0, 0.0, "~"), (-r, 0.1, "("), (r, 0.1, ")")):
+                    if age > 0.7 and g != "~":
+                        continue
+                    put_point(ch, co, v, walls, mh[0] + drift + da * v.plx,
+                              y + dh * age, mh[1] + drift * 0.5 + da * v.plz, g, tone)
+
+
 def draw_ground(ch, co, v, walls, glow, wet, now):
     """Road, pavement and kerb.
 
@@ -4642,6 +4716,7 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                         and fair_at(i, j))
                 rock = not wet_cell and not solid and headland_at(i, j)
                 tarmac = not wet_cell and not solid and car_park_at(i, j)
+                mh = None if solid or wet_cell else manhole_at(i, j)
                 hollow = (woods and v.hollow is not None
                           and hollow_at(i, j))
                 lane = None
@@ -4671,6 +4746,18 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
             elif CELL - fz_ < edge and CELL - fz_ < PAVE and wall_s:
                 edge = CELL - fz_
 
+            if mh is not None:
+                # The cover: a rim, and the grip pattern cast into it. Before
+                # the snow, because what comes up from under it melts it.
+                d2 = (x - mh[0]) ** 2 + (z - mh[1]) ** 2
+                if d2 < MANHOLE_R * MANHOLE_R:
+                    if d2 > (MANHOLE_R * 0.78) ** 2:
+                        ch[y][sx], co[y][sx] = "o", CURB
+                    elif (int((x - mh[0]) * 5.0 + 9) + int((z - mh[1]) * 5.0 + 9)) % 2:
+                        ch[y][sx], co[y][sx] = "#", STREET
+                    else:
+                        ch[y][sx], co[y][sx] = "+", CURB
+                    continue
             if (v.cover > 0.05 and not wet_cell and not deck and not tunnel_at(i, j)
                     and not (PAVE - 0.3 <= edge < PAVE)):
                 # Snow lying, ahead of everything else the ground would draw:
@@ -10021,6 +10108,7 @@ def render_street(v, now):
     for d_ in near_diners(v, CUP_REACH):
         draw_diner_cup(ch, co, v, walls, d_, now)
     draw_props(ch, co, v, walls, now, wet)
+    draw_manhole_steam(ch, co, v, walls, now)
     draw_car_park(ch, co, v, walls, now, wet)
     draw_walkers(ch, co, v, walls, now, wet)
     draw_traffic(ch, co, v, walls, now, wet)
@@ -12010,6 +12098,7 @@ CHEAT_PLACES = [
     ("f", "carnival", "carnival"),
     ("j", "claw machine", "claw"),
     ("h", "strength test", "striker"),
+    ("x", "a manhole", "manhole"),
     ("r", "ramen", "ramen"),
     ("d", "diner", "diner"),
     ("^", "sky deck", "tower"),
@@ -12031,7 +12120,7 @@ CHEAT_PLACES = [
 # The panel's groups, by what you would go there for.
 CHEAT_GROUPS = [
     ("NIGHTLIFE", ["casino", "club", "roofparty", "rave"]),
-    ("FUN", ["arcade", "cinema", "carnival", "claw", "striker"]),
+    ("FUN", ["arcade", "cinema", "carnival", "claw", "striker", "manhole"]),
     ("EAT", ["ramen", "diner"]),
     ("VIEWS", ["tower", "lighthousedoor", "grand", "billboard"]),
     ("MONEY", ["exchange"]),
@@ -12689,6 +12778,30 @@ def _ramen_spot(x, z):
     return None
 
 
+def _manhole_spot(x, z):
+    """Back along the street from the nearest steaming manhole, looking at
+    it. Skips the one at hand, so a second press finds another."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    for i, j in _rings(ci, cj, CHEAT_RINGS):
+        if _mix(i, j, 3101) % MANHOLE_ODDS:
+            continue
+        mh = manhole_at(i, j)
+        if mh is None or not mh[2]:
+            continue
+        if (mh[0] - x) ** 2 + (mh[1] - z) ** 2 < CHEAT_SKIP ** 2:
+            continue
+        # Seven back: nearer and the cover is under the bottom of the screen,
+        # since the camera cannot look down.
+        for back in (7.0, 6.0):
+            for ax, az in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                sx, sz = mh[0] - ax * back, mh[1] - az * back
+                if can_stand(sx, sz) and road_at(int(sx / CELL + BIG) - BIG,
+                                                 int(sz / CELL + BIG) - BIG):
+                    return sx, sz, math.atan2(ax, az)
+    return None
+
+
 def find_place(x, z, kind):
     """Somewhere of this kind to stand, and which way to face. None if there is
     none within reach - the panel says so rather than the search running on."""
@@ -12705,6 +12818,8 @@ def find_place(x, z, kind):
         return _doorway(x, z, 909, "club")
     if kind == "ramen":
         return _ramen_spot(x, z)
+    if kind == "manhole":
+        return _manhole_spot(x, z)
     if kind == "highway":
         return _hwy_spot(x, z)
     if kind == "el":
@@ -13420,6 +13535,153 @@ def render_diner(width, height, now, since):
     return ch, co
 
 
+SEWER_EAT = 7.0        # seconds between one of them finishing a slice
+SEWER_SAY = [("dude. close the lid.", 0), ("you want a slice?", 1),
+             ("pineapple? no way.", 2), ("extra cheese. obviously.", 3),
+             ("shh. someone's up there.", 0), ("this one's got anchovies!", 2)]
+# Each one's headband, and the turtle sprite: head, band, shell, legs.
+SEWER_BANDS = ("red", "blue", "orange", "purple")
+
+
+def render_sewer(width, height, now, since, taken):
+    """Down the manhole: a brick tunnel with the water going by, the ladder
+    you came down with the light from the street at the top of it, pipes
+    dripping - and somebody has made it home. An old couch, a television on
+    the blink, fairy lights, and four turtles round a pizza box on a crate,
+    eating. They look up when you come down. It is cool. Pizza?"""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    t = now - since
+    band = {"red": ROU_RED, "blue": CROWN_BLUE, "orange": EMBER_HOT,
+            "purple": NEON[6][0]}
+    left = sewer_slices(t, taken)
+    if width < 44 or height < 16:
+        _text(ch, co, height // 2 - 1, 1, "~ down the sewer ~", ROU_GREEN)
+        _text(ch, co, height // 2, 1, "four turtles, one pizza", GOLD_DIM)
+        _text(ch, co, height // 2 + 1, 1, "%d slices left" % left, GOLD_DIM)
+        return ch, co
+    cx = width // 2
+    floor = height - 6                       # the ledge they sit on
+    # The arch, in brick, and the brick of the back wall, faintly.
+    for y in range(0, floor):
+        for x in range(width):
+            arch = abs(x - cx) / float(cx) > 0.92 - 0.25 * (1 - y / float(floor)) ** 3
+            if arch or y == 0:
+                ch[y][x] = "_" if y % 2 == 0 else ("|" if (x + (y // 2) * 3) % 6 == 0
+                                                   else "_")
+                co[y][x] = CURB
+            elif (x + (y // 2) * 3) % 6 == 0 and y % 2:
+                ch[y][x], co[y][x] = "|", CONCRETE
+            elif y % 2 == 0 and x % 2 == 0:
+                ch[y][x], co[y][x] = "_", CONCRETE
+    # A pipe along the top, dripping.
+    for x in range(2, width - 2):
+        ch[2][x], co[2][x] = "=", STREET
+    for k in range(5):
+        dx = 6 + _mix(k, 0, 3105) % max(1, width - 12)
+        dy = 3 + int((now * 6 + k * 3.3) % max(1, floor - 3))
+        if dy < floor:
+            ch[dy][dx], co[dy][dx] = "'", RAIN
+    # The ladder you came down, and the street light at the top of it.
+    lx = max(3, width // 8)
+    for y in range(1, height - 3):
+        _text(ch, co, y, lx, "|-|" if y % 2 else "| |", CURB)
+    _text(ch, co, 0, lx - 2, "(   )", BULB)
+    for y in range(1, floor - 2):
+        if (y + int(now * 4)) % 3 == 0:
+            _text(ch, co, y, lx - 1, ".", BULB_DIM)
+            _text(ch, co, y, lx + 3, ".", BULB_DIM)
+    # The water going by under the ledge.
+    for x in range(width):
+        ch[floor][x], co[floor][x] = "=", CURB
+        for y in range(floor + 1, height - 1):
+            h = _mix(x - int(now * 5.0), y, 3107)
+            if h % 3 == 0:
+                ch[y][x], co[y][x] = "~", RAIN_FAR
+            elif h % 7 == 0:
+                ch[y][x], co[y][x] = "-", ROU_GREEN if h % 2 else STREET
+    # Fairy lights strung along the wall over them.
+    for x in range(lx + 6, width - 4):
+        y = 5 + int(1.5 * math.sin((x - lx) * 0.25))
+        ch[y][x], co[y][x] = "-", CONCRETE
+        if x % 4 == 0:
+            ch[y + 1][x] = "o"
+            co[y + 1][x] = NEON[(x // 4 + int(now * 1.5)) % len(NEON)][0]
+    # The couch at the back, and the television on a crate, on the blink.
+    tvx = width - 18
+    for r, line in enumerate((" ________ ", "|.:.:.:.:|", "|:.:.:.:.|", "|________|",
+                              "  [====]  ")):
+        _text(ch, co, floor - 9 + r, tvx, line, CONCRETE if r in (0, 3, 4) else
+              (STAR if (r + int(now * 9)) % 3 else HAZE))
+    couch = ("  ______________ ", " (______________)", "(|              |)",
+             " '--------------' ")
+    for r, line in enumerate(couch):
+        _text(ch, co, floor - 4 + r, cx - 26, line, BARK)
+    # The pizza, in its box, on a crate in the middle.
+    px = cx - 6
+    _text(ch, co, floor - 6, px, " __________ ", CURB)
+    pie = " (" + "".join("o" if k < left else " " for k in range(8)) + ") "
+    _text(ch, co, floor - 5, px, "|" + pie + "|", GOLD_DIM)
+    for k in range(8):
+        if k < left:
+            _text(ch, co, floor - 5, px + 3 + k, "o" if k % 2 else "*",
+                  ROU_RED if k % 2 else GOLD)
+    _text(ch, co, floor - 4, px, "|__________|", CURB)
+    _text(ch, co, floor - 3, px + 1, "[ PIZZA! ]", BARK)
+    _text(ch, co, floor - 2, px + 1, "[________]", BARK)
+    _text(ch, co, floor - 1, px + 1, "|        |", BARK)
+    # The four of them round it, each eating on their own count.
+    looking = t < 3.0
+    spots = (cx - 22, cx - 13, cx + 9, cx + 18)
+    for n, (x, name) in enumerate(zip(spots, SEWER_BANDS)):
+        phase = (t * 0.8 + n * 0.37) % 1.0
+        bite = not looking and phase < 0.35
+        y = floor - 5
+        eyes = "o o" if looking else ("- -" if bite else "o o")
+        _text(ch, co, y, x, " ___ ", ROU_GREEN)
+        _text(ch, co, y + 1, x, "=", band[name])
+        _text(ch, co, y + 1, x + 1, "(" + eyes + ")", ROU_GREEN)
+        _text(ch, co, y + 1, x + 2, "=" if not looking else "o", band[name])
+        _text(ch, co, y + 1, x + 4, "=" if not looking else "o", band[name])
+        _text(ch, co, y + 1, x + 6, "=", band[name])
+        _text(ch, co, y + 1, x + 2, eyes[0], STAR)
+        _text(ch, co, y + 1, x + 4, eyes[2], STAR)
+        _text(ch, co, y + 2, x + 1, " \\" + ("O" if bite else "_") + "/ ", ROU_GREEN)
+        _text(ch, co, y + 3, x, "/", ROU_GREEN)
+        _text(ch, co, y + 3, x + 1, "[###]", GOLD_DIM)
+        _text(ch, co, y + 3, x + 6, "\\", ROU_GREEN)
+        _text(ch, co, y + 4, x + 1, "_| |_", ROU_GREEN)
+        # The slice in hand: up at the mouth on the bite, down in the lap
+        # otherwise, a string of cheese when it comes away.
+        sx = x + 6 if n < 2 else x - 1
+        if bite:
+            _text(ch, co, y + 1, sx, "V", GOLD)
+            if phase > 0.25:
+                _text(ch, co, y + 2, sx, "~", GOLD_DIM)
+        elif not looking:
+            _text(ch, co, y + 3, sx, ">" if n < 2 else "<", GOLD)
+    # What they say.
+    if looking:
+        say, who = ("...", 0) if t < 1.5 else ("it's cool, it's cool. pizza?", 1)
+    else:
+        say, who = SEWER_SAY[int(t / 4.0) % len(SEWER_SAY)]
+        if (t % 4.0) > 3.0:
+            say = ""
+    if say:
+        bx = spots[who] + 3 - len(say) // 2
+        _text(ch, co, floor - 8, max(1, min(width - len(say) - 1, bx)), say, STAR)
+    _text(ch, co, height - 1, max(1, cx - 15), "-- the ladder up (s) - a slice (p) --",
+          GOLD_DIM)
+    return ch, co
+
+
+def sewer_slices(t, taken):
+    """Slices left in the box: eight, less one every SEWER_EAT seconds
+    they have been at it (they leave two), less what you took."""
+    eaten = min(6, int(max(0.0, t - 3.0) / SEWER_EAT))
+    return max(0, 8 - eaten - taken)
+
+
 TURNED = {
     "cinema": ["the usher holds out a hand.", "$%d a seat." % FEES["cinema"]],
     "club": ["the bouncer doesn't move.", "twenty at the door. not tonight."],
@@ -13649,6 +13911,7 @@ CLAW_HUD = (" at the claw machine at %d,%d  -  p plays, p again drops  -  s walk
 CLIMB_HUD = " on the fire escape, climbing %s "
 STAIRS_HUD = " on the lighthouse stair, climbing %s "
 TURNED_HUD = " turned away  -  s walks back out  -  q quit "
+SEWER_HUD = " down the sewer  -  p takes a slice  -  s climbs back up  -  q quit "
 PARTY_HUD = (" on the roof of %s, %s  -  ws walk  ad turn  -  into the lift hut to go"
              " down  -  q quit ")
 GALLERY_HUD = " up the lighthouse, %s  -  ad round  -  s down  -  q quit "
@@ -13692,6 +13955,7 @@ def main(stdscr):
     at_striker = False
     seated = None               # (which ramen counter, since when)
     lift = None                 # riding a sky-deck lift: {"up", "t0", "t"}
+    sewer = None                # down a manhole: {"t0", "taken"}
     on_roof = None              # the tower whose roof you are standing on
     roof_x = roof_z = 0.0       # where you are on the landmark's roof
     wheel_at = 0.0
@@ -13772,6 +14036,7 @@ def main(stdscr):
                             fwd = side = spin = steer = 0.0
                             autopilot = False
                             wheel = None
+                            sewer = None
                             street = True
                             note = "-> " + name
                             # And the panel closes: you jumped somewhere to
@@ -13793,6 +14058,16 @@ def main(stdscr):
                 return
             elif key == CHEAT_KEY:
                 cheats, note = True, ""
+            elif sewer is not None:
+                if key in (ord("s"), ord("S"), ord("e"), ord("E"), curses.KEY_DOWN):
+                    sewer = None                # up the ladder, onto the cover
+                    note, note_at = "back up in the street", now
+                elif key in (ord("p"), ord("P")):
+                    if sewer_slices(now - sewer["t0"], sewer["taken"]):
+                        sewer["taken"] += 1
+                        note, note_at = "you take a slice. still warm.", now
+                    else:
+                        note, note_at = "the box is empty. they look at you.", now
             elif key in (ord("\t"), ord("v")):
                 street = not street
                 sky_v = fwd = side = spin = 0.0
@@ -13858,6 +14133,11 @@ def main(stdscr):
                 claw.press(now)
             elif lift is not None:
                 pass                            # nothing to do but ride
+            elif (street and on_roof is None and key in (ord("e"), ord("E"))
+                  and manhole_under(cam_x, cam_z) is not None):
+                sewer = {"t0": now, "taken": 0}  # lift the cover, down the ladder
+                fwd = side = spin = 0.0
+                autopilot = False
             elif (on_roof is not None and on_roof.get("kind") == "lighthouse"
                   and key in (ord("f"), ord("F"))):
                 # Up on the gallery: light a show, or fire the one going up.
@@ -13940,10 +14220,10 @@ def main(stdscr):
             if ((roof_x - hx_) ** 2 + (roof_z - hz_) ** 2 < 1.6 ** 2
                     and (hx_ - roof_x) * ddx + (hz_ - roof_z) * ddz > 0.0):
                 lift = {"up": False, "t0": now, "t": party}
-        if lift is not None or on_roof is not None:
+        if lift is not None or on_roof is not None or sewer is not None:
             fwd = side = 0.0            # on the roof you can only look round
             autopilot = False
-            if lift is not None:
+            if lift is not None or sewer is not None:
                 spin = 0.0
         sky_x += sky_v * frame_time
         yaw += spin * frame_time
@@ -13963,7 +14243,7 @@ def main(stdscr):
         # Walking into a casino doorway is the one way into a building in
         # this city. Walk back out and the wheel goes away; stand there and it
         # deals you another, because that is what a casino is for.
-        venue = venue_at(cam_x, cam_z) if street else None
+        venue = venue_at(cam_x, cam_z) if street and sewer is None else None
         # The sky deck: walking into the lobby is stepping into the lift.
         if lift is not None:
             venue = None
@@ -14047,7 +14327,10 @@ def main(stdscr):
 
         # --- draw ------------------------------------------------------
         height, width = stdscr.getmaxyx()
-        if lift is not None:
+        if sewer is not None and street:
+            ch, co = render_sewer(width, height, now, sewer["t0"], sewer["taken"])
+            hud = SEWER_HUD
+        elif lift is not None:
             floors = max(2, int(lift["t"]["height"] / FLOOR_H))
             if lift["t"].get("kind") == "lighthouse":
                 ch, co = render_stairs(lift["up"], floors, now - lift["t0"],
@@ -14154,6 +14437,10 @@ def main(stdscr):
                     else "")
                 or ("  ~ the hum of the highway ~" if hwy_near(cam_x, cam_z)
                     else "")
+                or ("  ~ a manhole: e lifts the cover ~"
+                    if manhole_under(cam_x, cam_z) else "")
+                or ("  ~ a manhole: stand on it, e lifts the cover ~"
+                    if manhole_near(cam_x, cam_z) else "")
                 or ("  ~ a fire escape: walk into it to climb ~"
                     if escape_near(cam_x, cam_z) else "")
                 or ("  ~ a claw machine: walk up to it to play ~"
