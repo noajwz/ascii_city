@@ -14662,6 +14662,166 @@ def render_temple(tp, width, height, now, said, sung=None):
     return ch, co
 
 
+# --- the taxi ---------------------------------------------------------------
+TAXI_ARRIVE = 3.0      # seconds from hailing one to it pulling up
+TAXI_SPEED = 20.0      # how fast the city goes by the window
+FARE_BASE = 3.0        # the flag
+FARE_PER = 0.015       # dollars a unit, as the crow flies
+TAXI_DESTS = [("the casino", "casino"), ("the club", "club"),
+              ("the pictures", "cinema"), ("the arcade", "arcade"), ("a ramen counter", "ramen"),
+              ("the diner", "diner"), ("the temple", "temple"),
+              ("the stock exchange", "exchange"), ("a sky deck", "tower"),
+              ("the roof party", "roofparty"), ("the carnival", "carnival"),
+              ("the lighthouse", "lighthousedoor"), ("the big bridge", "grand"),
+              ("the riverbank", "bank"), ("the woods", "woods"), ("the lake", "lake")]
+DRIVER_SAYS = ["Busy night.", "Where you headed, friend?", "Meter's running.",
+               "You see the fireworks over the bay? I saw them once.",
+               "I don't go into the woods after dark. Nobody does.",
+               "Thirty years I've driven this city. Still get lost.",
+               "Casino's paying out tonight, they say. They always say.",
+               "Rain's good for business.",
+               "My cousin works the ramen place. Tell him I sent you."]
+
+
+def taxi_dests(x, z):
+    """Where the cab can take you from here, nearest of each, and the fare."""
+    out = []
+    for name, kind in TAXI_DESTS:
+        spot = find_place(x, z, kind)
+        if spot is not None:
+            d = math.hypot(spot[0] - x, spot[1] - z)
+            out.append((name, spot, int(round(FARE_BASE + d * FARE_PER))))
+    return out
+
+
+def taxi_route(x, z, tx, tz, dur):
+    """The stretch of avenue the ride goes along: (x, z0, sign, length).
+    Up the nearest avenue towards where you are going, for as far as it runs
+    open - a ride is the city going by the window, not a map of the way."""
+    ci = int(x / CELL + BIG) - BIG
+    ax = x
+    for d in range(0, XP * 2):
+        sp = road_span(ci + d, XP, 91) or road_span(ci - d, XP, 91)
+        if sp is not None:
+            ax = (sp[0] + sp[1] * 0.5) * CELL
+            break
+    want = TAXI_SPEED * dur
+    best = None
+    for sign in ((1, -1) if tz >= z else (-1, 1)):
+        n, step = 0.0, 1.0
+        ai = int(ax / CELL + BIG) - BIG
+        while n < want:
+            j = int((z + sign * (n + step)) / CELL + BIG) - BIG
+            if not is_open(ai, j) or woods_at(ai, j) or headland_at(ai, j):
+                break
+            n += step
+        if best is None or n > best[3]:
+            best = (ax + sign * 1.3, z, sign, n)       # the near lane
+        if n >= want:
+            break
+    return best
+
+
+def taxi_ride_at(route, u):
+    """Where the cab is, u of the way through the ride (0..1), eased."""
+    ax, z0, sign, length = route
+    e = u * u * (3.0 - 2.0 * u)
+    return ax, z0 + sign * length * e, 0.0 if sign > 0 else math.pi
+
+
+def draw_taxi_coming(ch, co, v, axis, t):
+    """The cab pulling up along the street towards you, t seconds after you
+    hailed it: yellow, the TAXI light on, headlights, slowing to a stop."""
+    u = min(1.0, t / TAXI_ARRIVE)
+    e = 1.0 - (1.0 - u) ** 2
+    d = 6.5 + 24.0 * (1.0 - e)      # nearer, and it is under the bottom of the screen
+    ax, az = axis
+    if ax * v.dx + az * v.dz < 0.0:
+        ax, az = -ax, -az
+    sx_, sz_ = -az, ax                                   # the kerb side
+    wx, wz = v.x + ax * d + sx_ * 1.4, v.z + az * d + sz_ * 1.4
+    pr = v.project(wx, 0.0, wz)
+    if pr is None:
+        return
+    x, y, dist = pr
+    art = ([" _[TAXI]_ ", "/=|==|==\\", "(O)----(O)"] if dist < 8.0 else
+           ["_TAXI_", "[o==o]"] if dist < 18.0 else ["[==]"])
+    top = int(round(y)) - len(art) + 1
+    for r, line in enumerate(art):
+        for k, c in enumerate(line):
+            cx_ = int(round(x)) - len(line) // 2 + k
+            if c != " " and 0 <= top + r < v.height and 0 <= cx_ < v.width:
+                ch[top + r][cx_] = c
+                co[top + r][cx_] = (FLASH if c in "Oo" and r == len(art) - 1
+                                    else ROU_RED if c in "TAXI" else GOLD)
+
+
+def draw_cab(ch, co, now, wet, top_line, meter, says):
+    """From the back seat: the roof, the pillars either side of the windscreen,
+    the mirror with dice on it, the wipers going if it is wet, the dashboard
+    with the meter in red, and the back of the driver's head."""
+    height, width = len(ch), len(ch[0])
+    if width < 30 or height < 12:
+        _text(ch, co, 0, 0, (" " + top_line)[:width], GOLD)
+        _text(ch, co, height - 1, 0, (" fare $%.2f " % meter)[:width], ROU_RED)
+        return
+    for x in range(width):
+        ch[0][x], co[0][x] = "=", BARK
+    dash = height - 5
+    for y in range(1, dash):
+        w = max(1, int((dash - y) * 0.18) + 2)
+        for x in range(w):
+            ch[y][x], co[y][x] = ("\\" if x == w - 1 else " "), BARK
+            ch[y][width - 1 - x] = "/" if x == w - 1 else " "
+            co[y][width - 1 - x] = BARK
+    mx = width // 2
+    _text(ch, co, 1, mx - 5, "[_________]", CURB)
+    _text(ch, co, 2, mx - 1, "|", CURB)
+    dice = int(math.sin(now * 2.3) * 1.2)
+    _text(ch, co, 3, mx - 1 + dice, "[:]", ROU_RED)
+    if wet > 0.15:                                    # the wipers
+        a = math.sin(now * 3.0) * 1.2
+        for k in range(12):
+            for base in (width // 3, 2 * width // 3):
+                x = int(round(base + math.sin(a) * k * 2.0))
+                y = int(round(dash - 1 - math.cos(a) * k * 0.8))
+                if 1 <= y < dash and 0 <= x < width:
+                    ch[y][x], co[y][x] = "*", CONCRETE
+    for y in range(dash, height):
+        for x in range(width):
+            ch[y][x], co[y][x] = ("_" if y == dash else " "), BARK
+    _text(ch, co, dash - 3, 4, " ___ ", CONCRETE)       # the driver's headrest
+    _text(ch, co, dash - 2, 4, "(   )", CONCRETE)
+    _text(ch, co, dash - 1, 3, "/     \\", CONCRETE)
+    box = " FARE $%6.2f " % meter
+    _text(ch, co, dash + 1, width - len(box) - 4, box, ROU_RED)
+    _text(ch, co, dash + 2, width - len(box) - 4, "  [ TAXI ]  ", GOLD_DIM)
+    _text(ch, co, dash + 1, 4, top_line[:width - len(box) - 10], GOLD)
+    if says:
+        _text(ch, co, dash + 3, 4, ('"' + says + '"')[:width - 8], HUD)
+
+
+def draw_taxi_menu(ch, co, dests, sel, money):
+    """WHERE TO? in the windscreen: each place, the fare, and the one you are
+    on lit; the fares you cannot pay dimmed."""
+    height, width = len(ch), len(ch[0])
+    w = 34
+    x0 = max(0, (width - w) // 2)
+    room = max(1, height - 12)
+    first = max(0, min(sel - room // 2, len(dests) - room))
+    rows = dests[first:first + room]
+    y0 = max(1, (height - 5 - len(rows) - 3) // 2)
+    for y in range(y0, y0 + len(rows) + 3):
+        for x in range(x0, min(width, x0 + w)):
+            ch[y][x], co[y][x] = " ", 0
+    _text(ch, co, y0, x0 + 2, "WHERE TO?    ($%d on you)" % int(money), GOLD)
+    for r, (name, _, fare) in enumerate(rows):
+        k = first + r
+        line = "%s %-20s $%3d" % (">" if k == sel else " ", name[:20], fare)
+        _text(ch, co, y0 + 2 + r, x0 + 2, line,
+              FLASH if k == sel else (HUD if fare <= money else CONCRETE))
+
+
 TURNED = {
     "cinema": ["the usher holds out a hand.", "$%d a seat." % FEES["cinema"]],
     "club": ["the bouncer doesn't move.", "twenty at the door. not tonight."],
@@ -14871,7 +15031,8 @@ def render_rave(club, width, height, now):
 ARROWS = (curses.KEY_LEFT, curses.KEY_RIGHT, curses.KEY_UP, curses.KEY_DOWN)
 
 SKYLINE_HUD = " x=%-6d %s  tab view  arrows/hl walk  HL run  space wander  ` cheats "
-STREET_HUD = " %d,%d %s, %s%s  ws walk  ad turn  ,. step  tab view  ` cheats "
+STREET_HUD = " %d,%d %s, %s%s  ws walk  ad turn  ,. step  t taxi  tab view  ` cheats "
+TAXI_HUD = " in a taxi  -  %s "
 ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
                 " blackjack  o plinko  r races  -  s walks out  -  q quit ")
 RACES_HUD = (" at the races, %s casino, %d,%d  -  1-6 bet on a horse  +/- stake"
@@ -14942,6 +15103,7 @@ def main(stdscr):
     # for (to the nanosecond - it is what picks the next) and when.
     oracle = {"said": [], "last_ns": time.perf_counter_ns(), "at": -1e9, "sung": None}
     booth = None                # in the confession booth: {"t0", "text", "said"}
+    taxi = None                 # hailed, choosing, or riding: {"phase", ...}
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -15043,6 +15205,7 @@ def main(stdscr):
                             wheel = None
                             sewer = None
                             booth = None
+                            taxi = None
                             ledger["jumps"] += 1
                             street = True
                             note = "-> " + name
@@ -15061,6 +15224,30 @@ def main(stdscr):
                                 note = "-> the woods rave (starting)"
                                 note_at = now
                         break
+            elif taxi is not None and key not in (ord("q"), CHEAT_KEY):
+                if key in (27, ord("x"), ord("X")) and taxi["phase"] != "ride":
+                    taxi = None                 # wave it off, or get back out
+                    note, note_at = "you wave the cab on", now
+                elif taxi["phase"] == "menu" and taxi["dests"]:
+                    n_ = len(taxi["dests"])
+                    if key in (curses.KEY_UP, ord("w"), ord("W")):
+                        taxi["sel"] = (taxi["sel"] - 1) % n_
+                    elif key in (curses.KEY_DOWN, ord("s"), ord("S")):
+                        taxi["sel"] = (taxi["sel"] + 1) % n_
+                    elif key in (10, 13, curses.KEY_ENTER, ord("t"), ord("T")):
+                        name_, spot_, fare_ = taxi["dests"][taxi["sel"]]
+                        if wallet.take(fare_):
+                            d_ = math.hypot(spot_[0] - cam_x, spot_[1] - cam_z)
+                            dur_ = min(14.0, max(6.0, 4.0 + d_ / 150.0))
+                            taxi = {"phase": "ride", "t0": now, "dur": dur_,
+                                    "dest": (name_, spot_, fare_),
+                                    "route": taxi_route(cam_x, cam_z, spot_[0],
+                                                        spot_[1], dur_),
+                                    "says": DRIVER_SAYS[_mix(int(now), 7, 3501)
+                                                        % len(DRIVER_SAYS)]}
+                        else:
+                            note, note_at = ("the driver looks at your $%d and "
+                                             "shakes his head" % int(wallet.money), now)
             elif booth is not None and key != CHEAT_KEY:
                 # Every key is a letter in here, q included; esc steps out.
                 if key == 27:
@@ -15191,6 +15378,17 @@ def main(stdscr):
                 claw.press(now)
             elif lift is not None:
                 pass                            # nothing to do but ride
+            elif (street and on_roof is None and sewer is None and venue is None
+                  and key in (ord("t"), ord("T"))):
+                ci_, cj_ = int(cam_x / CELL + BIG) - BIG, int(cam_z / CELL + BIG) - BIG
+                if road_at(ci_, cj_) and not water_at(ci_, cj_):
+                    along_z_ = road_span(ci_, XP, 91) is not None
+                    taxi = {"phase": "hail", "t0": now,
+                            "axis": (0.0, 1.0) if along_z_ else (1.0, 0.0)}
+                    fwd = side = spin = 0.0
+                    autopilot = False
+                else:
+                    note, note_at = "no cabs down here - stand in a street", now
             elif (street and on_roof is None and key in (ord("e"), ord("E"))
                   and manhole_under(cam_x, cam_z) is not None):
                 sewer = {"t0": now, "taken": 0}  # lift the cover, down the ladder
@@ -15279,11 +15477,22 @@ def main(stdscr):
                     and (hx_ - roof_x) * ddx + (hz_ - roof_z) * ddz > 0.0):
                 lift = {"up": False, "t0": now, "t": party}
         if (lift is not None or on_roof is not None or sewer is not None
-                or booth is not None):
+                or booth is not None or taxi is not None):
             fwd = side = 0.0            # on the roof you can only look round
             autopilot = False
-            if lift is not None or sewer is not None or booth is not None:
+            if lift is not None or sewer is not None or booth is not None or taxi:
                 spin = 0.0
+        if (taxi is not None and taxi["phase"] == "hail"
+                and now - taxi["t0"] >= TAXI_ARRIVE):
+            # It has pulled up, and you are in: where to?
+            taxi = {"phase": "menu", "dests": taxi_dests(cam_x, cam_z), "sel": 0,
+                    "t0": now}
+        if (taxi is not None and taxi["phase"] == "ride"
+                and now - taxi["t0"] >= taxi["dur"]):
+            name_, spot_, fare_ = taxi["dest"]
+            cam_x, cam_z, yaw = spot_
+            taxi = None
+            note, note_at = "-> %s, $%d. the cab pulls away" % (name_, fare_), now
         sky_x += sky_v * frame_time
         yaw += spin * frame_time
         # Move on each axis in turn, so running into a wall at an angle slides
@@ -15302,7 +15511,8 @@ def main(stdscr):
         # Walking into a casino doorway is the one way into a building in
         # this city. Walk back out and the wheel goes away; stand there and it
         # deals you another, because that is what a casino is for.
-        venue = venue_at(cam_x, cam_z) if street and sewer is None else None
+        venue = (venue_at(cam_x, cam_z)
+                 if street and sewer is None and taxi is None else None)
         # The sky deck: walking into the lobby is stepping into the lift.
         if lift is not None:
             venue = None
@@ -15498,15 +15708,35 @@ def main(stdscr):
                 seated = (venue[1]["seed"], now)    # sat down just now
             ch, co = render_ramen(venue[1], width, height, now, seated[1])
             hud = RAMEN_HUD % (cam_x, cam_z)
+        elif street and taxi is not None and taxi["phase"] != "hail":
+            if taxi["phase"] == "ride":
+                u_ = min(1.0, (now - taxi["t0"]) / taxi["dur"])
+                rx_, rz_, ry_ = taxi_ride_at(taxi["route"], u_)
+                v = View(rx_, rz_, ry_, width, height, eye=2.4)
+                ch, co, wet = render_street(v, now)
+                fare_ = taxi["dest"][2]
+                draw_cab(ch, co, now, wet, "-> " + taxi["dest"][0],
+                         FARE_BASE + (fare_ - FARE_BASE) * u_,
+                         taxi["says"] if now - taxi["t0"] < 6.0 else "")
+                hud = TAXI_HUD % ("the meter is running")
+            else:
+                v = View(cam_x, cam_z, yaw, width, height, eye=2.4)
+                ch, co, wet = render_street(v, now)
+                draw_cab(ch, co, now, wet, "where to?", FARE_BASE, "Where to, friend?")
+                draw_taxi_menu(ch, co, taxi["dests"], taxi["sel"], wallet.money)
+                hud = TAXI_HUD % "ws or arrows choose  -  enter goes  -  x gets out"
         elif street:
             v = View(cam_x, cam_z, yaw, width, height)
             ch, co, wet = render_street(v, now)
+            if taxi is not None:
+                draw_taxi_coming(ch, co, v, taxi["axis"], now - taxi["t0"])
             hud = STREET_HUD % (
                 cam_x, cam_z,
                 district(int(cam_x / CELL + BIG) - BIG,
                          int(cam_z / CELL + BIG) - BIG)["name"],
                 sky_word(now, wet),
                 show_hint(now, cam_x, cam_z)
+                or ("  ~ a taxi is pulling up ~" if taxi is not None else "")
                 or blackout_word(cam_x, cam_z, now)
                 or landmark_hint(cam_x, cam_z)
                 or rave_hint(v, now)

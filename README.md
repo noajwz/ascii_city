@@ -38,7 +38,7 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   with a rave going
   on, a temple with stained glass and a rose window, where a terminal on the altar
   gives you the word of God the way TempleOS did and a priest in the confession
-  booth hears what you type, a blackout one night in a while, when the power goes block by block and comes
+  booth hears what you type, taxis you can hail on any street and ride across town, a blackout one night in a while, when the power goes block by block and comes
   back in a wave, manholes in the streets, some of them steaming, with somebody living down one
   of them, steaming ramen shops down the lit lanes, a neon bowl over the door, where you can sit
   and wait for your bowl, a cinema

@@ -1757,6 +1757,26 @@ schedule so a strike can be had on demand even when dry. The flash envelope came
 compares 400,000 samples of both functions on `auto` against the formulas they replaced and requires
 zero drift.
 
+## The taxi
+
+**`t` on any street hails a cab** — a proper street (`road_at()`), dry, not in a venue, the sewer
+or on a roof; anywhere else the HUD says to stand in a street. `taxi` in `main()` is a state like
+the lift's, and nothing moves you while it is set. `hail`: `draw_taxi_coming()` brings it along
+the street's own axis towards you over `TAXI_ARRIVE`, slowing, three sprites by distance, and
+stops **6.5 units off** — at 3.2 it pulled up under the bottom of the screen, the camera not being
+able to look down. `menu`: you are in, and `taxi_dests()` has found the nearest of each of
+`TAXI_DESTS` with `find_place()` (about 60 ms, once) and priced it, `FARE_BASE` plus `FARE_PER`
+a unit as the crow flies; `draw_taxi_menu()` puts WHERE TO? in the windscreen, `w`/`s` or the
+arrows choose, enter or `t` goes, `x` or esc gets out. The fare comes out of the wallet up front;
+short of it, the driver shakes his head. `ride`: the camera, at a seated `eye`, goes along the
+nearest avenue towards where you are going for as far as it runs open (`taxi_route()`,
+`taxi_ride_at()`, eased at both ends) while `render_street()` draws the real city past it and
+`draw_cab()` puts the back seat round it — roof, pillars, the mirror with dice swinging, wipers
+when it is wet, the driver's headrest, a line from him (`DRIVER_SAYS`), the meter counting up to
+the fare in red. **It is the city going by the window, not a map of the way**: the route is one
+straight avenue, and at the end you are set down at the place, facing it. Six to fourteen
+seconds a ride, by distance.
+
 ## Money
 
 **One balance for the whole city.** `main()` owns a `Wallet` — `STARTING_MONEY`, a thousand
@@ -1767,7 +1787,8 @@ machine (`CLAW_COST` a go), the strength tester (`STRIKE_COST` a swing), the arc
 cover are paid on the way in, the bowl and the coffee when you sit down — once a visit, keyed on
 the venue, so walking out and back in is another ticket. Can't pay, and `render_turned_away()` is
 what you get instead: the usher, the bouncer, the cook's sign, the drone. The lifts cost
-(`LIFT_FEES`: a sky deck, the roof party; the fire escapes and the lighthouse stair are free), and
+(`LIFT_FEES`: a sky deck, the roof party; the fire escapes and the lighthouse stair are free), a
+taxi by the fare, and
 a show from the lighthouse is `SHOW_FEE`; refused, the HUD says what it costs. The balance leads
 the HUD everywhere. Nothing tops it up — the casino's old stake when you were broke would have
 been money for nothing — except `+` in the menu, `+$1000`. Like everything else you carry, it is
