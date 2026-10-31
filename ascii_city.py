@@ -14241,15 +14241,64 @@ yes no amen hallelujah verily therefore behold lo selah forever
 taxi ferry tram pizza noodles coffee arcade jackpot elevator billboard pigeon
 umbrella puddle siren antenna circuit compiler pixel kernel keyboard sixteen
 """.split()
-GOD_SAY = 12           # words a time
-GOD_KEEP = 6           # utterances kept on the screen
+GOD_WORDS = list(dict.fromkeys(GOD_WORDS))   # each word once, or "behold" is likelier
+GOD_KEEP = 6           # verses kept on the screen
+GOD_PAUSE = 6.0        # seconds without a word, and the next one starts a new verse
+GOD_VERSE = 24         # or a verse this long
 
 
-def god_words(seed, n=GOD_SAY):
-    """n words for this seed - which is the time between two presses of a
-    key, in microseconds, so nobody chooses it, not even the program."""
-    rng = random.Random(seed)
-    return [rng.choice(GOD_WORDS) for _ in range(n)]
+def god_word(gap_ns):
+    """One word, for the time since the last one was asked for, in
+    nanoseconds. Each word is its own draw: no generator stands between the
+    moment you pressed and the word - which is what made twelve at a time
+    only one random number's worth - and nobody, the program included, can
+    say what the low digits of that gap will be."""
+    return GOD_WORDS[gap_ns % len(GOD_WORDS)]
+
+
+def syllables(word):
+    """A word cut up for singing: mer-cy, hal-le-lu-jah, a-men."""
+    v = "aeiouy"
+    word = re.sub(r"([%s])([^%s])([^%s])(?=[%s])" % (v, v, v, v), r"\1\2-\3", word)
+    return re.sub(r"([%s])([^%s-])(?=[%s])" % (v, v, v), r"\1-\2", word)
+
+
+CHOIR_BPM = 66         # slow
+CHOIR_NOTES = "dJb."   # notes going up, in ASCII
+
+
+def draw_choir(ch, co, x0, y0, width, now, sung):
+    """The choir on its risers: two rows in white robes, mouths opening on
+    the beat a breath apart, the director's hands going, notes floating up
+    and away - and the words over them are whatever the terminal last said,
+    sung; until it has said anything, a long a-men."""
+    n = max(3, min(7, (width - x0 - 3) // 4))
+    beat = now * CHOIR_BPM / 60.0
+    word = syllables(sung) if sung else "a-a-a-men"
+    lyric = "~ " + word + " ~"
+    _text(ch, co, y0, x0 + max(0, (n * 4 - len(lyric)) // 2), lyric,
+          GOLD if int(beat) % 2 == 0 else GOLD_DIM)
+    for k in range(6):                              # notes going up
+        age = (beat * 0.25 + k / 6.0) % 1.0
+        nx = x0 + 2 + (k * 5) % max(1, n * 4 - 2) + int(math.sin(beat + k) * 1.5)
+        ny = y0 + 2 - int(age * 3)
+        if age < 0.85 and ny > y0:
+            _text(ch, co, ny, nx, CHOIR_NOTES[k % len(CHOIR_NOTES)],
+                  GOLD if age < 0.4 else GOLD_DIM)
+    for row, (dy, shift) in enumerate(((2, 2), (5, 0))):
+        for k in range(n - row):
+            x = x0 + shift + k * 4
+            y = y0 + dy
+            phase = (beat + k * 0.15 + row * 0.4) % 1.0
+            mouth = "o" if phase < 0.6 else ("O" if phase < 0.75 else "-")
+            _text(ch, co, y, x, "(" + mouth + ")", STAR)
+            _text(ch, co, y + 1, x - 1, "/|H|\\", STAR)
+            _text(ch, co, y + 2, x - 1, "\"\"\"\"\"", BARK)  # the riser under them
+    # The director, side on, hands going.
+    up = int(beat * 2) % 2
+    _text(ch, co, y0 + 4, x0 - 4, "\\o/" if up else "_o_", CURB)
+    _text(ch, co, y0 + 5, x0 - 3, "|", CURB)
+    _text(ch, co, y0 + 6, x0 - 4, "/ \\", CURB)
 
 
 # The confession booth. The priest listens for the words he knows, and the
@@ -14398,7 +14447,7 @@ def render_confession(width, height, now, booth):
     return ch, co
 
 
-def render_temple(tp, width, height, now, said):
+def render_temple(tp, width, height, now, said, sung=None):
     """Inside: the nave going away from you between its pillars, the pews in
     rows, the stained glass down both sides throwing its colours, candles
     flickering along the altar - and on the altar an old terminal, a blue
@@ -14478,9 +14527,17 @@ def render_temple(tp, width, height, now, said):
         newest = r >= len(lines[-(rows - 2):]) - 3
         _text(ch, co, sy0 + 1 + r, sx0 + 2, line, CROWN_BLUE if newest else HAZE)
     if not said:
-        _text(ch, co, sy0 + 2, sx0 + 2, "press g", CROWN_BLUE)
+        _text(ch, co, sy0 + 2, sx0 + 2, "press g, a word at a time", CROWN_BLUE)
     if int(now * 2) % 2:
         _text(ch, co, sy0 + rows - 1, sx0 + 2, "_", CROWN_BLUE)   # the cursor
+    # The choir, on the other side from the booth.
+    qy = height - 10
+    if qy > vy + 6 and width >= 70:
+        qx = width - 30
+        for y in range(qy, height - 2):
+            for x in range(qx - 5, width - 1):
+                ch[y][x], co[y][x] = " ", 0
+        draw_choir(ch, co, qx, qy, width, now, sung)
     # The confession booth, against the wall at the side of the nave.
     bx, by = 2, height - 9
     if by > vy + 6:
@@ -14773,7 +14830,9 @@ def main(stdscr):
     at_plinko = False
     races = Races(wallet)       # and the race track, r
     at_races = False
-    oracle = {"said": [], "last": time.monotonic()}   # the temple's terminal
+    # The temple's terminal: the verses so far, when the last word was asked
+    # for (to the nanosecond - it is what picks the next) and when.
+    oracle = {"said": [], "last_ns": time.perf_counter_ns(), "at": -1e9, "sung": None}
     booth = None                # in the confession booth: {"t0", "text", "said"}
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
@@ -14931,11 +14990,19 @@ def main(stdscr):
                 booth = {"t0": now, "text": "", "said": [
                     ("priest", "Bless you. Tell me what is on your mind.", now + 1.4)]}
             elif at_temple and key in (ord("g"), ord("G")):
-                # The time since the last time you asked, to the microsecond,
-                # is what picks the words. Nobody can choose that.
-                seed = int((now - oracle["last"]) * 1e6)
-                oracle["last"] = now
-                oracle["said"] = (oracle["said"] + [" ".join(god_words(seed))])[-20:]
+                # The time since the last word, to the nanosecond, picks this
+                # one. Nobody can choose that.
+                ns_ = time.perf_counter_ns()
+                word_ = god_word(ns_ - oracle["last_ns"])
+                oracle["last_ns"] = ns_
+                said_ = oracle["said"]
+                if (not said_ or now - oracle["at"] > GOD_PAUSE
+                        or len(said_[-1].split()) >= GOD_VERSE):
+                    said_.append(word_)             # a new verse
+                else:
+                    said_[-1] += " " + word_
+                oracle["said"] = said_[-20:]
+                oracle["at"], oracle["sung"] = now, word_
             elif wheel is not None and key in (ord("o"), ord("O")):
                 at_plinko, at_races = not at_plinko, False
             elif wheel is not None and key in (ord("r"), ord("R")):
@@ -15297,7 +15364,8 @@ def main(stdscr):
             ch, co = render_confession(width, height, now, booth)
             hud = CONFESS_HUD
         elif venue is not None and venue[0] == "temple":
-            ch, co = render_temple(venue[1], width, height, now, oracle["said"])
+            ch, co = render_temple(venue[1], width, height, now, oracle["said"],
+                                   oracle["sung"])
             hud = TEMPLE_HUD % venue[1]["name"].lower()
         elif venue is not None and venue[0] == "arcade":
             g_ = play["game"]

@@ -139,7 +139,8 @@ ok &= report("a manhole: walk on, down, a slice, back up", *run(
     [(b"`", .5), (b"x", 1.0)] + [(b"w", .25)] * 3
     + [(b"e", 1.5), (b"p", .5), (b"s", .8), (b"w", .4)], cols=100, rows=30))
 ok &= report("the temple: across the street, in, the word of god twice, out", *run(
-    [(b"`", .5), (b"*", 1.0)] + IN + IN + [(b"g", .7), (b"g", .7), (b"s", .6),
+    [(b"`", .5), (b"*", 1.0)] + IN + IN + [(b"g", .3), (b"g", .45), (b"g", .7),
+                                             (b"s", .6),
      (b"s", .6)], cols=100, rows=30))
 ok &= report("the confession booth: in, type with q and s in it, confess, esc, out",
              *run([(b"`", .5), (b"*", 1.0)] + IN + IN + [(b"c", 1.6)]
