@@ -118,7 +118,9 @@ ok &= report("the roof party: lift up, walk about, back to the lift, down", *run
      (b"s", .6), (b"s", .6), (b"s", .6), (b"s", .6), (b"s", 6.0)], cols=100, rows=30))
 ok &= report("the stock exchange: buy, more, sell, walk out", *run(
     [(b"`", .5), (b";", 1.0), (b"b", .4), (b"+", .3), (b"b", .4), (b"n", .4),
-     (b"-", .3), (b"s", .6), (b"s", .6)], cols=100, rows=30))
+     (b"l", .4), (b"\x1b[B", .3), (b"\x1b[B", .3), (b"b", .4), (b"\x1b[A", .3),
+     (b"l", .4), (b"\x1b[C", .3), (b"-", .3), (b"s", .6), (b"s", .6)],
+    cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
