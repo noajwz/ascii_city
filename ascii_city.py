@@ -10657,8 +10657,12 @@ def rig_jackpot():
 # The plinko machine: a ball dropped in at the top bounces left or right off
 # every row of pegs, a fair coin each time, and lands in a bin. Most land in
 # the middle, which pays least; the edges are a long way off and pay most.
-PLINKO_ROWS = 12
-PLINKO_PAYS = [120, 14, 3, 1.5, 1, 0.6, 0.3, 0.6, 1, 1.5, 3, 14, 120]   # ~94%
+# How many rows, and how hard the pay table is - how little the middle pays
+# and how much the edges do - are yours to set.
+PLINKO_ROWS = 12       # what a machine is set to when you walk up to it
+PLINKO_ROW_SET = (8, 10, 12, 14, 16)
+PLINKO_RISKS = ("LOW", "MEDIUM", "HIGH")
+PLINKO_BACK = 0.95     # what every table pays back
 PLINKO_BETS = [1, 5, 10, 25, 100]
 PLINKO_STEP = 0.16     # seconds a row
 PLINKO_MAX = 6         # balls in the air at once
@@ -10666,22 +10670,86 @@ PLINKO_HOLD = 2.5      # how long a landed ball sits in its bin
 _rig_plinko = False    # the menu's jackpot: the next ball goes all the way
 
 
+def _nice(v):
+    """A multiplier as a machine would print it: 1000, 130, 26, 5.6, 0.4."""
+    if v >= 100:
+        return float(int(round(v / 10.0)) * 10)
+    if v >= 10:
+        return float(int(round(v)))
+    return max(0.1, round(v, 1))
+
+
+def plinko_table(rows, risk):
+    """The pay table for this many rows at this risk. Edge and middle are set
+    by the risk - the edge growing with the rows, since it gets rarer - and
+    the curve between them is solved so the whole table pays PLINKO_BACK."""
+    half = rows / 2.0
+    edge = (1.5 ** half, 2.22 ** half, min(1000.0, 3.0 ** half))[risk]
+    mid = (0.5, 0.3, 0.2)[risk]
+    p = [math.comb(rows, k) / 2.0 ** rows for k in range(rows + 1)]
+
+    def table(q):
+        return [mid * (edge / mid) ** ((abs(k - half) / half) ** q)
+                for k in range(rows + 1)]
+
+    lo, hi = 0.05, 12.0               # the curve's power: higher, a deeper middle
+    for _ in range(60):
+        q = (lo + hi) / 2.0
+        if sum(pk * m for pk, m in zip(p, table(q))) > PLINKO_BACK:
+            lo = q
+        else:
+            hi = q
+    return [_nice(m) for m in table((lo + hi) / 2.0)]
+
+
+PLINKO_TABLES = {(r, k): plinko_table(r, k)
+                 for r in PLINKO_ROW_SET for k in range(len(PLINKO_RISKS))}
+PLINKO_PAYS = PLINKO_TABLES[(PLINKO_ROWS, 1)]     # the machine as it stands
+
+
 class Plinko:
     """The machine. drop() pays the bet and lets a ball go, its bounces drawn
     there and then and the fall a timeline from them, so where() can say
-    where it is at any moment; settle() pays each out once, as it lands."""
+    where it is at any moment; settle() pays each out once, as it lands.
+    Each ball carries its own rows and pay table, and the machine will not
+    be changed while any are still falling."""
 
     def __init__(self, wallet=None):
         self.wallet = wallet if wallet is not None else Wallet()
         self.bet = PLINKO_BETS[1]
+        self.rows = PLINKO_ROWS
+        self.risk = 1
         self.balls = []
-        self.last = None             # (bin, win, when) of the last to land
+        self.last = None             # (bin, win, when, pays) of the last to land
         self.short = False
         self.drops = 0
+        self.note = ""
+
+    @property
+    def pays(self):
+        return PLINKO_TABLES[(self.rows, self.risk)]
 
     def bet_up(self, step):
         k = PLINKO_BETS.index(self.bet) if self.bet in PLINKO_BETS else 1
         self.bet = PLINKO_BETS[max(0, min(len(PLINKO_BETS) - 1, k + step))]
+
+    def _settable(self):
+        if any(not b["paid"] for b in self.balls):
+            self.note = "wait for the balls to land"
+            return False
+        self.note = ""
+        self.last = None
+        return True
+
+    def rows_up(self, step):
+        k = PLINKO_ROW_SET.index(self.rows)
+        k = max(0, min(len(PLINKO_ROW_SET) - 1, k + step))
+        if PLINKO_ROW_SET[k] != self.rows and self._settable():
+            self.rows = PLINKO_ROW_SET[k]
+
+    def set_risk(self, risk):
+        if risk != self.risk and self._settable():
+            self.risk = risk
 
     def drop(self, now):
         global _rig_plinko
@@ -10691,16 +10759,17 @@ class Plinko:
         if self.short:
             return False
         if _rig_plinko:
-            path, _rig_plinko = [_spin_rng.random() < 0.5] * PLINKO_ROWS, False
+            path, _rig_plinko = [_spin_rng.random() < 0.5] * self.rows, False
         else:
-            path = [_spin_rng.random() < 0.5 for _ in range(PLINKO_ROWS)]
-        self.balls.append({"t0": now, "path": path, "bet": self.bet, "paid": False})
+            path = [_spin_rng.random() < 0.5 for _ in range(self.rows)]
+        self.balls.append({"t0": now, "path": path, "bet": self.bet, "paid": False,
+                           "pays": self.pays})
         self.drops += 1
         return True
 
     @staticmethod
     def landed(ball, now):
-        return now - ball["t0"] >= (PLINKO_ROWS + 1) * PLINKO_STEP
+        return now - ball["t0"] >= (len(ball["path"]) + 1) * PLINKO_STEP
 
     @staticmethod
     def bin_of(ball):
@@ -10710,12 +10779,13 @@ class Plinko:
     def where(ball, now):
         """(across, down): across in pegs from the middle, down in rows from
         the first peg - the ball sits on top of a peg at a whole row."""
+        rows = len(ball["path"])
         t = (now - ball["t0"]) / PLINKO_STEP
-        r = int(min(PLINKO_ROWS, max(0.0, t)))
-        f = min(1.0, max(0.0, t - r)) if r < PLINKO_ROWS else 0.0
+        r = int(min(rows, max(0.0, t)))
+        f = min(1.0, max(0.0, t - r)) if r < rows else 0.0
         k = sum(ball["path"][:r])
         across = k - r / 2.0
-        if r < PLINKO_ROWS:
+        if r < rows:
             across += (0.5 if ball["path"][r] else -0.5) * f
         return across, r - 1 + f + (0.0 if f > 0.35 or r == 0 else -0.3 * (1 - f))
 
@@ -10726,12 +10796,12 @@ class Plinko:
             if not b["paid"] and self.landed(b, now):
                 b["paid"] = True
                 k = self.bin_of(b)
-                win = b["bet"] * PLINKO_PAYS[k]
+                win = b["bet"] * b["pays"][k]
                 self.wallet.give(win)
-                self.last = (k, win, now)
+                self.last = (k, win, now, b["pays"])
                 hit.append(k)
-        self.balls = [b for b in self.balls if not b["paid"]
-                      or now - b["t0"] < (PLINKO_ROWS + 1) * PLINKO_STEP + PLINKO_HOLD]
+        self.balls = [b for b in self.balls if not b["paid"] or now - b["t0"]
+                      < (len(b["path"]) + 1) * PLINKO_STEP + PLINKO_HOLD]
         return hit
 
 
@@ -10925,29 +10995,41 @@ RACE_WIDE = 64         # columns the track needs
 RACE_TALL = RACE_FIELD + 5
 
 
-PLINKO_TALL = PLINKO_ROWS + 4    # rows the board needs, without its title
 PLINKO_SX = 4          # columns between pegs: even, so a half step is a column,
                        # and wide enough for "120" under its bin
-PLINKO_WIDE = (PLINKO_ROWS + 3) * PLINKO_SX + 2
 
 
-def plinko_colour(k):
-    edge = abs(k - PLINKO_ROWS // 2)
-    return (GOLD if edge == 6 else ROU_RED if edge == 5 else EMBER_HOT if edge >= 3
-            else CURB)
+def plinko_tall(rows):
+    return rows + 4                    # rows the board needs, without its title
+
+
+def plinko_wide(rows):
+    return (rows + 2) * PLINKO_SX + 3
+
+
+PLINKO_TALL = plinko_tall(PLINKO_ROWS)
+PLINKO_WIDE = plinko_wide(PLINKO_ROWS)
+
+
+def plinko_colour(k, rows):
+    edge = abs(k - rows / 2.0) / (rows / 2.0)
+    return (GOLD if edge >= 1.0 else ROU_RED if edge >= 0.8
+            else EMBER_HOT if edge >= 0.45 else CURB)
 
 
 def draw_plinko(ch, co, pk, cx, y0, y1, now):
     """The board between rows y0 and y1, its middle at column cx: the slot at
     the top, the pegs in a triangle, the bins along the bottom with what each
     pays under it - lit hotter towards the edges - the balls on their way down,
-    and the bet and the last win."""
+    and the bet, the rows and the risk, and the last win."""
     height, width = len(ch), len(ch[0])
     sx = PLINKO_SX
-    title = y1 - y0 + 1 >= PLINKO_TALL + 1
+    rows = pk.rows
+    pays = pk.pays
+    title = y1 - y0 + 1 >= plinko_tall(rows) + 1
     top = y0 + (1 if title else 0)
     peg0 = top + 1
-    bins = peg0 + PLINKO_ROWS
+    bins = peg0 + rows
     if title:
         _text(ch, co, y0, int(cx) - 5, "P L I N K O", GOLD)
 
@@ -10955,21 +11037,21 @@ def draw_plinko(ch, co, pk, cx, y0, y1, now):
         return int(round(cx + across * sx))
 
     _text(ch, co, top, col(0) - 1, "\\v/", GOLD_DIM)
-    for r in range(PLINKO_ROWS):
+    for r in range(rows):
         for j in range(-1, r + 2):
             x = col(j - r / 2.0)
             if 0 <= x < width:
                 ch[peg0 + r][x], co[peg0 + r][x] = ".", CURB
-    mid = PLINKO_ROWS // 2
+    mid = rows // 2
     fresh = pk.last is not None and now - pk.last[2] < PLINKO_HOLD
-    for k in range(PLINKO_ROWS + 1):
+    for k in range(rows + 1):
         a = k - mid
         for side in (-0.5, 0.5):
             x = col(a + side)
             if 0 <= x < width:
                 ch[bins][x], co[bins][x] = "|", GOLD_DIM
-        label = "%g" % PLINKO_PAYS[k]
-        attr = plinko_colour(k)
+        label = "%gk" % (pays[k] / 1000.0) if pays[k] >= 1000 else "%g" % pays[k]
+        attr = plinko_colour(k, rows)
         if fresh and pk.last[0] == k and int(now * 8) % 2:
             attr = FLASH
         _text(ch, co, bins + 1, col(a) - (len(label) - 1) // 2, label, attr)
@@ -10982,14 +11064,17 @@ def draw_plinko(ch, co, pk, cx, y0, y1, now):
             ch[y][x], co[y][x] = "O", FLASH
     if pk.short:
         say = "NOT ENOUGH"
+    elif pk.note:
+        say = pk.note
     elif fresh:
-        k, win, _ = pk.last
-        say = "x%g  +$%s" % (PLINKO_PAYS[k], ("%.2f" % win).rstrip("0").rstrip("."))
+        k, win, _, paid = pk.last
+        say = "x%g  +$%s" % (paid[k], ("%.2f" % win).rstrip("0").rstrip("."))
     else:
         say = "p drops a ball"
-    line = "BET $%d    %s    $%d" % (pk.bet, say, int(pk.wallet.money))
+    line = "BET $%d  %d ROWS  %s RISK   %s   $%d" % (
+        pk.bet, rows, PLINKO_RISKS[pk.risk], say, int(pk.wallet.money))
     _text(ch, co, bins + 2, int(cx - len(line) / 2), line,
-          GOLD if fresh and abs(pk.last[0] - mid) >= 5 else GOLD_DIM)
+          GOLD if fresh and abs(pk.last[0] - mid) >= rows * 0.4 else GOLD_DIM)
 
 
 class Slot:
@@ -11449,14 +11534,23 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
     if plinko is not None:
         y1 = floor - 2
         y0 = band_top if roomy else top
-        if y1 - y0 + 1 < PLINKO_TALL or right - left < PLINKO_WIDE:
+        need = plinko_tall(plinko.rows)
+        if roomy and y1 - y0 + 1 < need:
+            # A big board goes up over the ceiling and the back wall.
+            y0 = top + 1
+            for y in range(y0, y1 + 1):
+                for x in range(int(left), int(right) + 1):
+                    ch[y][x], co[y][x] = " ", 0
+        if y1 - y0 + 1 < need or right - left < plinko_wide(plinko.rows):
             last = plinko.last
             _text(ch, co, height // 2, 1, "PLINKO: " + (
-                "x%g" % PLINKO_PAYS[last[0]] if last else "p drops a ball"), GOLD)
-            _text(ch, co, min(height - 1, height // 2 + 1), 1, "bet $%d" % plinko.bet,
+                "x%g" % last[3][last[0]] if last else "p drops a ball"), GOLD)
+            _text(ch, co, min(height - 1, height // 2 + 1), 1,
+                  "bet $%d, %d rows, %s risk - a bigger window for the board" % (
+                      plinko.bet, plinko.rows, PLINKO_RISKS[plinko.risk].lower()),
                   GOLD_DIM)
         else:
-            y0 += max(0, (y1 - y0 - PLINKO_TALL) // 2)     # in the middle
+            y0 += max(0, (y1 - y0 - need) // 2)            # in the middle
             draw_plinko(ch, co, plinko, cx, y0, y1, now)
         _text(ch, co, floor, max(1, int(cx) - 10), "-- the way out (s) --", GOLD_DIM)
         return ch, co
@@ -15039,7 +15133,7 @@ ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
 RACES_HUD = (" at the races, %s casino, %d,%d  -  1-6 bet on a horse  +/- stake"
              "  r back to the wheel  -  s walks out ")
 PLINKO_HUD = (" at the plinko machine, %s casino, %d,%d  -  p drops a ball  +/- bet"
-              "  o back to the wheel  -  s walks out ")
+              "  [ ] rows  1 2 3 risk  -  o back to the wheel  -  s walks out ")
 RAVE_HUD = " inside the club at %d,%d  -  s walks back out  -  q quit "
 RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
@@ -15319,6 +15413,11 @@ def main(stdscr):
                 plinko.bet_up(1)
             elif wheel is not None and at_plinko and key in (ord("-"), ord("_")):
                 plinko.bet_up(-1)
+            elif wheel is not None and at_plinko and key in (ord("["), ord("]")):
+                plinko.rows_up(1 if key == ord("]") else -1)
+            elif (wheel is not None and at_plinko
+                  and key in (ord("1"), ord("2"), ord("3"))):
+                plinko.set_risk(key - ord("1"))
             elif wheel is not None and key in (ord("p"), ord("P")):
                 if slot.t0 is None or slot.settled(now):
                     slot.settle(now)
@@ -15644,8 +15743,7 @@ def main(stdscr):
         elif wheel is not None:
             slot.settle(now)
             table.update(now)
-            if any(abs(k_ - PLINKO_ROWS // 2) == PLINKO_ROWS // 2
-                   for k_ in plinko.settle(now)):
+            if any(k_ in (0, plinko.rows) for k_ in plinko.settle(now)):
                 hit_jackpot(now, venue[1])      # all the way to the edge
             paid_ = races.update(now)
             if paid_ and races.last[1] >= 20:
