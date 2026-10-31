@@ -10762,7 +10762,7 @@ def draw_cabinet(ch, co, x0, y0, game, colour, now):
     _text(ch, co, y0 + 6 + sh, x0, "|" + "_" * (w - 2) + "|", CONCRETE)
 
 
-def render_arcade(arc, width, height, now):
+def render_arcade(arc, width, height, now, sel=None):
     """In the arcade. The name across the top in the big font, the letters
     in every colour; a row of cabinets as wide as the window takes; the
     carpet; a couple of kids playing. A window too small for a cabinet gets
@@ -10789,13 +10789,18 @@ def render_arcade(arc, width, height, now):
     else:
         _text(ch, co, 2, (width - len(name)) // 2, name, GOLD)
         y = 4
-    count = max(1, min(len(ARCADE_GAMES), (width - 2) // (CAB_W + 2)))
+    order = arcade_order(arc, width)
+    count = len(order)
     span = count * (CAB_W + 2) - 2
     left = (width - span) // 2
-    order = [ARCADE_GAMES[(arc["seed"] + k) % len(ARCADE_GAMES)] for k in range(count)]
     for k, game in enumerate(order):
+        mine = sel is not None and k == sel % count
         draw_cabinet(ch, co, left + k * (CAB_W + 2), y, game,
-                     NEON[(arc["seed"] + k * 3) % n][0], now)
+                     (FLASH if int(now * 3) % 2 else GOLD) if mine
+                     else NEON[(arc["seed"] + k * 3) % n][0], now)
+        if mine:
+            _text(ch, co, y - 1, left + k * (CAB_W + 2) + CAB_W // 2 - 1, "vvv",
+                  FLASH)
     # The carpet: the loud one every arcade has, under everything else.
     for yy in range(y + CAB_H, height - 1):
         for x in range(width):
@@ -10815,6 +10820,595 @@ def render_arcade(arc, width, height, now):
             _text(ch, co, y + CAB_H - 5, px + 5, "!", FLASH)
     _text(ch, co, height - 1, max(1, width // 2 - 10), "-- the way out (s) --",
           GOLD_DIM)
+    return ch, co
+
+
+# ---------------------------------------------------------------------------
+# The arcade's games. Each is a small class on a fixed-step clock with the same
+# shape: key() takes one of "up", "down", "left", "right" or "act"; tick()
+# catches the game up to now; draw() fills a GAME_W x GAME_H playfield. They
+# are one or two keys and taps, never holds, because curses sees a key go down
+# again and again while it is held and never sees it come up.
+# ---------------------------------------------------------------------------
+
+GAME_W, GAME_H = 40, 16   # the playfield, inside the cabinet's bezel
+GAME_DT = 1.0 / 60.0      # the games' own clock, finer than the frame's
+
+
+class ArcadeGame:
+    name = "?"
+    controls = ""
+
+    def __init__(self, seed, now):
+        self.rng = random.Random(seed)
+        self.t = now
+        self.score = 0
+        self.over = False
+        self.why = ""
+
+    def tick(self, now):
+        if now - self.t > 0.5:
+            self.t = now - 0.5          # no catching up after a stall
+        while not self.over and self.t + GAME_DT <= now:
+            self.t += GAME_DT
+            self.step(GAME_DT)
+
+    def step(self, dt):
+        pass
+
+    def key(self, k):
+        pass
+
+    def status(self):
+        return ""
+
+    def blank(self):
+        return ([[" "] * GAME_W for _ in range(GAME_H)],
+                [[0] * GAME_W for _ in range(GAME_H)])
+
+
+def _put(g, c, x, y, s, attr):
+    for k, ch_ in enumerate(s):
+        xx = int(x) + k
+        if 0 <= int(y) < GAME_H and 0 <= xx < GAME_W and ch_ != " ":
+            g[int(y)][xx], c[int(y)][xx] = ch_, attr
+
+
+class RooftopRun(ArcadeGame):
+    """Over the rooftops at night: the roofs come at you, you jump the gaps,
+    and it goes faster the further you get. Miss a roof and you fall; run
+    into the side of a taller one and that is it too."""
+    name = "ROOFTOP RUN"
+    controls = "p jumps"
+    RUN_X = 8
+
+    def __init__(self, seed, now):
+        ArcadeGame.__init__(self, seed, now)
+        self.x, self.speed = 0.0, 11.0
+        self.y, self.vy, self.ground = 3.0, 0.0, True
+        self.roofs = [(-10.0, 40.0, 3)]
+        while self.roofs[-1][0] + self.roofs[-1][1] < 120:
+            self.more()
+
+    def more(self):
+        x, n, h = self.roofs[-1]
+        gap = self.rng.uniform(2.5, 4.0 + self.speed * 0.12)
+        h2 = max(2, min(7, h + self.rng.choice((-2, -1, 0, 1, 1, 2))))
+        # Longer as it gets faster: one jump carries you further, and a roof
+        # shorter than a jump is one you come down off the end of.
+        self.roofs.append((x + n + gap, self.rng.uniform(7.0, 16.0) + self.speed * 0.7,
+                           h2))
+
+    def roof_at(self, wx):
+        for x, n, h in self.roofs:
+            if x <= wx < x + n:
+                return h
+        return None
+
+    def key(self, k):
+        if k in ("act", "up") and self.ground:
+            self.vy, self.ground = 23.0, False
+
+    def step(self, dt):
+        self.speed += 0.22 * dt
+        self.x += self.speed * dt
+        while self.roofs[-1][0] + self.roofs[-1][1] < self.x + 60:
+            self.more()
+        self.roofs = [r for r in self.roofs if r[0] + r[1] > self.x - 5]
+        self.vy -= 62.0 * dt
+        self.y += self.vy * dt
+        h = self.roof_at(self.x + self.RUN_X)
+        if h is not None and self.y < h:
+            if self.y > h - 0.7 and self.vy <= 0.0:
+                self.y, self.vy, self.ground = float(h), 0.0, True
+            else:
+                self.over, self.why = True, "ran into a wall"
+        elif h is None:
+            self.ground = False
+        if self.y < -2.0:
+            self.over, self.why = True, "fell"
+        self.score = int(self.x / 2.0)
+
+    def draw(self, now):
+        g, c = self.blank()
+        for k in range(14):                        # stars, slow
+            sx = (k * 37 - int(self.x * 0.1)) % GAME_W
+            _put(g, c, sx, k % 6, ".", STAR_DIM)
+        for x, n, h in self.roofs:
+            for wx in range(int(x - self.x), int(x + n - self.x)):
+                if 0 <= wx < GAME_W:
+                    top = GAME_H - 1 - h
+                    _put(g, c, wx, top, "=", ROOF)
+                    for yy in range(top + 1, GAME_H):
+                        lit = (_mix(int(x), wx + int(self.x), yy) % 5 == 0)
+                        _put(g, c, wx, yy, "#" if lit else ":",
+                             tone_colour("warm", 0.7) if lit else CONCRETE)
+        py = GAME_H - 1 - int(round(self.y))
+        legs = "^" if not self.ground else ("/" if int(self.t * 10) % 2 else "\\")
+        _put(g, c, self.RUN_X, py - 1, "o", FLASH)
+        _put(g, c, self.RUN_X, py, legs, FLASH)
+        return g, c
+
+    def status(self):
+        return "%dm" % self.score
+
+
+class FixTheNeon(ArcadeGame):
+    """A sign gone dark and the tubes to it turned every which way: move the
+    cursor round the grid, turn the tubes with p until the power runs from
+    the plug on the left all the way to the sign on the right, and the sign
+    lights. Then the next one, with less time."""
+    name = "FIX THE NEON"
+    controls = "arrows move  p turns"
+    GW, GH = 9, 4
+    N, E, S, W = 1, 2, 4, 8
+    STEP = {1: (0, -1), 2: (1, 0), 4: (0, 1), 8: (-1, 0)}
+    BACK = {1: 4, 2: 8, 4: 1, 8: 2}
+
+    def __init__(self, seed, now):
+        ArcadeGame.__init__(self, seed, now)
+        self.level = 0
+        self.cx = self.cy = 0
+        self.new_level()
+
+    def new_level(self):
+        self.level += 1
+        self.left = max(20.0, 48.0 - self.level * 4.0)
+        self.won_at = None
+        gw, gh = self.GW, self.GH
+        self.r0, self.r1 = self.rng.randrange(gh), self.rng.randrange(gh)
+        # A path from the plug to the sign, eastwards with wandering.
+        path = [(0, self.r0)]
+        while path[-1] != (gw - 1, self.r1):
+            x, y = path[-1]
+            moves = []
+            if x < gw - 1:
+                moves += [(x + 1, y)] * 3
+            for dy in (-1, 1):
+                if 0 <= y + dy < gh and (x == gw - 1 or self.rng.random() < 0.5):
+                    moves.append((x, y + dy))
+            moves = [m for m in moves if m not in path]
+            if x == gw - 1:
+                moves = [(x, y + (1 if self.r1 > y else -1))]
+            if not moves:
+                path = [(0, self.r0)]
+                continue
+            path.append(self.rng.choice(moves))
+        pieces = {}
+        for k, (x, y) in enumerate(path):
+            a = self.W if k == 0 else self.dir_to(path[k - 1], (x, y))
+            b = self.E if k == len(path) - 1 else self.dir_to(path[k + 1], (x, y))
+            pieces[(x, y)] = a | b
+        self.answer = pieces            # the way round that lights it
+        self.grid = {}
+        for y in range(gh):
+            for x in range(gw):
+                m = pieces.get((x, y))
+                if m is None:
+                    m = self.rng.choice((self.N | self.S, self.N | self.E))
+                for _ in range(self.rng.randrange(4)):
+                    m = self.turn(m)
+                self.grid[(x, y)] = m
+
+    def dir_to(self, other, here):
+        dx, dy = other[0] - here[0], other[1] - here[1]
+        return {(0, -1): self.N, (1, 0): self.E, (0, 1): self.S,
+                (-1, 0): self.W}[(dx, dy)]
+
+    def turn(self, m):
+        return ((m << 1) | (m >> 3)) & 15
+
+    def lit(self):
+        on, todo = set(), []
+        if self.grid[(0, self.r0)] & self.W:
+            todo.append((0, self.r0))
+        while todo:
+            p = todo.pop()
+            if p in on:
+                continue
+            on.add(p)
+            m = self.grid[p]
+            for d, (dx, dy) in self.STEP.items():
+                q = (p[0] + dx, p[1] + dy)
+                if m & d and q in self.grid and self.grid[q] & self.BACK[d]:
+                    todo.append(q)
+        return on
+
+    def solved(self):
+        end = (self.GW - 1, self.r1)
+        return end in self.lit() and self.grid[end] & self.E
+
+    def key(self, k):
+        if self.won_at is not None:
+            return
+        if k == "left":
+            self.cx = max(0, self.cx - 1)
+        elif k == "right":
+            self.cx = min(self.GW - 1, self.cx + 1)
+        elif k == "up":
+            self.cy = max(0, self.cy - 1)
+        elif k == "down":
+            self.cy = min(self.GH - 1, self.cy + 1)
+        elif k == "act":
+            self.grid[(self.cx, self.cy)] = self.turn(self.grid[(self.cx, self.cy)])
+            if self.solved():
+                self.won_at = self.t
+                self.score += 100 + int(self.left) * 5
+
+    def step(self, dt):
+        if self.won_at is not None:
+            if self.t - self.won_at > 1.5:
+                self.new_level()
+            return
+        self.left -= dt
+        if self.left <= 0.0:
+            self.over, self.why = True, "the sign stayed dark"
+
+    def draw(self, now):
+        g, c = self.blank()
+        on = self.lit()
+        x0, y0 = 4, 2
+        lit, dark = NEON[(self.level * 3) % len(NEON)]
+        for (x, y), m in self.grid.items():
+            px, py = x0 + x * 3 + 1, y0 + y * 3 + 1
+            attr = lit if (x, y) in on else CONCRETE
+            mid = "+" if m not in (5, 10) else ("|" if m == 5 else "-")
+            _put(g, c, px, py, mid, attr)
+            if m & self.N:
+                _put(g, c, px, py - 1, "|", attr)
+            if m & self.S:
+                _put(g, c, px, py + 1, "|", attr)
+            if m & self.W:
+                _put(g, c, px - 1, py, "-", attr)
+            if m & self.E:
+                _put(g, c, px + 1, py, "-", attr)
+        cx, cy = x0 + self.cx * 3, y0 + self.cy * 3
+        if int(self.t * 4) % 2 == 0 or self.won_at is not None:
+            for dx, dy, s in ((0, 0, "."), (2, 0, "."), (0, 2, "'"), (2, 2, "'")):
+                _put(g, c, cx + dx, cy + dy, s, FLASH)
+        _put(g, c, 0, y0 + self.r0 * 3 + 1, "=]", GOLD)
+        done = self.won_at is not None
+        sx = x0 + self.GW * 3 + 1
+        for k, ch_ in enumerate("OPEN"):
+            _put(g, c, sx + k, y0 + self.r1 * 3 + 1, ch_,
+                 (lit if int(self.t * 6) % 2 else FLASH) if done else dark)
+        return g, c
+
+    def status(self):
+        return "sign %d  %ds" % (self.level, max(0, int(self.left)))
+
+
+class LateDelivery(ArcadeGame):
+    """A scooter and a bag of noodles, round a little grid of streets: it
+    keeps going, the arrows steer it, and the door with the order is marked.
+    Get there before the clock runs out; every delivery buys more time and
+    the next order is somewhere else."""
+    name = "LATE DELIVERY"
+    controls = "arrows steer"
+    DIRS = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
+
+    def __init__(self, seed, now):
+        ArcadeGame.__init__(self, seed, now)
+        self.road = {(x, y) for x in range(GAME_W) for y in range(GAME_H)
+                     if x % 5 == 1 or y % 4 == 1}
+        self.pos, self.dir, self.want = (1, 1), (1, 0), (1, 0)
+        self.left, self.move = 20.0, 0.0
+        self.pick()
+
+    def pick(self):
+        doors = [p for p in self.road
+                 if any((p[0] + dx, p[1] + dy) not in self.road
+                        and 0 <= p[0] + dx < GAME_W and 0 <= p[1] + dy < GAME_H
+                        for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0)))
+                 and abs(p[0] - self.pos[0]) + abs(p[1] - self.pos[1]) > 15]
+        self.target = self.rng.choice(sorted(doors))
+
+    def key(self, k):
+        if k in self.DIRS:
+            self.want = self.DIRS[k]
+
+    def free(self, d):
+        q = (self.pos[0] + d[0], self.pos[1] + d[1])
+        return q in self.road
+
+    def step(self, dt):
+        self.left -= dt
+        if self.left <= 0.0:
+            self.over, self.why = True, "the noodles went cold"
+            return
+        self.move += dt
+        every = max(0.06, 0.13 - self.score * 0.004)
+        while self.move >= every:
+            self.move -= every
+            if self.free(self.want):
+                self.dir = self.want
+            if self.free(self.dir):
+                self.pos = (self.pos[0] + self.dir[0], self.pos[1] + self.dir[1])
+            if self.pos == self.target:
+                self.score += 1
+                self.left += max(5.0, 9.0 - self.score * 0.3)
+                self.pick()
+
+    def draw(self, now):
+        g, c = self.blank()
+        for y in range(GAME_H):
+            for x in range(GAME_W):
+                if (x, y) in self.road:
+                    _put(g, c, x, y, ".", STREET)
+                else:
+                    _put(g, c, x, y, "#",
+                         tone_colour("cold", ((x // 5 + y // 4) % 4) / 4.0))
+        tx, ty = self.target
+        _put(g, c, tx, ty, "X", FLASH if int(self.t * 5) % 2 else ROU_RED)
+        _put(g, c, self.pos[0], self.pos[1], "@", GOLD)
+        return g, c
+
+    def status(self):
+        return "%d delivered  %ds" % (self.score, max(0, int(self.left)))
+
+
+class NeonDrift(ArcadeGame):
+    """Down a neon highway at night, faster and faster, in and out of the
+    traffic: left and right change lanes, and anything in your lane when you
+    get to it is the end of the run."""
+    name = "NEON DRIFT"
+    controls = "left/right change lane"
+    LANES = 5
+
+    def __init__(self, seed, now):
+        ArcadeGame.__init__(self, seed, now)
+        self.lane, self.speed, self.dist = 2, 9.0, 0.0
+        self.cars = []                 # [lane, y]
+        self.next = 1.0
+
+    def key(self, k):
+        if k == "left":
+            self.lane = max(0, self.lane - 1)
+        elif k == "right":
+            self.lane = min(self.LANES - 1, self.lane + 1)
+
+    def lane_x(self, lane):
+        return GAME_W // 2 - 8 + lane * 4
+
+    def step(self, dt):
+        self.speed += 0.35 * dt
+        self.dist += self.speed * dt
+        self.score = int(self.dist)
+        self.next -= dt
+        if self.next <= 0.0:
+            free = [k for k in range(self.LANES)
+                    if not any(cl == k and cy < 3 for cl, cy in self.cars)]
+            if free:
+                self.cars.append([self.rng.choice(free), -2.0])
+            self.next = max(0.25, 1.1 - self.speed * 0.03) * self.rng.uniform(0.6, 1.2)
+        for car in self.cars:
+            car[1] += self.speed * dt * 0.8
+            if car[0] == self.lane and GAME_H - 4 < car[1] < GAME_H:
+                self.over, self.why = True, "crashed"
+        self.cars = [c_ for c_ in self.cars if c_[1] < GAME_H + 2]
+
+    def draw(self, now):
+        g, c = self.blank()
+        left, right = self.lane_x(0) - 2, self.lane_x(self.LANES - 1) + 4
+        scroll = int(self.dist)
+        for y in range(GAME_H):
+            on = (y + scroll) % 4 < 2
+            _put(g, c, left, y, "|", NEON[2][0] if on else NEON[2][1])
+            _put(g, c, right, y, "|", NEON[1][0] if on else NEON[1][1])
+            for k in range(1, self.LANES):
+                if (y + scroll) % 3 == 0:
+                    _put(g, c, self.lane_x(k) - 1, y, ":", CONCRETE)
+            for x in range(0, left):
+                if _mix(x, y - scroll, 7) % 23 == 0:
+                    _put(g, c, x, y, ".", STAR_DIM)
+            for x in range(right + 1, GAME_W):
+                if _mix(x, y - scroll, 9) % 23 == 0:
+                    _put(g, c, x, y, ".", STAR_DIM)
+        for k, (cl, cy) in enumerate(self.cars):
+            attr = NEON[(cl * 3 + 1) % len(NEON)][0]
+            _put(g, c, self.lane_x(cl), cy, "[#]", attr)
+            _put(g, c, self.lane_x(cl), cy + 1, " V ", ROU_RED)
+        px = self.lane_x(self.lane)
+        _put(g, c, px, GAME_H - 3, " A ", FLASH)
+        _put(g, c, px, GAME_H - 2, "[#]", GOLD)
+        return g, c
+
+    def status(self):
+        return "%d km/h" % int(self.speed * 9)
+
+
+class SkyShow(ArcadeGame):
+    """Rockets go up and p bursts them: on the line is a big one, near it a
+    small one, and one that goes off the top without bursting is a miss.
+    Three misses and the show is over."""
+    name = "SKY SHOW"
+    controls = "p bursts on the line"
+    LINE = 4
+
+    def __init__(self, seed, now):
+        ArcadeGame.__init__(self, seed, now)
+        self.rockets, self.bursts = [], []     # [x, y, speed]; (x, y, t0, big)
+        self.misses, self.next, self.rate = 0, 0.6, 1.2
+
+    def key(self, k):
+        if k != "act":
+            return
+        near = [r for r in self.rockets if abs(r[1] - self.LINE) < 1.6]
+        if not near:
+            self.score = max(0, self.score - 10)
+            return
+        r = min(near, key=lambda r_: abs(r_[1] - self.LINE))
+        big = abs(r[1] - self.LINE) < 0.6
+        self.score += 100 if big else 40
+        self.bursts.append((r[0], r[1], self.t, big))
+        self.rockets.remove(r)
+
+    def step(self, dt):
+        self.next -= dt
+        if self.next <= 0.0:
+            self.rockets.append([self.rng.randrange(3, GAME_W - 3), float(GAME_H - 1),
+                                 self.rng.uniform(5.0, 7.0)
+                                 + min(5.0, self.score * 0.002)])
+            self.rate = max(0.45, self.rate * 0.985)
+            self.next = self.rate * self.rng.uniform(0.7, 1.3)
+        for r in self.rockets:
+            r[1] -= r[2] * dt
+        gone = [r for r in self.rockets if r[1] < 0.0]
+        for r in gone:
+            self.rockets.remove(r)
+            self.misses += 1
+        if self.misses >= 3:
+            self.over, self.why = True, "three went up dark"
+        self.bursts = [b for b in self.bursts if self.t - b[2] < 1.2]
+
+    def draw(self, now):
+        g, c = self.blank()
+        for x in range(0, GAME_W, 2):
+            _put(g, c, x, self.LINE, "-", GOLD_DIM)
+        for x in range(GAME_W):
+            _put(g, c, x, GAME_H - 1, "~", RAIN_FAR)
+        for x, y, _ in self.rockets:
+            _put(g, c, x, y, "|", EMBER_HOT)
+            _put(g, c, x, y + 1, ".", EMBER)
+        for x, y, t0, big in self.bursts:
+            age = self.t - t0
+            r = age * (6.0 if big else 3.0)
+            attr = NEON[int(x) % len(NEON)][0 if age < 0.6 else 1]
+            for k in range(12 if big else 6):
+                a = k * math.tau / (12 if big else 6)
+                _put(g, c, x + math.cos(a) * r * 2.0, y + math.sin(a) * r,
+                     "*" if age < 0.5 else ".", attr)
+        return g, c
+
+    def status(self):
+        return "misses %d/3" % self.misses
+
+
+class NightOwl(ArcadeGame):
+    """An owl on a branch at the bottom, moths coming down through the dark:
+    left and right move it along the branch to catch them. Three that get
+    past and it goes hungry."""
+    name = "NIGHT OWL"
+    controls = "left/right move"
+
+    def __init__(self, seed, now):
+        ArcadeGame.__init__(self, seed, now)
+        self.x, self.moths, self.lost = GAME_W // 2, [], 0
+        self.next = 0.8
+
+    def key(self, k):
+        if k == "left":
+            self.x = max(1, self.x - 2)
+        elif k == "right":
+            self.x = min(GAME_W - 2, self.x + 2)
+
+    def step(self, dt):
+        self.next -= dt
+        if self.next <= 0.0:
+            self.moths.append([float(self.rng.randrange(2, GAME_W - 2)), 0.0,
+                               self.rng.uniform(0.0, math.tau),
+                               2.5 + self.score * 0.05])
+            self.next = max(0.5, 1.6 - self.score * 0.03) * self.rng.uniform(0.7, 1.3)
+        for m in self.moths:
+            m[1] += m[3] * dt
+            m[2] += dt * 3.0
+            m[0] = min(GAME_W - 1.0, max(0.0, m[0] + math.sin(m[2]) * dt * 3.0))
+        caught = [m for m in self.moths
+                  if GAME_H - 3.5 < m[1] < GAME_H - 1.5 and abs(m[0] - self.x) < 2.0]
+        for m in caught:
+            self.moths.remove(m)
+            self.score += 1
+        gone = [m for m in self.moths if m[1] >= GAME_H - 1]
+        for m in gone:
+            self.moths.remove(m)
+            self.lost += 1
+        if self.lost >= 3:
+            self.over, self.why = True, "three got away"
+
+    def draw(self, now):
+        g, c = self.blank()
+        _put(g, c, 34, 1, "( )", MOON_DIM)
+        for x in range(GAME_W):
+            _put(g, c, x, GAME_H - 1, "=", BARK)
+        for x, y, _, _ in self.moths:
+            _put(g, c, x, y, "*" if int(self.t * 8 + x) % 2 else "+", BULB)
+        blink = int(self.t * 0.7) % 7 == 0
+        _put(g, c, self.x - 1, GAME_H - 3, "-v-" if blink else "OvO", GOLD)
+        _put(g, c, self.x - 1, GAME_H - 2, "/_\\", BARK)
+        return g, c
+
+    def status(self):
+        return "%d caught, %d got away" % (self.score, self.lost)
+
+
+GAMES = {g.name: g for g in (RooftopRun, FixTheNeon, LateDelivery, NeonDrift,
+                             SkyShow, NightOwl)}
+
+
+def arcade_order(arc, width):
+    """The cabinets in the row, as many as the window has room for."""
+    count = max(1, min(len(ARCADE_GAMES), (width - 2) // (CAB_W + 2)))
+    return [ARCADE_GAMES[(arc["seed"] + k) % len(ARCADE_GAMES)] for k in range(count)]
+
+
+def render_game(game, hi, width, height, now):
+    """Playing one: the cabinet's screen filling the window - the game's name
+    lit along the top, the playfield in the bezel, the score and the high
+    score under it, and GAME OVER over it when it is."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    if width < GAME_W + 4 or height < GAME_H + 6:
+        _text(ch, co, height // 2, 1, "%s: the window is too small to play" % game.name,
+              GOLD)
+        _text(ch, co, min(height - 1, height // 2 + 1), 1, "x leaves the cabinet",
+              GOLD_DIM)
+        return ch, co
+    x0 = (width - GAME_W) // 2
+    y0 = max(2, (height - GAME_H - 4) // 2 + 1)
+    _text(ch, co, y0 - 2, x0 + (GAME_W - len(game.name)) // 2, game.name,
+          NEON[len(game.name) % len(NEON)][0])
+    _text(ch, co, y0 - 1, x0 - 1, "." + "-" * GAME_W + ".", GOLD_DIM)
+    _text(ch, co, y0 + GAME_H, x0 - 1, "'" + "-" * GAME_W + "'", GOLD_DIM)
+    for y in range(GAME_H):
+        _text(ch, co, y0 + y, x0 - 1, "|", GOLD_DIM)
+        _text(ch, co, y0 + y, x0 + GAME_W, "|", GOLD_DIM)
+    g, c = game.draw(now)
+    for y in range(GAME_H):
+        for x in range(GAME_W):
+            if g[y][x] != " ":
+                ch[y0 + y][x0 + x], co[y0 + y][x0 + x] = g[y][x], c[y][x]
+    line = "SCORE %d   HI %d   %s" % (game.score, max(hi, game.score), game.status())
+    _text(ch, co, y0 + GAME_H + 1, x0 + (GAME_W - len(line)) // 2, line, GOLD)
+    if game.over:
+        flash = FLASH if int(now * 3) % 2 else GOLD
+        for k, (s, attr) in enumerate((("GAME OVER", flash),
+                                       (game.why, GOLD_DIM),
+                                       ("p plays again  x leaves", GOLD_DIM))):
+            _text(ch, co, y0 + GAME_H // 2 - 1 + k, x0 + (GAME_W - len(s)) // 2,
+                  " %s " % s, attr)
+    else:
+        hint = game.controls + "   x leaves"
+        _text(ch, co, y0 + GAME_H + 2, x0 + (GAME_W - len(hint)) // 2, hint, GOLD_DIM)
     return ch, co
 
 
@@ -12227,8 +12821,9 @@ RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
 DINER_HUD = " at the diner, open 24/7, at %d,%d  -  s walks back out  -  q quit "
 CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
-ARCADE_HUD = (" in the %s arcade at %d,%d  -  the games are on their way  -  s walks"
-              " back out  -  q quit ")
+ARCADE_HUD = (" in the %s arcade  -  ad choose a game  -  p plays  -  s walks out"
+              "  -  q quit ")
+GAME_HUD = " playing %s  -  %s  -  x leaves the cabinet  -  q quit "
 STRIKER_HUD = (" at the strength tester at %d,%d  -  p swings the hammer  -  s walks"
                " back out  -  q quit ")
 CLAW_HUD = (" at the claw machine at %d,%d  -  p plays, p again drops  -  s walks"
@@ -12269,6 +12864,8 @@ def main(stdscr):
     arms = []                   # what the claw machines have given you
     claw = None                 # the last claw machine you stood at
     at_claw = False             # and are you standing at it now
+    play = {"arc": None, "sel": 0, "game": None, "hi": {}}   # at the arcade
+    at_arcade = False
     striker = None              # the last strength tester you stood at
     at_striker = False
     seated = None               # (which ramen counter, since when)
@@ -12374,7 +12971,7 @@ def main(stdscr):
             elif key in (ord("\t"), ord("v")):
                 street = not street
                 sky_v = fwd = side = spin = 0.0
-            elif key == ord(" "):
+            elif key == ord(" ") and not at_arcade:
                 autopilot = not autopilot
             elif wheel is not None and key in (ord("p"), ord("P")):
                 if slot.t0 is None or slot.settled(now):
@@ -12390,6 +12987,28 @@ def main(stdscr):
                 table.hit(now)
             elif wheel is not None and key in (ord("k"), ord("K")):
                 table.stand(now)
+            elif at_arcade and play["game"] is not None:
+                # Playing: the keys are the game's, but for x, which leaves.
+                g_ = play["game"]
+                if key in (ord("x"), ord("X")):
+                    play["game"] = None
+                elif g_.over and key in (ord("p"), ord("P")):
+                    play["game"] = type(g_)(_spin_rng.randrange(1 << 30), now)
+                else:
+                    g_.key({curses.KEY_UP: "up", ord("w"): "up", ord("W"): "up",
+                            curses.KEY_DOWN: "down", ord("s"): "down",
+                            ord("S"): "down", curses.KEY_LEFT: "left",
+                            ord("a"): "left", ord("A"): "left",
+                            curses.KEY_RIGHT: "right", ord("d"): "right",
+                            ord("D"): "right", ord("p"): "act",
+                            ord("P"): "act"}.get(key, ""))
+            elif at_arcade and key in (curses.KEY_LEFT, ord("a"), curses.KEY_RIGHT,
+                                       ord("d")):
+                play["sel"] += -1 if key in (curses.KEY_LEFT, ord("a")) else 1
+            elif at_arcade and key in (ord("p"), ord("P")):
+                name = arcade_order(play["arc"], stdscr.getmaxyx()[1])[
+                    play["sel"] % len(arcade_order(play["arc"], stdscr.getmaxyx()[1]))]
+                play["game"] = GAMES[name](_spin_rng.randrange(1 << 30), now)
             elif at_striker and key in (ord("p"), ord("P")):
                 striker.swing(now)
             elif at_claw and key in (ord("p"), ord("P")):
@@ -12541,6 +13160,11 @@ def main(stdscr):
             venue = None
         if venue is None or venue[0] not in ("ramen", "diner"):
             seated = None               # stood up: the next visit is a new bowl
+        at_arcade = venue is not None and venue[0] == "arcade"
+        if not at_arcade:
+            play["game"] = None
+        elif play["arc"] is None or play["arc"]["seed"] != venue[1]["seed"]:
+            play.update(arc=venue[1], sel=0, game=None)
         at_striker = venue is not None and venue[0] == "striker"
         if at_striker and (striker is None or striker.col != venue[1]["col"]):
             striker = Striker(venue[1]["col"], arms)
@@ -12624,8 +13248,17 @@ def main(stdscr):
             ch, co = render_claw(claw, width, height, now)
             hud = CLAW_HUD % (cam_x, cam_z)
         elif venue is not None and venue[0] == "arcade":
-            ch, co = render_arcade(venue[1], width, height, now)
-            hud = ARCADE_HUD % (venue[1]["name"].lower(), cam_x, cam_z)
+            g_ = play["game"]
+            if g_ is not None:
+                g_.tick(now)
+                key_ = (venue[1]["seed"], g_.name)
+                if g_.over:
+                    play["hi"][key_] = max(play["hi"].get(key_, 0), g_.score)
+                ch, co = render_game(g_, play["hi"].get(key_, 0), width, height, now)
+                hud = GAME_HUD % (g_.name.lower(), g_.controls)
+            else:
+                ch, co = render_arcade(venue[1], width, height, now, play["sel"])
+                hud = ARCADE_HUD % venue[1]["name"].lower()
         elif venue is not None and venue[0] == "cinema":
             ch, co = render_cinema(venue[1], width, height, now)
             hud = CINEMA_HUD % (venue[1]["title"].lower(), cam_x, cam_z)

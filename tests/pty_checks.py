@@ -100,8 +100,10 @@ ok &= report("the claw machine: play, drop, walk out", *run(
 ok &= report("up the lighthouse: climb, light a show, fire, climb down", *run(
     [(b"`", .5), (b"+", 1.0), (b"w", 6.0), (b"f", 3.0), (b"f", .5), (b"F", 1.5),
      (b"d", .4), (b"s", 6.0), (b"w", .4)], cols=100, rows=30))
-ok &= report("the arcade: go in, look round, walk out", *run(
-    [(b"`", .5), (b"#", 2.0), (b"s", .6), (b"s", .6), (b"w", .4)], cols=100, rows=30))
+ok &= report("the arcade: choose, play, play keys, leave, walk out", *run(
+    [(b"`", .5), (b"#", 2.0), (b"d", .4), (b"p", 1.0), (b"p", .3), (b"\x1b[D", .3),
+     (b"w", .3), (b"s", .3), (b"d", .3), (b"x", .5), (b"a", .3), (b"p", 1.5),
+     (b"x", .4), (b"s", .6), (b"s", .6)], cols=100, rows=30))
 ok &= report("the casino: 777 next pull, pull, walk out into the gold", *run(
     [(b"`", .5), (b"9", 1.0), (b"`", .5), (b"%", .4), (b"`", .3), (b"p", 3.5),
      (b"s", .6), (b"s", .6), (b"s", 1.0)], cols=100, rows=30))
