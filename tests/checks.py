@@ -3434,10 +3434,12 @@ ac.FLASH = real_flash
 # --- the club's door, its queue, and who is on it ---------------------------
 cl_spot = ac.find_place(x0, z0, "clubdoor")
 cl_ = ac.venue_at(cl_spot[0], cl_spot[1])[1]
+# Not counting closing time, when it stands open for good.
 opens = [ac.club_door(1000.0 + k * 0.1, cl_)[0]
+         and ac.club_closing(1000.0 + k * 0.1) is None
          for k in range(int(ac.CLUB_DOOR * 1000))]
 starts = sum(1 for a, b in zip(opens, opens[1:]) if b and not a)
-check("the club's door opens every so often", 85 <= starts <= 105,
+check("the club's door opens every so often", 75 <= starts <= 105,
       "%d times in %d door-cycles" % (starts, 100))
 check("and stands open a moment each time",
       abs(sum(opens) * 0.1 / max(1, starts) - ac.CLUB_OPEN) < 0.25)
@@ -3523,6 +3525,85 @@ room_p = ac.render_casino_room(ac.Spin(400.0, "ACES"), 110, 30, 401.0, None, Non
                                True)[0]
 check("inside too, every light on the ceiling", room_p[1].count("o") == 110)
 ac._jackpot = None
+
+# --- closing time, and the bass ----------------------------------------------
+nk = next(k for k in range(1, 80) if not ac.night(k * ac.NIGHT_LENGTH + 10)["alien"])
+na = next(k for k in range(1, 400) if ac.night(k * ac.NIGHT_LENGTH + 10)["alien"])
+end_ = (nk + 1) * ac.NIGHT_LENGTH
+check("the clubs close for the last stretch of the night",
+      ac.club_closing(end_ - ac.CLOSE_LEN - 5.0) is None
+      and abs(ac.club_closing(end_ - ac.CLOSE_LEN + 5.0) - 5.0) < 1e-6
+      and ac.club_closing((na + 1) * ac.NIGHT_LENGTH - 10.0) is None)
+shut_t = end_ - ac.CLOSE_LEN + 15.0
+check("then the music stops and the house lights stay up",
+      len({ac.club_light(shut_t + k * 0.05, cl_) for k in range(40)}) == 1
+      and ac.club_kick(shut_t, cl_) is None)
+check("and the door stands open",
+      all(ac.club_door(shut_t + k, cl_)[0] for k in range(40)))
+line_a = ac.club_line(home[0], home[1], cl_["door"], cl_, shut_t)
+line_b = ac.club_line(home[0], home[1], cl_["door"], cl_, shut_t + 4.0)
+kinds_a = [k for k, _, _ in line_a]
+check("no queue: they are all coming out", "raver" not in kinds_a
+      and "smoker" not in kinds_a and kinds_a.count("leaver") > 8
+      and "bouncer" in kinds_a)
+door_w = ac.face_point(home[0], home[1], cl_["door"], cl_["u"], 0.0, 0.0)
+far_ = lambda line: max(math.hypot(w[0] - door_w[0], w[2] - door_w[2])
+                        for k, _, w in line if k == "leaver")
+check("and walking off down the street", far_(line_b) > far_(line_a) + 3.0)
+late = ac.club_line(home[0], home[1], cl_["door"], cl_,
+                    end_ - ac.CLOSE_LEN + ac.LEAVE_FOR + 24.0)
+check("until the street is empty", [k for k, _, _ in late].count("leaver") == 0)
+inside_ = "\n".join("".join(r) for r in ac.render_rave(cl_, 92, 28, shut_t)[0])
+check("inside, the lights are up and nobody is dancing",
+      "time to go home" in inside_ and "*" not in inside_)
+ac._night_skip = 0.0
+ac.skip_to_closing(500.0)
+check("/ in the menu goes to just before closing time",
+      ac.club_closing(500.0) is None and ac.club_closing(504.0) is not None)
+ac._night_skip = 0.0
+open_t = next(t / 50.0 for t in range(25000, 60000)
+              if ac.club_closing(t / 50.0) is None
+              and ac.club_kick(t / 50.0, cl_) is not None
+              and ac.club_kick(t / 50.0, cl_) < 0.02 and ac.city_sync(t / 50.0) is None)
+bv = ac.View(cl_spot[0], cl_spot[1], cl_spot[2], 110, 30)
+on_ = ac.bass_lots(bv, open_t)
+off_ = ac.bass_lots(bv, open_t + 0.5 * 60.0 / ac.CLUB_BPM)
+check("on the kick the windows round a club shake, and between kicks they do not",
+      len(on_) >= 8 and not off_ and home not in on_, "%d buildings" % len(on_))
+real_neon = list(ac.NEON)
+ac.NEON[:] = [(800 + k, 900 + k) for k in range(8)]
+# A club with room in front of it, the cheat's is down a one-cell alley.
+for i, j in ac._rings(int(x0 // ac.CELL), int(z0 // ac.CELL), 160):
+    if ac._mix(i, j, 909) % ac.CLUB_ODDS or ac.is_open(i, j):
+        continue
+    rc = ac.lot(i, j)["club"]
+    if rc is None:
+        continue
+    rnx, rnz = ac.FACES[rc["door"]]
+    rp = ac.face_point(i, j, rc["door"], rc["u"], 1.4, 0.0)
+    if ac.is_open(i + rnx, j + rnz) and ac.can_stand(rp[0] + rnx * 6, rp[2] + rnz * 6):
+        rhome = (i, j)
+        break
+bv = ac.View(rp[0] + rnx * 6, rp[2] + rnz * 6, math.atan2(-rnx, -rnz), 110, 30)
+bw_ = ac.draw_walls([[" "] * 110 for _ in range(30)], [[0] * 110 for _ in range(30)],
+                    bv, open_t)
+
+
+def ripples(t_, wet_):
+    g_, c_ = [[" "] * 110 for _ in range(30)], [[0] * 110 for _ in range(30)]
+    ac.draw_bass(g_, c_, bv, bw_, rhome[0], rhome[1], rc["door"], rc, t_, wet_)
+    return sum(1 for r in g_ for x in r if x != " ")
+
+
+rt_ = next(t / 50.0 for t in range(25000, 60000)
+           if ac.club_closing(t / 50.0) is None
+           and ac.club_kick(t / 50.0, rc) is not None
+           and ac.club_kick(t / 50.0, rc) < 0.02 and ac.city_sync(t / 50.0) is None)
+open_t = rt_
+check("and the puddles ripple out from the door, when it has rained",
+      ripples(open_t, 0.6) > 10 and ripples(open_t, 0.0) == 0,
+      "%d cells" % ripples(open_t, 0.6))
+ac.NEON[:] = real_neon
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

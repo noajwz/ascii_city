@@ -122,6 +122,14 @@ CLUB_DOOR = 12.0       # seconds between one opening and the next
 CLUB_OPEN = 1.8        # and how long it stands open
 CLUB_QUEUE = 5         # people waiting
 CLUB_GAP = 0.85        # world units between them in the line
+# Closing time, the last stretch of every night but the strange one: the
+# music stops, the house lights come up, the door stands open and they all
+# come out and go home.
+CLOSE_LEN = 75.0       # seconds of it, at the end of the night
+LEAVE_GAP = 0.9        # seconds between one coming out and the next
+LEAVE_FOR = 50.0       # and how long they keep coming
+LEAVE_PACE = 1.15      # units a second, walking off down the street
+BASS_REACH = 2         # cells round a club whose windows rattle on the kick
 
 # --- the woods, and the rig in them ---
 # Not a park. The parks are the small green squares the city has everywhere;
@@ -2256,6 +2264,7 @@ def lot(i, j):
             # Shared by every cell of a block, so a thing can be decided for a
             # whole building rather than for one five-metre slice of it.
             "block": _mix(i // 3, j // 3, 97),
+            "ij": (i, j),
             "district": d,
             "tree": d["park"],
         }
@@ -2429,6 +2438,7 @@ class View:
         self.cover = 0.0        # and how much is lying
         self.flash = 0.0        # how bright the lightning is this instant
         self.crown = None       # the sky decks' weather light this instant
+        self.bass = set()       # the lots by a club whose windows shake this instant
 
     def ray(self, sx):
         cam = 2.0 * sx / (self.width - 1) - 1.0
@@ -2635,6 +2645,10 @@ def club_door(now, club):
     CLUB_DOOR seconds, at a different moment in each, and stands open for
     CLUB_OPEN; the count goes up smoothly while it is open, which is what
     walks the front of the queue in and shuffles the rest up."""
+    shut = club_closing(now)
+    if shut is not None:
+        # Open for good, and the count stops where it was.
+        return True, club_door(now - shut - 1e-3, club)[1]
     seed = int(club["tone"] * 1e6)
     t = now + club["phase"] * 3.0
     k = int(t // CLUB_DOOR)
@@ -2658,7 +2672,12 @@ def club_line(i, j, f, club, now):
     seed = int(club["tone"] * 1e6)
     moved = club_door(now, club)[1]
     out = []
+    shut = club_closing(now)
+    if shut is not None:
+        out += going_home(i, j, f, club, shut)
     for q in range(int(moved) - 1, int(moved) + CLUB_QUEUE + 1):
+        if shut is not None:
+            break                                    # no queue at closing time
         place = q - moved
         if place <= -0.75 or place > CLUB_QUEUE - 1:
             continue
@@ -2681,7 +2700,113 @@ def club_line(i, j, f, club, now):
                 face_point(i, j, f, club["u"] + side * 2.3, 1.7, 0.0)))
     out.append(("clubdoor", (i, j, f, club),
                 face_point(i, j, f, club["u"], 0.3, 0.0)))
+    out.append(("bass", (i, j, f, club), face_point(i, j, f, club["u"], 0.9, 0.0)))
     return out
+
+
+def club_closing(now):
+    """Seconds into closing time, or None while the night is still going.
+    The last CLOSE_LEN of every night - into the dawn, on a night that has
+    one - and never on the strange night, when the rig is playing to the sky
+    and nobody is going anywhere."""
+    nt = night(now)
+    if nt["alien"]:
+        return None
+    t = (now + _night_skip) % NIGHT_LENGTH
+    start = NIGHT_LENGTH - CLOSE_LEN
+    return t - start if t >= start else None
+
+
+def going_home(i, j, f, club, shut):
+    """Everyone coming out at closing time: one through the door every
+    LEAVE_GAP, out onto the pavement, and off down the street one way or the
+    other, for LEAVE_FOR seconds, and then the street is empty. Each is a
+    number and where they are is a function of how long ago they came out,
+    like the queue."""
+    out = []
+    last = int(min(shut, LEAVE_FOR) / LEAVE_GAP)
+    for k in range(max(0, last - 24), last + 1):
+        age = shut - k * LEAVE_GAP
+        if age < 0.0:
+            continue
+        m = _mix(int(club["tone"] * 1e6), k, 1237)
+        way = 1.0 if m & 1 else -1.0
+        if age < 1.2:                              # through the door and out
+            u, o, walked = club["u"], 0.3 + 0.8 * age / 1.2, 0.0
+        else:
+            walked = (age - 1.2) * LEAVE_PACE * (0.85 + (m >> 4 & 7) * 0.05)
+            u, o = club["u"] + way * walked, 0.9 + (m >> 8 & 3) * 0.12
+        if walked > 26.0:
+            continue                               # gone round the corner
+        out.append(("leaver", {"stride": walked, "tone": (m >> 12) % 4},
+                    face_point(i, j, f, u, o, 0.0)))
+    return out
+
+
+def club_kick(now, club):
+    """How far through the beat the club is, 0 on the kick, or None when
+    there is no beat - at closing time. On the strange night it is the sky's
+    beat, the way the lights are."""
+    if club_closing(now) is not None:
+        return None
+    sync = city_sync(now)
+    if sync is not None:
+        return 0.0 if sync == "flash" else 0.5
+    return (now * CLUB_BPM / 60.0 + club["phase"]) % 1.0
+
+
+def near_clubs(v, reach):
+    """(i, j, club) of the clubs round you, hash first, so it costs a few
+    hundred multiplies and not a lot each."""
+    n = int(reach / CELL) + 1
+    ci = int(v.x / CELL + BIG) - BIG
+    cj = int(v.z / CELL + BIG) - BIG
+    for i in range(ci - n, ci + n + 1):
+        for j in range(cj - n, cj + n + 1):
+            if _mix(i, j, 909) % CLUB_ODDS or is_open(i, j):
+                continue
+            c = lot(i, j)["club"]
+            if c is not None:
+                yield i, j, c
+
+
+def bass_lots(v, now):
+    """The buildings next to a club whose windows are shaking this instant:
+    on the kick, everything within BASS_REACH of the sound system."""
+    hit = set()
+    for i, j, c in near_clubs(v, 70.0):
+        beat = club_kick(now, c)
+        if beat is not None and beat < 0.18:
+            for a in range(i - BASS_REACH, i + BASS_REACH + 1):
+                for b in range(j - BASS_REACH, j + BASS_REACH + 1):
+                    if (a, b) != (i, j):
+                        hit.add((a, b))
+    return hit
+
+
+def draw_bass(ch, co, v, walls, i, j, f, club, now, wet):
+    """The kick, in the puddles: a ring of ripples going out across the wet
+    pavement from the club's door on every beat, and the last one's fainter
+    behind it. Only when it has been raining - a dry pavement has nothing to
+    ripple."""
+    if wet < 0.12:
+        return
+    beat = club_kick(now, club)
+    if beat is None:
+        return
+    lit, dark = NEON[min(len(NEON) - 1, int(club["tone"] * len(NEON)))]
+    for r, attr in ((0.6 + beat * 6.0, lit if beat < 0.35 else dark),
+                    (6.6 + beat * 6.0, dark)):
+        if r > 9.0:
+            continue
+        steps = max(12, int(r * 14))
+        for rr in (r, r + 0.35):                 # a ripple has some width to it
+            for k in range(steps + 1):
+                a = math.pi * k / steps
+                put_point(ch, co, v, walls,
+                          *face_point(i, j, f, club["u"] + math.cos(a) * rr,
+                                      0.15 + math.sin(a) * rr, 0.03),
+                          "~" if k % 2 else "-", attr)
 
 
 def draw_rope(ch, co, v, walls, i, j, f, side, club, now):
@@ -3107,8 +3232,10 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     escape = (not lit) and fc["escape"] and 0.45 < frac < 0.8
 
     crown = storeys - CROWN_FLOORS if b["tower"] is not None else storeys
+    # Next door to a club, the windows shake on the kick.
+    shake = 1 if b["ij"] in v.bass else 0
     for f in range(storeys):
-        y = int(round(v.horizon - ((f + 0.55) * FLOOR_H - v.eye) * scale))
+        y = int(round(v.horizon - ((f + 0.55) * FLOOR_H - v.eye) * scale)) + shake
         if y > r_hi or y + thick < r_lo:
             continue
         if f >= crown:
@@ -8035,6 +8162,14 @@ def draw_props(ch, co, v, walls, now, wet):
         elif kind == "raver":
             s["world"] = world
             draw_raver(ch, co, v, walls, s, now, wet)
+        elif kind == "leaver":
+            blit_sprite(ch, co, v, walls,
+                        WALKER_A if int(s["stride"] / 0.6) % 2 == 0 else WALKER_B,
+                        world[0], world[2], 0.0, SMOKER_H, SMOKER_W,
+                        (CURB, BARK, tone_colour("warm", 0.5),
+                         tone_colour("cold", 0.5))[s["tone"]])
+        elif kind == "bass":
+            draw_bass(ch, co, v, walls, *s, now, wet)
         elif kind == "bouncer":
             blit_sprite(ch, co, v, walls, BOUNCER, world[0], world[2], 0.05,
                         SMOKER_H * 1.08, SMOKER_W * 1.4, CURB)
@@ -8333,6 +8468,8 @@ def club_light(now, club):
         if sync == "off":
             return None
         return NEON[min(len(NEON) - 1, int(club["tone"] * len(NEON)))][0]
+    if club_closing(now) is not None:
+        return BULB                     # the house lights, and no beat at all
     t = now * CLUB_BPM / 60.0 + club["phase"]
     beat = t % 1.0
     if (int(t) // 4) % 8 == 7 and int(t * 8) % 2:
@@ -8392,6 +8529,20 @@ def skip_to_dawn(now):
             t = (now + _night_skip) % NIGHT_LENGTH
             _night_skip += (NIGHT_LENGTH - DAWN_LEN - 5.0) - t
             return night(now)["dawn"]
+    return False
+
+
+def skip_to_closing(now):
+    """To a few seconds before the clubs close - on a night that is not the
+    strange one, since they never close on that."""
+    global _night_skip
+    for _ in range(ALIEN_ODDS + 2):
+        if not night(now)["alien"]:
+            t = (now + _night_skip) % NIGHT_LENGTH
+            _night_skip += (NIGHT_LENGTH - CLOSE_LEN - 3.0 - t) % NIGHT_LENGTH
+            if not night(now)["alien"]:
+                return True
+        _night_skip += NIGHT_LENGTH
     return False
 
 
@@ -8777,6 +8928,7 @@ def render_street(v, now):
     v.cover = snow_cover(now)
     v.dawn = dawn(now)
     v.crown = crown_light(now, wet)
+    v.bass = bass_lots(v, now)
 
     rave = None
     if rave_window(now) is not None:
@@ -10774,7 +10926,7 @@ def draw_cheats(ch, co, note):
            ("", ""), ("", "NIGHTS"),
            ("n", "the next one"), ("A", "a strange night"),
            ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
-           ("%", "777 next pull"),
+           ("%", "777 next pull"), ("/", "closing time"),
            ("", ""), ("`", "close")]
     columns = (left, middle, right, sky)
 
@@ -11257,6 +11409,12 @@ def render_rave(club, width, height, now):
     up = t % 1.0 < 0.5
     lamp = club_light(now, club)
     neon = NEON[min(len(NEON) - 1, int(club["tone"] * len(NEON)))]
+    shut = club_closing(now)
+    if shut is not None:
+        # Closing time: the lights up, the rig off, nobody dancing, and the
+        # floor emptying as the minutes go.
+        lamp, up = None, False
+    gone = 0 if shut is None else int(100 * min(1.0, shut / LEAVE_FOR))
 
     if width < 40 or height < 16:
         _text(ch, co, height // 2, 1, "*** in the club ***",
@@ -11300,7 +11458,7 @@ def render_rave(club, width, height, now):
     # and the people you are actually standing among at the front.
     far = booth + 2
     for x in range(1, width - 1, 2):
-        if _mix(x, 0, 7) % 3 == 0:
+        if _mix(x, 0, 7) % 3 == 0 or _mix(x, 5, 13) % 100 < gone:
             continue
         y = far + _mix(x, 1, 9) % 2 - (1 if up ^ (x % 4 < 2) else 0)
         if truss < y < height:
@@ -11309,21 +11467,26 @@ def render_rave(club, width, height, now):
 
     mid = far + 3
     for x in range(2, width - 5, 7):
-        arms = up ^ (_mix(x, 2, 3) % 2 == 0)
+        if _mix(x, 6, 13) % 100 < gone:
+            continue
+        arms = up ^ (_mix(x, 2, 3) % 2 == 0) if shut is None else False
         for r, line in enumerate(("\\o/", " | ") if arms else ("(o)", "/|\\")):
             if mid + r < height:
                 _text(ch, co, mid + r, x, line, CURB)
 
     near = height - 8
     for k in (-1, 0, 1):
+        if shut is not None and _mix(k, 7, 13) % 100 < gone:
+            continue
         px = int(cx + k * width * 0.29) - 2
-        for r, line in enumerate(RAVER_UP if up ^ (k == 0) else RAVER_DOWN):
+        dancing = up ^ (k == 0) if shut is None else False
+        for r, line in enumerate(RAVER_UP if dancing else RAVER_DOWN):
             if near + r < floor:
                 _text(ch, co, near + r, px, line, CURB)
 
     # Glow sticks, up in the air and moving with everyone else.
     span = max(1, height - far - 5)
-    for k in range(16):
+    for k in range(16 if shut is None else 0):
         m = _mix(k, int(t * 2), 71)
         gx = int((m & 1023) / 1023.0 * width)
         gy = far + (m >> 10) % span - (1 if up else 0)
@@ -11340,6 +11503,9 @@ def render_rave(club, width, height, now):
                     row[x] = ":"
                     rowc[x] = FLASH
 
+    if shut is not None:
+        say = "the lights are up. time to go home."
+        _text(ch, co, booth + 2, int(cx - len(say) / 2), say, BULB)
     _text(ch, co, floor, max(1, int(cx) - 10), "-- the way out (s) --", GOLD_DIM)
     return ch, co
 
@@ -11447,6 +11613,9 @@ def main(stdscr):
                 elif key == ord("%"):
                     rig_jackpot()
                     note = "the next pull is 777"
+                elif key == ord("/"):
+                    skip_to_closing(now)
+                    note = "closing time - 1 for a club"
                 elif key == ord("z"):
                     note = ("lanterns on the river tonight"
                             if skip_to_lanterns(now) else "no such night near")
