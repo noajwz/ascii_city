@@ -64,8 +64,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   with a suspension bridge
   across it, lights the length of its cables, a ferry crossing beside it, landing on a headland -
   the only way onto it - with a lighthouse at the point whose
-  beam goes round over all of it, and a firing box on the rock: `f` there lights a show, and you
-  fire it, one shell for every press on the beat. One night in a dozen the river is lanterns, and
+  beam goes round over all of it, and you can climb the lighthouse: up on its gallery `f`
+  lights a show, and you fire it, one shell for every press on the beat. One night in a dozen the river is lanterns, and
   now and then there are fireworks over the bay.
 
 Nothing is stored. Every street, building, sign and trail is a hash of its own coordinates, so

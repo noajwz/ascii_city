@@ -248,13 +248,13 @@ FW_LIFE = 2.4          # and how long the sparks last once it bursts
 FW_FINALE = 180.0      # seconds between finales
 FW_REACH = 900.0       # how far off you can see them from
 
-# --- your own show, fired from the headland ---
-# A firing box stands on the rock between the lighthouse and the bay. f at
-# the box lights a show with you on the button: cues come along a bar at the
-# bottom of the screen and every press on the beat sends a real shell up over
-# the bay - on time a big one, near enough a smaller one, off the beat a
-# fizzle. Anybody on the bridge or the far bank sees what you fire. The
-# better you did, the bigger the finale.
+# --- your own show, fired from the lighthouse ---
+# In at the lighthouse's door and up its stair to the gallery. f up there
+# lights a show with you on the button: cues come along a bar at the bottom
+# of the screen and every press on the beat sends a real shell up over the
+# bay - on time a big one, near enough a smaller one, off the beat a fizzle.
+# Anybody on the bridge or the far bank sees what you fire. The better you
+# did, the bigger the finale.
 SHOW_BPM = 96
 SHOW_COUNT = 4         # beats of count-in before the first cue
 SHOW_BARS = 12         # four beats a bar
@@ -263,9 +263,9 @@ SHOW_GOOD = 0.18       # and as near enough
 SHOW_AHEAD = 3.0       # seconds of cues the bar shows coming
 SHOW_FINALE = 7.0      # seconds of finale after the last cue
 SHOW_SPREAD = 0.5      # how wide over the bay your shells go up, against a show's
-SHOW_OUT = 30.0        # how far past the middle of the bay they go up
-FIRE_REACH = 3.0       # how close to the box to light it
-FIRE_ZONE = 25.0       # and how far from it you can still be on the button
+FIRE_REACH = 3.0       # how near the lighthouse's middle the gallery is
+LIGHT_DOOR = 1.75      # the door, out from the middle of the tower at its foot
+GALLERY_R = 1.6        # where you stand on the gallery, from the middle
 # One bar of cues per row: 1 a shell, 2 a big one. The first bars come from
 # the easy ones, so the count-in is not followed by a wall of them.
 SHOW_BARS_EASY = [(1, 0, 1, 0), (1, 0, 0, 0), (2, 0, 1, 0)]
@@ -5593,13 +5593,6 @@ def draw_grand_bridge(ch, co, v, walls, i, j, now, wet):
         zf += 9.0
 
 
-FIRING_BOX = [
-    "  =T=  ",
-    " .-|-. ",
-    " |o o| ",
-    " '---' ",
-]
-
 BENCH = [
     "_______",
     "|_____|",
@@ -5812,23 +5805,57 @@ def shell_sparks(bx, bz, t0, m, now, size=1.0, spread=1.0, willow=None):
     return out
 
 
-def firing_box(i):
-    """Where the firing box stands on the headland in this stretch: on the
-    rock between the lighthouse and the bay, off the bridge's landing."""
+def lighthouse_info(i):
+    """The lighthouse in this stretch as a place you can go into, or None:
+    where it stands, its door at the foot facing the bridge's landing, where
+    you come out again, and where a show fired from its gallery goes up -
+    over the bay between the bridge and the carnival's wheel, so from up
+    there the three are in the one view."""
     spot = lighthouse_spot(i)
     if spot is None:
         return None
-    return spot[0] - 14.0, spot[1] + 25.0
+    lx, lz = spot
+    span = grand_avenue(i)
+    gx = (span[0] + span[1] * 0.5) * CELL
+    (wx, _), _, _, _ = carnival_spots(carnival_col(span[0]))
+    bay = bay_centre(i)
+    return {"kind": "lighthouse", "x": lx, "z": lz, "height": LIGHT_H,
+            "i": int(lx / CELL + BIG) - BIG, "j": int(lz / CELL + BIG) - BIG,
+            "door": (lx, lz + LIGHT_DOOR), "exit": (lx, lz + LIGHT_DOOR + 2.6, 0.0),
+            "show": ((gx + wx) * 0.5, bay[1])}
 
 
-def near_firing_box(x, z, reach):
-    """(box x, box z, the bay it fires over) if you are within reach of one."""
+def near_lighthouse(x, z, reach):
+    """The lighthouse whose middle you are within reach of - which is to say,
+    up on its gallery - or None."""
     ci = int(x / CELL + BIG) - BIG
     for k in range(-1, 2):
-        box = firing_box(ci + k * GRAND_GAP)
-        if box is not None and (box[0] - x) ** 2 + (box[1] - z) ** 2 < reach ** 2:
-            return box[0], box[1], bay_centre(ci + k * GRAND_GAP)
+        spot = lighthouse_spot(ci + k * GRAND_GAP)
+        if spot is not None and (spot[0] - x) ** 2 + (spot[1] - z) ** 2 < reach ** 2:
+            return lighthouse_info(ci + k * GRAND_GAP)
     return None
+
+
+def lighthouse_door(x, z):
+    """The lighthouse whose door you are standing in, or None."""
+    ci = int(x / CELL + BIG) - BIG
+    for k in range(-1, 2):
+        spot = lighthouse_spot(ci + k * GRAND_GAP)
+        if spot is None:
+            continue
+        dx, dz = spot[0], spot[1] + LIGHT_DOOR
+        if (dx - x) ** 2 + (dz - z) ** 2 < CASINO_REACH ** 2:
+            return lighthouse_info(ci + k * GRAND_GAP)
+    return None
+
+
+def gallery_view(t, yaw, width, height):
+    """The camera on the lighthouse's gallery, round the lantern: at the rail
+    on whichever side you are facing, and turning walks you round it, the way
+    a sky deck's roof does."""
+    x = t["x"] + math.sin(yaw) * GALLERY_R
+    z = t["z"] + math.cos(yaw) * GALLERY_R
+    return View(x, z, yaw, width, height, eye=t["height"] + 1.5, reach=ROOF_REACH)
 
 
 class Show:
@@ -5930,35 +5957,40 @@ _show_best = 0          # the best score tonight
 
 
 def light_show(now, x, z):
-    """f at the box: light a show, unless one is already going up."""
+    """f on the lighthouse's gallery: light a show, unless one is already
+    going up."""
     global _show
     if _show is not None and not _show.over(now):
         return False
-    box = near_firing_box(x, z, FIRE_REACH)
-    if box is None:
+    lh = near_lighthouse(x, z, FIRE_REACH)
+    if lh is None:
         return False
-    # Out in front of the box and well over towards the far side: from the
-    # rock the middle of the bay is near enough that the bursts went off
-    # the top of the screen.
-    over = (box[0], box[2][1] + SHOW_OUT)
-    _show = Show(now, over, int(now * 1000.0) & 0xFFFFFF)
+    _show = Show(now, lh["show"], int(now * 1000.0) & 0xFFFFFF)
     return True
 
 
 def show_hint(now, x, z):
-    """For the HUD, by the firing box: how to light it, and how it went."""
-    if near_firing_box(x, z, FIRE_ZONE) is None:
-        return ""
+    """For the HUD, at the foot of the lighthouse: that you can go up."""
+    ci = int(x / CELL + BIG) - BIG
+    for k in range(-1, 2):
+        spot = lighthouse_spot(ci + k * GRAND_GAP)
+        if spot is not None and (spot[0] - x) ** 2 + (spot[1] - z) ** 2 < 20.0 ** 2:
+            return "  ~ the lighthouse: in at the door to climb up ~"
+    return ""
+
+
+def gallery_hint(now):
+    """For the HUD, up on the gallery: how to light a show, and how it went."""
     if _show is None:
-        return "  ~ a firing box: f lights a show ~"
+        return "  ~ f lights a show over the bay ~"
     if not _show.over(now):
         return "  ~ your show over the bay ~"
-    return "  ~ your show: %d, best tonight %d - f again ~" % (_show.score, _show_best)
+    return "  ~ your show: %d, best %d ~" % (_show.score, _show_best)
 
 
 def on_the_button(now, x, z):
-    """The show you are firing, if you are near enough the box to fire it."""
-    if _show is None or _show.over(now) or near_firing_box(x, z, FIRE_ZONE) is None:
+    """The show you are firing, if you are up on the gallery to fire it."""
+    if _show is None or _show.over(now) or near_lighthouse(x, z, FIRE_REACH) is None:
         return None
     return _show
 
@@ -6080,23 +6112,35 @@ def draw_lighthouse(ch, co, v, walls, lx, lz, now, wet):
     every BEAM_TURN seconds, bright near the lamp and fading with distance -
     and it goes over the bridge, the bay and the town without asking any of
     them, which is the point of one."""
-    for k in range(int(LIGHT_H / 0.55)):
-        y = k * 0.55
-        r = 1.6 - 0.6 * y / LIGHT_H
-        band = int(y / 3.5) % 2 == 0
+    # Up on its gallery the tower is under your feet and the lantern at your
+    # back: neither is drawn, and the rail round you is.
+    mine = (v.roof is not None and v.roof.get("kind") == "lighthouse"
+            and abs(v.roof["x"] - lx) < 0.5 and abs(v.roof["z"] - lz) < 0.5)
+    if not mine:
+        for k in range(int(LIGHT_H / 0.55)):
+            y = k * 0.55
+            r = 1.6 - 0.6 * y / LIGHT_H
+            band = int(y / 3.5) % 2 == 0
+            for a in range(8):
+                ang = a * math.tau / 8.0
+                put_point(ch, co, v, walls, lx + math.cos(ang) * r, y,
+                          lz + math.sin(ang) * r, "|" if a % 2 else "#",
+                          ROU_RED if band else MOON_DIM)
+        # The lantern room and its roof.
         for a in range(8):
             ang = a * math.tau / 8.0
-            put_point(ch, co, v, walls, lx + math.cos(ang) * r, y,
-                      lz + math.sin(ang) * r, "|" if a % 2 else "#",
-                      ROU_RED if band else MOON_DIM)
-    # The lantern room and its roof.
-    for a in range(8):
-        ang = a * math.tau / 8.0
-        put_point(ch, co, v, walls, lx + math.cos(ang) * 1.2, LIGHT_H + 0.6,
-                  lz + math.sin(ang) * 1.2, "=", CONCRETE)
-        put_point(ch, co, v, walls, lx + math.cos(ang) * 0.6, LIGHT_H + 2.0,
-                  lz + math.sin(ang) * 0.6, "^", CONCRETE)
-    put_lit(ch, co, v, walls, lx, LIGHT_H + 1.0, lz, "O", FLASH, max(wet, 0.4), now)
+            put_point(ch, co, v, walls, lx + math.cos(ang) * 1.2, LIGHT_H + 0.6,
+                      lz + math.sin(ang) * 1.2, "=", CONCRETE)
+            put_point(ch, co, v, walls, lx + math.cos(ang) * 0.6, LIGHT_H + 2.0,
+                      lz + math.sin(ang) * 0.6, "^", CONCRETE)
+        put_lit(ch, co, v, walls, lx, LIGHT_H + 1.0, lz, "O", FLASH, max(wet, 0.4), now)
+
+        # The door at the foot, lit, facing the landing - from that side.
+        if v.z > lz:
+            blit_sprite(ch, co, v, walls, ["[#]", "[#]", "[#]"], lx, lz + LIGHT_DOOR,
+                        0.0, 2.1, 1.0, BULB)
+    else:
+        draw_gallery(ch, co, v, lx, lz)
 
     # The beam, and a fainter one the other way, the way a real lens throws.
     turn = now * math.tau / BEAM_TURN
@@ -6122,14 +6166,32 @@ def draw_lighthouse(ch, co, v, walls, lx, lz, now, wet):
         put_point(ch, co, v, walls, lx + 6.5, h, lz - 2.5, "|", CONCRETE)
     put_lit(ch, co, v, walls, lx + 6.5, 3.3, lz - 2.5, "o", BULB, max(wet, 0.3), now)
 
-    # The firing box, on the rock towards the bay; its lamp goes red and
-    # blinks while somebody is firing from it.
-    bx, bz = lx - 14.0, lz + 25.0                   # firing_box(), from here
-    blit_sprite(ch, co, v, walls, FIRING_BOX, bx, bz, 0.0, 1.3, 1.4, EMBER_HOT)
-    live = _show is not None and not _show.over(now)
-    put_lit(ch, co, v, walls, bx, 1.6, bz, "o",
-            ROU_RED if live and int(now * 4) % 2 else (BULB_DIM if live else BULB),
-            max(wet, 0.3), now)
+
+
+def draw_gallery(ch, co, v, lx, lz):
+    """The rail round the lighthouse's gallery, from on it: solved per screen
+    column the way the sky deck's parapet is, so it is a solid line however
+    near it is - where each column's ray meets the rail's circle, the top
+    rail, the uprights every few columns, and the gallery's edge under them."""
+    rail_r, top_y, floor_y = GALLERY_R + 1.4, LIGHT_H + 1.0, LIGHT_H
+    px, pz = v.x - lx, v.z - lz
+    c0 = px * px + pz * pz - rail_r * rail_r            # under nought: inside
+    for sx in range(v.width):
+        rdx, rdz = v.ray(sx)
+        a = rdx * rdx + rdz * rdz
+        b = rdx * px + rdz * pz
+        t = (-b + math.sqrt(max(0.0, b * b - a * c0))) / a
+        if t <= 0.05:
+            continue
+        top = int(round(v.horizon - (top_y - v.eye) * v.fy / t))
+        foot = int(round(v.horizon - (floor_y - v.eye) * v.fy / t))
+        for y in range(max(0, top), min(v.height, foot + 1)):
+            if y == top:
+                ch[y][sx], co[y][sx] = "=", ROU_RED
+            elif y == foot:
+                ch[y][sx], co[y][sx] = "-", CONCRETE
+            elif sx % 4 == 0:
+                ch[y][sx], co[y][sx] = "|", CONCRETE
 
 
 BRIDGE_LAMP_GAP = 6.0    # world units between lamp posts along the parapet
@@ -7189,6 +7251,73 @@ def render_climb(up, floors, t, width, height, now):
     return ch, co
 
 
+STAIR_STEPS = 96        # up the lighthouse, round and round
+
+
+def render_stairs(up, floors, t, width, height, now):
+    """Up the lighthouse's stair, round and round the post in the middle.
+
+    The steps come down past you as you climb - each a slab from the post
+    out to the wall, turning a little from one to the next, so they wind -
+    with the wall's courses behind them and now and then a slit window going
+    by, black sea and, when the beam is round this side, white. A count of
+    the steps in the corner; at the top the lantern's light floods in."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    start, top, over = climb_times(floors)
+    p = min(1.0, max(0.0, (t - start) / max(1e-6, top - start)))
+    climbed = p if up else 1.0 - p
+    step = 1 + min(STAIR_STEPS - 1, int(climbed * STAIR_STEPS))
+    if width < 30 or height < 12:
+        _text(ch, co, height // 2, 1, "up the lighthouse  %d/%d" % (step, STAIR_STEPS),
+              MOON_DIM)
+        return ch, co
+    cx = width // 2
+    half = min(width // 2 - 2, 26)
+    scroll = climbed * STAIR_STEPS * 2.0
+    for y in range(height):
+        wy = int(scroll) + (height - 1 - y)            # rows up the tower
+        for x in (cx - half, cx + half):               # the curve of the wall
+            ch[y][x], co[y][x] = ("(" if x < cx else ")"), MOON_DIM
+        if wy % 2 == 0:
+            for x in range(cx - half + 1, cx + half):
+                if (x + wy) % 6 == 0:
+                    ch[y][x], co[y][x] = ".", CONCRETE
+        # A step every other row: from the post out to one side, the side
+        # swinging round as you go up.
+        if wy % 2 == 0:
+            ang = (wy // 2) * 0.55
+            reach = int(math.cos(ang) * (half - 3))
+            a, b = sorted((cx, cx + reach))
+            for x in range(a, b + 1):
+                ch[y][x], co[y][x] = "_", BARK
+        # A slit window every twenty rows, the beam crossing it.
+        if wy % 20 in (8, 9, 10, 11):
+            half_turn = BEAM_TURN / 2.0
+            lit = int(now / half_turn) % 2 == 0 and now % half_turn < 0.6
+            for x in range(cx + half - 6, cx + half - 2):
+                ch[y][x], co[y][x] = ("#", FLASH) if lit else ("~", RAIN_FAR)
+        ch[y][cx], co[y][cx] = "|", MOON_DIM          # the post
+    for k, line in enumerate((" o ", "/|\\", "/ \\")):
+        _text(ch, co, height // 2 - 1 + k, cx - 6, line, STAR)
+    if t >= top:
+        flood = int((t - top) / max(1e-6, over - top) * height)
+        for y in range(min(height, flood)):
+            for x in range(width):
+                if _mix(x, y, 1937) % 5 == 0:
+                    ch[y][x], co[y][x] = "*", BULB
+    panel = " step %d / %d " % (step, STAIR_STEPS)
+    for k in range(len(panel)):
+        ch[0][1 + k], co[0][1 + k] = panel[k], GOLD_DIM
+    say = (" climbing " if up else " climbing down ") if t < top else (
+        " the gallery " if up else " the rock ")
+    for k, c in enumerate(say):
+        x = cx - len(say) // 2 + k
+        if 0 <= x < width:
+            ch[height - 1][x], co[height - 1][x] = c, GOLD_DIM
+    return ch, co
+
+
 def lift_times(floors):
     """(doors closed, arrived, doors open) as seconds from stepping in."""
     travel = 0.6 + floors * LIFT_FLOOR
@@ -7279,6 +7408,8 @@ def draw_roof_ledge(ch, co, v, walls, t, now, wet):
     """Your own roof: a parapet round the edge at waist height, a water tower
     on one corner and the mast with its red light on another. Drawn in world
     space, so it turns with you and frames whichever way you look."""
+    if t.get("kind") == "lighthouse":
+        return                          # its rail is draw_gallery()'s
     h = t["height"]
     i, j = t["i"], t["j"]
     x0, z0 = i * CELL, j * CELL
@@ -9760,7 +9891,7 @@ CHEAT_PLACES = [
     ("&", "a claw machine", "claw"),
     ("u", "the big bridge", "grand"),
     ("h", "the lighthouse", "lighthouse"),
-    ("+", "the firing box", "firebox"),
+    ("+", "lighthouse top", "lighthousedoor"),
     ("j", "end of a pier", "pier"),
     ("b", "a bridge", "bridge"),
     ("B", "someone leaning", "leaner"),
@@ -9769,7 +9900,7 @@ CHEAT_PLACES = [
 
 # The river and the woods: listed under the parts of town, not with the city.
 OUT_OF_TOWN = {"woods", "rave", "lake", "bank", "pier", "bridge", "leaner",
-               "carnival", "claw", "grand", "lighthouse", "firebox"}
+               "carnival", "claw", "grand", "lighthouse", "lighthousedoor"}
 
 
 def _rings(ci, cj, limit):
@@ -10153,18 +10284,19 @@ def _claw_spot(x, z):
     return None
 
 
-def _firebox_spot(x, z):
-    """At the firing box on the headland, facing out over the bay."""
+def _lighthouse_door_spot(x, z):
+    """Outside the lighthouse's door, facing it: one step in and you are on
+    the stair, the way the sky deck's cheat leaves you at its lobby."""
     ci = int(x / CELL + BIG) - BIG
     for k in range(-1, 3):
-        box = firing_box(ci + k * GRAND_GAP)
-        if box is None:
+        lh = lighthouse_info(ci + k * GRAND_GAP)
+        if lh is None:
             continue
-        px, pz = box[0], box[1] - 1.5
+        px, pz, _ = lh["exit"]
         if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
             continue
         if can_stand(px, pz):
-            return px, pz, 0.0
+            return px, pz, math.pi
     return None
 
 
@@ -10397,8 +10529,8 @@ def find_place(x, z, kind):
         return _billboard_spot(x, z)
     if kind == "claw":
         return _claw_spot(x, z)
-    if kind == "firebox":
-        return _firebox_spot(x, z)
+    if kind == "lighthousedoor":
+        return _lighthouse_door_spot(x, z)
     if kind == "police":
         return _police_spot(x, z, now_hint())
     if kind in ("tunnel", "longtunnel"):
@@ -11047,6 +11179,8 @@ ARCADE_HUD = (" in the %s arcade at %d,%d  -  the games are on their way  -  s w
 CLAW_HUD = (" at the claw machine at %d,%d  -  p plays, p again drops  -  s walks"
             " back out  -  q quit ")
 CLIMB_HUD = " on the fire escape, climbing %s "
+STAIRS_HUD = " on the lighthouse stair, climbing %s "
+GALLERY_HUD = " up the lighthouse, %s  -  ad round  -  s down  -  q quit "
 ESCAPE_ROOF_HUD = (" on a roof in the alleys, %d floors up, %s  -  ad look round  -"
                    "  s climbs down  -  q quit ")
 ROOF_HUD = (" on the roof, %d floors up, %s  -  ad look round  -  s takes the"
@@ -11193,6 +11327,14 @@ def main(stdscr):
                 claw.press(now)
             elif lift is not None:
                 pass                            # nothing to do but ride
+            elif (on_roof is not None and on_roof.get("kind") == "lighthouse"
+                  and key in (ord("f"), ord("F"))):
+                # Up on the gallery: light a show, or fire the one going up.
+                show = on_the_button(now, on_roof["x"], on_roof["z"])
+                if show is not None:
+                    show.press(now)
+                else:
+                    light_show(now, on_roof["x"], on_roof["z"])
             elif on_roof is not None and key in (curses.KEY_DOWN, ord("s"),
                                                  ord("S")):
                 lift = {"up": False, "t0": now, "t": on_roof}
@@ -11214,12 +11356,6 @@ def main(stdscr):
                     side, last["s"], autopilot = -SIDESTEP, now, False
                 elif key == ord("."):
                     side, last["s"], autopilot = SIDESTEP, now, False
-                elif key in (ord("f"), ord("F")):
-                    show = on_the_button(now, cam_x, cam_z)
-                    if show is not None:
-                        show.press(now)
-                    elif light_show(now, cam_x, cam_z):
-                        autopilot = False
             else:
                 if key in (curses.KEY_LEFT, ord("h")):
                     sky_v, last["sky"], autopilot = -WALK_SPEED, now, False
@@ -11282,11 +11418,15 @@ def main(stdscr):
         if lift is not None:
             venue = None
             floors = max(2, int(lift["t"]["height"] / FLOOR_H))
-            times = (climb_times(floors) if lift["t"].get("kind") == "escape"
+            times = (climb_times(floors)
+                     if lift["t"].get("kind") in ("escape", "lighthouse")
                      else lift_times(floors))
             if now - lift["t0"] >= times[2]:
                 if lift["up"]:
                     on_roof = lift["t"]
+                elif lift["t"].get("kind") == "lighthouse":
+                    cam_x, cam_z, yaw = lift["t"]["exit"]   # out of the door
+                    on_roof = None
                 else:
                     t_ = lift["t"]
                     out = 2.6 if t_.get("kind") == "escape" else CASINO_REACH + 1.8
@@ -11305,6 +11445,10 @@ def main(stdscr):
             venue = None
         elif venue is not None and venue[0] == "tower":
             lift = {"up": True, "t0": now, "t": venue[1]}
+            venue = None
+        elif street and fwd > 0.0 and lighthouse_door(cam_x, cam_z) is not None:
+            # In at the lighthouse's door is on to its stair.
+            lift = {"up": True, "t0": now, "t": lighthouse_door(cam_x, cam_z)}
             venue = None
         if venue is None or venue[0] not in ("ramen", "diner"):
             seated = None               # stood up: the next visit is a new bowl
@@ -11325,7 +11469,11 @@ def main(stdscr):
         height, width = stdscr.getmaxyx()
         if lift is not None:
             floors = max(2, int(lift["t"]["height"] / FLOOR_H))
-            if lift["t"].get("kind") == "escape":
+            if lift["t"].get("kind") == "lighthouse":
+                ch, co = render_stairs(lift["up"], floors, now - lift["t0"],
+                                       width, height, now)
+                hud = STAIRS_HUD % ("up" if lift["up"] else "down")
+            elif lift["t"].get("kind") == "escape":
                 ch, co = render_climb(lift["up"], floors, now - lift["t0"],
                                       width, height, now)
                 hud = CLIMB_HUD % ("up" if lift["up"] else "down")
@@ -11333,6 +11481,14 @@ def main(stdscr):
                 ch, co = render_lift(lift["up"], floors, now - lift["t0"], width,
                                      height, now)
                 hud = LIFT_HUD % ("up" if lift["up"] else "down")
+        elif on_roof is not None and on_roof.get("kind") == "lighthouse":
+            v = gallery_view(on_roof, yaw, width, height)
+            v.roof = on_roof
+            ch, co, wet = render_street(v, now)
+            show = on_the_button(now, on_roof["x"], on_roof["z"])
+            if show is not None:
+                draw_show_bar(ch, co, show, now)
+            hud = GALLERY_HUD % sky_word(now, wet) + gallery_hint(now)
         elif on_roof is not None:
             v = roof_view(on_roof, yaw, width, height)
             v.roof = on_roof
@@ -11371,9 +11527,6 @@ def main(stdscr):
         elif street:
             v = View(cam_x, cam_z, yaw, width, height)
             ch, co, wet = render_street(v, now)
-            show = on_the_button(now, cam_x, cam_z)
-            if show is not None:
-                draw_show_bar(ch, co, show, now)
             hud = STREET_HUD % (
                 cam_x, cam_z,
                 district(int(cam_x / CELL + BIG) - BIG,
