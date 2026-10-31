@@ -129,6 +129,9 @@ ok &= report("money: +1000 in the menu, a film, a bowl, walk out", *run(
     [(b"`", .5), (b"+", .4), (b"m", 2.0), (b"s", .6), (b"s", .6), (b"`", .5),
      (b"r", .6)] + IN + [(b"s", .1), (b"w", 5.0), (b"s", .6), (b"s", .6)],
     cols=100, rows=30))
+ok &= report("a manhole: walk on, down, a slice, back up", *run(
+    [(b"`", .5), (b"x", 1.0)] + [(b"w", .25)] * 3
+    + [(b"e", 1.5), (b"p", .5), (b"s", .8), (b"w", .4)], cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

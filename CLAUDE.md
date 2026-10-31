@@ -1234,6 +1234,33 @@ walking out and back in is a new bowl. It is all ASCII inside: the room is drawn
 across the lane from a shop, looking at the front — a step or two in is the counter — and a
 second press finds another.
 
+## Manholes, and who is down there
+
+One street cell in `MANHOLE_ODDS` has a manhole in it (`manhole_at()`: a proper street only,
+never on a bridge or in the water, hash first), off the middle of the roadway along the street —
+about one every 170 units of street, which is "some, not too many". `draw_ground()` paints the
+cover per point the way it paints everything on the ground: a rim of `o`, the grip pattern cast
+into it, and before the snow, because what comes up from under it melts it. One in three
+**steams** (`draw_manhole_steam()`): puffs off the cover that grow and thin from white to haze as
+they rise, which is what you find one by from down the street.
+
+You go down with **`e`**, standing on it (`manhole_under()`, within `MANHOLE_ON`) — a key and not
+a step, because the autopilot walks the roadway and would otherwise drop you down every manhole it
+crossed. `MANHOLE_ON` is wider than the cover on purpose: a tap of `w` carries you 2.3 units, and
+at 0.8 you could tap straight over it without ever being on it. The HUD says when you are near
+one and when you are on it. Down there is `sewer` in `main()` — a state like the lift: nothing
+moves you, `s` (or `e`) climbs back up onto the cover, a jump clears it.
+
+`render_sewer()` is the lair: a brick arch, a pipe dripping, the ladder you came down with the
+street light at the top of it, the water going by under the ledge, fairy lights, an old couch and
+a television on the blink — and **four turtles round a pizza box** on a crate, each in their own
+coloured headband (`SEWER_BANDS`), eating on their own counts: a slice up at the mouth on the
+bite, a string of cheese as it comes away. For the first few seconds they all freeze and look at
+you; then it is cool, and they talk (`SEWER_SAY`). They get through a slice every `SEWER_EAT`
+seconds and leave two (`sewer_slices()`), and `p` takes one — until the box is empty. They have no
+names. `x` in the menu stands you seven units back along the street from a steaming one — nearer
+and the cover is under the bottom of the screen, since the camera cannot look down.
+
 ## The sky deck
 
 One building `TOWER_MIN` tall in `TOWER_ODDS` with a street front has a lobby — `SKY DECK` over a
