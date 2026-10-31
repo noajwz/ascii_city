@@ -1058,6 +1058,25 @@ shades stands the other side of the door, arms folded, not dancing; three brass 
 rope (`draw_rope()`) stand between the line and the street. The line runs whichever way along the
 wall has more room from the door.
 
+**Closing time** is the last `CLOSE_LEN` of every night but the strange one (`club_closing()`),
+and runs on into the dawn on a night that has one. `club_light()` returns the house lights — a
+steady `BULB`, no beat — so the slit windows, the door and the pool on the pavement all go flat and
+warm at once; `club_door()` stands open and the count stops where it was; and `club_line()` gives
+no queue but `going_home()`: one out of the door every `LEAVE_GAP` for `LEAVE_FOR` seconds, onto the
+pavement and off down the street one way or the other, each a number whose place is a function of
+how long ago they came out, until the street is empty. The bouncer stays. Inside, the rig is off,
+nobody dances, the floor empties as the minutes go and the lights are up. `/` in the menu goes to
+a few seconds before it.
+
+**The bass you can see.** `club_kick()` is how far through the beat a club is (none at closing
+time; the sky's on the strange night). On the kick, `bass_lots()` — found per frame by
+`near_clubs()`, which tests the hash before building a lot, so it costs a few hundred multiplies —
+is every building within `BASS_REACH` of the sound system, and `draw_wall_column()` drops their
+windows a row while it lasts: the windows next door shake. The lot dict carries its own `ij` now
+for that. And when it has rained, `draw_bass()` sends a ring of ripples out across the wet pavement
+from the door on every kick, with the last one fainter behind it. The kick's window was a single
+frame at 30 a second at first and easy to miss; it is a fifth of a beat now.
+
 ## The casino, and the one door in the city that opens
 
 Same odds as the club (`CLUB_ODDS`, different salt) and mutually exclusive with it, so a building is

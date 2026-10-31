@@ -43,7 +43,9 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   and sky decks: ride the lift to the roof of the tallest towers and look out over the whole city,
   where every
   tower's crown is lit in the colour of the weather. The club still has no sign, but there is a
-  queue, a bouncer and a rope, and now and then the door opens and lets the light out.
+  queue, a bouncer and a rope, and now and then the door opens and lets the light out; the
+  windows next door shake on the kick, the puddles ripple, and at closing time the lights come
+  up and everyone spills out into the street.
 - **People out walking** — not many, it is night — under umbrellas when it rains.
 - **Traffic on the wide streets**, headlights and tail lights, the odd bus — and now and then a
   police car, its lights washing the street red and blue. Most of it is up on **the highway**, an

@@ -105,6 +105,9 @@ ok &= report("the arcade: go in, look round, walk out", *run(
 ok &= report("the casino: 777 next pull, pull, walk out into the gold", *run(
     [(b"`", .5), (b"9", 1.0), (b"`", .5), (b"%", .4), (b"`", .3), (b"p", 3.5),
      (b"s", .6), (b"s", .6), (b"s", 1.0)], cols=100, rows=30))
+ok &= report("closing time at the club, outside and in", *run(
+    [(b"`", .5), (b"/", .4), (b"1", 4.5), (b"w", .4), (b"`", .5), (b"0", 1.5),
+     (b"s", .6)], cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
