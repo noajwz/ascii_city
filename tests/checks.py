@@ -3461,5 +3461,68 @@ kinds = [k for k, _, _ in before]
 check("with a bouncer on the door and a rope out front",
       "bouncer" in kinds and "rope" in kinds and "clubdoor" in kinds)
 
+# --- the casino from the street: blade, carpet, doorman, jackpot ----------
+ci_, cj_ = int(x0 // ac.CELL), int(z0 // ac.CELL)
+for i, j in ac._rings(ci_, cj_, 200):
+    if ac._mix(i, j, 911) % ac.CLUB_ODDS or ac.is_open(i, j):
+        continue
+    kc = ac.lot(i, j)["casino"]
+    if kc is None:
+        continue
+    knx, knz = ac.FACES[kc["door"]]
+    kp = ac.face_point(i, j, kc["door"], kc["u"], 1.4, 0.0)
+    if all(ac.can_stand(kp[0] + knx * b, kp[2] + knz * b) for b in (4.0, 8.0, 12.0)):
+        ki, kj = i, j
+        break
+ktx, ktz = -knz, knx
+for sgn in (1, -1):
+    kx, kz = kp[0] + knx * 6 + ktx * 25 * sgn, kp[2] + knz * 6 + ktz * 25 * sgn
+    if ac.can_stand(kx, kz):
+        break
+bw = ac.face_point(ki, kj, kc["door"], ac.BLADE_U, ac.BLADE_OUT, 0.0)
+kv = ac.View(kx, kz, math.atan2(bw[0] - kx, bw[2] - kz), 110, 34)
+kv.tunnels = []
+kwalls = ac.draw_walls([[" "] * 110 for _ in range(34)], [[0] * 110 for _ in range(34)],
+                       kv, 405.0)
+bch = [[" "] * 110 for _ in range(34)]
+ac.draw_blade(bch, [[0] * 110 for _ in range(34)], kv, kwalls, kc, ki, kj, kc["door"],
+              405.0)
+down = "".join(c for x in range(110) for y in range(34)
+               if bch[y][x].isupper() for c in bch[y][x])
+check("down the street the casino's name runs down its blade, top to bottom",
+      down == kc["name"].replace(" ", ""), "%r" % down)
+check("between two lines of bulbs", sum(r.count("o") for r in map("".join, bch)) >= 4)
+real_red, real_gold = ac.ROU_RED, ac.GOLD
+ac.ROU_RED, ac.GOLD = 1801, 1802
+fv_ = ac.View(kp[0] + knx * 9, kp[2] + knz * 9, math.atan2(-knx, -knz), 110, 34)
+g_, c_, _ = ac.render_street(fv_, 405.0)
+check("from across the road, a red carpet to the kerb",
+      sum(1 for r in c_ for a in r if a == 1801) > 20)
+check("and the doorman in his braid", any(
+    "(o)" in "".join(g_[y]) or "[#]" in "".join(g_[y]) for y in range(34)))
+ac.ROU_RED, ac.GOLD = real_red, real_gold
+ac._jackpot = None
+plain_, _ = ac.render_street(fv_, 405.0)[:2]
+ac.hit_jackpot(400.0, kc)
+other = dict(kc, i=kc["i"] + 1)
+check("777 sets the casino it was hit in going, and only that one",
+      ac.jackpot_on(405.0, kc) and not ac.jackpot_on(405.0, other)
+      and not ac.jackpot_on(400.0 + ac.JACKPOT_LONG + 1.0, kc))
+party_, _ = ac.render_street(fv_, 405.0)[:2]
+lit_ = lambda g: sum("".join(r).count("o") for r in g)
+check("and the whole front lights up", lit_(party_) > lit_(plain_) + 10,
+      "%d bulbs against %d" % (lit_(party_), lit_(plain_)))
+ac.rig_jackpot()
+rigged = ac.Slot()
+rigged.pull(0.0)
+honest = ac.Slot()
+honest.pull(0.0)
+check("% in the menu makes the next pull 777, and only that one",
+      rigged.result == [0, 0, 0] and not ac._rig_slot)
+room_p = ac.render_casino_room(ac.Spin(400.0, "ACES"), 110, 30, 401.0, None, None,
+                               True)[0]
+check("inside too, every light on the ceiling", room_p[1].count("o") == 110)
+ac._jackpot = None
+
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

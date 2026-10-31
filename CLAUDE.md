@@ -1084,6 +1084,26 @@ before you can stand far enough back to see the whole building — and on a fift
 never can — so it is a stylised fixed size. Unreadable is worse than the wrong size, which is the
 same call the hung signs make about their rows.
 
+**From the street it has three more things.** `draw_blade()` puts the name up the front corner on
+a blade sign, the old Las Vegas way: a tall board standing `BLADE_OUT` out of the wall at right
+angles, from over the canopy to `BLADE_RISE` above the roofline, the letters stacked down it and
+bulbs chasing down both edges. Its edges are projected from the world like a hung sign's, so it is
+edge-on from straight across the road and opens out as you come down the street — which is when a
+blade is meant to be read, and when the marquee over the door is hardest to. The letters are in
+screen rows spread down the whole board, closed up under the top of the screen when its top is
+above it (the name with its first letters gone is worse than the name a little squeezed), and in
+the big font once the board is wide and tall enough to take them. The first try capped their
+spacing at a hung sign's and they bunched at the foot of the board. They light one at a time from
+the top, flash, and hold. `draw_red_carpet()` runs a red carpet from the door across the pavement
+to the kerb between brass posts and a red rope, and a `DOORMAN` in braid stands beside it.
+
+**And it celebrates.** A 777 on the slot (`main()` sees the payout and calls `hit_jackpot()`) puts
+that casino — by its cell, which the casino dict now carries — into `jackpot_on()` for
+`JACKPOT_LONG`: every bulb on, every window lit, the blade, the marquee and the doorman flashing gold
+and white, and inside the room's ceiling all lit. Walk out and the building is still going. A 777 is
+about one pull in nine thousand, so `%` in the menu (`rig_jackpot()`) makes the next pull one, once —
+the one place the slot is not honest, and only when asked.
+
 **It is one of the two buildings you can enter.** `venue_at()` is the trigger for both: stand in a
 doorway and the room is drawn around you. Neither is an interior you walk about in, because a
 five-metre cell has no inside to walk about in — what you get is a room drawn around where you are

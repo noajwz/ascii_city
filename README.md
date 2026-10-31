@@ -31,8 +31,10 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
 - **A night sky with a different character every night** — clarity, the moon's phase, whether the
   milky way is up, the odd meteor, cloud coming and going. Now and then a night ends in a dawn, the
   city switching off sign by sign as the sky pales. Once in a great while, something else entirely.
-- **Places you can go into** — a casino with a roulette wheel that spins honestly, a slot machine
-  you play for chips and a blackjack table that deals straight, a club with a rave going
+- **Places you can go into** — a casino (a blade sign up the corner, a red carpet and a doorman,
+  and the whole building in gold when somebody hits 777) with a roulette wheel that spins
+  honestly, a slot machine you play for chips and a blackjack table that deals straight, a club
+  with a rave going
   on, ramen counters down the lit lanes where you can sit and wait for your bowl, a cinema
   showing a black-and-white film, with the title up over the doors in big lit letters and
   searchlights sweeping the sky from its roof, an arcade with a front that is one big wall of

@@ -351,6 +351,17 @@ ARCADE_NAMES = ["PIXEL PALACE", "HI-SCORE", "GAME ZONE", "TURBO", "BLIP BLOP",
 ARCADE_GAMES = ["ROOFTOP RUN", "FIX THE NEON", "LATE DELIVERY", "NEON DRIFT",
                 "SKY SHOW", "NIGHT OWL"]
 
+# The casino from the street: a blade sign up the front corner, the name
+# stacked down it, standing well out of the wall and up over the roofline; a
+# red carpet to the kerb with a doorman by it; and when somebody inside hits
+# 777, the whole building in gold, flashing, for half a minute.
+BLADE_U = 0.35         # how far along the front the blade stands: at the corner
+BLADE_OUT = 1.6        # out from the wall, to its middle
+BLADE_HALF = 1.3       # and half its depth either side of that
+BLADE_RISE = 3.0       # how far it goes up over the roof
+CARPET_HALF = 0.9      # half the carpet's width
+JACKPOT_LONG = 30.0    # seconds a casino celebrates a 777
+
 CASINO_NAMES = ["ROYALE", "GOLDEN", "LUCKY", "ACES", "MIRAGE", "JACKPOT",
                 "FORTUNA", "DIAMOND", "SPHINX", "MONTE"]
 
@@ -2283,7 +2294,8 @@ def lot(i, j):
                                "name": rng.choice(CASINO_NAMES),
                                "tone": rng.random(),
                                "sign_tone": rng.random(),
-                               "phase": rng.uniform(0.0, 5.0)}
+                               "phase": rng.uniform(0.0, 5.0),
+                               "i": i, "j": j, "height": b["height"]}
         elif _mix(i, j, 2401) % DINER_ODDS == 0:
             # A diner wants a wide street out front, and only one storey or
             # two over it: it is a low, long, lit box.
@@ -2790,7 +2802,9 @@ def draw_casino_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
     neon, and every window in the place lit."""
     scale = v.fy / dist
     cas = b["casino"]
-    trim = FLASH if v.flash > 0.35 else GOLD_DIM
+    party = jackpot_on(now, cas)
+    blink = FLASH if int(now * 8) % 2 else GOLD
+    trim = FLASH if v.flash > 0.35 else (blink if party else GOLD_DIM)
     roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
     foot = int(round(v.horizon + v.eye * scale))
 
@@ -2808,9 +2822,9 @@ def draw_casino_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
 
     # Bulbs along the roof and along the canopy over the door.
     for row in (roof, awning):
-        if r_lo <= row <= r_hi and chase(u, now):
+        if r_lo <= row <= r_hi and (party or chase(u, now)):
             ch[row][sx] = "o"
-            co[row][sx] = GOLD
+            co[row][sx] = blink if party else GOLD
 
     # The name, in neon, across the middle of the front.
     text = cas["name"]
@@ -2849,9 +2863,11 @@ def draw_casino_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
             # bulbs chasing round the edge on top you could not see where
             # the building stopped.
             m = _mix(b["seed"] + face, f, bay)
-            if (m & 0xFFFF) / 65535.0 >= 0.62:
+            if (m & 0xFFFF) / 65535.0 >= 0.62 and not party:
                 continue
             glyph, attr = b["glyphs"][(m >> 17) & 1], gold
+            if party:                       # every window on, and flashing
+                attr = FLASH if int(now * 8 + f + bay) % 2 else GOLD
         for dy in range(thick):
             yy = y + dy
             if r_lo <= yy <= r_hi:
@@ -4114,6 +4130,16 @@ RAVER_DOWN = [
 # where everybody is looking at the same thing.
 # On the door of the club, arms folded, not dancing, not smoking, and not
 # letting you in yet.
+# On the casino's door: cap, braid, white gloves, and opening it for you.
+DOORMAN = [
+    "  _=_  ",
+    "  (o)  ",
+    " /[#]\\ ",
+    " |[#]| ",
+    "  | |  ",
+    " _| |_ ",
+]
+
 BOUNCER = [
     "  ,-.  ",
     " (-_-) ",
@@ -4853,6 +4879,130 @@ def draw_arcade_front(ch, co, v, walls, arc, world, now):
                      int(round(door[1])), door[2], c, FLASH)
 
 
+_jackpot = None         # (when, i, j) of the last 777, and whose machine it was
+
+
+def hit_jackpot(now, cas):
+    """777 on a slot: the casino it was in goes up in gold for JACKPOT_LONG."""
+    global _jackpot
+    _jackpot = (now, cas["i"], cas["j"])
+
+
+def jackpot_on(now, cas):
+    """Is this casino celebrating."""
+    return (_jackpot is not None and cas.get("i") == _jackpot[1]
+            and cas.get("j") == _jackpot[2] and 0.0 <= now - _jackpot[0] < JACKPOT_LONG)
+
+
+def draw_blade(ch, co, v, walls, cas, i, j, f, now):
+    """The casino's name up the corner of the building on a blade sign, the
+    old Las Vegas way: a tall panel standing out from the wall at right
+    angles, the letters stacked top to bottom, bulbs chasing down both edges.
+    It runs from over the canopy to above the roofline.
+
+    Its two edges are projected from the world like a hung sign's, so it
+    stands out of the wall and foreshortens as you walk - edge-on from
+    straight across the road, open as you come down the street, which is
+    when a blade is meant to be read and when the marquee over the door is
+    hardest to. The letters are in screen rows, between where its top and
+    bottom are on screen - and if the top is over the top of the screen, they
+    close up to fit under it: from across a narrow street a blade's upper
+    half is out of sight, and the name with its first letters gone is worse
+    than the name a little squeezed.
+
+    The letters light one at a time from the top down, the whole name
+    flashes, and then it holds in its own colour - and on a jackpot it is
+    all gold and flashing for as long as the building is."""
+    lit, dark = NEON[min(len(NEON) - 1, int(cas["sign_tone"] * len(NEON)))]
+    name = cas["name"]
+    top_y, foot_y = cas["height"] + BLADE_RISE, FLOOR_H + 1.0
+    nx, nz = FACES[f]
+    edges = []
+    for out in (BLADE_OUT - BLADE_HALF, BLADE_OUT + BLADE_HALF):
+        pt = v.project(*face_point(i, j, f, BLADE_U, out, top_y))
+        pb = v.project(*face_point(i, j, f, BLADE_U, out, foot_y))
+        if pt is None or pb is None:
+            return
+        edges.append((pt[0], pt[1], pb[0], pb[1], (pt[2] + pb[2]) * 0.5))
+    dist = min(e[4] for e in edges)
+    if dist > 120.0:
+        return
+    party = jackpot_on(now, cas)
+    # The edges: lines of bulbs chasing downwards, unless edge-on.
+    cols = [int(round((e[0] + e[2]) * 0.5)) for e in edges]
+    open_ = abs(cols[0] - cols[1]) > 2
+    y0 = int(round(min(e[1] for e in edges)))
+    y1 = int(round(max(e[3] for e in edges)))
+    if open_:
+        a, b = sorted(cols)
+        for y in range(max(0, y0), min(v.height, y1 + 1)):
+            for x in range(a + 1, b):                  # a dark board behind
+                put_cell(ch, co, v, walls, x, y, dist, " ", GOLD_DIM)
+            for x in (a, b):
+                on = (y - int(now * 14.0)) % 3 == 0
+                put_cell(ch, co, v, walls, x, y, dist, "o" if on else ".",
+                         (FLASH if int(now * 8) % 2 else GOLD) if party
+                         else (GOLD if on else GOLD_DIM))
+    # The letters, top to bottom, between the board's top and its foot -
+    # closed up under the top of the screen when its top is above it.
+    first, last = max(1, y0 + 1), y1 - 1
+    if last - first < len(name) - 1:
+        return
+    mid = (cols[0] + cols[1]) // 2
+    t = (now + cas["phase"]) % 5.0
+
+    def colour(k):
+        if party:
+            return FLASH if int(now * 8 + k) % 2 else GOLD
+        if t < 0.25 * len(name):
+            return lit if k <= int(t / 0.25) else dark
+        if t < 0.25 * len(name) + 1.2:
+            return FLASH if int((t - 0.25 * len(name)) / 0.2) % 2 == 0 else lit
+        return lit
+    # The letters spread down the whole board - in the big font when it is
+    # wide enough and tall enough to take them, which it is from down the
+    # street, and in plain letters otherwise.
+    if open_ and abs(cols[0] - cols[1]) >= 5 and last - first + 1 >= len(name) * 6 - 1:
+        step = (last - first + 2 - 5) / max(1, len(name) - 1) if len(name) > 1 else 0
+        for dx, dy, k in big_cells(name):
+            cx, row = dx - k * 4, dy                   # the letter's own cell
+            put_cell(ch, co, v, walls, mid - 1 + cx, int(round(first + k * step)) + row,
+                     dist, "#", colour(k))
+        return
+    step = (last - first) / max(1, len(name) - 1) if len(name) > 1 else 0
+    for k, c in enumerate(name):
+        put_cell(ch, co, v, walls, mid, int(round(first + k * step)), dist, c,
+                 colour(k))
+
+
+def draw_red_carpet(ch, co, v, walls, cas, i, j, f, now):
+    """A red carpet from the casino's door to the kerb, brass posts down both
+    sides of it with a red rope slung between them."""
+    u = cas["u"]
+    out = 0.1
+    while out < PAVE - 0.05:
+        w = -CARPET_HALF
+        while w <= CARPET_HALF:
+            put_point(ch, co, v, walls, *face_point(i, j, f, u + w, out, 0.03), "=",
+                      ROU_RED)
+            w += 0.22
+        out += 0.3
+    for side in (-1.0, 1.0):
+        su = u + side * (CARPET_HALF + 0.25)
+        posts = (0.5, PAVE - 0.15)
+        for po in posts:
+            for y in (0.25, 0.55):
+                put_point(ch, co, v, walls, *face_point(i, j, f, su, po, y), "|",
+                          GOLD_DIM)
+            put_point(ch, co, v, walls, *face_point(i, j, f, su, po, 0.9), "o", GOLD)
+        for n in range(1, 5):
+            t = n / 5.0
+            put_point(ch, co, v, walls,
+                      *face_point(i, j, f, su, posts[0] + (posts[1] - posts[0]) * t,
+                                  0.82 - 0.16 * math.sin(math.pi * t)),
+                      "~", ROU_RED)
+
+
 def draw_marquee(ch, co, v, walls, cas, world, now):
     """The word, in lights, across the front of a casino.
 
@@ -4866,6 +5016,8 @@ def draw_marquee(ch, co, v, walls, cas, world, now):
         return
     sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
     neon = NEON[min(len(NEON) - 1, int(cas["sign_tone"] * len(NEON)))][0]
+    if jackpot_on(now, cas):
+        neon = FLASH if int(now * 8) % 2 else GOLD
     for row, (word, attr) in enumerate((("CASINO", neon), (cas["name"], GOLD))):
         x0 = sx - len(word) // 2
         for k, c in enumerate(word):
@@ -7790,8 +7942,18 @@ def draw_props(ch, co, v, walls, now, wet):
             if b["casino"] is not None:
                 # It has to be obvious from down the street what this is.
                 if f == b["casino"]["door"]:
+                    cas = b["casino"]
                     w = face_point(i, j, f, CELL * 0.5, 0.6, 4.6)
-                    props.append((_d2(v, w), "marquee", b["casino"], w, (nx, nz)))
+                    props.append((_d2(v, w), "marquee", cas, w, (nx, nz)))
+                    # The blade up the corner, out over the pavement.
+                    w = face_point(i, j, f, BLADE_U, BLADE_OUT, FLOOR_H + 1.0)
+                    props.append((_d2(v, w), "blade", (cas, i, j, f), w, (nx, nz)))
+                    # The red carpet to the kerb, and the doorman beside it.
+                    w = face_point(i, j, f, cas["u"], 0.9, 0.0)
+                    props.append((_d2(v, w), "carpet", (cas, i, j, f), w, (nx, nz)))
+                    side = 1.3 if cas["u"] < CELL * 0.5 else -1.3
+                    w = face_point(i, j, f, cas["u"] + side, 0.45, 0.0)
+                    props.append((_d2(v, w), "doorman", cas, w, (nx, nz)))
                 continue
             if b["club"] is not None:
                 # Nobody is getting in for a while. Some of them are dancing
@@ -7860,6 +8022,14 @@ def draw_props(ch, co, v, walls, now, wet):
             draw_lanterns(ch, co, v, walls, s[0], s[1], s[2], s[3], now, wet)
         elif kind == "marquee":
             draw_marquee(ch, co, v, walls, s, world, now)
+        elif kind == "blade":
+            draw_blade(ch, co, v, walls, *s, now)
+        elif kind == "carpet":
+            draw_red_carpet(ch, co, v, walls, *s, now)
+        elif kind == "doorman":
+            blit_sprite(ch, co, v, walls, DOORMAN, world[0], world[2], 0.05,
+                        SMOKER_H * 1.02, SMOKER_W * 1.15,
+                        FLASH if jackpot_on(now, s) and int(now * 6) % 2 else GOLD)
         elif kind == "hung":
             draw_hung_sign(ch, co, v, walls, s, world, normal, now, wet)
         elif kind == "raver":
@@ -8918,6 +9088,15 @@ class Purse:
         return True
 
 
+_rig_slot = False       # % in the menu: the next pull is 777, once
+
+
+def rig_jackpot():
+    """The one way to see a jackpot without nine thousand pulls."""
+    global _rig_slot
+    _rig_slot = True
+
+
 class Slot:
     """One machine. pull() draws a result and starts the reels; reel_at()
     says what is showing in a reel this instant, and the payline is the
@@ -8943,7 +9122,11 @@ class Slot:
         self.short = not self.purse.take(self.bet)
         if self.short:
             return False
-        picks = _spin_rng.choices(range(len(SLOT_SYMBOLS)), SLOT_WEIGHTS, k=3)
+        global _rig_slot
+        if _rig_slot:
+            picks, _rig_slot = [0, 0, 0], False     # the menu asked for 777
+        else:
+            picks = _spin_rng.choices(range(len(SLOT_SYMBOLS)), SLOT_WEIGHTS, k=3)
         self.result = picks
         self.t0 = now
         self.pulls += 1
@@ -9288,7 +9471,7 @@ def _big(ch, co, y, x, s, attr):
             col += 2
 
 
-def render_casino_room(spin, width, height, now, slot=None, table=None):
+def render_casino_room(spin, width, height, now, slot=None, table=None, party=False):
     """Inside.
 
     The wheel is the middle of a room rather than the whole screen: a ceiling
@@ -9305,9 +9488,10 @@ def render_casino_room(spin, width, height, now, slot=None, table=None):
 
     if roomy:
         for x in range(width):                       # the ceiling, in lights
-            lit = chase(x * 0.2, now)
+            lit = chase(x * 0.2, now) or party
             ch[top][x] = "o" if lit else "="
-            co[top][x] = GOLD if lit else GOLD_DIM
+            co[top][x] = ((FLASH if int(now * 8 + x) % 2 else GOLD) if party
+                          else GOLD if lit else GOLD_DIM)
         banner = "CASINO  %s" % spin.name
         _text(ch, co, top + 1, int(cx - len(banner) / 2), banner, GOLD)
         for x in range(2, width - 6, 9):             # a back wall of slots
@@ -10590,6 +10774,7 @@ def draw_cheats(ch, co, note):
            ("", ""), ("", "NIGHTS"),
            ("n", "the next one"), ("A", "a strange night"),
            ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
+           ("%", "777 next pull"),
            ("", ""), ("`", "close")]
     columns = (left, middle, right, sky)
 
@@ -11207,6 +11392,7 @@ def main(stdscr):
     wheel = None                # the roulette, while you stand in a casino
     purse = Purse()             # the chips you carry round the casino
     slot = Slot(purse)          # the machine beside the wheel
+    jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(purse)    # and the table on the other side
     arms = []                   # what the claw machines have given you
     claw = None                 # the last claw machine you stood at
@@ -11258,6 +11444,9 @@ def main(stdscr):
                 elif key == ord("!"):
                     note = ("fireworks over the bay tonight"
                             if skip_to_fireworks(now) else "no such night near")
+                elif key == ord("%"):
+                    rig_jackpot()
+                    note = "the next pull is 777"
                 elif key == ord("z"):
                     note = ("lanterns on the river tonight"
                             if skip_to_lanterns(now) else "no such night near")
@@ -11499,7 +11688,12 @@ def main(stdscr):
         elif wheel is not None:
             slot.settle(now)
             table.update(now)
-            ch, co = render_casino_room(wheel, width, height, now, slot, table)
+            if slot.payout(now) == "JACKPOT" and slot.pulls != jackpot_pull:
+                # 777: this casino goes up in gold, inside and out.
+                hit_jackpot(now, venue[1])
+                jackpot_pull = slot.pulls
+            ch, co = render_casino_room(wheel, width, height, now, slot, table,
+                                        jackpot_on(now, venue[1]))
             hud = ROULETTE_HUD % (wheel.name, cam_x, cam_z)
         elif venue is not None and venue[0] == "club":
             ch, co = render_rave(venue[1], width, height, now)
