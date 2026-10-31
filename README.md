@@ -48,8 +48,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   windows next door shake on the kick, the puddles ripple, and at closing time the lights come
   up and everyone spills out into the street.
 - **A stock exchange** in the financial district, its ticker running across the front in green
-  and red, and inside the candles for a made-up stock you can buy and sell as it moves every
-  thirty seconds.
+  and red, and inside a trading floor with sixteen made-up stocks - charts or a list - to buy and sell
+  as they move every thirty seconds, with bull and bear markets, sectors and hot streaks.
 - **A landmark skyscraper** a whole block wide in every part of the city, stepped like the old
   Art Deco towers with a spire on top, and a techno party on its roof that you can walk about in,
   its lasers going out over the city.

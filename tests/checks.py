@@ -3932,7 +3932,65 @@ xv = ac.View(xsp[0] - math.sin(xsp[2]) * 12, xsp[1] - math.cos(xsp[2]) * 12, xsp
              110, 34)
 xg = "\n".join("".join(r) for r in ac.render_street(xv, 405.0)[0])
 check("from across the street, the ticker going by over the columns",
-      "STOCK  EXCHANGE" in xg and any(sym in xg for sym, _ in ac.STOCKS))
+      "STOCK  EXCHANGE" in xg and any(sym in xg for sym, _, _ in ac.STOCKS))
+
+# --- more stocks, the list, and the market's logic -----------------------------
+check("sixteen stocks in four sectors", len(ac.STOCKS) == 16
+      and {sec for _, _, sec in ac.STOCKS} == {0, 1, 2, 3})
+runs_ = []
+rises_ = []
+for st in range(len(ac.STOCKS)):
+    prices = [ac.stock_price(st, k * ac.TICK_LEN) for k in range(2000)]
+    run = best = 0
+    for a_, b_ in zip(prices, prices[1:]):
+        run = run + 1 if b_ > a_ else 0
+        best = max(best, run)
+    runs_.append(best)
+    for e in range(2000 // ac.EPOCH - 1):
+        if ac.stock_mode(st, e)[0] == "hot":
+            rises_.append(prices[(e + 1) * ac.EPOCH] / prices[e * ac.EPOCH])
+check("stocks go on hot streaks, many ticks up in a row", max(runs_) >= 8,
+      "longest %d" % max(runs_))
+rises_.sort()
+check("and a hot epoch is a big rise, mostly",
+      rises_ and rises_[len(rises_) // 2] > 1.3,
+      "median x%.2f over %d" % (rises_[len(rises_) // 2], len(rises_)))
+names_ = {ac.stock_mode(st, e)[0] for st in range(16) for e in range(200)}
+check("every mode turns up", names_ == {m[0] for m in ac.MODES})
+
+
+def returns(st):
+    return [math.log(ac.stock_price(st, (k + 1) * ac.TICK_LEN)
+                     / ac.stock_price(st, k * ac.TICK_LEN)) for k in range(0, 3000, 3)]
+
+
+def corr(a, b):
+    ma, mb = sum(a) / len(a), sum(b) / len(b)
+    sa = math.sqrt(sum((x - ma) ** 2 for x in a))
+    sb = math.sqrt(sum((x - mb) ** 2 for x in b))
+    return sum((x - ma) * (y - mb) for x, y in zip(a, b)) / (sa * sb)
+
+
+rets = [returns(st) for st in range(16)]
+same = [corr(rets[a], rets[b]) for a in range(16) for b in range(a + 1, 16)
+        if ac.STOCKS[a][2] == ac.STOCKS[b][2]]
+other = [corr(rets[a], rets[b]) for a in range(16) for b in range(a + 1, 16)
+         if ac.STOCKS[a][2] != ac.STOCKS[b][2]]
+check("stocks move with the market, and more with their own sector",
+      sum(other) / len(other) > 0.02
+      and sum(same) / len(same) > sum(other) / len(other),
+      "sector %.2f, across %.2f" % (sum(same) / len(same), sum(other) / len(other)))
+lb = ac.Broker()
+lb.listing = True
+lb.sel = 13
+lt = "\n".join("".join(r) for r in ac.render_exchange(xven[1], lb, 80, 24, t_)[0])
+check("the list shows the stocks round the one picked, in 80x24",
+      ac.STOCKS[13][0] in lt and "PRICE" in lt and ">" in lt)
+lb.lot = 0
+lb.buy(13, t_)
+check("and buys what is picked", lb.held.get(13) == 1)
+check("the floor says which way the market is going",
+      ac.mood(t_) in ("BULL MARKET", "BEAR MARKET", "FLAT MARKET"))
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

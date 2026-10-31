@@ -410,10 +410,24 @@ TICK_LEN = 30.0        # seconds a price stands before the next
 CANDLES = 48           # how many the chart goes back, at most
 LOTS = [1, 10, 100, 0] # how many a trade is: 0 is as many as you can
 STARTING_CASH = 1000.0
-STOCKS = [("NEON", "NEON TUBES CO"), ("RAMN", "RAMEN HOLDINGS"),
-          ("DRFT", "DRIFT MOTORS"), ("BLIP", "BLIP ARCADES"),
-          ("CLAW", "CLAW AND CO"), ("GLOW", "GLOWSTICK INDUSTRIES"),
-          ("LIFT", "SKYDECK LIFTS"), ("NOOD", "NOODLE FUTURES")]
+SECTORS = ["TECH", "FOOD", "TRANSPORT", "LEISURE"]
+STOCKS = [("NEON", "NEON TUBES CO", 0), ("BLIP", "BLIP ARCADES", 0),
+          ("GLOW", "GLOWSTICK INDUSTRIES", 0), ("HOLO", "HOLO SIGNAGE", 0),
+          ("RAMN", "RAMEN HOLDINGS", 1), ("NOOD", "NOODLE FUTURES", 1),
+          ("CUPS", "COFFEE CUP CORP", 1), ("PIES", "PIE CASE INC", 1),
+          ("DRFT", "DRIFT MOTORS", 2), ("LIFT", "SKYDECK LIFTS", 2),
+          ("FERY", "BAY FERRY LINES", 2), ("ELEV", "EL LINE TRANSIT", 2),
+          ("CLAW", "CLAW AND CO", 3), ("CINE", "PICTURE HOUSE", 3),
+          ("LUCK", "LUCKY SEVEN GAMING", 3), ("PIER", "PLEASURE PIER LTD", 3)]
+# What a stock is doing, for EPOCH ticks at a time: (name, how far it carries
+# the price over the epoch in log units, how wild the noise is, how often).
+# A move rises across its epoch and then fades back out across the next, so a
+# hot streak is followed by the air coming out of it.
+EPOCH = 24
+MODES = [("stable", 0.0, 1.0, 38), ("rising", 0.22, 1.0, 14),
+         ("falling", -0.22, 1.0, 14),
+         ("hot", 0.62, 1.2, 9), ("crash", -0.45, 1.5, 7), ("chaotic", 0.0, 3.0, 18)]
+STREAK = 4             # ticks one way in a row that the list calls a streak
 
 CASINO_NAMES = ["ROYALE", "GOLDEN", "LUCKY", "ACES", "MIRAGE", "JACKPOT",
                 "FORTUNA", "DIAMOND", "SPHINX", "MONTE"]
@@ -3299,21 +3313,88 @@ def _noise(x, salt):
     return a + (b - a) * f
 
 
+def stock_mode(s, e):
+    """What stock s is doing in epoch e."""
+    m = _mix(s, e, 2721) % sum(w for *_, w in MODES)
+    for mode in MODES:
+        if m < mode[3]:
+            return mode
+        m -= mode[3]
+    return MODES[0]
+
+
+def _moves(s, k):
+    """(how far its modes have carried the price, how wild its noise is), at
+    tick k: this epoch's move rising, the last one's fading back out, and the
+    wildness eased over from the last epoch's in a couple of ticks."""
+    e = int(math.floor(k / EPOCH))
+    carry = 0.0
+    for ee in (e, e - 1):
+        t = (k - ee * EPOCH) / EPOCH
+        amp = stock_mode(s, ee)[1]
+        carry += amp * (t if t <= 1.0 else max(0.0, 2.0 - t))
+    into = k - e * EPOCH
+    wild = stock_mode(s, e)[2]
+    if into < 2.0:
+        before = stock_mode(s, e - 1)[2]
+        wild = before + (wild - before) * into / 2.0
+    return carry, wild
+
+
+def market(k):
+    """The tide the whole market is on: everything rises and falls on it, some
+    stocks more than others."""
+    # Slow, for the long bulls and bears; and quick, for the market's nerves
+    # on the day, which every stock feels on the same tick.
+    return (0.18 * math.sin(k / 157.0 + 1.3) + 0.12 * _noise(k / 23.0, 999)
+            + 0.06 * _noise(k / 1.5, 998))
+
+
 def stock_price(s, t):
     """What stock s is worth at time t, the way it went in between the
-    ticks. A function of time alone - long slow trends, swings, noise, and
-    now and then a lurch up or down that the noise carries on from - so it
-    is the same market however you come back to it, and nothing is kept."""
+    ticks. Four things, all functions of time, so it is the same market
+    however you come back to it and nothing is kept: the market's tide, with
+    the stock's own beta on it; its sector's current, shared with the other
+    three in it; its own swings and noise, wilder in a chaotic epoch; and its
+    mode's move - a rise, a fall, a hot streak, a crash."""
     k = t / TICK_LEN
     m = _mix(s, 0, 2713)
     base = 20.0 + (m & 255) * 0.6
-    vol = 0.6 + ((m >> 8) & 255) / 255.0 * 0.8
-    a, b_, c = ((m >> 16) & 63) * 0.1, ((m >> 22) & 63) * 0.1, ((m >> 26) & 31) * 0.2
-    x = (0.45 * math.sin(k / 97.0 + a) + 0.25 * math.sin(k / 31.0 + b_)
-         + 0.12 * math.sin(k / 7.3 + c)
-         + 0.16 * _noise(k / 2.0, s) + 0.035 * _noise(k * 3.0, s + 17)
-         + 0.25 * _noise(k / 11.0, s + 41) ** 3)
+    vol = 0.7 + ((m >> 8) & 255) / 255.0 * 0.6
+    beta = 0.6 + ((m >> 16) & 63) / 63.0 * 0.9
+    b_, c = ((m >> 22) & 63) * 0.1, ((m >> 26) & 31) * 0.2
+    sec = STOCKS[s][2]
+    carry, wild = _moves(s, k)
+    x = (beta * market(k)
+         + 0.12 * _noise(k / 17.0, 1000 + sec) + 0.06 * math.sin(k / 41.0 + sec)
+         + 0.05 * _noise(k / 2.0, 1100 + sec)
+         + 0.10 * math.sin(k / 31.0 + b_) + 0.05 * math.sin(k / 7.3 + c)
+         + wild * (0.08 * _noise(k / 2.0, s) + 0.025 * _noise(k * 3.0, s + 17))
+         + carry)
     return base * math.exp(vol * x)
+
+
+def streak(s, now):
+    """How many ticks in a row stock s has gone up (or down, negative)."""
+    k = tick_of(now)
+    run, way = 0, 0
+    for q in range(k, k - 30, -1):
+        d = stock_price(s, q * TICK_LEN) - stock_price(s, (q - 1) * TICK_LEN)
+        w = 1 if d >= 0 else -1
+        if way and w != way:
+            break
+        way, run = w, run + 1
+    return run * way
+
+
+def mood(now):
+    """The market's mood for the floor's header: which way the tide has gone
+    over the last ten ticks."""
+    k = tick_of(now)
+    d = market(k) - market(k - 10)
+    if d > 0.02:
+        return "BULL MARKET"
+    return "BEAR MARKET" if d < -0.02 else "FLAT MARKET"
 
 
 def tick_of(now):
@@ -3338,7 +3419,7 @@ def ticker(now):
     last tick, as (text, colour) runs."""
     out = []
     k = tick_of(now)
-    for n, (sym, _) in enumerate(STOCKS):
+    for n, (sym, _, _) in enumerate(STOCKS):
         p, q = stock_price(n, k * TICK_LEN), stock_price(n, (k - 1) * TICK_LEN)
         up = p >= q
         out.append((sym + " ", GOLD))
@@ -3416,6 +3497,8 @@ class Broker:
         self.paid = {}               # stock -> what they cost, in all
         self.lot = 0                 # index into LOTS
         self.said = ("", -1e9)
+        self.sel = 0                 # the stock picked on the floor
+        self.listing = False         # the list of them all, or the chart
 
     def size(self, s, price, buying):
         n = LOTS[self.lot]
@@ -3452,15 +3535,15 @@ class Broker:
 
 
 def render_exchange(ex, broker, width, height, now):
-    """The trading floor: the ticker running along the top, the house
-    stock's candles across the middle - green where a tick closed up, red
-    where it closed down, the wick from its high to its low - with the price
-    scale down the side and the time to the next tick, and under it your
-    account and what to press."""
+    """The trading floor: the ticker along the top, then either the chart -
+    the chosen stock's candles, green where a tick closed up and red where it
+    closed down, the wick from its high to its low, the scale down the side -
+    or the list of every stock on the floor, to pick from and trade; and
+    under either, your account and what to press."""
     ch = [[" "] * width for _ in range(height)]
     co = [[0] * width for _ in range(height)]
-    s = ex["stock"]
-    sym, name = STOCKS[s]
+    s = broker.sel % len(STOCKS)
+    sym, name, sec = STOCKS[s]
     price = stock_now(s, now)
     if width < 50 or height < 18:
         _text(ch, co, height // 2, 1, "%s %.2f" % (sym, price), GOLD)
@@ -3474,35 +3557,17 @@ def render_exchange(ex, broker, width, height, now):
     for x in range(width):
         n = (x + shift) % len(text)
         ch[1][x], co[1][x] = text[n], colours[n]
-    head = "%s  -  %s (%s)" % ("THE EXCHANGE", name, sym)
-    _text(ch, co, 3, 2, head, GOLD)
     k = tick_of(now)
     left = int(TICK_LEN - (now - k * TICK_LEN))
+    md = mood(now)
+    _text(ch, co, 3, 2, "THE EXCHANGE  -  " + md,
+          {"BULL": ROU_GREEN, "BEAR": ROU_RED}.get(md[:4], GOLD))
     _text(ch, co, 3, width - 24, "next price in %2ds" % left, GOLD_DIM)
-    # The chart.
     top, bot = 5, height - 7
-    cols = (width - 14) // 2
-    n = max(4, min(CANDLES, cols))
-    cs = [candle(s, k - n + q) for q in range(n)]
-    hi = max(c[1] for c in cs)
-    lo = min(c[2] for c in cs)
-    span = max(1e-6, hi - lo)
-
-    def row(p):
-        return bot - int(round((p - lo) / span * (bot - top)))
-    for r in range(5):
-        p = lo + span * r / 4.0
-        _text(ch, co, row(p), width - 11, "- %7.2f" % p, CONCRETE)
-    for q, (o, h, l_, c) in enumerate(cs):
-        x = 2 + q * 2
-        up = c >= o
-        attr = ROU_GREEN if up else ROU_RED
-        for y in range(row(h), row(l_) + 1):
-            ch[y][x], co[y][x] = "|", attr
-        for y in range(min(row(o), row(c)), max(row(o), row(c)) + 1):
-            ch[y][x], co[y][x] = "#", attr
-    _text(ch, co, row(price), width - 12, ">", FLASH)
-    # The account.
+    if broker.listing:
+        _exchange_list(ch, co, broker, width, top, bot, now)
+    else:
+        _exchange_chart(ch, co, s, width, top, bot, now)
     held = broker.held.get(s, 0)
     worth = broker.cash + sum(n_ * stock_now(t, now) for t, n_ in broker.held.items())
     cost = broker.paid.get(s, 0.0)
@@ -3514,14 +3579,72 @@ def render_exchange(ex, broker, width, height, now):
             "+" if pl >= 0 else "-", abs(pl)), ROU_GREEN if pl >= 0 else ROU_RED),
         ("cash %.2f   worth %.2f   in lots of %s" % (
             broker.cash, worth, lot if lot else "max"), GOLD),
-        ("b buys  n sells  +/- lot size  s walks out", GOLD_DIM),
+        ("b buys  n sells  +/- lot  arrows pick  l %s  s walks out"
+         % ("chart" if broker.listing else "list"), GOLD_DIM),
     ]
     for r, (line, attr) in enumerate(lines):
-        _text(ch, co, height - 5 + r, 2, line, attr)
+        _text(ch, co, height - 5 + r, 2, line[:width - 3], attr)
     said, at = broker.said
     if now - at < 3.0:
         _text(ch, co, height - 6, 2, said, FLASH)
     return ch, co
+
+
+def _exchange_chart(ch, co, s, width, top, bot, now):
+    sym, name, sec = STOCKS[s]
+    price = stock_now(s, now)
+    _text(ch, co, top - 1, 2, "%s (%s, %s)  %d/%d" % (name, sym, SECTORS[sec].lower(),
+                                                   s + 1, len(STOCKS)), GOLD)
+    k = tick_of(now)
+    n = max(4, min(CANDLES, (width - 14) // 2))
+    cs = [candle(s, k - n + q) for q in range(n)]
+    hi = max(c[1] for c in cs)
+    lo = min(c[2] for c in cs)
+    span = max(1e-6, hi - lo)
+    top += 1
+
+    def row(p):
+        return bot - int(round((p - lo) / span * (bot - top)))
+    for r in range(5):
+        p = lo + span * r / 4.0
+        _text(ch, co, row(p), width - 11, "- %7.2f" % p, CONCRETE)
+    for q, (o, h, l_, c) in enumerate(cs):
+        x = 2 + q * 2
+        attr = ROU_GREEN if c >= o else ROU_RED
+        for y in range(row(h), row(l_) + 1):
+            ch[y][x], co[y][x] = "|", attr
+        for y in range(min(row(o), row(c)), max(row(o), row(c)) + 1):
+            ch[y][x], co[y][x] = "#", attr
+    _text(ch, co, row(price), width - 12, ">", FLASH)
+
+
+def _exchange_list(ch, co, broker, width, top, bot, now):
+    """Every stock on the floor, a row each, the chosen one picked out:
+    what it is, what it costs, its last move, what you hold of it and what
+    that is worth, and whether it is on a streak."""
+    _text(ch, co, top, 2,
+          "  STOCK  COMPANY               PRICE    MOVE    HELD     VALUE", GOLD_DIM)
+    rows = bot - top - 1
+    first = max(0, min(len(STOCKS) - rows, broker.sel % len(STOCKS) - rows // 2))
+    for r, s in enumerate(range(first, min(len(STOCKS), first + rows))):
+        sym, name, _ = STOCKS[s]
+        p = stock_now(s, now)
+        q = stock_price(s, (tick_of(now) - 1) * TICK_LEN)
+        move = p / q - 1.0
+        held = broker.held.get(s, 0)
+        run = streak(s, now)
+        tag = "HOT!" if run >= STREAK else ("SLIDE" if run <= -STREAK else "")
+        mine = s == broker.sel % len(STOCKS)
+        y = top + 1 + r
+        _text(ch, co, y, 2, ">" if mine else " ", FLASH)
+        _text(ch, co, y, 4, "%-5s  %-20s" % (sym, name[:20]), FLASH if mine else GOLD)
+        _text(ch, co, y, 34, "%8.2f" % p, FLASH if mine else CONCRETE)
+        _text(ch, co, y, 44, "%+6.1f%%" % (move * 100),
+              ROU_GREEN if move >= 0 else ROU_RED)
+        if held:
+            _text(ch, co, y, 52, "%6d  %9.2f" % (held, held * p), GOLD)
+        if tag and width > 76:
+            _text(ch, co, y, 70, tag, ROU_GREEN if run > 0 else ROU_RED)
 
 
 def draw_tree_column(ch, co, v, sx, dist, b, u, r_lo, r_hi):
@@ -13103,8 +13226,8 @@ RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
 DINER_HUD = " at the diner, open 24/7, at %d,%d  -  s walks back out  -  q quit "
 CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
-EXCHANGE_HUD = (" on the trading floor  -  b buys, n sells, +/- lot size  -  s walks"
-                " out  -  q quit ")
+EXCHANGE_HUD = (" on the trading floor  -  b buys, n sells, arrows pick, l lists  -"
+                "  s walks out  -  q quit ")
 ARCADE_HUD = (" in the %s arcade  -  ad choose a game  -  p plays  -  s walks out"
               "  -  q quit ")
 GAME_HUD = " playing %s  -  %s  -  x leaves the cabinet  -  q quit "
@@ -13274,8 +13397,14 @@ def main(stdscr):
             elif wheel is not None and key in (ord("k"), ord("K")):
                 table.stand(now)
             elif at_exchange and key in (ord("b"), ord("n")):
-                (broker.buy if key == ord("b") else broker.sell)(at_exchange["stock"],
-                                                                 now)
+                (broker.buy if key == ord("b") else broker.sell)(
+                    broker.sel % len(STOCKS), now)
+            elif at_exchange and key in (ord("l"), ord("L")):
+                broker.listing = not broker.listing
+            elif at_exchange and key in ARROWS:
+                # Up and down the list, or left and right between charts -
+                # either way it is the next stock or the last one.
+                broker.sel += -1 if key in (curses.KEY_UP, curses.KEY_LEFT) else 1
             elif at_exchange and key in (ord("+"), ord("="), ord("-"), ord("_")):
                 step = 1 if key in (ord("+"), ord("=")) else -1
                 broker.lot = (broker.lot + step) % len(LOTS)
@@ -13452,6 +13581,8 @@ def main(stdscr):
             venue = None
         if venue is None or venue[0] not in ("ramen", "diner"):
             seated = None               # stood up: the next visit is a new bowl
+        if venue is not None and venue[0] == "exchange" and not at_exchange:
+            broker.sel = venue[1]["stock"]          # its own stock, on the way in
         at_exchange = (venue[1] if venue is not None and venue[0] == "exchange"
                        else False)
         at_arcade = venue is not None and venue[0] == "arcade"
