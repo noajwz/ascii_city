@@ -371,6 +371,8 @@ SEARCH_LONG = 160.0    # how far up into the sky a beam reaches
 SEARCH_LEAN = 0.65     # radians off the vertical: well over, across the sky
 FILM_TITLES = ["THE LONG NIGHT", "NEON RAIN", "LAST TRAIN", "AFTER HOURS",
                "CITY OF GLASS", "THE QUIET STREET", "BLUE HOUR", "NOWHERE MAN"]
+# And the other half of the cinemas are showing an action picture.
+ACTION_TITLES = ["OVERDRIVE", "BURN ZONE", "STEEL NERVE", "ZERO HOUR"]
 
 # --- the arcade ---
 # Low, two or three storeys, and loud with it: the whole front is a wall of
@@ -2479,8 +2481,7 @@ def lot(i, j):
             if face is not None:
                 b["height"] = max(b["height"], 10.0)
                 b["cinema"] = {"door": face, "u": CELL * 0.5,
-                               "title": FILM_TITLES[_mix(i, j, 1967)
-                                                    % len(FILM_TITLES)],
+                               "title": _film_pick(i, j),
                                "offset": _mix(i, j, 1969) % 997,
                                "i": i, "j": j, "height": b["height"]}
         elif d["name"] == "financial" and _mix(i, j, 2701) % EXCHANGE_ODDS == 0 \
@@ -12978,7 +12979,9 @@ def film_frame(title, t, w, h):
     """One frame of the picture: a list of h strings of w characters, and how
     bright it is overall (0..1) - which is what lights the audience. Six
     scenes on a loop: the title, rain on a window, a night drive, two people
-    talking, the city, and THE END."""
+    talking, the city, and THE END. An action title is the other picture."""
+    if title in ACTION_TITLES:
+        return action_frame(title, t, w, h)
     g = [[" "] * w for _ in range(h)]
 
     def put(x, y, c):
@@ -13058,6 +13061,230 @@ def film_frame(title, t, w, h):
         bright = 0.15
     flicker = 0.85 + 0.15 * math.sin(t * 23.0) * math.sin(t * 7.0)
     return ["".join(r) for r in g], bright * flicker
+
+
+def _film_pick(i, j):
+    """What a cinema is showing: the drama or, one in two, the action."""
+    titles = ACTION_TITLES if _mix(i, j, 1971) % 2 else FILM_TITLES
+    return titles[_mix(i, j, 1967) % len(titles)]
+
+
+ACTION_TAGS = {"OVERDRIVE": "ONE NIGHT. ONE CITY. NO BRAKES.",
+               "BURN ZONE": "THIS TIME IT'S PERSONAL. AGAIN.",
+               "STEEL NERVE": "HE DOESN'T DO SEQUELS. UNTIL NOW.",
+               "ZERO HOUR": "THE CLOCK IS TICKING. SO IS HE."}
+ACTION_QUIPS = ["Guess the party's over.", "I was off duty anyway.",
+                "Somebody call a tow truck.", "That was my favourite car.",
+                "Told you. No brakes."]
+ACTION_BLOWS = ["POW!", "WHAM!", "KRAK!", "BIFF!", "THUD!"]
+# What the screen shows in colour, when an action picture is on - the
+# drama is black and white, and this is not.
+ACTION_INK = {"@": "fire", "%": "fire", "*": "spark", "!": "spark"}
+
+HERO_CAR = ["  ____   ", " /|__|\\_ ", "(o)---(o)"]
+VAN = [" ______  ", "|[]  []|>", "(o)--(o) "]
+RUN = ([" o ", "/|\\", "/ \\"], [" o ", "<|-", " |\\"])
+LEAP = [" o/", "/| ", "/  "]
+COPTER = (["----+----", " __|__   ", "(__[]_>==", " '  '    "],
+          ["  --+--  ", " __|__   ", "(__[]_>==", " '  '    "])
+
+
+def action_frame(title, t, w, h):
+    """One frame of the action picture, the drama's other half: the title
+    slammed up in big letters, a car chase with the van shooting, a leap
+    between rooftops under a helicopter's searchlight, a fist fight with the
+    blows written up in the air, an explosion the hero walks away from
+    without looking back, and the sequel. Six scenes on the drama's loop, so
+    one cinema's film and another's keep the same time."""
+    g = [[" "] * w for _ in range(h)]
+
+    def put(x, y, c):
+        x, y = int(x), int(y)
+        if 0 <= x < w and 0 <= y < h:
+            g[y][x] = c
+
+    def text(y, s_, x=None):
+        x0 = (w - len(s_)) // 2 if x is None else int(x)
+        for k, c in enumerate(s_):
+            put(x0 + k, y, c)
+
+    def sprite(x, y, rows):
+        for r, line in enumerate(rows):
+            for k, c in enumerate(line):
+                if c != " ":
+                    put(x + k, y + r, c)
+
+    t = t % (FILM_SCENES * SCENE_LEN)
+    scene, s_ = divmod(t, SCENE_LEN)
+    scene = int(scene) % FILM_SCENES
+    seed = _mix(len(title), ord(title[0]), 2911)
+    bright = 0.4
+    shake = 0
+    if scene == 0:                        # the title, slammed up
+        if s_ > 0.4:
+            word = title.replace(" ", "  ")
+            if len(word) * 4 <= w and h >= 9:
+                x0 = (w - len(word) * 4) // 2
+                for dx, dy, _ in big_cells(word):
+                    put(x0 + dx, h // 2 - 4 + dy, "#")
+            else:
+                text(h // 2 - 2, title)
+            if s_ < 1.3:
+                shake = 1 if int(s_ * 20) % 2 else -1
+                for k in range(w // 2):          # sparks off the slam
+                    m = _mix(k, int(s_ * 10), 2913)
+                    r = (s_ - 0.4) * 30.0
+                    a = (m % 628) / 100.0
+                    put(w / 2 + math.cos(a) * r * ((m >> 9) % 100) / 100.0,
+                        h / 2 + math.sin(a) * r * 0.4 * ((m >> 9) % 100) / 100.0,
+                        "*")
+                bright = 0.9 - (s_ - 0.4) * 0.5
+        if s_ > 2.5:
+            text(h - 2, ACTION_TAGS.get(title, "NO BRAKES."))
+    elif scene == 1:                      # the chase
+        road = h - 2
+        for x in range(w):
+            put(x, road - 4, "_")
+            if (x + int(s_ * 30)) % 8 < 4:
+                put(x, road, "-")
+            top = road - 5 - _mix((x + int(s_ * 6)) // 5, 0, 2915) % max(1, h // 3)
+            if (x + int(s_ * 6)) % 5 == 0:
+                for y in range(top, road - 4):
+                    put(x, y, "|")
+            put(x, top, "_")
+        for k in range(4):                # lamp posts, going past fast
+            x = (k * w / 4.0 - s_ * 55.0) % (w + 10) - 5
+            for y in range(road - 7, road - 3):
+                put(x, y, "|")
+            put(x, road - 8, "o")
+        bounce = int(s_ * 9) % 2
+        hx = w * 0.55 + 4 * math.sin(s_ * 1.2)
+        vx = w * 0.12 + 5 * math.sin(s_ * 0.9 + 1.0)
+        sprite(hx, road - 3 - bounce, HERO_CAR)
+        sprite(vx, road - 3 - (1 - bounce), VAN)
+        if (s_ * 1.7) % 1.0 < 0.3:        # the van shooting
+            put(vx + 10, road - 2, "*")
+            for x in range(int(vx) + 11, int(hx) - 1, 3):
+                put(x, road - 2, "-")
+            put(hx - 1, road - 3, "*")
+            bright = 0.6
+        for k in range(6):                # speed lines, in the sky over it
+            m = _mix(k, int(s_ * 4), 2917)
+            y = 1 + m % max(1, road - 6 - h // 3)
+            x = (m >> 8) % w
+            for d in range(5):
+                put(x + d, y, "-")
+    elif scene == 2:                      # rooftops, and the leap
+        gap0, gap1 = int(w * 0.42), int(w * 0.58)
+        r1, r2 = h - 5, h - 6
+        for x in range(w):
+            top = r1 if x < gap0 else (r2 if x >= gap1 else None)
+            if top is None:
+                continue
+            put(x, top, "_")
+            for y in range(top + 1, h):
+                put(x, y, "|" if x in (gap0 - 1, gap1) else
+                    "o" if (x % 4 == 1 and y % 2 == 0 and _mix(x, y, 2919) % 3 == 0)
+                    else " ")
+        p = s_ / SCENE_LEN
+        if p < 0.4:
+            x, y, rows = 2 + (gap0 - 4) * p / 0.4, r1 - 3, RUN[int(s_ * 8) % 2]
+        elif p < 0.6:
+            q = (p - 0.4) / 0.2
+            x = gap0 - 2 + (gap1 - gap0 + 3) * q
+            y = r1 - 3 - math.sin(q * math.pi) * 4 + (r2 - r1) * q
+            rows = LEAP
+            text(1, "* * *  s l o w   m o t i o n  * * *") if 0.3 < q < 0.7 else None
+        else:
+            q = (p - 0.6) / 0.4
+            x, y, rows = gap1 + 1 + (w - gap1 - 5) * q, r2 - 3, RUN[int(s_ * 8) % 2]
+        cx = w * 0.3 + w * 0.4 * math.sin(s_ * 0.4)
+        sprite(cx, 1, COPTER[int(s_ * 10) % 2])
+        for k in range(1, h):              # its searchlight, down on him
+            f = k / float(h)
+            for dx in (-1, 1):
+                if _mix(k, dx, int(s_ * 5)) % 3:
+                    put(cx + 3 + (x + 1 - cx - 3) * f + dx * f * 3,
+                        5 + (y - 5) * f, ".")
+        sprite(x, y, rows)
+        bright = 0.45
+    elif scene == 3:                      # the fight
+        floor = h - 2
+        beat = int(s_ / 1.2)
+        hit = (s_ % 1.2) < 0.45
+        cx = w // 2
+        gone = s_ > 7.2
+        hero = [" o ", "/|\\", "/ \\"]
+        if hit and beat % 2 == 0 and not gone:
+            hero = [" o ", "/|--", "/ \\"]
+        sprite(cx - 5, floor - 3, hero)
+        if gone:                          # sent flying
+            q = (s_ - 7.2) / 1.8
+            sprite(cx + 2 + q * w * 0.4, floor - 3 - math.sin(q * math.pi) * 4,
+                   ["\\o/", " | ", "/ \\"])
+            text(2, "K . O .")
+        else:
+            villain = [" @ ", "/|\\", "/ \\"] if not (hit and beat % 2) else \
+                [" @ ", "--|\\", "/ \\"]
+            sprite(cx + 2, floor - 3, villain)
+            if hit:
+                blow = ACTION_BLOWS[(beat + seed) % len(ACTION_BLOWS)]
+                bx = cx - 2 - len(blow) // 2 + (beat % 3 - 1) * 3
+                text(floor - 7, "\\" + "/" * (len(blow)) + "/", bx - 1)
+                text(floor - 6, "> " + blow + " <", bx - 2)
+                text(floor - 5, "/" + "\\" * (len(blow)) + "\\", bx - 1)
+                bright = 0.55
+        for x in range(w):
+            put(x, floor, "=")
+    elif scene == 4:                      # the explosion, and the walk away
+        ground = h - 2
+        bx = w // 2
+        boom = s_ - 1.5
+        if boom < 0:
+            sprite(bx - 4, ground - 3, HERO_CAR)
+            text(1, "3 . . . 2 . . . 1" if s_ > 0.4 else "")
+        else:
+            r = min(boom * w * 0.16, w * 0.45)
+            for k in range(int(80 + r * 6)):     # the fireball
+                m = _mix(k, int(boom * 8), 2921)
+                a = (m % 628) / 100.0
+                d = r * math.sqrt(((m >> 10) % 1000) / 1000.0)
+                c = "@" if d < r * 0.5 else "%" if d < r * 0.85 else "*"
+                if boom > 3.5 and (m >> 4) % 3 == 0:
+                    c = "."                       # smoke now
+                put(bx + math.cos(a) * d, ground - 3 - abs(math.sin(a)) * d * 0.45, c)
+            for k in range(14):                  # bits of car, coming down
+                m = _mix(k, 3, 2923)
+                vx_ = ((m % 200) - 100) / 100.0 * w * 0.12
+                vy = 3.0 + (m >> 8) % 5
+                put(bx + vx_ * boom, ground - 3 - (vy * boom - 1.5 * boom * boom), "#")
+            if boom < 1.2:
+                shake = 1 if int(boom * 20) % 2 else -1
+            bright = max(0.45, 1.0 - boom * 0.25)
+        # Him, walking towards you, not looking back.
+        q = min(1.0, s_ / SCENE_LEN * 1.4)
+        big = ([" ___ ", "[=_=]", "/|#|\\", " | | "] if q > 0.5
+               else [" o ", "/|\\", "/ \\"])
+        sprite(bx + w * 0.18 - len(big[0]) // 2 + (int(s_ * 3) % 2),
+               ground - len(big) + 1, big)
+        if s_ > 5.0:
+            text(h - 1, ACTION_QUIPS[seed % len(ACTION_QUIPS)])
+    else:                                 # the end, and the sequel
+        if s_ < 3.5:
+            text(h // 2, "THE END")
+        elif s_ < 5.5:
+            text(h // 2, "...OR IS IT?")
+        else:
+            text(h // 2 - 1, title + " 2")
+            text(h // 2 + 1, "COMING SOON")
+            if int(s_ * 2) % 2:
+                text(h // 2 + 3, "!!!")
+        bright = 0.2
+    if shake:
+        g = [row[-shake:] + row[:-shake] if shake > 0 else row[1:] + row[:1]
+             for row in g]
+    flicker = 0.9 + 0.1 * math.sin(t * 23.0) * math.sin(t * 7.0)
+    return ["".join(r) for r in g], min(1.0, bright * flicker)
 
 
 DINER_MENU = ["REAL COFFEE ...... 9 CR", "SYNTH-PIE ........ 4 CR",
@@ -13233,11 +13460,15 @@ def render_cinema(cin, width, height, now):
     sy0, sy1 = 1, int(height * 0.6)
     fw, fh = sx1 - sx0, sy1 - sy0
     frame, bright = film_frame(cin["title"], t, fw, fh)
+    colour = cin["title"] in ACTION_TITLES
+    ink = {"fire": EMBER_HOT, "spark": GOLD}
     for r, line in enumerate(frame):
         for k, c in enumerate(line):
             if c != " ":
                 ch[sy0 + r][sx0 + k] = c
-                co[sy0 + r][sx0 + k] = FLASH if bright > 0.42 else STAR
+                co[sy0 + r][sx0 + k] = (
+                    ink[ACTION_INK[c]] if colour and c in ACTION_INK
+                    else FLASH if bright > 0.42 else STAR)
     for x in range(sx0 - 1, sx1 + 1):            # the screen's edge
         ch[sy0 - 1][x], co[sy0 - 1][x] = "_", CONCRETE
         ch[sy1][x], co[sy1][x] = "-", CONCRETE

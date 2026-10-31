@@ -1361,6 +1361,20 @@ offset, so you walk in on whatever is showing. Everything in the frame is keyed 
 the loop, grain and flicker included, so it really is the same film every time round; there is a
 test that one loop on is the same frame.
 
+**Half the cinemas are showing the action picture** instead (`_film_pick()`: `ACTION_TITLES`,
+one in two on its own hash). `film_frame()` hands an action title to `action_frame()`, the
+drama's other half on the same six-scene loop: the title slammed up in `BIG_FONT` with the screen
+shaking and sparks off it, then the tagline (`ACTION_TAGS`); a car chase, side on, the hero's car
+ahead and the van behind shooting, lamp posts going by and speed lines over the skyline; a leap
+between rooftops in slow motion under a helicopter's searchlight; a fist fight with the blows
+written up in the air (`ACTION_BLOWS`) until the villain is sent flying, K.O.; a countdown and an
+explosion, fireball, debris coming down, the screen shaking, and him walking towards you without
+looking back, with a line (`ACTION_QUIPS`); and THE END, ...OR IS IT?, the sequel. The explosion is
+the brightest thing either film puts up, so it lights the audience the way nothing in the drama
+does. And it is **in colour**: `render_cinema()` inks the fire (`@`, `%`) and the sparks (`*`, `!`)
+by `ACTION_INK`, where the drama is all black and white. Its sprites are ASCII for the same reason
+as the ramen room's.
+
 The marquee's NOW SHOWING was in the star colour at first, and the stars-inside-buildings test
 counted its letters as stars drawn inside a building. Anything in screen space on a facade needs a
 colour that is not a star's.

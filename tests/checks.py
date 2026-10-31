@@ -749,7 +749,7 @@ ac.LANE, ac.NEON = 1, [(100 + k, 200 + k) for k in range(8)]
 cin_at = ac.find_place(x0, z0, "cinema")
 cin = ac.venue_at(cin_at[0], cin_at[1])
 check("the menu stands you in a cinema's doorway", cin is not None and cin[0] == "cinema")
-check("and it has a film on", cin[1]["title"] in ac.FILM_TITLES)
+check("and it has a film on", cin[1]["title"] in ac.FILM_TITLES + ac.ACTION_TITLES)
 cinemas = sum(1 for i in range(-200, 200) for j in range(-200, 200)
               if ac._mix(i, j, 1961) % ac.CLUB_ODDS == 0 and not ac.is_open(i, j)
               and ac.lot(i, j)["cinema"] is not None)
@@ -768,6 +768,52 @@ check("it opens on its title and has dialogue", "NEON RAIN" in opening
       and any(line in talking for _, line in ac.FILM_LINES))
 loop = ac.FILM_SCENES * ac.SCENE_LEN
 check("and it loops", ac.film_frame("X", 5.0, 40, 10) == ac.film_frame("X", 5.0 + loop, 40, 10))
+# The other picture: the action one, in colour.
+acts = set()
+for k in range(ac.FILM_SCENES):
+    frame, bright = ac.action_frame("OVERDRIVE", k * ac.SCENE_LEN + 4.0, 87, 17)
+    acts.add("\n".join(frame))
+    check("action scene %d draws something" % (k + 1),
+          any(line.strip() for line in frame) and 0.0 < bright <= 1.0)
+check("and every action scene is different", len(acts) == ac.FILM_SCENES)
+check("an action title gets the action picture",
+      ac.film_frame("ZERO HOUR", 30.0, 60, 14)
+      == ac.action_frame("ZERO HOUR", 30.0, 60, 14)
+      and ac.film_frame("NEON RAIN", 30.0, 60, 14)
+      != ac.action_frame("NEON RAIN", 30.0, 60, 14))
+slam = "\n".join(ac.action_frame("OVERDRIVE", 4.0, 87, 17)[0])
+check("it slams its title up in big letters, with the tagline",
+      slam.count("#") > 60 and ac.ACTION_TAGS["OVERDRIVE"] in slam)
+chase = "\n".join(ac.action_frame("OVERDRIVE", ac.SCENE_LEN + 3.0, 87, 17)[0])
+check("there is a chase", "(o)---(o)" in chase and "|[]  []|>" in chase)
+fight = ["\n".join(ac.action_frame("OVERDRIVE", 3 * ac.SCENE_LEN + k * 0.1, 87, 17)[0])
+         for k in range(90)]
+check("and a fight, with the blows written up", any(
+    any(b_ in f_ for b_ in ac.ACTION_BLOWS) for f_ in fight)
+      and any("K . O ." in f_ for f_ in fight))
+boom = [ac.action_frame("OVERDRIVE", 4 * ac.SCENE_LEN + 1.6 + k * 0.2, 87, 17)
+        for k in range(10)]
+check("and an explosion, bright enough to light the audience",
+      max(b_ for _, b_ in boom) > 0.7 and "@" in "\n".join(boom[2][0]))
+walk = "\n".join(ac.action_frame("OVERDRIVE", 4 * ac.SCENE_LEN + 6.0, 87, 17)[0])
+check("which he walks away from, with a line", "[=_=]" in walk
+      and any(q in walk for q in ac.ACTION_QUIPS))
+check("and the sequel", "OVERDRIVE 2" in "\n".join(
+    ac.action_frame("OVERDRIVE", 5 * ac.SCENE_LEN + 7.0, 87, 17)[0]))
+check("it loops on the drama's clock", ac.action_frame("BURN ZONE", 5.0, 40, 10)
+      == ac.action_frame("BURN ZONE", 5.0 + loop, 40, 10))
+for w_, h_ in ((10, 3), (3, 1), (200, 50)):
+    ac.action_frame("STEEL NERVE", 4 * ac.SCENE_LEN + 2.0, w_, h_)
+check("and any size of screen is fine", True)
+picks = Counter(ac._film_pick(i, j) in ac.ACTION_TITLES
+                for i in range(-60, 60) for j in range(-60, 60))
+check("about half the cinemas are showing it",
+      0.4 < picks[True] / float(sum(picks.values())) < 0.6, str(picks))
+act = dict(cin[1], title="OVERDRIVE")
+room, rco = ac.render_cinema(act, 100, 30, 4 * ac.SCENE_LEN + 2.2 - act["offset"])
+fire = sum(1 for y in range(30) for x in range(100)
+           if room[y][x] in "@%" and rco[y][x] == ac.EMBER_HOT)
+check("and on the screen the fire is in colour", fire > 10, str(fire))
 room, _ = ac.render_cinema(cin[1], 90, 28, 300.0)
 rtext = "\n".join("".join(r) for r in room)
 check("inside: the screen between curtains, the audience, the way out",
