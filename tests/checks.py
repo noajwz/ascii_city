@@ -4287,6 +4287,68 @@ for w_, h_ in ((20, 8), (43, 15), (240, 70)):
     ac.render_sewer(w_, h_, 330.0, 300.0, 1)
 check("and any size of window is fine", True)
 
+# --- the temple, and the word of God ------------------------------------
+temples_ = []
+for i in range(-200, 200):
+    for j in range(-200, 200):
+        if ac._mix(i, j, 3201) % ac.TEMPLE_ODDS == 0 and not ac.is_open(i, j):
+            tp_ = ac.lot(i, j)["temple"]
+            if tp_ is not None:
+                temples_.append(tp_)
+check("temples are rare", 8 < len(temples_) < 80,
+      "%d in a 2000-unit square" % len(temples_))
+check("and each fronts a street", all(
+    ac.road_at(t_["i"] + ac.FACES[t_["door"]][0], t_["j"] + ac.FACES[t_["door"]][1])
+    for t_ in temples_))
+tsp = ac.find_place(x0, z0, "temple")
+check("the menu stands you across the street from one, outside",
+      tsp is not None and ac.can_stand(tsp[0], tsp[1])
+      and ac.venue_at(tsp[0], tsp[1]) is None)
+fronts_ = []
+real_tf = ac.draw_temple_front
+ac.draw_temple_front = lambda *a: (fronts_.append(a[4]), real_tf(*a))
+tv = ac.View(tsp[0], tsp[1], tsp[2], 100, 30)
+keep_ = (ac.GOLD, ac.MOON_DIM)
+ac.GOLD, ac.MOON_DIM = 911, 912
+tch, tco = ac.render_street(tv, 300.0)[:2]
+ac.draw_temple_front = real_tf
+ttext = "\n".join("".join(r) for r in tch)
+ring_ = sum(1 for y in range(30) for x in range(100)
+            if tch[y][x] == "o" and tco[y][x] == 912)
+check("and from there you see its front: the rose window and the name",
+      fronts_ and fronts_[0]["name"] in ttext and ring_ >= 15
+      and any(tch[y][x] == "@" and tco[y][x] == 911
+              for y in range(30) for x in range(100)), "%d ring cells" % ring_)
+glass_ = sum(1 for y in range(30) for x in range(100) if tch[y][x] == "#"
+             and tco[y][x] in [a_ for a_, _ in ac.NEON] + [b_ for _, b_ in ac.NEON])
+check("and its stained glass", glass_ >= 40, str(glass_))
+ac.GOLD, ac.MOON_DIM = keep_
+step_ = 0.0
+while step_ < 12.0 and ac.venue_at(tsp[0] + math.sin(tsp[2]) * step_,
+                                   tsp[1] + math.cos(tsp[2]) * step_) is None:
+    step_ += 0.25
+tin = ac.venue_at(tsp[0] + math.sin(tsp[2]) * step_, tsp[1] + math.cos(tsp[2]) * step_)
+check("walk across and in at the door is inside",
+      tin is not None and tin[0] == "temple")
+w1, w2 = ac.god_words(123456), ac.god_words(123457)
+check("the word of god: words from the list, the same for the same moment",
+      len(w1) == ac.GOD_SAY and all(w_ in ac.GOD_WORDS for w_ in w1)
+      and w1 == ac.god_words(123456) and w1 != w2)
+spread_ = Counter(w_ for k in range(400) for w_ in ac.god_words(k * 7919))
+check("and any word can come up", len(spread_) > len(set(ac.GOD_WORDS)) * 0.9,
+      "%d of %d" % (len(spread_), len(set(ac.GOD_WORDS))))
+said_ = [" ".join(w1), " ".join(w2)]
+inside_ = "\n".join("".join(r) for r in
+                    ac.render_temple(tin[1], 100, 30, 1.0, said_)[0])
+check("inside: the terminal on the altar says it, and the way out",
+      "GOD SAYS:" in inside_ and w2[0] in inside_ and "the way out" in inside_)
+check("and before you ask, it says how",
+      "press g" in "\n".join("".join(r) for r in ac.render_temple(
+          tin[1], 100, 30, 1.0, [])[0]))
+for w_, h_ in ((20, 8), (49, 17), (80, 24), (240, 70)):
+    ac.render_temple(tin[1], w_, h_, 1.0, said_ * 5)
+check("and any size of window is fine", True)
+
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
 cl2 = ac.Claw(0, [], w_)

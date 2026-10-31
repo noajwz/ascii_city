@@ -381,6 +381,12 @@ ACTION_TITLES = ["OVERDRIVE", "BURN ZONE", "STEEL NERVE", "ZERO HOUR"]
 # then flash, and the glow of the cabinets in the window. The games inside are
 # still being built; for now the cabinets run their demos and say so.
 ARCADE_ODDS = 1000     # like the club and the cinema, on its own hash
+TEMPLE_ODDS = 1100     # the temple: rarer than the arcade, on its own hash
+TEMPLE_H = 11.0        # low enough that the rose window is in sight from the road
+TEMPLE_GABLE = 2.6     # how far the gable over the front rises past the roof
+ROSE_Y = 5.4           # the rose window's middle, over the door
+ROSE_R = 1.15
+TEMPLE_NAMES = ["THE TEMPLE", "ST. NEON", "HOLY LIGHT", "THE CATHEDRAL", "SANCTUARY"]
 ARCADE_BIG = 45.0      # nearer than this, the sign is in the big font
 ARCADE_MODE = 5.0      # seconds the light wall runs one pattern before the next
 ARCADE_NAMES = ["PIXEL PALACE", "HI-SCORE", "GAME ZONE", "TURBO", "BLIP BLOP",
@@ -2441,6 +2447,7 @@ def lot(i, j):
         # and be invisible.
         b["club"] = b["casino"] = b["tower"] = b["cinema"] = None
         b["diner"] = b["billboard"] = b["arcade"] = b["exchange"] = None
+        b["temple"] = None
         if d["park"]:
             pass
         elif _mix(i, j, 909) % CLUB_ODDS == 0:
@@ -2505,6 +2512,18 @@ def lot(i, j):
                                                     % len(ARCADE_NAMES)],
                                "seed": _mix(i, j, 2507) % 9973,
                                "height": b["height"]}
+        elif _mix(i, j, 3201) % TEMPLE_ODDS == 0 and d["name"] != "financial":
+            # Stone among the shopfronts, with its front on a street, and
+            # low: the rose window over the door has to be in sight from
+            # across the road.
+            face = _road_face(i, j, _mix(i, j, 3203) % 4)
+            if face is not None:
+                b["height"] = TEMPLE_H
+                b["temple"] = {"door": face, "u": CELL * 0.5, "i": i, "j": j,
+                               "name": TEMPLE_NAMES[_mix(i, j, 3205)
+                                                    % len(TEMPLE_NAMES)],
+                               "seed": _mix(i, j, 3207) % 9973,
+                               "height": b["height"]}
         elif b["height"] >= TOWER_MIN and _mix(i, j, 1907) % TOWER_ODDS == 0:
             # A sky deck. Off a hash rather than the lot's rng, so being one
             # moves nothing else about the building; and only with a street
@@ -2521,6 +2540,7 @@ def lot(i, j):
         if (b["club"] is None and b["casino"] is None and b["tower"] is None
                 and b["cinema"] is None and b["diner"] is None
                 and b["arcade"] is None and b["exchange"] is None and not d["park"]
+                and b["temple"] is None
                 and d["name"] in BILL_DISTRICTS and 8.0 <= b["height"] <= 12.0
                 and _mix(i, j, 2405) % BILL_ODDS == 0):
             face = _wide_face(i, j, _mix(i, j, 2407) % 4)
@@ -2535,6 +2555,7 @@ def lot(i, j):
             b["height"] = LANDMARK_BASE if ring == 0 else LANDMARK_H
             b["club"] = b["casino"] = b["cinema"] = b["diner"] = None
             b["arcade"] = b["billboard"] = b["tower"] = b["exchange"] = None
+            b["temple"] = None
             b["tree"] = False
             if (i, j) == lm["lobby"]:
                 b["tower"] = {"door": 3, "u": CELL * 0.5, "i": i, "j": j,
@@ -3469,6 +3490,106 @@ def draw_exchange_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
     return roof, None, foot, None, ()
 
 
+def draw_temple_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
+                       cont, now):
+    """One column of the temple: pale stone, a buttress at every corner, and
+    in every bay a tall pointed window of stained glass lit from inside by
+    candles - the panes in the city's colours, flickering, with the lead
+    between them. Over the front a gable comes to a point; the middle bay of
+    the front is the door and the rose window, which draw_temple_front()
+    does."""
+    scale = v.fy / dist
+    tp = b["temple"]
+    stone = FLASH if v.flash > 0.35 else MOON_DIM
+    front = face == tp["door"]
+    rise = TEMPLE_GABLE * max(0.0, 1.0 - abs(u - CELL * 0.5) / (CELL * 0.5)) \
+        if front else 0.0
+    roof = int(round(v.horizon - (b["height"] + rise - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    if edge:
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx], co[y][sx] = "|", stone
+        return roof, None, foot, None, ()
+    prev_roof, prev_awn, prev_foot = cont[:3]
+    slope = "^" if rise > TEMPLE_GABLE * 0.9 else (
+        "/" if u < CELL * 0.5 else "\\") if front else "="
+    facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, slope, ROOF)
+    n = len(NEON)
+    frac = u / BAY_W - int(u / BAY_W)
+    narrow = BAY_W * v.fx / dist <= 2.5        # far off: one column a bay
+    door_bay = front and abs(u - CELL * 0.5) < 1.1
+    w_bot, w_top = 1.4, b["height"] - 1.2
+    for y in range(max(r_lo, roof + 1), min(r_hi, foot - 1) + 1):
+        h = v.eye + (v.horizon - y) / scale
+        half = 0.26
+        if h > w_top - 1.4:                    # the pointed arch at the top
+            half *= max(0.0, (w_top - h) / 1.4)
+        glass = (not door_bay and w_bot < h < w_top
+                 and (narrow or abs(frac - 0.5) < half))
+        if glass:
+            row = int(h * 1.6)
+            if row % 3 == 0 and not narrow:
+                ch[y][sx], co[y][sx] = "-", CONCRETE          # the lead
+            else:
+                k = (row // 3 + int(u * 2.0) + tp["seed"]) % n
+                lit = _mix(sx, row, int(now * 5.0)) % 9 != 0  # candlelight
+                ch[y][sx], co[y][sx] = "#", NEON[k][0 if lit else 1]
+        elif abs(frac - 0.5) > 0.44 and not door_bay:
+            ch[y][sx], co[y][sx] = "|", stone                 # a buttress
+        elif (y + sx) % 7 == 0:
+            ch[y][sx], co[y][sx] = ".", tone_colour("warm", 0.3)
+    steps = int(round(v.horizon - (0.45 - v.eye) * scale))
+    for y in range(max(r_lo, steps), min(r_hi, foot) + 1):
+        ch[y][sx], co[y][sx] = "_" if (y - steps) % 2 == 0 else "=", stone
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, None, foot, None, ()
+
+
+def draw_temple_front(ch, co, v, walls, tp, world, now):
+    """The front's middle bay: the rose window over the door - a ring of
+    stone, spokes of coloured glass turning slowly with the light, a bright
+    eye in the middle - and under it the arched door standing open on the
+    candles inside, a candle each side of it, and the name over it."""
+    i, j, f = tp["i"], tp["j"], tp["door"]
+    mid = CELL * 0.5
+    n = len(NEON)
+
+    def at(a, h, out=0.15):
+        return face_point(i, j, f, mid + a, out, h)
+
+    for k in range(40):                         # the ring
+        a = k * math.tau / 40
+        put_point(ch, co, v, walls, *at(ROSE_R * math.cos(a), ROSE_Y + ROSE_R
+                                         * math.sin(a)), "o", MOON_DIM)
+    for k in range(12):                          # the spokes, in glass
+        a = k * math.tau / 12
+        hue = NEON[(k + int(now * 0.8) + tp["seed"]) % n][0]
+        for r in (0.3, 0.5, 0.7, 0.9):
+            put_point(ch, co, v, walls, *at(r * math.cos(a), ROSE_Y + r * math.sin(a)),
+                      "*" if r > 0.8 else "#", hue)
+    put_point(ch, co, v, walls, *at(0.0, ROSE_Y, 0.2), "@", GOLD)
+    # The door, arched, open, and the candlelight inside it.
+    for k in range(13):
+        h = k * 0.2
+        half = 0.6 if h < 1.9 else 0.6 * math.sqrt(max(0.0, 1 - ((h - 1.9) / 0.7) ** 2))
+        for a in (-half, half):
+            put_point(ch, co, v, walls, *at(a, h, 0.2), "|" if h < 1.9 else
+                      ("/" if a < 0 else "\\"), MOON_DIM)
+        if half > 0.15:
+            put_point(ch, co, v, walls, *at(0.0, h, 0.1),
+                      ":" if _mix(k, int(now * 6), 3209) % 3 else ".", BULB)
+    for a in (-1.0, 1.0):                        # a candle each side
+        put_point(ch, co, v, walls, *at(a, 1.1, 0.35), "|", STAR)
+        put_point(ch, co, v, walls, *at(a, 1.35, 0.35),
+                  "*" if int(now * 7 + a) % 3 else "'", EMBER_HOT)
+    pr = v.project(*at(0.0, 3.3, 0.3))
+    if pr is not None and pr[2] < 70.0:
+        name = tp["name"]
+        x0 = int(round(pr[0])) - len(name) // 2
+        for k, c in enumerate(name):
+            put_cell(ch, co, v, walls, x0 + k, int(round(pr[1])), pr[2], c, GOLD)
+
+
 def draw_exchange_front(ch, co, v, walls, ex, world, now):
     """STOCK EXCHANGE over the columns, and the ticker running across the
     front under it - the market going by, green when it went up and red when
@@ -3718,6 +3839,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
                                   r_lo, r_hi, edge, cont, now)
     if b["arcade"] is not None:
         return draw_arcade_column(ch, co, v, sx, dist, b, face, u,
+                                  r_lo, r_hi, edge, cont, now)
+    if b["temple"] is not None:
+        return draw_temple_column(ch, co, v, sx, dist, b, face, u,
                                   r_lo, r_hi, edge, cont, now)
     if b["diner"] is not None:
         return draw_diner_column(ch, co, v, sx, dist, b, face, u,
@@ -4256,6 +4380,11 @@ def collect_glow(v, now, wet):
                 if f == b["exchange"]["door"]:
                     p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
                     _spill(glow, p[0], p[2], 5.0, GOLD_DIM)
+                continue
+            if b["temple"] is not None:
+                if f == b["temple"]["door"]:
+                    p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
+                    _spill(glow, p[0], p[2], 4.5, BULB_DIM)
                 continue
             if b["arcade"] is not None:
                 # The pavement in front takes the colour of whatever the
@@ -8536,7 +8665,8 @@ def climbable(i, j, f):
     if not (b["faces"][f]["escape"] and b["height"] >= 3 * FLOOR_H
             and not b["tree"] and b["club"] is None
             and b["casino"] is None and b["tower"] is None
-            and b["arcade"] is None and b["exchange"] is None):
+            and b["arcade"] is None and b["exchange"] is None
+            and b["temple"] is None):
         return False
     # And only off a roof that is the high point of its corner: climbed from
     # an alley, the first ones put you face to face with the wall of a taller
@@ -9206,6 +9336,11 @@ def draw_props(ch, co, v, walls, now, wet):
                     w = face_point(i, j, f, CELL * 0.5, 0.5, 2.0 * FLOOR_H + 1.2)
                     props.append((_d2(v, w), "exchange", b["exchange"], w, (nx, nz)))
                 continue
+            if b["temple"] is not None:
+                if f == b["temple"]["door"]:
+                    w = face_point(i, j, f, CELL * 0.5, 0.4, ROSE_Y)
+                    props.append((_d2(v, w), "temple", b["temple"], w, (nx, nz)))
+                continue
             if b["arcade"] is not None:
                 if f == b["arcade"]["door"]:
                     w = face_point(i, j, f, CELL * 0.5, 0.5, FLOOR_H + 0.6)
@@ -9287,6 +9422,8 @@ def draw_props(ch, co, v, walls, now, wet):
             draw_lobby(ch, co, v, walls, s, now)
         elif kind == "cinema":
             draw_cinema_front(ch, co, v, walls, s, world, now)
+        elif kind == "temple":
+            draw_temple_front(ch, co, v, walls, s, world, now)
         elif kind == "arcade":
             draw_arcade_front(ch, co, v, walls, s, world, now)
         elif kind == "exchange":
@@ -11078,7 +11215,7 @@ def venue_at(x, z):
                 continue
             b = lot(i, j)
             for kind in ("casino", "club", "tower", "cinema", "diner", "arcade",
-                         "exchange"):
+                         "temple", "exchange"):
                 v = b[kind]
                 if v is None:
                     continue
@@ -12482,6 +12619,7 @@ CHEAT_PLACES = [
     ("b", "big bridge", "grand"),
     ("$", "billboard", "billboard"),
     ("e", "stock exchange", "exchange"),
+    ("*", "the temple", "temple"),
     ("y", "lit alley", "yokocho"),
     ("=", "under the el", "el"),
     ("|", "fire escape", "escape"),
@@ -12500,7 +12638,8 @@ CHEAT_GROUPS = [
     ("EAT", ["ramen", "diner"]),
     ("VIEWS", ["tower", "lighthousedoor", "grand", "billboard"]),
     ("MONEY", ["exchange"]),
-    ("AROUND TOWN", ["yokocho", "el", "escape", "carpark", "police", "highway"]),
+    ("AROUND TOWN", ["temple", "yokocho", "el", "escape", "carpark", "police",
+                     "highway"]),
     ("OUT OF TOWN", ["woods", "lake", "bank"]),
 ]
 
@@ -12787,6 +12926,27 @@ def _woods_spot(x, z, kind):
             px, pz = (i + 0.5) * CELL, (j - out + 0.5) * CELL
             if can_stand(px, pz):
                 return px, pz, 0.0
+    return None
+
+
+def _temple_spot(x, z):
+    """Across the street from the nearest temple, looking at its front: the
+    rose window and the door are what it is. Walking in is a few steps."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    for i, j in _rings(ci, cj, CHEAT_RINGS):
+        if _mix(i, j, 3201) % TEMPLE_ODDS or is_open(i, j):
+            continue
+        tp = lot(i, j)["temple"]
+        if tp is None:
+            continue
+        nx, nz = FACES[tp["door"]]
+        for back in (9.0, 8.0, 10.0, 7.0, 11.0):
+            p = face_point(i, j, tp["door"], tp["u"], back, 0.0)
+            if (p[0] - x) ** 2 + (p[2] - z) ** 2 < CHEAT_SKIP ** 2:
+                break
+            if can_stand(p[0], p[2]):
+                return p[0], p[2], math.atan2(-nx, -nz)
     return None
 
 
@@ -13212,6 +13372,8 @@ def find_place(x, z, kind):
         return _diner_door(x, z)
     if kind == "arcade":
         return _doorway(x, z, 2501, "arcade", ARCADE_ODDS)
+    if kind == "temple":
+        return _temple_spot(x, z)
     if kind == "exchange":
         return _doorway(x, z, 2701, "exchange", EXCHANGE_ODDS)
     if kind == "billboard":
@@ -14058,6 +14220,125 @@ def sewer_slices(t, taken):
     return max(0, 8 - eaten - taken)
 
 
+# The word of God, the way Terry A. Davis had TempleOS give it: the moment
+# you ask is the random number, and the number picks the words. His list was
+# his own; this one is the city's.
+GOD_WORDS = """
+light behold river neon rain night city bridge lantern moon star dawn street
+gate door window stone fire water bread salt wine oil lamp candle mercy grace
+peace wrath glory kingdom servant shepherd sheep lion lamb dove raven serpent
+mountain valley desert garden vine fig olive cedar harvest seed field storm
+thunder lightning cloud wind dust ash gold silver iron brass crown throne
+temple altar scroll word song psalm trumpet harp bell silence voice echo
+wanderer stranger king prophet fool child elder widow orphan builder fisher
+walk run rest wait listen remember forget forgive return arise behold shine
+burn sleep wake dream watch build break heal sing weep laugh pray seek find
+lost found open closed first last always never soon tomorrow yesterday today
+mighty humble holy hidden faithful broken whole small great quiet loud bright
+dark narrow wide deep high low far near beloved blessed weary new old true
+yes no amen hallelujah verily therefore behold lo selah forever
+taxi ferry tram pizza noodles coffee arcade jackpot elevator billboard pigeon
+umbrella puddle siren antenna circuit compiler pixel kernel keyboard sixteen
+""".split()
+GOD_SAY = 12           # words a time
+GOD_KEEP = 6           # utterances kept on the screen
+
+
+def god_words(seed, n=GOD_SAY):
+    """n words for this seed - which is the time between two presses of a
+    key, in microseconds, so nobody chooses it, not even the program."""
+    rng = random.Random(seed)
+    return [rng.choice(GOD_WORDS) for _ in range(n)]
+
+
+def render_temple(tp, width, height, now, said):
+    """Inside: the nave going away from you between its pillars, the pews in
+    rows, the stained glass down both sides throwing its colours, candles
+    flickering along the altar - and on the altar an old terminal, a blue
+    one, on which you can ask for the word of God."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    n = len(NEON)
+    if width < 50 or height < 18:
+        _text(ch, co, 1, 1, "~ in %s ~" % tp["name"].lower(), GOLD)
+        for r, line in enumerate(said[-max(1, height - 5):]):
+            _text(ch, co, 3 + r, 1, line[:width - 2], CROWN_BLUE)
+        _text(ch, co, height - 1, 1, "g: the word of god - s: out", GOLD_DIM)
+        return ch, co
+    cx = width // 2
+    vy = height // 3                          # where the nave meets the altar
+    # The vault: ribs from the sides up to the ridge.
+    for x in range(width):
+        d = abs(x - cx) / float(cx)
+        y = int(vy * (d ** 1.6))
+        if 0 <= y < height:
+            ch[y][x], co[y][x] = ("-" if d < 0.15 else "/" if x < cx else "\\"), CURB
+    # Pillars, nearer ones wider apart, and the glass between them.
+    for k in range(4):
+        f = (k + 1) / 5.0
+        for side in (-1, 1):
+            x = int(cx + side * (cx - 2) * (1.0 - f * 0.75))
+            top = int(vy * ((1.0 - f * 0.75) ** 1.6)) + 1
+            bot = int(vy + (height - 3 - vy) * (1.0 - f * 0.7))
+            for y in range(top, min(height - 2, bot)):
+                if 0 <= x < width:
+                    ch[y][x], co[y][x] = "|", MOON_DIM
+            gx = x - side * 2
+            for y in range(top + 1, top + 1 + max(2, int(6 * (1 - f * 0.6)))):
+                if 0 <= gx < width and 0 <= y < height:
+                    hue = NEON[(k * 2 + y + (side > 0)) % n]
+                    ch[y][gx] = "#"
+                    co[y][gx] = hue[0] if _mix(gx, y, int(now * 3)) % 7 else hue[1]
+    # The pews, in rows down the nave either side of the aisle.
+    for r in range(5):
+        y = height - 3 - r * 2
+        if y <= vy + 6:
+            break
+        half = int((cx - 6) * (1.0 - r * 0.13))
+        for side in (-1, 1):
+            a, b_ = sorted((cx + side * 4, cx + side * half))
+            _text(ch, co, y, a, "[" + "_" * max(0, b_ - a - 1) + "]", BARK)
+    # The altar, with its candles, and the terminal on it.
+    ay = vy + 5
+    _text(ch, co, ay, cx - 16, "=" * 33, GOLD_DIM)
+    for k in range(-14, 15, 4):
+        flick = _mix(k, int(now * 8), 3211) % 3
+        _text(ch, co, ay - 1, cx + k, "|", STAR)
+        _text(ch, co, ay - 2, cx + k, "*'."[flick], EMBER_HOT)
+    sw = min(width - 8, 60)
+    sx0 = cx - sw // 2
+    sy0 = max(1, vy - 7)
+    rows = max(2, ay - 3 - sy0 - 1)
+    _text(ch, co, sy0 - 1, sx0, "+" + "-" * (sw - 2) + "+", CONCRETE)
+    for y in range(sy0, sy0 + rows):
+        _text(ch, co, y, sx0, "|", CONCRETE)
+        _text(ch, co, y, sx0 + sw - 1, "|", CONCRETE)
+        for x in range(sx0 + 1, sx0 + sw - 1):
+            ch[y][x], co[y][x] = " ", 0
+    _text(ch, co, sy0 + rows, sx0, "+" + "-" * (sw - 2) + "+", CONCRETE)
+    _text(ch, co, sy0, sx0 + 2, "GOD SAYS:", GOLD)
+    lines = []
+    for said_ in said[-GOD_KEEP:]:
+        words, line = said_.split(), ""
+        for w in words:
+            if len(line) + len(w) + 1 > sw - 4:
+                lines.append(line)
+                line = ""
+            line = (line + " " + w).strip()
+        lines.append(line)
+        lines.append("")
+    for r, line in enumerate(lines[-(rows - 2):]):
+        newest = r >= len(lines[-(rows - 2):]) - 3
+        _text(ch, co, sy0 + 1 + r, sx0 + 2, line, CROWN_BLUE if newest else HAZE)
+    if not said:
+        _text(ch, co, sy0 + 2, sx0 + 2, "press g", CROWN_BLUE)
+    if int(now * 2) % 2:
+        _text(ch, co, sy0 + rows - 1, sx0 + 2, "_", CROWN_BLUE)   # the cursor
+    _text(ch, co, height - 1, max(1, cx - 22),
+          "-- g: the word of god  -  the way out (s) --", GOLD_DIM)
+    return ch, co
+
+
 TURNED = {
     "cinema": ["the usher holds out a hand.", "$%d a seat." % FEES["cinema"]],
     "club": ["the bouncer doesn't move.", "twenty at the door. not tonight."],
@@ -14279,6 +14560,7 @@ RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
 DINER_HUD = " at the diner, open 24/7, at %d,%d  -  s walks back out  -  q quit "
 CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
+TEMPLE_HUD = " in %s  -  g asks for the word of god  -  s walks out  -  q quit "
 EXCHANGE_HUD = (" on the trading floor  -  b buys, n sells, arrows pick, l lists  -"
                 "  s walks out  -  q quit ")
 ARCADE_HUD = (" in the %s arcade  -  ad choose a game  -  p plays  -  s walks out"
@@ -14326,6 +14608,7 @@ def main(stdscr):
     at_plinko = False
     races = Races(wallet)       # and the race track, r
     at_races = False
+    oracle = {"said": [], "last": time.monotonic()}   # the temple's terminal
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
     arms = []                   # what the claw machines have given you
@@ -14335,6 +14618,7 @@ def main(stdscr):
     broker = Broker(wallet)     # your account at the exchange
     at_exchange = False
     at_arcade = False
+    at_temple = False
     striker = None              # the last strength tester you stood at
     at_striker = False
     seated = None               # (which ramen counter, since when)
@@ -14457,6 +14741,12 @@ def main(stdscr):
                 sky_v = fwd = side = spin = 0.0
             elif key == ord(" ") and not at_arcade:
                 autopilot = not autopilot
+            elif at_temple and key in (ord("g"), ord("G")):
+                # The time since the last time you asked, to the microsecond,
+                # is what picks the words. Nobody can choose that.
+                seed = int((now - oracle["last"]) * 1e6)
+                oracle["last"] = now
+                oracle["said"] = (oracle["said"] + [" ".join(god_words(seed))])[-20:]
             elif wheel is not None and key in (ord("o"), ord("O")):
                 at_plinko, at_races = not at_plinko, False
             elif wheel is not None and key in (ord("r"), ord("R")):
@@ -14706,6 +14996,7 @@ def main(stdscr):
         at_exchange = (venue[1] if venue is not None and venue[0] == "exchange"
                        else False)
         at_arcade = venue is not None and venue[0] == "arcade"
+        at_temple = venue is not None and venue[0] == "temple"
         if not at_arcade:
             play["game"] = None
         elif play["arc"] is None or play["arc"]["seed"] != venue[1]["seed"]:
@@ -14810,6 +15101,9 @@ def main(stdscr):
         elif venue is not None and venue[0] == "exchange":
             ch, co = render_exchange(venue[1], broker, width, height, now)
             hud = EXCHANGE_HUD
+        elif venue is not None and venue[0] == "temple":
+            ch, co = render_temple(venue[1], width, height, now, oracle["said"])
+            hud = TEMPLE_HUD % venue[1]["name"].lower()
         elif venue is not None and venue[0] == "arcade":
             g_ = play["game"]
             if g_ is not None:
