@@ -3209,5 +3209,84 @@ check("and you can see them from down the street", seen_from >= 0.1 * looked,
       "from %d of %d views" % (seen_from, looked))
 ac.BEAM = ac.BEAM_DIM = 1
 
+# --- the sky decks' weather crown -------------------------------------------
+# Steady blue, clear view; flashing blue, clouds due; steady red, rain ahead;
+# flashing red, snow instead - and a storm, red and white as fast as it goes.
+real_flash = ac.FLASH
+ac.CROWN_BLUE, ac.CROWN_RED, ac.FLASH = 960, 961, 990
+
+
+def crown_seen(weather, sky):
+    while ac.weather_name() != weather:
+        ac.cycle_weather()
+    while ac.clouds_name() != sky:
+        ac.cycle_clouds()
+    return {ac.crown_light(400.0 + k * 0.05, ac.rain_intensity(400.0 + k * 0.05))
+            for k in range(80)}
+
+
+check("clear, the crown is steady blue", crown_seen("dry", "clear") == {960})
+check("clouds, it flashes blue", crown_seen("dry", "cloudy") == {960, None})
+check("rain, steady red", crown_seen("rain", "clear") == {961})
+check("snow, it flashes red", crown_seen("snow", "clear") == {961, None})
+check("and a storm is red and white", crown_seen("storm", "clear") == {961, 990})
+crown_seen("dry", "clear")
+crowns = 0
+for hop in range(3):
+    sp_ = ac.find_place(x0 + hop * 600, z0 - hop * 400, "tower")
+    ci_, cj_ = int(sp_[0] // ac.CELL), int(sp_[1] // ac.CELL)
+    tw_ = next(ac.lot(ci_ + a, cj_ + b)["tower"] for a in range(-2, 3)
+               for b in range(-2, 3)
+               if not ac.is_open(ci_ + a, cj_ + b)
+               and ac.lot(ci_ + a, cj_ + b)["tower"])
+    for k in range(4):
+        rv = ac.roof_view(tw_, k * math.tau / 4, 110, 30)
+        rv.roof = tw_
+        g_, c_, _ = ac.render_street(rv, 400.0)
+        crowns += sum(1 for y in range(30) for x in range(110) if c_[y][x] == 960) > 3
+check("from a sky deck you can read the weather off the others", crowns >= 6,
+      "in %d of 12 views" % crowns)
+lv, ldoor = across("tower", 12.0)
+g_, c_, _ = ac.render_street(lv, 400.0)
+check("and in the street the sign over the lift door says it too",
+      sum(1 for y in range(34) for x in range(110)
+          if c_[y][x] == 960) >= len("SKYDECK"))
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
+while ac.clouds_name() != "as it comes":
+    ac.cycle_clouds()
+ac.CROWN_BLUE = ac.CROWN_RED = 0
+ac.FLASH = real_flash
+
+# --- the club's door, its queue, and who is on it ---------------------------
+cl_spot = ac.find_place(x0, z0, "clubdoor")
+cl_ = ac.venue_at(cl_spot[0], cl_spot[1])[1]
+opens = [ac.club_door(1000.0 + k * 0.1, cl_)[0]
+         for k in range(int(ac.CLUB_DOOR * 1000))]
+starts = sum(1 for a, b in zip(opens, opens[1:]) if b and not a)
+check("the club's door opens every so often", 85 <= starts <= 105,
+      "%d times in %d door-cycles" % (starts, 100))
+check("and stands open a moment each time",
+      abs(sum(opens) * 0.1 / max(1, starts) - ac.CLUB_OPEN) < 0.25)
+ci_, cj_ = int(cl_spot[0] // ac.CELL), int(cl_spot[1] // ac.CELL)
+home = next((i, j) for i in range(ci_ - 2, ci_ + 3) for j in range(cj_ - 2, cj_ + 3)
+            if not ac.is_open(i, j) and ac.lot(i, j)["club"] is cl_)
+t_open = next(1000.0 + k * 0.05 for k in range(1000)
+              if ac.club_door(1000.0 + k * 0.05, cl_)[0])
+before = ac.club_line(home[0], home[1], cl_["door"], cl_, t_open - 0.5)
+after = ac.club_line(home[0], home[1], cl_["door"], cl_, t_open + ac.CLUB_OPEN + 0.5)
+people = lambda line: [(k, s_.get("tone", s_.get("phase")), w) for k, s_, w in line
+                       if k in ("raver", "smoker")]
+pb, pa = people(before), people(after)
+check("a queue of five waits outside, shut",
+      len(pb) == ac.CLUB_QUEUE and len(pa) == ac.CLUB_QUEUE)
+check("when it opens the front one goes in and the rest step up",
+      [p[:2] for p in pb[1:]] == [p[:2] for p in pa[:-1]]
+      and all(abs(a[2][0] - b[2][0]) + abs(a[2][2] - b[2][2]) < 1e-6
+              for a, b in zip(pa[:-1], pb[:-1])))
+kinds = [k for k, _, _ in before]
+check("with a bouncer on the door and a rope out front",
+      "bouncer" in kinds and "rope" in kinds and "clubdoor" in kinds)
+
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

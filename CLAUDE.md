@@ -985,6 +985,19 @@ without being in lockstep, and gives them a glow stick in each hand. A stick is 
 trail of its own past positions: one moving cell reads as a speck, three read as a light. Keep the
 swing tight — at arm's length the trails of five dancers overlap into noise.
 
+**They are a queue now**, and the door opens. `club_door()` swings it open once every `CLUB_DOOR`
+seconds, at a hashed moment within each, for `CLUB_OPEN`: shut, the steel door shows only the beat
+leaking under it; open, it is solid light, a wedge of it lies across the street
+(`draw_door_light()`), and `collect_glow()` throws a second pool of it further out. `club_line()`
+is everything outside. Every person has a number, and their place in the line is that number less
+how many have gone in — a count that rises smoothly while the door stands open — so the one at the
+front walks in at the door, the rest shuffle up a place, and somebody new joins the back, with
+nothing stored. Who they are, raver or smoker, is a hash of the number, so the same person moves up
+the line rather than turning into someone else, and there is a test that says so. A `BOUNCER` in
+shades stands the other side of the door, arms folded, not dancing; three brass posts and a red
+rope (`draw_rope()`) stand between the line and the street. The line runs whichever way along the
+wall has more room from the door.
+
 ## The casino, and the one door in the city that opens
 
 Same odds as the club (`CLUB_ODDS`, different salt) and mutually exclusive with it, so a building is
@@ -1117,6 +1130,21 @@ number of floors. In `main()` the lift is a state, not a room: walking into the 
 nothing moves you while it runs, on the roof `a`/`d` look round and `s` calls it, and coming down
 puts you back outside the door facing the street, a step beyond `CASINO_REACH` so it does not take
 you straight back up. `^` in the menu stands you outside a lobby; one step in and you are riding.
+
+### The crown
+
+The top `CROWN_FLOORS` of every sky-deck tower are a weather beacon, by the old rhyme: steady blue,
+clear view; flashing blue, clouds due; steady red, rain ahead; flashing red, snow instead — and in a
+storm, red and white as fast as it goes. `crown_light()` reads `sky_word()` once a frame into
+`v.crown`, so every tower agrees, and the window loop in `draw_wall_column()` fills those floors
+solid, every column, so it reads as one band of light rather than lit windows. The blue is its own
+colour (`crown_blue`, 33, or plain blue on eight colours): nothing in the palette was blue.
+
+**It cannot be seen from the street, and that was measured, not assumed.** The camera does not
+tilt, and a top floor seventy units up only drops onto a thirty-row screen from further off than
+`MAX_VIEW` follows a wall — zero of 192 street views around a tower saw it. From another sky deck's
+roof it is everywhere: 28 of 32 views, every tower in reach telling you the weather. So the street
+gets it at the door instead: SKY DECK over the lobby is lit in the crown's colour.
 
 ## Up the fire escapes
 
