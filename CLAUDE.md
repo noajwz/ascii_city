@@ -1181,14 +1181,15 @@ to "add a slot machine" arrived for one that existed. `Slot` is honest the way `
 is drawn first from `SLOT_WEIGHTS` (a 7 is rare, a `%` is not) and the reels are then shown stopping
 on it, left to right, `SLOT_STAGGER` apart.
 
-It is played for chips. A `Purse` is the pocket you carry round the room — the slot and the
-blackjack table play out of the same one, so a win at one is chips at the other. `p` pays the bet
+It is played for dollars, out of the one `Wallet` (see *Money*), so a win at the slot is money
+at the table, at the exchange and everywhere else. `p` pays the bet
 and pulls, `+`/`-` step the bet through `SLOT_BETS`; three of a kind pays `SLOT_PAYS` times the bet
 by symbol (777 is a hundred), a pair gives the bet back, and `settle()` pays out once, when the
-last reel stops. Against `SLOT_WEIGHTS` that returns about 82 chips in 100, which there is a test
-for — the house wins slowly. A pull you cannot cover is refused and says `NOT ENOUGH`; at zero the
-house stakes you `STAKE` again, because nobody is turned away from a casino for having lost. It no
-longer pulls itself: a machine that spent your chips while you stood there would be a bug.
+last reel stops. Against `SLOT_WEIGHTS` that returns about 82 dollars in 100, which there is a
+test for — the house wins slowly. A pull you cannot cover is refused and says `NOT ENOUGH`. The
+house used to stake you again at zero; with one balance for the whole city that was free money,
+so it does not. It no longer pulls itself: a machine that spent your money while you stood there
+would be a bug.
 
 The one trap from before still holds: `9` puts you in the casino, and the panel used to stay open
 so `p` was the park. A jump closes the panel now.
@@ -1399,7 +1400,7 @@ the next price, and then the chart — the picked stock's candles, green up, red
 the list of all sixteen: price, last move, what you hold and its worth, and `HOT!` or `SLIDE` for
 a `streak()` of `STREAK` ticks one way. The arrows pick a stock in either (the list scrolls to
 keep it in view); you come in on the exchange's own. `Broker` is the account, one for the night
-whichever exchange you are in, like the casino's purse: `STARTING_CASH`, shares held and what they
+whichever exchange you are in, its cash the one `Wallet`'s; shares held and what they
 cost, profit or loss. `b` buys and `n` sells the picked stock at the current price, `+`/`-` step
 the size through `LOTS` (0 is as many as you can).
 
@@ -1585,6 +1586,22 @@ schedule so a strike can be had on demand even when dry. The flash envelope came
 `_strike_flash()` so the one you asked for is the same strike the storm would have had. A test
 compares 400,000 samples of both functions on `auto` against the formulas they replaced and requires
 zero drift.
+
+## Money
+
+**One balance for the whole city.** `main()` owns a `Wallet` — `STARTING_MONEY`, a thousand
+dollars — and everything that costs anything takes from it: the slot and the blackjack table
+(which used to have their own chips), the exchange (`Broker.cash` is the wallet's), the claw
+machine (`CLAW_COST` a go), the strength tester (`STRIKE_COST` a swing), the arcade
+(`ARCADE_COST` a game), and the city's buildings, by `FEES`: a seat at the pictures and the club's
+cover are paid on the way in, the bowl and the coffee when you sit down — once a visit, keyed on
+the venue, so walking out and back in is another ticket. Can't pay, and `render_turned_away()` is
+what you get instead: the usher, the bouncer, the cook's sign, the drone. The lifts cost
+(`LIFT_FEES`: a sky deck, the roof party; the fire escapes and the lighthouse stair are free), and
+a show from the lighthouse is `SHOW_FEE`; refused, the HUD says what it costs. The balance leads
+the HUD everywhere. Nothing tops it up — the casino's old stake when you were broke would have
+been money for nothing — except `:` in the menu, `+$1000`. Like everything else you carry, it is
+for the session and nowhere else.
 
 ## Testing it
 

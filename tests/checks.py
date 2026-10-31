@@ -185,7 +185,7 @@ check("nothing is unfindable from anywhere", fails == 0, "%d misses in 96" % fai
 # --- the slot machine ----------------------------------------------------
 # Honest the way the wheel is: the result is drawn first from the weights,
 # and the reels stop on it, one after another.
-slot = ac.Slot()
+slot = ac.Slot(ac.Wallet(10 ** 9))      # deep enough to pull all night
 counts = [0] * len(ac.SLOT_SYMBOLS)
 for _ in range(3000):
     slot.pull(0.0)
@@ -218,40 +218,39 @@ check("the machine stands in the room", "L U C K Y" in text and "PAIR" in text)
 room, _ = ac.render_casino_room(spin, 60, 24, settled, slot)
 check("and stays out of a narrow one", "L U C K Y" not in "\n".join("".join(r) for r in room))
 
-# Playable: a bet comes out of the chips, the payline pays by the table, the
-# blackjack table plays out of the same purse, and the house stakes you again
-# when you are broke but not before.
-purse = ac.Purse()
+# Playable: a bet comes out of the wallet, the payline pays by the table, the
+# blackjack table plays out of the same money, and broke is broke.
+purse = ac.Wallet()
 slot = ac.Slot(purse)
 slot.bet = 5
 slot.pull(0.0)
-check("a pull costs the bet", purse.chips == ac.STAKE - 5)
+check("you start with a thousand dollars, and a pull costs the bet",
+      purse.money == ac.STARTING_MONEY - 5 and ac.STARTING_MONEY == 1000)
 slot.result = [1, 1, 1]
 end = slot.stop_at(2) + 0.1
 slot.settle(end)
 slot.settle(end + 1.0)
-check("three $ pays forty times the bet, once", purse.chips == ac.STAKE - 5 + 5 * 40,
-      "%d chips" % purse.chips)
-check("the blackjack table sees the same chips", ac.Blackjack(purse).chips == purse.chips)
-purse.chips = 3
+check("three $ pays forty times the bet, once",
+      purse.money == ac.STARTING_MONEY - 5 + 5 * 40, "$%d" % purse.money)
+check("the blackjack table sees the same money",
+      ac.Blackjack(purse).money == purse.money)
+purse.money = 3
 slot.bet = 5
 check("you cannot bet more than you have", not slot.pull(10.0) and slot.short
-      and purse.chips == 3)
-purse.chips = 0
-check("but broke, the house stakes you again", slot.pull(20.0)
-      and purse.chips == ac.STAKE - 5 and purse.staked == 1)
+      and purse.money == 3)
+purse.money = 0
+check("and broke, nobody stakes you again", not slot.pull(20.0) and purse.money == 0)
 slot.bet_up(5)
 check("bets go up to the top of the table and stop", slot.bet == ac.SLOT_BETS[-1])
 slot.bet_up(-9)
 check("and down to the bottom", slot.bet == ac.SLOT_BETS[0])
-house = ac.Purse()
-house.chips = 10 ** 9
+house = ac.Wallet(10 ** 9)
 rtp = ac.Slot(house)
 rtp.bet = 1
 for k in range(20000):
     rtp.pull(k * 10.0)
     rtp.settle(k * 10.0 + 9.0)
-back = (house.chips - (10 ** 9 - 20000)) / 20000.0
+back = (house.money - (10 ** 9 - 20000)) / 20000.0
 check("it pays back most of what goes in, not all of it", 0.70 < back < 0.95,
       "%.2f per chip" % back)
 room, _ = ac.render_casino_room(ac.Spin(0.0, "ROYALE"), 80, 24, end, slot, None)
@@ -266,14 +265,14 @@ bj = ac.Blackjack()
 bj.deal(0.0)
 check("a hand is two cards each, from one deck", len(bj.player) == 2 and len(bj.dealer) == 2
       and len(set(bj.shoe + bj.player + bj.dealer)) == 52)
-bj = ac.Blackjack(); bj.chips = 100
+bj = ac.Blackjack(); bj.money = 100
 bj.phase, bj.player, bj.dealer = "player", [("10", "^"), ("6", "v")], [("9", "*"), ("7", "o")]
 bj.hit(1.0)                                  # whatever comes, it is at least 6 more
 busted = ac.hand_value(bj.player) > 21
 check("hitting can bust you, and that costs the bet",
-      (busted and bj.phase == "done" and bj.outcome == "BUST" and bj.chips == 90)
+      (busted and bj.phase == "done" and bj.outcome == "BUST" and bj.money == 90)
       or (not busted and bj.phase == "player"))
-bj = ac.Blackjack(); bj.chips = 100
+bj = ac.Blackjack(); bj.money = 100
 bj.phase, bj.player, bj.dealer = "player", [("10", "^"), ("9", "v")], [("10", "*"), ("6", "o")]
 bj.shoe = [("9", "^")] * 20 + [("2", "v")]   # pop() takes the end; enough not to refill
 bj.stand(2.0)
@@ -284,16 +283,16 @@ check("and draws on sixteen", len(bj.dealer) == 3)
 bj.update(2.0 + ac.BJ_DEAL); bj.update(3.0 + 2 * ac.BJ_DEAL)
 check("and stands on seventeen or more, then settles",
       bj.phase == "done" and ac.hand_value(bj.dealer) >= 17)
-check("nineteen beats eighteen", bj.outcome == "YOU WIN" and bj.chips == 110,
-      "%s, %d chips" % (bj.outcome, bj.chips))
-bj = ac.Blackjack(); bj.chips = 100
+check("nineteen beats eighteen", bj.outcome == "YOU WIN" and bj.money == 110,
+      "%s, %d chips" % (bj.outcome, bj.money))
+bj = ac.Blackjack(); bj.money = 100
 bj.phase, bj.player, bj.dealer = "player", [("A", "^"), ("K", "v")], [("9", "*"), ("7", "o")]
 bj._finish(0.0)
-check("blackjack pays three to two", bj.outcome == "BLACKJACK" and bj.chips == 115)
-bj = ac.Blackjack(); bj.chips = 100
+check("blackjack pays three to two", bj.outcome == "BLACKJACK" and bj.money == 115)
+bj = ac.Blackjack(); bj.money = 100
 bj.phase, bj.player, bj.dealer = "player", [("10", "^"), ("8", "v")], [("10", "*"), ("8", "o")]
 bj._finish(0.0)
-check("and a push is a push", bj.outcome == "PUSH" and bj.chips == 100)
+check("and a push is a push", bj.outcome == "PUSH" and bj.money == 100)
 bj = ac.Blackjack(); bj.deal(0.0)
 if bj.phase == "player":
     bj.stand(0.0)
@@ -3903,11 +3902,11 @@ t_ = k_ * ac.TICK_LEN + 5.0
 p_ = ac.stock_now(xs_, t_)
 br_.buy(xs_, t_)
 check("buying takes the price out of your cash and gives you the share",
-      br_.held[xs_] == 1 and abs(br_.cash - (ac.STARTING_CASH - p_)) < 1e-6)
+      br_.held[xs_] == 1 and abs(br_.cash - (ac.STARTING_MONEY - p_)) < 1e-6)
 br_.lot = 3                              # as many as you can
 br_.buy(xs_, t_)
 check("max buys all your cash will run to", br_.cash < p_
-      and br_.held[xs_] == 1 + int((ac.STARTING_CASH - p_) // p_))
+      and br_.held[xs_] == 1 + int((ac.STARTING_MONEY - p_) // p_))
 later = (k_ + 40) * ac.TICK_LEN + 5.0
 before = br_.cash
 had = br_.held[xs_]
@@ -3991,6 +3990,28 @@ lb.buy(13, t_)
 check("and buys what is picked", lb.held.get(13) == 1)
 check("the floor says which way the market is going",
       ac.mood(t_) in ("BULL MARKET", "BEAR MARKET", "FLAT MARKET"))
+
+# --- one wallet for the whole city --------------------------------------------
+w_ = ac.Wallet()
+cl2 = ac.Claw(0, [], w_)
+cl2.press(0.0)
+st3 = ac.Striker(0, [], w_)
+st3.swing(0.0)
+br3 = ac.Broker(w_)
+check("the claw, the hammer and the exchange all take from the one wallet",
+      abs(w_.money - (ac.STARTING_MONEY - ac.CLAW_COST - ac.STRIKE_COST)) < 1e-9
+      and br3.cash == w_.money)
+poor = ac.Wallet(0.5)
+cl3 = ac.Claw(0, [], poor)
+cl3.press(0.0)
+check("and with no money there is no go", cl3.t0 is None and cl3.short
+      and cl3.verdict(0.1)[0] == "$%d A GO" % ac.CLAW_COST
+      and not ac.Striker(0, [], poor).swing(0.0))
+check("and things in the city have prices",
+      all(ac.FEES[k] > 0 for k in ("cinema", "club", "ramen", "diner"))
+      and ac.LIFT_FEES[None] > 0 and ac.SHOW_FEE > 0)
+ta = "\n".join("".join(r) for r in ac.render_turned_away("club", 80, 24, 1.0)[0])
+check("and if you cannot pay, you are turned away", "not tonight" in ta)
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

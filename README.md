@@ -33,7 +33,7 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   city switching off sign by sign as the sky pales. Once in a great while, something else entirely.
 - **Places you can go into** — a casino (a blade sign up the corner, a red carpet and a doorman,
   and the whole building in gold when somebody hits 777) with a roulette wheel that spins
-  honestly, a slot machine you play for chips and a blackjack table that deals straight, a club
+  honestly, a slot machine and a blackjack table that deals straight, a club
   with a rave going
   on, ramen counters down the lit lanes where you can sit and wait for your bowl, a cinema
   showing a black-and-white film, with the title up over the doors in big lit letters and
@@ -80,6 +80,9 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   beam goes round over all of it, and you can climb the lighthouse: up on its gallery `f`
   lights a show, and you fire it, one shell for every press on the beat. One night in a dozen the river is lanterns, and
   now and then there are fireworks over the bay.
+
+You start the night with $1,000, one balance for everything - the casino, the exchange, the
+arcade, the carnival, a seat at the pictures, a bowl of ramen - and nothing tops it up.
 
 Nothing is stored. Every street, building, sign and trail is a hash of its own coordinates, so
 the city is infinite, identical every time you walk back to it, and held in no memory at all.
