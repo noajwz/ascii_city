@@ -38,7 +38,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   on, ramen counters down the lit lanes where you can sit and wait for your bowl, a cinema
   showing a black-and-white film, with the title up over the doors in big lit letters and
   searchlights sweeping the sky from its roof, an arcade with a front that is one big wall of
-  flashing coloured lights (the games inside are on their way), an all-night cyberpunk diner
+  flashing coloured lights and six games inside to play (a rooftop runner, a neon tube
+  puzzle, a delivery run, a racer, a fireworks show and an owl catching moths), an all-night cyberpunk diner
   with a giant neon coffee cup steaming on its roof, where a drone comes round with the coffee,
   and sky decks: ride the lift to the roof of the tallest towers and look out over the whole city,
   where every

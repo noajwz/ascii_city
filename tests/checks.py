@@ -3744,5 +3744,132 @@ ac.NEON[:] = real_neon
 check("and from across town you can see its lasers over the city", seen_lasers >= 2,
       "from %d spots" % seen_lasers)
 
+# --- the arcade games, played properly ----------------------------------------
+from collections import deque as _dq2
+
+
+def run_game(cls, bot, seconds, seed=7):
+    g = cls(seed, 0.0)
+    t = 0.0
+    while t < seconds and not g.over:
+        t += 1.0 / 30.0
+        k = bot(g)
+        if k:
+            g.key(k)
+        g.tick(t)
+    return g, t
+
+
+def roof_bot(g):
+    ahead = g.roof_at(g.x + g.RUN_X + g.speed * 0.2)       # a fifth of a second
+    here = g.roof_at(g.x + g.RUN_X)
+    if g.ground and (ahead is None or (here is not None and ahead > here)):
+        return "act"
+    return None
+
+
+g_, t_ = run_game(ac.RooftopRun, roof_bot, 60.0)
+check("rooftop run: jump the gaps and you keep going", t_ >= 59.0 and g_.score > 300,
+      "%.0fs, %dm" % (t_, g_.score))
+g_, t_ = run_game(ac.RooftopRun, lambda g: None, 60.0)
+check("and miss them and you fall", g_.over, g_.why)
+
+neon = ac.FixTheNeon(3, 0.0)
+solvable = True
+for lvl in range(5):
+    neon.grid.update(neon.answer)
+    solvable = solvable and neon.solved()
+    neon.new_level()
+check("fix the neon: every sign it deals can be lit", solvable)
+neon = ac.FixTheNeon(3, 0.0)
+neon.grid.update(neon.answer)
+x, y = next(p_ for p_ in neon.answer)
+neon.grid[(x, y)] = neon.turn(neon.turn(neon.turn(neon.answer[(x, y)])))
+neon.cx, neon.cy = x, y
+neon.key("act")
+check("and turning the last tube into place lights it and scores",
+      neon.won_at is not None and neon.score > 100)
+g_, t_ = run_game(ac.FixTheNeon, lambda g: None, 80.0)
+check("left alone, the sign stays dark", g_.over)
+
+
+def courier(g):
+    # Steer along the shortest way to the door.
+    start, goal = g.pos, g.target
+    prev, todo = {start: None}, _dq2([start])
+    while todo:
+        p_ = todo.popleft()
+        if p_ == goal:
+            break
+        for d in g.DIRS.values():
+            q = (p_[0] + d[0], p_[1] + d[1])
+            if q in g.road and q not in prev:
+                prev[q] = p_
+                todo.append(q)
+    p_ = goal
+    while prev.get(p_) not in (None, start):
+        p_ = prev[p_]
+    d = (p_[0] - start[0], p_[1] - start[1])
+    return next((k for k, v in g.DIRS.items() if v == d), None)
+
+
+g_, t_ = run_game(ac.LateDelivery, courier, 90.0)
+check("late delivery: the quick way round gets the orders there",
+      g_.score >= 8, "%d delivered in %.0fs" % (g_.score, t_))
+
+
+def driver(g):
+    def clear(lane):
+        return not any(cl == lane and ac.GAME_H - 9 < cy < ac.GAME_H
+                       for cl, cy in g.cars)
+    if clear(g.lane):
+        return None
+    for d, k in ((-1, "left"), (1, "right")):
+        if 0 <= g.lane + d < g.LANES and clear(g.lane + d):
+            return k
+    return None
+
+
+g_, t_ = run_game(ac.NeonDrift, driver, 40.0)
+check("neon drift: change lanes round the traffic and you keep going",
+      t_ > 15.0 and g_.score > 200, "%.0fs, %d" % (t_, g_.score))
+g_, t_ = run_game(ac.SkyShow, lambda g: "act" if any(
+    abs(r[1] - g.LINE) < 0.35 for r in g.rockets) else None, 60.0)
+check("sky show: burst them on the line and none go up dark",
+      not g_.over and g_.misses == 0 and g_.score > 1000, "%d" % g_.score)
+g_, t_ = run_game(ac.SkyShow, lambda g: None, 60.0)
+check("and let them go and the show is over", g_.over and g_.misses == 3)
+
+
+def owl(g):
+    low = max(g.moths, key=lambda m: m[1], default=None)
+    if low is None or abs(low[0] - g.x) < 1.0:
+        return None
+    return "left" if low[0] < g.x else "right"
+
+
+g_, t_ = run_game(ac.NightOwl, owl, 60.0)
+check("night owl: go to the moths and you catch them", g_.score >= 20,
+      "%d caught, %d lost" % (g_.score, g_.lost))
+for name, cls in ac.GAMES.items():
+    gg = cls(1, 0.0)
+    gg.tick(3.0)
+    txt = "\n".join("".join(r) for r in ac.render_game(gg, 50, 80, 24, 3.0)[0])
+    if not (name in txt and "SCORE" in txt and "HI 50" in txt):
+        check("every game fits an 80x24 window", False, name)
+        break
+else:
+    check("every game fits an 80x24 window", True)
+over_ = ac.RooftopRun(1, 0.0)
+for k in range(300):
+    over_.tick(k * 0.1)
+check("and says when it is over", "GAME OVER" in "".join(
+    "".join(r) for r in ac.render_game(over_, 0, 80, 24, 30.0)[0]) and over_.over)
+ar_ = ac.venue_at(*ac.find_place(x0, z0, "arcade")[:2])[1]
+sel_room = "\n".join("".join(r) for r in ac.render_arcade(ar_, 80, 24, 1.0, 1)[0])
+check("in the arcade the cabinet you are on is picked out", "vvv" in sel_room)
+check("and every cabinet in it is a game", all(
+    n in ac.GAMES for n in ac.ARCADE_GAMES))
+
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
