@@ -8,8 +8,9 @@ loop - checks.py never goes near a terminal - and it is what catches a local
 name shadowing loop state in main(), which no amount of headless rendering
 will show you.
 
-Watch out writing new cases here: an arrow key is "\x1b[C", and a program that
-quits on bare ESC may read it as one. Two dead-end investigations started that
+Watch out writing new cases here: an arrow key is "\x1bOC" once curses has
+the keypad on (xterm's application mode), not "\x1b[C" - write the second and
+it reads as a bare ESC, which quits. Two dead-end investigations started that
 way, with the program fine and the harness killing it."""
 import fcntl, os, pty, re, select, struct, sys, termios, time
 
@@ -63,7 +64,7 @@ ok &= report("tab to skyline and back", *run(
     [(b"\t",.6),(b"l",.4),(b"L",.4),(b"\t",.6),(b"w",.5)]))
 ok &= report("wander on spacebar", *run([(b" ", 5.0)]))
 ok &= report("panel open, arrows still walk", *run(
-    [(b"`",.6),(b"\x1b[A",.4),(b"\x1b[C",.4),(b"\x1b[B",.4),(b"`",.4),(b"w",.4)]))
+    [(b"`",.6),(b"\x1bOA",.4),(b"\x1bOC",.4),(b"\x1bOB",.4),(b"`",.4),(b"w",.4)]))
 ok &= report("panel keys then esc then play", *run(
     [(b"`",.5),(b"3",.7),(b"w",.4),(b"L",.6),(b"\x1b",.4),(b"w",.5),(b"a",.4)]))
 ok &= report("TERM=xterm (8 colours)", *run(
@@ -101,7 +102,7 @@ ok &= report("up the lighthouse: climb, light a show, fire, climb down", *run(
     [(b"`", .5), (b"+", 1.0), (b"w", 6.0), (b"f", 3.0), (b"f", .5), (b"F", 1.5),
      (b"d", .4), (b"s", 6.0), (b"w", .4)], cols=100, rows=30))
 ok &= report("the arcade: choose, play, play keys, leave, walk out", *run(
-    [(b"`", .5), (b"#", 2.0), (b"d", .4), (b"p", 1.0), (b"p", .3), (b"\x1b[D", .3),
+    [(b"`", .5), (b"#", 2.0), (b"d", .4), (b"p", 1.0), (b"p", .3), (b"\x1bOD", .3),
      (b"w", .3), (b"s", .3), (b"d", .3), (b"x", .5), (b"a", .3), (b"p", 1.5),
      (b"x", .4), (b"s", .6), (b"s", .6)], cols=100, rows=30))
 ok &= report("the casino: 777 next pull, pull, walk out into the gold", *run(
@@ -118,8 +119,8 @@ ok &= report("the roof party: lift up, walk about, back to the lift, down", *run
      (b"s", .6), (b"s", .6), (b"s", .6), (b"s", .6), (b"s", 6.0)], cols=100, rows=30))
 ok &= report("the stock exchange: buy, more, sell, walk out", *run(
     [(b"`", .5), (b";", 1.0), (b"b", .4), (b"+", .3), (b"b", .4), (b"n", .4),
-     (b"l", .4), (b"\x1b[B", .3), (b"\x1b[B", .3), (b"b", .4), (b"\x1b[A", .3),
-     (b"l", .4), (b"\x1b[C", .3), (b"-", .3), (b"s", .6), (b"s", .6)],
+     (b"l", .4), (b"\x1bOB", .3), (b"\x1bOB", .3), (b"b", .4), (b"\x1bOA", .3),
+     (b"l", .4), (b"\x1bOC", .3), (b"-", .3), (b"s", .6), (b"s", .6)],
     cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")

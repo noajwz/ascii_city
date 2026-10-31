@@ -1531,9 +1531,11 @@ Three things that only turned up by testing it:
   back to the Latin word list, and it draws from the same `rng` call either way so the city itself
   is identical on both.
 
-Testing this through a pty has a trap of its own: writing `\x1b[C` for an arrow key can be read as a
-bare ESC, which quits. Two dead-end investigations started that way — the program was fine and the
-harness was killing it.
+Testing this through a pty has a trap of its own: with the keypad on, which `main()` asks for,
+xterm sends an arrow as `\x1bOC`, not `\x1b[C`; write the second and curses reads a bare ESC, which
+quits. Two dead-end investigations started that way, with the program fine and the harness killing
+it, and the arrow tests in `pty_checks.py` passed for months by quitting at the first arrow — "no
+crash" was true. They send the keypad form now; buying from the exchange's list is what showed it.
 
 ## The cheat menu
 
