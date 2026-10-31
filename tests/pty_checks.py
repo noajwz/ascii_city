@@ -141,6 +141,11 @@ ok &= report("a manhole: walk on, down, a slice, back up", *run(
 ok &= report("the temple: across the street, in, the word of god twice, out", *run(
     [(b"`", .5), (b"*", 1.0)] + IN + IN + [(b"g", .7), (b"g", .7), (b"s", .6),
      (b"s", .6)], cols=100, rows=30))
+ok &= report("the confession booth: in, type with q and s in it, confess, esc, out",
+             *run([(b"`", .5), (b"*", 1.0)] + IN + IN + [(b"c", 1.6)]
+                  + [(bytes([c_]), .05) for c_ in b"i quit my job and stole"]
+                  + [(b"\x7f", .1), (b"l", .1), (b"\r", 3.0), (b"\x1b", .5), (b"s", .6),
+                     (b"s", .6)], cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

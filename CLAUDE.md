@@ -1316,6 +1316,22 @@ microsecond (`oracle["last"]` in `main()`), so nobody chooses it, not even the p
 `god_words()` turns it into `GOD_SAY` words off `GOD_WORDS` — a list of the city's own, not his.
 The last few utterances stay on the screen, the newest bright. Free to go in; nothing to pay.
 
+**The confession booth** stands against the side of the nave; `c` steps into it (`booth` in
+`main()`, cleared when you leave the temple or jump). `render_confession()` is the inside: dark
+wood, the lattice, the panel sliding back and the priest's shape behind it with a candle, and
+what has been said both ways. **Every key is a letter in there**, `q` and `s` included — you type
+your confession, Enter gives it, backspace works, and **esc** steps out. That needed
+`curses.set_escdelay(25)` in `main()`: by default curses holds a bare esc for a second to see
+whether an arrow key follows, so esc-then-anything was read as one meta key and the booth never
+let you go — and the pty harness, which ends every run with `q`, hung on it. `absolve()` is the
+priest: the first of `SINS` whose words he hears — **whole words or their starts**, matched on
+tokens, because "cheat" has "eat" in it and a confession about the menu was first told hunger is
+no sin — and otherwise that the city has heard worse; now and then what the city told him
+(`ledger`: how many times you jumped across it from the menu tonight, or what is left of your
+thousand dollars); a penance from `PENANCES`, all of them things to go and do in the city; and
+peace. He takes `CONFESS_WAIT` to answer. Someone saying they are hurting is told, plainly, to
+talk to someone.
+
 ## The sky deck
 
 One building `TOWER_MIN` tall in `TOWER_ODDS` with a street front has a lobby — `SKY DECK` over a
