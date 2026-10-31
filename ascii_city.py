@@ -5910,6 +5910,147 @@ def draw_noren(ch, co, v, walls, world, normal, now):
                   "(" if k % 2 else ")", HAZE)
 
 
+RAMEN_BOWL = 0.42     # world units to one of the bowl sign's own
+RAMEN_SIGN_Y = 3.72   # where the bowl sits: over the name, and in view from
+                      # across the lane, which sees nothing above five
+RAMEN_PUFFS = 16      # puffs of steam out of the duct at once
+
+
+def bowl_shape():
+    """The bowl, in the sign's own (across, up) units: the rim, a round body
+    down to a foot, a pair of chopsticks lifting noodles out of it, and the
+    noodles - which are drawn per frame, because they swing."""
+    def line(a0, h0, a1, h1, n):
+        return [(a0 + (a1 - a0) * k / n, h0 + (h1 - h0) * k / n) for k in range(n + 1)]
+    rim = line(-2.2, 1.7, 2.2, 1.7, 24)
+    body = [(2.2 * math.cos(t), 1.7 - 1.35 * math.sin(t))
+            for t in [math.pi * k / 24 for k in range(25)]]
+    foot = line(-0.8, 0.15, -0.65, 0.0, 2) + line(-0.65, 0.0, 0.65, 0.0, 8) \
+        + line(0.65, 0.0, 0.8, 0.15, 2)
+    band = [(1.75 * math.cos(t), 1.25 - 0.9 * math.sin(t))
+            for t in [math.pi * (0.15 + 0.7 * k / 16) for k in range(17)]]
+    return rim, body, foot, band
+
+
+_BOWL = bowl_shape()
+
+
+def draw_ramen_front(ch, co, v, walls, i, j, f, now, wet):
+    """A ramen shop's front, made to be found from down the lane: a neon bowl
+    over the door with the chopsticks lifting noodles out of it and steam
+    curling off the top; a duct up the wall pouring steam out over the lane;
+    more of it rolling out under the curtain; a red lantern each side of the
+    door, and the ticket machine by it, lit. All world points, so it
+    foreshortens down the lane and the next shop's front hides it."""
+    seed = _mix(i, j * 4 + f, 1607)
+    nx, nz = FACES[f]
+    mid = CELL * 0.5
+
+    def world(a, h, out=0.25):
+        return face_point(i, j, f, mid + a * RAMEN_BOWL, out,
+                          RAMEN_SIGN_Y + h * RAMEN_BOWL)
+
+    red, orange, yellow = NEON[3], NEON[4], NEON[7]
+    flicker = (now + seed % 97 * 0.31) % 9.0 < 0.2 and int(now * 25) % 2 == 0
+    # Dark inside the bowl first, or the wall behind shows through the tube.
+    h = 0.4
+    while h < 1.65:
+        half = 2.2 * math.sqrt(max(0.0, 1.0 - ((1.7 - h) / 1.35) ** 2)) - 0.15
+        a = -half
+        while a <= half:
+            pr = v.project(*world(a, h))
+            if pr is not None:
+                put_cell(ch, co, v, walls, int(round(pr[0])), int(round(pr[1])),
+                         pr[2], " ", red[0])
+            a += 0.14
+        h += 0.14
+    rim, body, foot, band = _BOWL
+    tube = red[1] if flicker else red[0]
+    for path in (rim, body, foot):
+        draw_tube(ch, co, v, walls, [world(a, h) for a, h in path], tube)
+    # The pattern round the bowl, every other stretch lit.
+    for k in range(0, len(band) - 1, 2):
+        draw_tube(ch, co, v, walls, [world(*band[k]), world(*band[k + 1])],
+                  orange[0])
+    # The chopsticks, lifting and dipping, and the noodles hanging off them.
+    lift = 0.35 + 0.35 * math.sin(now * 1.6 + seed % 13)
+    for off in (0.0, 0.32):
+        draw_tube(ch, co, v, walls,
+                  [world(0.2 + off + 2.4 * k / 10, 2.0 + lift + 2.1 * k / 10)
+                   for k in range(11)], orange[0])
+    for k, a0 in enumerate((0.25, 0.55, 0.85)):
+        top = 2.05 + lift + 0.3 * k / 2
+        pts = []
+        h = top
+        while h > 1.7:
+            pts.append(world(a0 + 0.12 * math.sin(h * 6.0 + now * 3.0 + k), h))
+            h -= 0.1
+        draw_tube(ch, co, v, walls, pts, yellow[1] if flicker else yellow[0])
+    # Steam off the bowl: three strands, lit in pulses that climb them.
+    for k, a0 in enumerate((-1.1, -0.3, 0.5)):
+        run = []
+        h = 2.0
+        while h < 4.6:
+            a = a0 + 0.4 * math.sin(h * 1.9 - now * 2.0 + k * 2.3)
+            if (h - now * 1.4 + k * 0.7) % 1.4 < 0.85:
+                run.append(world(a, h))
+            else:
+                if len(run) > 1:
+                    draw_tube(ch, co, v, walls, run, SNOW if h < 3.6 else SMOKE)
+                run = []
+            h += 0.1
+        if len(run) > 1:
+            draw_tube(ch, co, v, walls, run, SMOKE)
+
+    # The duct: up the wall at one end of the front, out over the lane at the
+    # top, and the steam coming out of it in puffs that grow and thin out.
+    top = 4.1           # a vent, not a chimney: low enough to see from the lane
+    du = 0.55 if seed & 1 else CELL - 0.55
+    pts = [face_point(i, j, f, du, 0.2, 2.6 + (top - 2.6) * k / 12) for k in range(13)]
+    pts += [face_point(i, j, f, du, 0.2 + 0.8 * k / 4, top) for k in range(1, 5)]
+    draw_tube(ch, co, v, walls, pts, CURB)
+    wind = 0.6 * math.sin(now * 0.13 + seed % 7)
+    for k in range(RAMEN_PUFFS):
+        age = (now * 0.22 + k / float(RAMEN_PUFFS) + (seed % 11) * 0.09) % 1.0
+        if age > 0.92:
+            continue
+        r = 0.25 + age * 1.3
+        cx, cy, cz = face_point(i, j, f, du + wind * age * 3.0
+                                + 0.5 * math.sin(k * 2.7 + now * 0.7),
+                                1.1 + age * 2.0, top + 0.1 + age * age * 6.0)
+        tone = SNOW if age < 0.3 else SMOKE if age < 0.65 else HAZE
+        ax, az = -nz, nx
+        for da, dh, g in ((0.0, 0.0, "~"), (-r, 0.0, "("), (r, 0.0, ")"),
+                          (0.0, r * 0.6, "~"), (-r * 0.6, r * 0.5, "("),
+                          (r * 0.6, r * 0.5, ")")):
+            if age > 0.6 and g != "~" and (k + int(now * 3)) % 2:
+                continue                         # thinning out
+            put_point(ch, co, v, walls, cx + ax * da, cy + dh, cz + az * da, g, tone)
+
+    # Steam rolling out under the curtain into the lane.
+    for k in range(10):
+        age = (now * 0.35 + k / 10.0) % 1.0
+        along = 1.3 * math.sin(k * 1.9 + now * 0.5)
+        px, py, pz = face_point(i, j, f, mid + along, 0.3 + age * 2.3, 1.9 + age * 2.2)
+        put_point(ch, co, v, walls, px, py, pz,
+                  "~" if k % 3 else "(" if along < 0 else ")",
+                  SNOW if age < 0.35 else SMOKE if age < 0.7 else HAZE)
+
+    # A red lantern each side of the door, swaying.
+    for side in (-1, 1):
+        sway = 0.06 * math.sin(now * 1.2 + side + seed % 5)
+        lx, _, lz = face_point(i, j, f, mid + side * 1.95 + sway, 0.45, 0.0)
+        glow = red[0] if (int(now * 2) + side) % 9 else FLASH
+        blit_sprite(ch, co, v, walls, [".-.", "(#)", "'-'"],
+                    lx, lz, 2.25, 3.05, 0.38, glow)
+        put_lit(ch, co, v, walls, lx, 2.6, lz, "#", glow, wet, now)
+    # And the ticket machine: pay here, then sit down.
+    tu = CELL - 0.9 if seed & 1 else 0.9
+    tx, _, tz = face_point(i, j, f, tu, 0.35, 0.0)
+    blit_sprite(ch, co, v, walls, ["[==]", "|oo|", "|oo|", "|[]|", "|__|"],
+                tx, tz, 0.0, 1.5, 0.45, NEON[2][0])
+
+
 def near_yokocho(v, reach):
     """Open cells of a lit lane in front of you."""
     n = int(reach / CELL) + 1
@@ -9020,6 +9161,8 @@ def draw_props(ch, co, v, walls, now, wet):
                 if ramen:
                     w = face_point(i, j, f, CELL * 0.5, 0.6, 0.0)
                     props.append((_d2(v, w), "noren", (i, j, f), w, (nx, nz)))
+                    w = face_point(i, j, f, CELL * 0.5, 0.3, RAMEN_SIGN_Y)
+                    props.append((_d2(v, w), "ramenfront", (i, j, f), w, (nx, nz)))
             if lit:
                 if fc["hung"] is not None:
                     s = fc["hung"]
@@ -9045,6 +9188,8 @@ def draw_props(ch, co, v, walls, now, wet):
     for _, kind, s, world, normal in props:
         if kind == "noren":
             draw_noren(ch, co, v, walls, world, normal, now)
+        elif kind == "ramenfront":
+            draw_ramen_front(ch, co, v, walls, *s, now, wet)
         elif kind == "ladder":
             # The drop ladder down to the ground, which is what says this one
             # goes all the way up - the others stop at the first landing.
@@ -12519,8 +12664,9 @@ def _hwy_spot(x, z):
 
 
 def _ramen_spot(x, z):
-    """At the counter of the nearest ramen shop, facing it. Skips the one you
-    are sat at, so a second press finds another."""
+    """Across the lane from the nearest ramen shop, facing it - a step or two
+    in is the counter. Skips the one you are at, so a second press finds
+    another."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
     for i, j in _rings(ci, cj, CHEAT_RINGS):
@@ -12532,9 +12678,13 @@ def _ramen_spot(x, z):
             px, pz = ramen_door(i, j, f)
             if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
                 continue
-            if can_stand(px, pz):
-                nx, nz = FACES[f]
-                return px, pz, math.atan2(-nx, -nz)
+            # Back across the lane, to see the front: two steps from the
+            # counter, which is the way in.
+            nx, nz = FACES[f]
+            for back in (4.0, 3.8, 3.6):
+                q = face_point(i, j, f, CELL * 0.5, back, 0.0)
+                if can_stand(q[0], q[2]):
+                    return q[0], q[2], math.atan2(-nx, -nz)
     return None
 
 

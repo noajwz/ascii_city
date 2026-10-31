@@ -307,12 +307,22 @@ check("and the dealer's second card is face down until you stand",
       (":::" in text) == (bj2.phase == "player"))
 
 # --- the ramen counter ---------------------------------------------------
-# A yokocho pub, one in RAMEN_ODDS, that you can sit down at. The menu finds
-# one, standing there is being inside, and the bowl comes after a while.
-shop = ac.find_place(x0, z0, "ramen")
-check("the menu finds a ramen counter", shop is not None and ac.can_stand(shop[0], shop[1]))
+# A yokocho pub, one in RAMEN_ODDS, that you can sit down at. The menu stands
+# you across the lane from one, a couple of steps in is the counter, and the
+# bowl comes after a while.
+front = ac.find_place(x0, z0, "ramen")
+check("the menu finds a ramen shop, and stands you outside it",
+      front is not None and ac.can_stand(front[0], front[1])
+      and ac.venue_at(front[0], front[1]) is None)
+step = 0.0
+while step < 3.0 and ac.venue_at(front[0] + math.sin(front[2]) * step,
+                                 front[1] + math.cos(front[2]) * step) is None:
+    step += 0.25
+shop = (front[0] + math.sin(front[2]) * step, front[1] + math.cos(front[2]) * step,
+        front[2])
 ven = ac.venue_at(shop[0], shop[1])
-check("and standing at it is being inside it", ven is not None and ven[0] == "ramen")
+check("and a couple of steps in is the counter", ven is not None and ven[0] == "ramen"
+      and step <= 2.6, "%.2f" % step)
 si = int(shop[0] / ac.CELL + ac.BIG) - ac.BIG
 sj = int(shop[1] / ac.CELL + ac.BIG) - ac.BIG
 check("it is on a lit lane", ac.yokocho_at(si, sj))
@@ -350,6 +360,27 @@ ac.render_street(ac.View(shop[0] - math.sin(shop[2]) * 3.0, shop[1] - math.cos(s
                          shop[2], 110, 30), 300.0)
 ac.draw_noren = real_noren
 check("outside, the noren hangs over its door", blits)
+
+# The front, from where the menu stands you: a neon bowl over the name, the
+# lanterns, and steam - off the bowl, out of the vent, under the curtain.
+fronts = []
+real_front = ac.draw_ramen_front
+ac.draw_ramen_front = lambda *a: (fronts.append(1), real_front(*a))
+fv = ac.View(front[0], front[1], front[2], 100, 30)
+steamy = []
+for k in range(6):
+    fch, fco = ac.render_street(fv, 300.0 + k * 0.7)[:2]
+    steamy.append(sum(1 for y in range(30) for x in range(100)
+                      if fch[y][x] in "~()"
+                      and fco[y][x] in (ac.SNOW, ac.SMOKE, ac.HAZE)))
+ac.draw_ramen_front = real_front
+ftext = "\n".join("".join(r) for r in fch)
+check("the shop front is drawn, and seen from across the lane", fronts
+      and "ラ" in ftext and "(#" in ftext and "#)" in ftext)
+check("and it steams, all the time", min(steamy) >= 8, str(steamy))
+bowl = sum(1 for y in range(12) for x in range(100) if fco[y][x] == ac.NEON[3][0]
+           and fch[y][x] != " ")
+check("and the bowl is up there in red neon, above the name", bowl >= 25, str(bowl))
 
 # --- people walking ------------------------------------------------------
 while ac.weather_name() != "dry":
