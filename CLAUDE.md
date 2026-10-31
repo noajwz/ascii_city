@@ -475,6 +475,20 @@ ground pass planks it like any other pier, and everything is laid out from its e
 at the tip, the carousel and the stalls and the claw machine back towards the shore, bulbs along
 the rails with posts down to the water, and PLEASURE PIER over the way on (`draw_pier_sign()`).
 
+**Two rides stand on the pier with the wheel.** `draw_drop_tower()` is a mast near the pier's end
+`DROP_H` tall, half again the wheel's height, so it is the first thing you see of the carnival from
+the headland: bulbs up the front of it, a red light on top, and a car of riders round it whose
+height is `drop_car()` — waiting at the bottom, a slow climb, a hang at the top, a drop that falls
+rather than eases, the brakes — on `DROP_CYCLE`. Climbing, the lights creep up after it; falling,
+they race down with it in white. `draw_coaster()` is a roller coaster over the east half of the
+deck, the drop tower in the middle of its loop: `coaster_point()` is an oval that climbs and dives
+as it goes round (never under 2.2, clear of the stalls), drawn through `draw_tube()` with chasing
+bulbs on it and legs down to the deck, and a train of `COASTER_CARS` with a light on the front.
+`coaster_at()` slows it up the climbs and speeds it down the dips as a function of where it is on
+the lap rather than anything integrated, so nothing is stored. Both are only on the pier by the big
+bridge; between them they cost about 1.6 ms a frame near it. `}` in the menu stands you on the bank
+beside the pier, looking along it at them.
+
 **Behind it the town is kept low** (`seafront_cap()`, applied in `lot()` before the faces are
 made): six units at the water, rising a unit and a half a row inland for `SEAFRONT_DEEP` rows.
 That is the reason for the pier as much as the distance is. With towers right behind it the

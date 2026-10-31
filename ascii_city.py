@@ -166,6 +166,13 @@ CARNIVAL_BESIDE = 2    # cells kept clear between it and the big bridge
 FAIR_PIER = 6          # by the big bridge the fair is on a pier this many cells out
 FAIR_PIER_MAX = 0.5    # and never further than half way over
 SEAFRONT_DEEP = 30     # cells inland the town behind that pier is kept low
+# Out on the pier, two more rides: a drop tower near the end, taller than
+# the wheel by half again so it is the first thing you see from the
+# headland, and a roller coaster looping over the east half of the deck.
+DROP_H = 34.0          # the tower's height
+DROP_CYCLE = 20.0      # seconds: load, climb, hang, drop, brake
+COASTER_LAP = 18.0     # seconds for the train to go round once
+COASTER_CARS = 5
 WHEEL_R = 10.0         # the wheel's radius in world units
 WHEEL_RPM = 1.3
 
@@ -5696,6 +5703,10 @@ def draw_carnival(ch, co, v, walls, c, now, wet):
         draw_pier_sign(ch, co, v, walls, (c + FAIR_LONG * 0.5) * CELL,
                        bank_z(c + FAIR_LONG // 2) - 0.6, now)
 
+    if tip is not None:
+        draw_drop_tower(ch, co, v, walls, c, now, wet)
+        draw_coaster(ch, co, v, walls, c, now, wet)
+
     # The A-frame, then the spokes, then the rim over both.
     for h in range(0, int(hub * 2)):
         y = h * 0.5
@@ -5766,6 +5777,110 @@ def draw_carnival(ch, co, v, walls, c, now, wet):
                   + (0.9 + ((m >> 8) & 255) / 255.0 * 2.0) * CELL)
         blit_sprite(ch, co, v, walls, LOOK_UP, px, pz, 0.0, SMOKER_H, SMOKER_W,
                     CURB)
+
+
+def drop_car(t):
+    """How high the drop tower's car is, t seconds into its cycle, and
+    whether it is falling: waiting at the bottom while they get in, a slow
+    climb, a hang at the top long enough to look at the view, then the drop -
+    falling, not easing - and the brakes."""
+    t %= DROP_CYCLE
+    low, high = 1.2, DROP_H - 3.0
+    if t < 3.0:
+        return low, False
+    if t < 11.0:
+        k = (t - 3.0) / 8.0
+        return low + (high - low) * (0.5 - 0.5 * math.cos(k * math.pi)), False
+    if t < 13.5:
+        return high, False
+    if t < 14.6:
+        k = (t - 13.5) / 1.1
+        return high - (high - low) * k * k, True        # gravity, near enough
+    return low, False
+
+
+def draw_drop_tower(ch, co, v, walls, c, now, wet):
+    """The drop tower near the end of the pier: a mast ringed with bulbs,
+    a red light on top, and the car of riders round it going up slowly and
+    coming down all at once. While it climbs the lights creep up after it;
+    when it drops they race down with it."""
+    k = 9.5
+    x, z = (c + k) * CELL, (pier_tip(c, k=k) + 1.2) * CELL
+    car, falling = drop_car(now + c * 0.37)
+    for a in range(4):                       # the mast, four legs
+        ang = a * math.tau / 4.0 + 0.4
+        dx, dz = math.cos(ang) * 0.5, math.sin(ang) * 0.5
+        y = 0.3
+        while y < DROP_H:
+            put_point(ch, co, v, walls, x + dx, y, z + dz, "|", CONCRETE)
+            y += 0.6
+    y = 1.0
+    n = 0
+    while y < DROP_H - 0.5:                  # the bulbs up the front of it
+        if falling:
+            lit = car - 1.0 <= y <= car + 6.0
+        else:
+            lit = (n - int(now * 6.0)) % 5 == 0 or y < car
+        put_lit(ch, co, v, walls, x, y, z - 0.6, "o",
+                (FLASH if falling else NEON[(n // 3) % len(NEON)][0]) if lit
+                else BULB_DIM, max(wet, 0.3), now)
+        y += 1.2
+        n += 1
+    blink = int(now * 1.3) % 2 == 0
+    put_lit(ch, co, v, walls, x, DROP_H + 0.6, z, "*" if blink else ".",
+            ROU_RED if blink else CONCRETE, max(wet, 0.3), now)
+    # The car: a ring of seats round the mast with somebody in each.
+    for a in range(10):
+        ang = a * math.tau / 10.0
+        sx, sz = x + math.cos(ang) * 1.3, z + math.sin(ang) * 1.3
+        put_point(ch, co, v, walls, sx, car, sz, "=", GOLD)
+        put_point(ch, co, v, walls, sx, car + 0.55, sz, "o", CURB)
+
+
+def coaster_point(c, a):
+    """A point on the coaster's track, a going round it: an oval over the
+    east half of the pier, climbing and diving as it goes round."""
+    x0 = (c + 8.0) * CELL
+    z0 = (pier_tip(c, k=8.0) + 2.0) * CELL
+    h = 5.0 + 3.5 * math.sin(2.0 * a + 0.5) + 2.0 * math.sin(3.0 * a)
+    return x0 + 13.0 * math.cos(a), max(2.2, h), z0 + 7.2 * math.sin(a)
+
+
+def coaster_at(c, now):
+    """Where the train's front car is on the track, as an angle: slow up the
+    climbs and quick down the dips, which is a function of where it is on
+    the lap and not something integrated, so nothing is stored."""
+    lap = ((now + c * 0.53) % COASTER_LAP) / COASTER_LAP
+    a = lap * math.tau
+    return a + 0.35 * math.sin(2.0 * a + 0.5)
+
+
+def draw_coaster(ch, co, v, walls, c, now, wet):
+    """The roller coaster: the track in tube, glyph by which way it runs on
+    screen, bulbs chasing round it, legs down to the deck, and the train -
+    five cars of riders with a light on the front - going round."""
+    steps = 140
+    pts = [coaster_point(c, k * math.tau / steps) for k in range(steps + 1)]
+    draw_tube(ch, co, v, walls, pts, CONCRETE)
+    chase_k = int(now * 8.0)
+    for k, (x, y, z) in enumerate(pts[:-1]):
+        if k % 4 == 0:
+            on = (k // 4 - chase_k) % 6 == 0
+            put_lit(ch, co, v, walls, x, y + 0.35, z, "o",
+                    NEON[(k // 4) % len(NEON)][0] if on else BULB_DIM,
+                    max(wet, 0.3), now)
+        if k % 10 == 0:                      # the legs
+            h = y - 0.4
+            while h > 0.3:
+                put_point(ch, co, v, walls, x, h, z, "|", BARK)
+                h -= 0.9
+    front = coaster_at(c, now)
+    for n in range(COASTER_CARS):
+        x, y, z = coaster_point(c, front - n * 0.13)
+        put_point(ch, co, v, walls, x, y + 0.45, z, "#", ROU_RED)
+        put_point(ch, co, v, walls, x, y + 1.0, z, "o", CURB)
+    x, y, z = coaster_point(c, front + 0.04)
+    put_lit(ch, co, v, walls, x, y + 0.5, z, "*", FLASH, max(wet, 0.3), now)
 
 
 def draw_pier_sign(ch, co, v, walls, x, z, now):
@@ -10225,6 +10340,7 @@ CHEAT_PLACES = [
     ("t", "the riverbank", "bank"),
     ("i", "the carnival", "carnival"),
     ("&", "a claw machine", "claw"),
+    ("}", "pleasure pier", "pleasurepier"),
     ("u", "the big bridge", "grand"),
     ("h", "the lighthouse", "lighthouse"),
     ("+", "lighthouse top", "lighthousedoor"),
@@ -10236,7 +10352,8 @@ CHEAT_PLACES = [
 
 # The river and the woods: listed under the parts of town, not with the city.
 OUT_OF_TOWN = {"woods", "rave", "lake", "bank", "pier", "bridge", "leaner",
-               "carnival", "claw", "grand", "lighthouse", "lighthousedoor"}
+               "carnival", "claw", "pleasurepier", "grand", "lighthouse",
+               "lighthousedoor"}
 
 
 def _rings(ci, cj, limit):
@@ -10620,6 +10737,26 @@ def _claw_spot(x, z):
     return None
 
 
+def _pleasure_pier_spot(x, z):
+    """On the bank beside the pleasure pier, looking along the shore at it:
+    the drop tower, the coaster and the wheel side by side."""
+    ci = int(x / CELL + BIG) - BIG
+    for k in range(-1, 3):
+        span = grand_avenue(ci + k * GRAND_GAP)
+        if span is None:
+            continue
+        c = carnival_col(span[0])
+        tx, tz = (c + 7.0) * CELL, (pier_tip(c, k=7) + 2.0) * CELL
+        for d in (12, 16, 9, 20):
+            for col in (c - d, c + FAIR_LONG + d):
+                px, pz = (col + 0.5) * CELL, (shore_j(col) + 1.2) * CELL
+                if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+                    continue
+                if can_stand(px, pz):
+                    return px, pz, math.atan2(tx - px, tz - pz)
+    return None
+
+
 def _lighthouse_door_spot(x, z):
     """Outside the lighthouse's door, facing it: one step in and you are on
     the stair, the way the sky deck's cheat leaves you at its lobby."""
@@ -10867,6 +11004,8 @@ def find_place(x, z, kind):
         return _claw_spot(x, z)
     if kind == "lighthousedoor":
         return _lighthouse_door_spot(x, z)
+    if kind == "pleasurepier":
+        return _pleasure_pier_spot(x, z)
     if kind == "police":
         return _police_spot(x, z, now_hint())
     if kind in ("tunnel", "longtunnel"):
