@@ -2625,7 +2625,7 @@ check("but it is planked", any(g == "-" for g in feet))
 # The carnival: a strip of open bank nothing is built on, a wheel that turns
 # with its lights going round, and it lies on the water.
 fair = ac.find_place(x0, z0, "carnival")
-fc = ac.carnival_col(int(fair[0] / ac.CELL))
+fc = ac.carnival_col(int(fair[0] // ac.CELL))
 (wx, wz), (cx, cz), stalls, zb = ac.carnival_spots(fc)
 ground = [(i, j) for i in range(fc - 2, fc + ac.FAIR_LONG + 2)
           for j in range(int(ac.river_span(i)[1]) - 1, int(ac.river_span(i)[1]) + 7)
@@ -2635,7 +2635,8 @@ check("there is a fairground on the bank", len(ground) >= ac.FAIR_LONG * ac.FAIR
 check("and nothing is built on it", all(ac.is_open(i, j) and not ac.river_at(i, j)
                                         for i, j in ground))
 check("everything on it stands on dry ground",
-      all(ac.dry_at(x, z) for x, z in [(wx, wz), (cx, cz)] + stalls))
+      all(ac.dry_at(x, z) for x, z in [(cx, cz)] + stalls
+          + ([] if ac.wheel_out(fc) else [(wx, wz)])))
 check("the cheat stands you on it", ac.can_stand(fair[0], fair[1])
       and ac.fair_at(int(fair[0] / ac.CELL), int(fair[1] / ac.CELL)))
 check("and one carnival is a long way from the next",
@@ -2731,7 +2732,7 @@ ac._show = None
 # grip is drawn when it drops, and the claw is then shown doing exactly that.
 bx_, bz_ = ac.claw_spot(fc)
 check("the claw machine stands on the fairground",
-      ac.dry_at(bx_, bz_) and ac.fair_at(int(bx_ / ac.CELL), int(bz_ / ac.CELL)))
+      ac.dry_at(bx_, bz_) and ac.fair_at(int(bx_ // ac.CELL), int(bz_ // ac.CELL)))
 cl_at = ac.find_place(x0, z0, "claw")
 check("the cheat stands you at it", cl_at is not None
       and ac.venue_at(cl_at[0], cl_at[1])[0] == "claw")
@@ -2942,18 +2943,32 @@ check("and the town behind it stands well back across the water", min(gaps) >= 8
       "%s cells of water behind the rock" % gaps)
 # Every big bridge has the carnival beside it on the near bank, across the bay
 # from the headland, and from the rock the wheel and the bridge are in one view.
-beside = []
+beside, reach = [], []
 for k in range(-4, 5):
     sp_ = ac.grand_avenue(k * ac.GRAND_GAP + 1)
     if sp_ is None:
         continue
     c_ = ac.carnival_col(sp_[0])
     (wx_, wz_), cz_, st_, z0_ = ac.carnival_spots(c_)
-    beside.append(abs(c_ - sp_[0]) < 30
-                  and all(ac.dry_at(x, z) for x, z in [(wx_, wz_), cz_] + st_)
+    li2, lj2 = ac.headland_home(sp_[0])
+    rock2 = [((i + 0.5) * ac.CELL, (j + 0.5) * ac.CELL)
+             for i in range(li2 - 20, li2 + 21) for j in range(lj2 - 12, lj2 + 14)
+             if ac.headland_at(i, j)]
+    reach.append(min(math.hypot(x - wx_, z - wz_) for x, z in rock2))
+    beside.append(abs(c_ - sp_[0]) < 50
+                  and all(ac.dry_at(x, z) for x, z in [cz_] + st_ + [ac.claw_spot(c_)])
+                  and ac.water_at(int(wx_ // ac.CELL), int(wz_ // ac.CELL))
                   and not any(ac.grand_at(i) for i in range(c_, c_ + ac.FAIR_LONG)))
-check("every big bridge has the carnival beside it", beside and all(beside),
-      "%d of %d" % (sum(beside), len(beside)))
+check("every big bridge has the carnival beside it, its wheel out on the water",
+      beside and all(beside), "%d of %d" % (sum(beside), len(beside)))
+reach.sort()
+check("and as near the headland as the bay allows", reach[len(reach) // 2] < 70
+      and reach[-1] < 130, "wheel to rock: %s units" % [int(r) for r in reach])
+flooded = [(i, j) for i in range(li_ - 40, li_ + 41)
+           for j in range(int(ac.river_span(i)[1]) + 1, int(ac.river_span(i)[1]) + 10)
+           if ac.moat_at(i, j)]
+check("the water round the headland never comes onto the near bank", not flooded,
+      "%d cells" % len(flooded))
 cc_ = ac.carnival_col(gspan[0])
 (wx_, wz_), _, _, _ = ac.carnival_spots(cc_)
 gx_ = (gspan[0] + gspan[1] / 2.0) * ac.CELL
