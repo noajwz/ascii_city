@@ -4630,6 +4630,55 @@ for w_, h_ in ((20, 8), (40, 14), (240, 70)):
     ac.draw_taxi_menu(g_, c_, tdests, 3, 100.0)
 check("and any size of window is fine", True)
 
+# --- fog nights --------------------------------------------------------------------
+fog_n = sum(1 for k in range(2000) if ac.night(k * ac.NIGHT_LENGTH + 1.0)["fog"])
+check("fog comes in one night in a while", 2000 / 20.0 < fog_n < 2000 / 5.0,
+      "%d nights in 2000" % fog_n)
+check("and never on the strange night", not any(
+    ac.night(k * ac.NIGHT_LENGTH + 1.0)["fog"]
+    and ac.night(k * ac.NIGHT_LENGTH + 1.0)["alien"]
+    for k in range(4000)))
+near0, far0 = ac.fog_reach(0.0)
+reach_ = [ac.fog_reach(t * 7.0) for t in range(200)]
+check("the bank rolls in and out", max(f_ for _, f_ in reach_) > far0 * 1.15
+      and min(f_ for _, f_ in reach_) < far0 * 0.85
+      and all(n_ < f_ for n_, f_ in reach_))
+keep_skip = ac._night_skip
+for _ in range(60):                     # an ordinary night to compare with
+    n_ = ac.night(300.0)
+    if not (n_["fog"] or n_["alien"] or n_["blackout"]):
+        break
+    ac.skip_night()
+lst_ = ac.find_place(x0, z0, "street")
+lv = ac.View(lst_[0], lst_[1], lst_[2], 100, 30)
+clear_ch, clear_co = ac.render_street(lv, 300.0)[:2]
+ac.skip_to_fog(300.0)
+while ac.night(300.0)["blackout"]:
+    ac.skip_to_fog(300.0)
+fog_ch, fog_co = ac.render_street(lv, 300.0)[:2]
+ac._night_skip = keep_skip
+far_rows = range(lv.horizon - 6, lv.horizon + 1)
+def struct_(g):
+    return sum(1 for y in far_rows for x in range(100) if g[y][x] in "|_-=")
+check("down a long street the far buildings go into the fog",
+      struct_(fog_ch) < struct_(clear_ch) * 0.75,
+      "%d structure cells, then %d" % (struct_(clear_ch), struct_(fog_ch)))
+check("and the far lights go soft",
+      sum(1 for y in far_rows for x in range(100) if fog_ch[y][x] in ":o")
+      > sum(1 for y in far_rows for x in range(100) if clear_ch[y][x] in ":o"))
+bottom = range(26, 30)
+check("what is near you is still there",
+      sum(1 for y in bottom for x in range(100) if fog_ch[y][x] == clear_ch[y][x])
+      > 0.8 * 400)
+keep_star = ac.STAR
+ac.STAR = 914
+ac.skip_to_fog(300.0)
+sky_ch, sky_co = ac.render_street(lv, 300.0)[:2]
+ac._night_skip = keep_skip
+ac.STAR = keep_star
+check("and no stars through it", not any(sky_co[y][x] == 914 for y in range(lv.horizon)
+                                          for x in range(100)))
+
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
 cl2 = ac.Claw(0, [], w_)
