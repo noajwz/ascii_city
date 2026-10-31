@@ -303,8 +303,27 @@ ADS = [
 # doors with the film's name in it. Inside it is the quietest light in the
 # city - one black-and-white film, on a loop, on the city's own clock, so you
 # walk in on whatever is showing.
+CINEMA_BIG = 40.0      # nearer than this, the title goes up in the big font
+SEARCH_REACH = 260.0   # how far off the searchlights are seen from
+SEARCH_LONG = 160.0    # how far up into the sky a beam reaches
+SEARCH_LEAN = 0.65     # radians off the vertical: well over, across the sky
 FILM_TITLES = ["THE LONG NIGHT", "NEON RAIN", "LAST TRAIN", "AFTER HOURS",
                "CITY OF GLASS", "THE QUIET STREET", "BLUE HOUR", "NOWHERE MAN"]
+
+# --- the arcade ---
+# Low, two or three storeys, and loud with it: the whole front is a wall of
+# coloured lights running patterns, bulbs going round the roof in every
+# colour, ARCADE over the door in big letters that light up one by one and
+# then flash, and the glow of the cabinets in the window. The games inside are
+# still being built; for now the cabinets run their demos and say so.
+ARCADE_ODDS = 1000     # like the club and the cinema, on its own hash
+ARCADE_BIG = 45.0      # nearer than this, the sign is in the big font
+ARCADE_MODE = 5.0      # seconds the light wall runs one pattern before the next
+ARCADE_NAMES = ["PIXEL PALACE", "HI-SCORE", "GAME ZONE", "TURBO", "BLIP BLOP",
+                "1UP", "POWER UP", "BONUS ROUND", "EXTRA LIFE", "CONTINUE?"]
+# The cabinets inside, by what they will be: each runs a demo of its own.
+ARCADE_GAMES = ["ROOFTOP RUN", "FIX THE NEON", "LATE DELIVERY", "NEON DRIFT",
+                "SKY SHOW", "NIGHT OWL"]
 
 CASINO_NAMES = ["ROYALE", "GOLDEN", "LUCKY", "ACES", "MIRAGE", "JACKPOT",
                 "FORTUNA", "DIAMOND", "SPHINX", "MONTE"]
@@ -465,6 +484,7 @@ RAIN = RAIN_FAR = BULB = BULB_DIM = FLASH = CONCRETE = 0
 GOLD = GOLD_DIM = ROU_RED = ROU_BLACK = ROU_GREEN = LANE = 0
 GRASS = BARK = ROOF = 0
 STAR_DIM = STAR_WARM = STAR_COLD = MOON = MOON_DIM = BAND = 0
+BEAM = BEAM_DIM = 0
 
 
 def init_colors():
@@ -473,6 +493,7 @@ def init_colors():
     global GOLD, GOLD_DIM, ROU_RED, ROU_BLACK, ROU_GREEN, LANE, GRASS, BARK
     global FIREFLY, EYES, SNOW
     global ROOF, STAR_DIM, STAR_WARM, STAR_COLD, MOON, MOON_DIM, BAND
+    global BEAM, BEAM_DIM
 
     curses.start_color()
     try:
@@ -583,6 +604,9 @@ def init_colors():
     RAIN_FAR = made["rain_far"]
     BULB = made["bulb"] | curses.A_BOLD
     BULB_DIM = made["bulb_dim"]
+    # The cinemas' searchlights: the lamp colours, under their own names, so
+    # nothing that counts stars or the moon ever counts a beam.
+    BEAM, BEAM_DIM = BULB, BULB_DIM
     FLASH = made["flash"] | curses.A_BOLD
     CONCRETE = made["concrete"]
     GOLD = made["gold"] | curses.A_BOLD
@@ -2021,7 +2045,7 @@ def lot(i, j):
         # draw_wall_column() would draw it as one, so the venue would exist
         # and be invisible.
         b["club"] = b["casino"] = b["tower"] = b["cinema"] = None
-        b["diner"] = b["billboard"] = None
+        b["diner"] = b["billboard"] = b["arcade"] = None
         if d["park"]:
             pass
         elif _mix(i, j, 909) % CLUB_ODDS == 0:
@@ -2056,7 +2080,21 @@ def lot(i, j):
                 b["cinema"] = {"door": face, "u": CELL * 0.5,
                                "title": FILM_TITLES[_mix(i, j, 1967)
                                                     % len(FILM_TITLES)],
-                               "offset": _mix(i, j, 1969) % 997}
+                               "offset": _mix(i, j, 1969) % 997,
+                               "i": i, "j": j, "height": b["height"]}
+        elif _mix(i, j, 2501) % ARCADE_ODDS == 0 and d["name"] != "financial":
+            # Low, so the light wall and the sign over the door are where you
+            # are looking from across the street, not off the top of it - but
+            # never under what its district builds. Not in the financial
+            # district, which is the cold dark one and keeps to itself.
+            face = _road_face(i, j, _mix(i, j, 2503) % 4)
+            if face is not None:
+                b["height"] = max(d["lo"], min(b["height"], 11.0))
+                b["arcade"] = {"door": face, "u": CELL * 0.5, "i": i, "j": j,
+                               "name": ARCADE_NAMES[_mix(i, j, 2505)
+                                                    % len(ARCADE_NAMES)],
+                               "seed": _mix(i, j, 2507) % 9973,
+                               "height": b["height"]}
         elif b["height"] >= TOWER_MIN and _mix(i, j, 1907) % TOWER_ODDS == 0:
             # A sky deck. Off a hash rather than the lot's rng, so being one
             # moves nothing else about the building; and only with a street
@@ -2071,7 +2109,8 @@ def lot(i, j):
                 b["tower"] = {"door": face, "u": CELL * 0.5, "i": i, "j": j,
                               "height": b["height"]}
         if (b["club"] is None and b["casino"] is None and b["tower"] is None
-                and b["cinema"] is None and b["diner"] is None and not d["park"]
+                and b["cinema"] is None and b["diner"] is None
+                and b["arcade"] is None and not d["park"]
                 and d["name"] in BILL_DISTRICTS and 8.0 <= b["height"] <= 12.0
                 and _mix(i, j, 2405) % BILL_ODDS == 0):
             face = _wide_face(i, j, _mix(i, j, 2407) % 4)
@@ -2494,6 +2533,89 @@ def draw_casino_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
     return roof, awning, foot, letter_k, ()
 
 
+def arcade_pixel(arc, bay, floor, now):
+    """Which neon tube one pane of the arcade's light wall shows this instant,
+    or None for dark. The wall runs one pattern for ARCADE_MODE seconds and
+    then the next - a rainbow rolling across, a chequer flipping, a bar
+    sweeping along, a sparkle - and every arcade starts the cycle somewhere
+    different, so two down the same street are not in step."""
+    n = len(NEON)
+    mode = (int(now / ARCADE_MODE) + arc["seed"]) % 4
+    if mode == 0:
+        return (bay + floor - int(now * 6.0)) % n
+    if mode == 1:
+        tick = int(now * 2.5)
+        return (tick // 2 + arc["seed"]) % n if (bay + floor + tick) % 2 else None
+    if mode == 2:
+        return (floor * 3 + arc["seed"]) % n if (bay - int(now * 9.0)) % 6 < 3 else None
+    m = _mix(bay, floor, int(now * 7.0) + arc["seed"])
+    return (m >> 5) % n if m % 2 == 0 else None
+
+
+def draw_arcade_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
+                       cont, now):
+    """One column of an arcade: the loudest front in the city.
+
+    Above the shopfront the whole face is a wall of coloured panes running
+    arcade_pixel()'s patterns - solid blocks with a dark line between, so it
+    reads as a screen of big pixels rather than as lit windows. Bulbs in every
+    colour chase round the roof and along the canopy, the corners change
+    colour, and the ground floor is glass with the cabinets' screens glowing
+    through it."""
+    scale = v.fy / dist
+    arc = b["arcade"]
+    n = len(NEON)
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    if edge:
+        corner = FLASH if v.flash > 0.35 else NEON[int(now * 4.0 + face) % n][0]
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx] = "|"
+            co[y][sx] = corner
+        return roof, None, foot, None, ()
+
+    prev_roof, prev_awn, prev_foot = cont[:3]
+    awning = int(round(v.horizon - (FLOOR_H - v.eye) * scale))
+    trim = FLASH if v.flash > 0.35 else tone_colour("dark", 0.3)
+    facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "=",
+                roof_colour(b, dist, v.flash, v.cover))
+    facade_line(ch, co, sx, awning, prev_awn, r_lo, r_hi, "-", trim)
+    for row in (roof, awning):
+        if r_lo <= row <= r_hi and chase(u, now):
+            ch[row][sx] = "o"
+            co[row][sx] = NEON[(int(u * 2.5) + int(now * 3.0)) % n][0]
+
+    bay = int(u / BAY_W) + face * 8
+    frac = u / BAY_W - int(u / BAY_W)
+    gap = BAY_W * v.fx / dist > 3.0 and not 0.12 < frac < 0.88
+    floors = int(b["height"] / FLOOR_H)
+    for f in range(floors):
+        top = int(round(v.horizon - ((f + 0.92) * FLOOR_H - v.eye) * scale))
+        bot = int(round(v.horizon - ((f + 0.12) * FLOOR_H - v.eye) * scale))
+        if bot < r_lo or top > r_hi or gap:
+            continue
+        if f == 0:
+            # The window: dark glass with a cabinet's screen in each bay,
+            # flickering between colours, and the doors lit.
+            if abs(u - arc["u"]) < 0.9 and face == arc["door"]:
+                glyph, attr = "#", BULB
+            elif 0.3 < frac < 0.7 or BAY_W * v.fx / dist <= 2.0:
+                m = _mix(bay, face, int(now * 3.0 + bay * 0.37))
+                glyph, attr = "#", NEON[(m >> 6) % n][(m >> 3) & 1]
+            else:
+                continue
+        else:
+            k = arcade_pixel(arc, bay, f, now)
+            if k is None:
+                continue
+            glyph, attr = "#", NEON[k][0]
+        for yy in range(max(r_lo, top), min(r_hi, bot) + 1):
+            ch[yy][sx] = glyph
+            co[yy][sx] = attr
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, awning, foot, None, ()
+
+
 def draw_tree_column(ch, co, v, sx, dist, b, u, r_lo, r_hi):
     """A clump of trees, which is what a park has instead of buildings.
 
@@ -2546,6 +2668,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
                                 r_lo, r_hi, edge, cont, now)
     if b["casino"] is not None:
         return draw_casino_column(ch, co, v, sx, dist, b, face, u,
+                                  r_lo, r_hi, edge, cont, now)
+    if b["arcade"] is not None:
+        return draw_arcade_column(ch, co, v, sx, dist, b, face, u,
                                   r_lo, r_hi, edge, cont, now)
     d = b["district"]
     scale = v.fy / dist
@@ -3054,6 +3179,12 @@ def collect_glow(v, now, wet):
             if b["casino"] is not None:
                 p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
                 _spill(glow, p[0], p[2], 6.0, GOLD_DIM)
+                continue
+            if b["arcade"] is not None:
+                # The pavement in front takes the colour of whatever the
+                # light wall is doing.
+                p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
+                _spill(glow, p[0], p[2], 6.5, NEON[int(now * 2.0 + f) % len(NEON)][1])
                 continue
             fc = b["faces"][f]
             if face_kind(i + nx, j + nz):
@@ -4052,31 +4183,130 @@ def draw_billboard(ch, co, v, walls, bb, now, wet):
                   mz + nz * out, "/", CONCRETE)
 
 
+def _title_lines(title, room):
+    """The title in as few lines of the big font as fit in room columns: one,
+    or two broken at the space nearest the middle. None if it will not go."""
+    if big_width(title) <= room:
+        return [title]
+    gaps = [k for k, c in enumerate(title) if c == " "]
+    if not gaps:
+        return None
+    k = min(gaps, key=lambda g: abs(g - len(title) / 2.0))
+    lines = [title[:k], title[k + 1:]]
+    return lines if max(big_width(t) for t in lines) <= room else None
+
+
 def draw_cinema_front(ch, co, v, walls, cin, world, now):
-    """NOW SHOWING and the title, in a box ringed with chasing bulbs, in screen
-    space for the casino marquee's reason: unreadable is worse than the wrong
-    size. And the lit doors under it."""
+    """The title in lights over the doors, ringed with chasing bulbs, and the
+    lit doors under it.
+
+    Near enough to read it, the title goes up in the big font, the way it is
+    on the front of a real one - the whole point of a cinema front is the name
+    of the film, and in a row of ordinary letters it was a line of print over
+    a door. Further off, NOW SHOWING and the title in a box the old size.
+    Both are in screen space for the casino marquee's reason: unreadable is
+    worse than the wrong size."""
     pr = v.project(world[0], world[1], world[2])
     if pr is None or pr[2] > 70.0:
         return
     sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
-    lines = ["NOW SHOWING", cin["title"]]
-    w = max(len(s) for s in lines) + 4
-    x0, y0 = sx - w // 2, sy - 2
+    lines = _title_lines(cin["title"], v.width - 8) if dist < CINEMA_BIG else None
+    if lines is None:
+        small = ["NOW SHOWING", cin["title"]]
+        w = max(len(t) for t in small) + 4
+        x0, y0 = sx - w // 2, sy - 2
+        rows = [(r, t, GOLD_DIM if r == 0 else FLASH) for r, t in enumerate(small)]
+        height = 2
+    else:
+        w = max(big_width(t) for t in lines) + 4
+        height = 1 + len(lines) * 6
+        x0, y0 = sx - w // 2, sy + 1 - (height + 1)
+        rows = [(0, "NOW SHOWING", GOLD)]
+    # The ring of bulbs, chasing round.
     for k in range(w):
-        for y in (y0, y0 + 3):
+        for y in (y0, y0 + height + 1):
             lit = chase(k * 0.6 + (y - y0), now)
             put_cell(ch, co, v, walls, x0 + k, y, dist, "o" if lit else ".",
                      GOLD if lit else GOLD_DIM)
-    for r, s in enumerate(lines):
-        y = y0 + 1 + r
-        put_cell(ch, co, v, walls, x0, y, dist, "o", GOLD)
-        put_cell(ch, co, v, walls, x0 + w - 1, y, dist, "o", GOLD)
-        for k, c in enumerate(s.center(w - 2)):
-            put_cell(ch, co, v, walls, x0 + 1 + k, y, dist, c,
-                     GOLD_DIM if r == 0 else FLASH)
+    for r in range(1, height + 1):
+        for x in (x0, x0 + w - 1):
+            lit = chase(r * 0.6 + x - x0, now)
+            put_cell(ch, co, v, walls, x, y0 + r, dist, "o" if lit else ".",
+                     GOLD if lit else GOLD_DIM)
+        for x in range(x0 + 1, x0 + w - 1):         # a dark board behind it
+            put_cell(ch, co, v, walls, x, y0 + r, dist, " ", GOLD_DIM)
+    for r, t, attr in rows:
+        for k, c in enumerate(t.center(w - 2)):
+            put_cell(ch, co, v, walls, x0 + 1 + k, y0 + 1 + r, dist, c, attr)
+    if lines is not None:
+        for n, t in enumerate(lines):
+            lx = sx - big_width(t) // 2
+            for dx, dy, _ in big_cells(t):
+                put_cell(ch, co, v, walls, lx + dx, y0 + 2 + n * 6 + dy, dist,
+                         "#", FLASH)
     blit_sprite(ch, co, v, walls, ["[|][|]", "[|][|]", "[|][|]"], world[0],
                 world[2], 0.0, 2.4, 2.4, BULB)
+
+
+def arcade_letter(arc, k, now):
+    """The colour of the k-th letter of ARCADE this instant. Every few seconds
+    the sign runs its routine: dark, the letters coming on one at a time, the
+    whole word flashing, then each letter in its own colour, turning slowly."""
+    n = len(NEON)
+    t = (now + arc["seed"] * 0.01) % 5.0
+    if t < 0.15 * 6:
+        return NEON[k % n][0] if k < int(t / 0.15) else NEON[k % n][1]
+    if t < 0.9 + 0.9:
+        return FLASH if int((t - 0.9) / 0.15) % 2 == 0 else NEON[k % n][1]
+    return NEON[(k + int(now * 1.5)) % n][0]
+
+
+def draw_arcade_front(ch, co, v, walls, arc, world, now):
+    """ARCADE over the door, on a dark board ringed with bulbs in every colour
+    - in the big font when you are near enough to take it in, the letters
+    going through arcade_letter()'s routine - the arcade's name under it, and
+    INSERT COIN blinking over the door. Screen space, for the casino marquee's
+    reason. The board is blanked first: on a wall of coloured panes, letters
+    made of the same blocks would be lost."""
+    pr = v.project(world[0], world[1], world[2])
+    if pr is None or pr[2] > 80.0:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    n = len(NEON)
+    big = dist < ARCADE_BIG and big_width("ARCADE") + 6 <= v.width
+    w = (big_width("ARCADE") if big else len("ARCADE")) + 6
+    w = max(w, len(arc["name"]) + 4)
+    rows = 7 if big else 3
+    x0, y0 = sx - w // 2, sy - rows
+    for r in range(rows + 1):
+        for x in range(x0, x0 + w):
+            ring = r in (0, rows) or x in (x0, x0 + w - 1)
+            if ring:
+                lit = chase((x - x0 + r) * 0.4, now)
+                put_cell(ch, co, v, walls, x, y0 + r, dist, "o" if lit else ".",
+                         NEON[(x - x0 + r + int(now * 4.0)) % n][0 if lit else 1])
+            else:
+                put_cell(ch, co, v, walls, x, y0 + r, dist, " ", GOLD_DIM)
+    if big:
+        lx = sx - big_width("ARCADE") // 2
+        for dx, dy, k in big_cells("ARCADE"):
+            put_cell(ch, co, v, walls, lx + dx, y0 + 1 + dy, dist, "#",
+                     arcade_letter(arc, k, now))
+    else:
+        for k, c in enumerate("ARCADE"):
+            put_cell(ch, co, v, walls, sx - 3 + k, y0 + 1, dist, c,
+                     arcade_letter(arc, k, now))
+    name = arc["name"]
+    for k, c in enumerate(name):
+        put_cell(ch, co, v, walls, sx - len(name) // 2 + k, y0 + rows - 1, dist, c,
+                 GOLD)
+    door = v.project(*face_point(arc["i"], arc["j"], arc["door"], arc["u"], 0.5,
+                                 FLOOR_H - 0.1))
+    if door is not None and int(now * 1.6) % 2 == 0:
+        word = "INSERT COIN"
+        for k, c in enumerate(word):
+            put_cell(ch, co, v, walls, int(round(door[0])) - len(word) // 2 + k,
+                     int(round(door[1])), door[2], c, FLASH)
 
 
 def draw_marquee(ch, co, v, walls, cas, world, now):
@@ -6100,6 +6330,82 @@ def draw_tower_beacon(ch, co, v, walls, t, now, wet):
             ROU_RED if on else CONCRETE, max(wet, 0.3), now)
 
 
+_cinema_blocks = {}
+
+
+def cinemas_in_block(bi, bj):
+    """The cinemas in city block (bi, bj), worked out once, for the reason
+    towers_in_block() is: their searchlights are seen from a long way off."""
+    key = (bi, bj)
+    hit = _cinema_blocks.get(key)
+    if hit is None:
+        _evict(_cinema_blocks, 4000)
+        hit = []
+        for i in range(bi * XP, bi * XP + XP):
+            for j in range(bj * ZP, bj * ZP + ZP):
+                if _mix(i, j, 1961) % CLUB_ODDS or is_open(i, j):
+                    continue
+                c = lot(i, j)["cinema"]
+                if c is not None:
+                    hit.append(c)
+        _cinema_blocks[key] = hit
+    return hit
+
+
+def near_cinemas(v, reach):
+    b0, b1 = int((v.x - reach) // (XP * CELL)), int((v.x + reach) // (XP * CELL))
+    c0, c1 = int((v.z - reach) // (ZP * CELL)), int((v.z + reach) // (ZP * CELL))
+    for bi in range(b0, b1 + 1):
+        for bj in range(c0, c1 + 1):
+            for c in cinemas_in_block(bi, bj):
+                rx = (c["i"] + 0.5) * CELL - v.x
+                rz = (c["j"] + 0.5) * CELL - v.z
+                if rx * rx + rz * rz > reach * reach:
+                    continue
+                yield c
+
+
+def search_beam(cin, side, now):
+    """(base, direction) of one of a cinema's two searchlights. They stand at
+    the front corners of the roof and sweep mirror to mirror, so they cross
+    over the street and open out again, the way a premiere's do."""
+    nx, nz = FACES[cin["door"]]
+    tx, tz = -nz, nx
+    base = face_point(cin["i"], cin["j"], cin["door"], 1.0 if side < 0 else CELL - 1.0,
+                      -0.8, cin["height"] + 0.4)
+    swing = side * 1.2 * math.sin(now * 0.37 + cin["offset"])
+    tilt = SEARCH_LEAN + 0.2 * math.sin(now * 0.23 + cin["offset"] * 0.5 + side)
+    hx = nx * math.cos(swing) + tx * math.sin(swing)
+    hz = nz * math.cos(swing) + tz * math.sin(swing)
+    st = math.sin(tilt)
+    return base, (hx * st, math.cos(tilt), hz * st)
+
+
+def draw_searchlights(ch, co, v, walls, cin, now):
+    """Two beams sweeping up off the roof - the thing you find the pictures
+    by from across town. A line of points like the lighthouse's beam, each
+    one's glyph taken from which way the beam runs on screen right there."""
+    for side in (-1.0, 1.0):
+        (bx, by, bz), (dx, dy, dz) = search_beam(cin, side, now)
+        put_point(ch, co, v, walls, bx, by, bz, "o", FLASH)
+        prev = v.project(bx, by, bz)
+        s = 1.0
+        while s < SEARCH_LONG:
+            x, y, z = bx + dx * s, by + dy * s, bz + dz * s
+            pr = v.project(x, y, z)
+            if pr is not None and prev is not None:
+                ax, ay = pr[0] - prev[0], (pr[1] - prev[1]) * 2.0
+                glyph = ("|" if abs(ax) < 0.4 * abs(ay) else
+                         "-" if abs(ay) < 0.4 * abs(ax) else
+                         "/" if ax * ay < 0 else "\\")
+                put_cell(ch, co, v, walls, int(round(pr[0])), int(round(pr[1])),
+                         pr[2], glyph, BEAM if s < SEARCH_LONG * 0.4 else BEAM_DIM)
+            prev = pr
+            # About a cell apart on screen: close together near, further
+            # apart in the world the further off the beam is.
+            s += 0.8 + (0.012 * pr[2] if pr is not None else 2.0)
+
+
 def draw_lobby(ch, co, v, walls, t, now):
     """The lit lobby door and SKY DECK over it, in screen space so it can be
     read - the casino marquee's reasoning, at a smaller size."""
@@ -6149,7 +6455,8 @@ def climbable(i, j, f):
     b = lot(i, j)
     if not (b["faces"][f]["escape"] and b["height"] >= 3 * FLOOR_H
             and not b["tree"] and b["club"] is None
-            and b["casino"] is None and b["tower"] is None):
+            and b["casino"] is None and b["tower"] is None
+            and b["arcade"] is None):
         return False
     # And only off a roof that is the high point of its corner: climbed from
     # an alley, the first ones put you face to face with the wall of a taller
@@ -6745,6 +7052,11 @@ def draw_props(ch, co, v, walls, now, wet):
             if b["tower"] is not None and f == b["tower"]["door"]:
                 w = face_point(i, j, f, CELL * 0.5, 0.3, 0.0)
                 props.append((_d2(v, w), "lobby", b["tower"], w, (nx, nz)))
+            if b["arcade"] is not None:
+                if f == b["arcade"]["door"]:
+                    w = face_point(i, j, f, CELL * 0.5, 0.5, FLOOR_H + 0.6)
+                    props.append((_d2(v, w), "arcade", b["arcade"], w, (nx, nz)))
+                continue
             if b["casino"] is not None:
                 # It has to be obvious from down the street what this is.
                 if f == b["casino"]["door"]:
@@ -6819,6 +7131,8 @@ def draw_props(ch, co, v, walls, now, wet):
             draw_lobby(ch, co, v, walls, s, now)
         elif kind == "cinema":
             draw_cinema_front(ch, co, v, walls, s, world, now)
+        elif kind == "arcade":
+            draw_arcade_front(ch, co, v, walls, s, world, now)
         elif kind == "diner":
             draw_diner_sign(ch, co, v, walls, world, now)
         elif kind == "overdoor":
@@ -7571,6 +7885,10 @@ def render_street(v, now):
     tunnels = v.tunnels
     draw_tunnel_ceiling(ch, co, v, walls, now, tunnels)
     draw_flash(ch, co, v, walls, v.flash)
+    # Before the props, so a sign out front is never painted over by a
+    # beam going up behind it.
+    for c_ in near_cinemas(v, SEARCH_REACH):
+        draw_searchlights(ch, co, v, walls, c_, now)
     draw_props(ch, co, v, walls, now, wet)
     draw_car_park(ch, co, v, walls, now, wet)
     draw_walkers(ch, co, v, walls, now, wet)
@@ -7714,6 +8032,59 @@ DIGITS = {
     "8": ("###", "# #", "###", "# #", "###"),
     "9": ("###", "# #", "###", "  #", "###"),
 }
+
+# The same three-by-five, for words: the cinema's title over the doors and
+# the arcade's sign. Big enough to read across a street, which a row of
+# ordinary letters a building wide is not.
+LETTERS = {
+    "A": (" # ", "# #", "###", "# #", "# #"),
+    "B": ("## ", "# #", "## ", "# #", "## "),
+    "C": (" ##", "#  ", "#  ", "#  ", " ##"),
+    "D": ("## ", "# #", "# #", "# #", "## "),
+    "E": ("###", "#  ", "## ", "#  ", "###"),
+    "F": ("###", "#  ", "## ", "#  ", "#  "),
+    "G": (" ##", "#  ", "# #", "# #", " ##"),
+    "H": ("# #", "# #", "###", "# #", "# #"),
+    "I": ("###", " # ", " # ", " # ", "###"),
+    "J": ("  #", "  #", "  #", "# #", " # "),
+    "K": ("# #", "# #", "## ", "# #", "# #"),
+    "L": ("#  ", "#  ", "#  ", "#  ", "###"),
+    "M": ("# #", "###", "# #", "# #", "# #"),
+    "N": ("## ", "# #", "# #", "# #", "# #"),
+    "O": (" # ", "# #", "# #", "# #", " # "),
+    "P": ("## ", "# #", "## ", "#  ", "#  "),
+    "Q": (" # ", "# #", "# #", "## ", " ##"),
+    "R": ("## ", "# #", "## ", "# #", "# #"),
+    "S": (" ##", "#  ", " # ", "  #", "## "),
+    "T": ("###", " # ", " # ", " # ", " # "),
+    "U": ("# #", "# #", "# #", "# #", "###"),
+    "V": ("# #", "# #", "# #", "# #", " # "),
+    "W": ("# #", "# #", "# #", "###", "# #"),
+    "X": ("# #", "# #", " # ", "# #", "# #"),
+    "Y": ("# #", "# #", " # ", " # ", " # "),
+    "Z": ("###", "  #", " # ", "#  ", "###"),
+    " ": ("   ",) * 5,
+    "-": ("   ", "   ", "###", "   ", "   "),
+    "!": (" # ", " # ", " # ", "   ", " # "),
+    "?": ("## ", "  #", " # ", "   ", " # "),
+    "'": (" # ", " # ", "   ", "   ", "   "),
+    ".": ("   ", "   ", "   ", "   ", " # "),
+}
+BIG_FONT = dict(DIGITS, **LETTERS)
+
+
+def big_width(text):
+    """Columns a word takes in the big font: three a letter and one between."""
+    return max(0, len(text) * 4 - 1)
+
+
+def big_cells(text):
+    """(column, row, which letter) of every lit cell of a word in the big font."""
+    for k, c in enumerate(text):
+        for row, line in enumerate(BIG_FONT.get(c, BIG_FONT["?"])):
+            for dx, px in enumerate(line):
+                if px != " ":
+                    yield k * 4 + dx, row, k
 
 # Everything else in this file is a hash of where you are, so that the city is
 # the same city every time you walk back to it. This one thing is not, and must
@@ -8125,7 +8496,7 @@ def venue_at(x, z):
             if is_open(i, j):
                 continue
             b = lot(i, j)
-            for kind in ("casino", "club", "tower", "cinema", "diner"):
+            for kind in ("casino", "club", "tower", "cinema", "diner", "arcade"):
                 v = b[kind]
                 if v is None:
                     continue
@@ -8586,6 +8957,148 @@ def render_claw(claw, width, height, now):
     return ch, co
 
 
+# Inside the arcade. A row of cabinets across the back, each running a demo
+# of the game it will be, the arcade's name over them in lights, the carpet
+# every arcade has, and a couple of kids already at the machines.
+CAB_W = 15              # one cabinet, in columns
+CAB_H = 13              # and rows
+CAB_SCREEN = (11, 5)    # its screen
+
+
+def cabinet_demo(game, t):
+    """One frame of a cabinet's demo, as CAB_SCREEN[1] strings - what the
+    game will be, running on its own. Each is a function of the time alone."""
+    w, h = CAB_SCREEN
+    rows = [[" "] * w for _ in range(h)]
+
+    def put(x, y, c):
+        if 0 <= x < w and 0 <= y < h:
+            rows[y][x] = c
+
+    k = ARCADE_GAMES.index(game) if game in ARCADE_GAMES else 0
+    if k == 0:                       # rooftop run: roofs going by, a jump
+        for x in range(w):
+            if (x + int(t * 8)) % 9 < 6:
+                put(x, h - 1 - (((x + int(t * 8)) // 9) % 2), "=")
+        hop = abs(math.sin(t * 3.0))
+        put(3, h - 2 - int(hop * 2.5), "o")
+    elif k == 1:                     # fix the neon: tubes turning
+        for y in range(1, h - 1):
+            for x in range(1, w - 1, 2):
+                put(x, y, "-|+L"[(_mix(x, y, int(t * 2)) >> 4) % 4])
+    elif k == 2:                     # late delivery: a grid, a scooter on it
+        for y in range(h):
+            for x in range(w):
+                if x % 4 == 0 or y % 2 == 0:
+                    put(x, y, ".")
+        p = int(t * 6) % (2 * (w + h))
+        put(min(p, w - 1), 0 if p < w else min(h - 1, p - w), "@")
+    elif k == 3:                     # neon drift: a road going away
+        for y in range(h):
+            half = 1 + y
+            mid = w // 2 + int(round(math.sin(t * 1.3 + y * 0.4) * (h - y) * 0.4))
+            put(mid - half, y, "/")
+            put(mid + half, y, "\\")
+        put(w // 2 + int(math.sin(t * 2.0) * 2), h - 1, "A")
+    elif k == 4:                     # sky show: a burst opening out
+        r = (t * 2.5) % 3.0
+        for a in range(8):
+            put(w // 2 + int(round(math.cos(a * 0.785) * r * 2)),
+                h // 2 + int(round(math.sin(a * 0.785) * r)), "*" if r < 2 else ".")
+    else:                            # night owl: an owl, blinking
+        put(w // 2 - 1, 1, "O" if int(t * 2) % 5 else "-")
+        put(w // 2 + 1, 1, "O" if int(t * 2) % 5 else "-")
+        put(w // 2, 2, "v")
+        for x in range(w):
+            put(x, h - 1, "~" if (x + int(t * 3)) % 3 else " ")
+    return ["".join(r) for r in rows]
+
+
+def draw_cabinet(ch, co, x0, y0, game, colour, now):
+    """One cabinet: the game's name lit along the top, the screen running its
+    demo with COMING SOON and INSERT COIN taking turns over it, the stick and
+    the buttons, and the coin door."""
+    w = CAB_W
+    sw, sh = CAB_SCREEN
+    _text(ch, co, y0, x0, "." + "-" * (w - 2) + ".", colour)
+    _text(ch, co, y0 + 1, x0, "|" + game[:w - 2].center(w - 2) + "|", colour)
+    _text(ch, co, y0 + 2, x0, "|" + "=" * (w - 2) + "|", GOLD_DIM)
+    t = now + len(game) * 1.7
+    demo = cabinet_demo(game, t)
+    say = int(t / 3.0) % 3
+    for r in range(sh):
+        y = y0 + 3 + r
+        _text(ch, co, y, x0, "||", GOLD_DIM)
+        _text(ch, co, y, x0 + w - 2, "||", GOLD_DIM)
+        line = demo[r]
+        if say == 1 and r == sh // 2:
+            line = "COMING SOON".center(sw)[:sw]
+        elif say == 2 and r == sh // 2 and int(now * 2) % 2:
+            line = "INSERT COIN".center(sw)[:sw]
+        _text(ch, co, y, x0 + 2, line, colour if line in demo else FLASH)
+    _text(ch, co, y0 + 3 + sh, x0, "|" + "=" * (w - 2) + "|", GOLD_DIM)
+    _text(ch, co, y0 + 4 + sh, x0, "/  o   o o o  \\", CONCRETE)
+    _text(ch, co, y0 + 5 + sh, x0, "|    [ 25c ]  |"[:w], GOLD_DIM)
+    _text(ch, co, y0 + 5 + sh, x0 + 6, "[", FLASH if int(now * 1.5) % 2 else GOLD_DIM)
+    _text(ch, co, y0 + 6 + sh, x0, "|" + "_" * (w - 2) + "|", CONCRETE)
+
+
+def render_arcade(arc, width, height, now):
+    """In the arcade. The name across the top in the big font, the letters
+    in every colour; a row of cabinets as wide as the window takes; the
+    carpet; a couple of kids playing. A window too small for a cabinet gets
+    the name and a line of text."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    n = len(NEON)
+    if width < CAB_W + 4 or height < CAB_H + 4:
+        _text(ch, co, height // 2, 1, "%s ARCADE" % arc["name"], GOLD)
+        _text(ch, co, min(height - 1, height // 2 + 1), 1, "the games are coming",
+              GOLD_DIM)
+        _text(ch, co, min(height - 1, height // 2 + 2), 1, "s to leave", GOLD_DIM)
+        return ch, co
+    for x in range(width):                           # the tube along the ceiling
+        ch[1][x] = "="
+        co[1][x] = NEON[(x // 4 + int(now * 6.0)) % n][0]
+    y = 2
+    name = arc["name"]
+    if height >= CAB_H + 12 and big_width(name) <= width - 2:
+        lx = (width - big_width(name)) // 2
+        for dx, dy, k in big_cells(name):
+            _text(ch, co, 3 + dy, lx + dx, "#", NEON[(k + int(now * 2.0)) % n][0])
+        y = 9
+    else:
+        _text(ch, co, 2, (width - len(name)) // 2, name, GOLD)
+        y = 4
+    count = max(1, min(len(ARCADE_GAMES), (width - 2) // (CAB_W + 2)))
+    span = count * (CAB_W + 2) - 2
+    left = (width - span) // 2
+    order = [ARCADE_GAMES[(arc["seed"] + k) % len(ARCADE_GAMES)] for k in range(count)]
+    for k, game in enumerate(order):
+        draw_cabinet(ch, co, left + k * (CAB_W + 2), y, game,
+                     NEON[(arc["seed"] + k * 3) % n][0], now)
+    # The carpet: the loud one every arcade has, under everything else.
+    for yy in range(y + CAB_H, height - 1):
+        for x in range(width):
+            m = _mix(x // 2, yy, 2511)
+            if m % 7 == 0:
+                ch[yy][x] = "*+o~^"[(m >> 4) % 5]
+                co[yy][x] = NEON[(m >> 8) % n][1]
+    # Two kids at the machines, from behind, and one of them is winning.
+    for k in (0, count - 1) if count > 1 else (0,):
+        px = left + k * (CAB_W + 2) + CAB_W // 2 - 2
+        for r, line in enumerate((" ,-. ", "(   )", "/|#|\\", " | | ")):
+            yy = y + CAB_H - 4 + r
+            for dx, c in enumerate(line):         # solid: nothing shows through
+                if yy < height - 1 and 0 <= px + dx < width:
+                    ch[yy][px + dx], co[yy][px + dx] = c, CURB
+        if k == 0 and int(now * 4) % 2:
+            _text(ch, co, y + CAB_H - 5, px + 5, "!", FLASH)
+    _text(ch, co, height - 1, max(1, width // 2 - 10), "-- the way out (s) --",
+          GOLD_DIM)
+    return ch, co
+
+
 # ===========================================================================
 # CHEATS
 #
@@ -8619,6 +9132,7 @@ CHEAT_PLACES = [
     ("_", "a car park", "carpark"),
     ("*", "the pictures", "cinema"),
     ("(", "the diner", "diner"),
+    ("#", "the arcade", "arcade"),
     ("$", "a billboard", "billboard"),
     ("[", "a short tunnel", "tunnel"),
     ("]", "a long tunnel", "longtunnel"),
@@ -8925,14 +9439,14 @@ def _woods_spot(x, z, kind):
     return None
 
 
-def _doorway(x, z, salt, key):
+def _doorway(x, z, salt, key, odds=CLUB_ODDS):
     """Standing in the door of the nearest one of these, which is what puts you
     inside it. No skipping the one underfoot here: if you are outside a club
     and ask to go in, you mean that club."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
     for i, j in _rings(ci, cj, CHEAT_RINGS):
-        if _mix(i, j, salt) % CLUB_ODDS or is_open(i, j):
+        if _mix(i, j, salt) % odds or is_open(i, j):
             continue
         v = lot(i, j)[key]
         if v is None:
@@ -9258,6 +9772,8 @@ def find_place(x, z, kind):
         return _doorway(x, z, 1961, "cinema")
     if kind == "diner":
         return _diner_door(x, z)
+    if kind == "arcade":
+        return _doorway(x, z, 2501, "arcade", ARCADE_ODDS)
     if kind == "billboard":
         return _billboard_spot(x, z)
     if kind == "claw":
@@ -9867,6 +10383,8 @@ RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
 DINER_HUD = " at the diner, open 24 hrs, at %d,%d  -  s walks back out  -  q quit "
 CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
+ARCADE_HUD = (" in the %s arcade at %d,%d  -  the games are on their way  -  s walks"
+              " back out  -  q quit ")
 CLAW_HUD = (" at the claw machine at %d,%d  -  p plays, p again drops  -  s walks"
             " back out  -  q quit ")
 CLIMB_HUD = " on the fire escape, climbing %s "
@@ -10180,6 +10698,9 @@ def main(stdscr):
             claw.update(now)
             ch, co = render_claw(claw, width, height, now)
             hud = CLAW_HUD % (cam_x, cam_z)
+        elif venue is not None and venue[0] == "arcade":
+            ch, co = render_arcade(venue[1], width, height, now)
+            hud = ARCADE_HUD % (venue[1]["name"].lower(), cam_x, cam_z)
         elif venue is not None and venue[0] == "cinema":
             ch, co = render_cinema(venue[1], width, height, now)
             hud = CINEMA_HUD % (venue[1]["title"].lower(), cam_x, cam_z)

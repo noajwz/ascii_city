@@ -1161,6 +1161,56 @@ The marquee's NOW SHOWING was in the star colour at first, and the stars-inside-
 counted its letters as stars drawn inside a building. Anything in screen space on a facade needs a
 colour that is not a star's.
 
+**The title goes up in big letters** within `CINEMA_BIG`: the three-by-five `BIG_FONT` (the
+roulette's `DIGITS` plus `LETTERS`, drawn through `big_cells()`), white, on a dark board blanked
+behind it, NOW SHOWING over it and the bulbs chasing round the lot. `_title_lines()` breaks a title
+too wide for the window at the space nearest the middle, and if even that will not go it is the
+small sign; further off than `CINEMA_BIG` it is always the small one, because a seven-row sign on
+a building a block away is bigger than the building.
+
+**Two searchlights sweep the sky from the roof**, at the front corners, mirror to mirror, so they
+cross over the street and open out again (`search_beam()`). `SEARCH_LEAN` off the vertical is what
+makes them read: nearly upright they went straight off the top of the screen from anywhere near,
+and from far off the nearer roofs hid them. Leant over, they cross the strip of sky over a street.
+They are found per city block and cached (`cinemas_in_block()`), like the sky decks' beacons, and
+drawn from `SEARCH_REACH` - and drawn *before* the props, so a sign out front is never painted over
+by a beam going up behind it. Measured, a cinema's beams are in sight from about a sixth of the
+street views round it, and there is a test that holds that. They are `BEAM`/`BEAM_DIM`, which are
+the lamp colours under their own names: first time round they were the moon's colours, and the
+star tests counted every beam cell as the moon drawn inside a building - the marquee lesson again.
+
+## The arcade
+
+`ARCADE_ODDS` on its own hash, a street front required (`_road_face()`), never in the financial
+district, and cut down to no more than eleven units unless its district builds higher: the light
+wall and the sign over the door have to be where you are looking from across the street. It is
+the third building with its own wall column, after the club and the casino.
+
+`draw_arcade_column()`: above the shopfront the whole face is a wall of coloured panes, solid
+across each bay with a dark line between so it reads as a screen of big pixels and not as lit
+windows. `arcade_pixel()` runs it, one pattern every `ARCADE_MODE` seconds - a rainbow rolling
+across, a chequer flipping, a bar sweeping, a sparkle - with each arcade starting the cycle
+somewhere else so two in one street are not in step. The sparse ones were made fuller after a
+measurement: the sweep lit two bays in seven and the wall went nearly dark between passes. Bulbs
+in every colour chase round the roof and the canopy, the corners change colour, and the ground
+floor is dark glass with a cabinet's screen glowing in each bay. The pavement takes the colour of
+the wall (`collect_glow()`).
+
+`draw_arcade_front()` is the sign: ARCADE in the big font on a blanked board (letters made of the
+same blocks as the wall behind them were lost in it), ringed with rainbow bulbs, the arcade's name
+under it, and INSERT COIN blinking on the canopy. `arcade_letter()` gives the letters their
+routine - dark, on one at a time, the word flashing, then each in its own colour turning slowly.
+Within `ARCADE_BIG`; further off, the word in ordinary letters. It hangs just over the canopy: an
+early one higher up went off the top of the screen from across a narrow street.
+
+Inside (`render_arcade()`) is a row of cabinets, as many as the window takes, each with its game's
+name lit on top and a demo of its own running on the screen (`cabinet_demo()`, a function of time
+alone), COMING SOON and INSERT COIN taking turns over it; the arcade's name across the top in the
+big font, the carpet every arcade has, and two kids at the machines. **The games are not built
+yet** - `ARCADE_GAMES` is the list of what the cabinets will be, from the ideas for it: a rooftop
+runner, fixing a neon sign, a late delivery, a drive, a fireworks show and a night owl. `#` in the
+menu stands you in the door.
+
 ## Inside the club
 
 `render_rave()` is the club's answer to the casino room, and it runs off `club_light()` and the same

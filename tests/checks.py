@@ -145,7 +145,7 @@ check("every destination lands somewhere you can stand", not bad, ",".join(bad))
 blind = []
 for _, name, kind in ac.CHEAT_PLACES:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
-                "diner", "billboard", "highway"):
+                "diner", "billboard", "highway", "arcade"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -3118,6 +3118,96 @@ check("painted signs read left to right", wrong == 0,
 check("on every one of the four faces",
       all((f, True) in order for f in range(4)),
       "faces seen: %s" % sorted({f for f, _ in order}))
+
+# --- the arcade, and the pictures' new front ----------------------------
+def across(kind, back=14.0):
+    """A view of a venue's front from across the street, and where it is."""
+    sx_, sz_, syaw = ac.find_place(x0, z0, kind)
+    ddx, ddz = math.sin(syaw), math.cos(syaw)
+    while back > 2.0 and not ac.can_stand(sx_ - ddx * back, sz_ - ddz * back):
+        back -= 1.0
+    return ac.View(sx_ - ddx * back, sz_ - ddz * back, syaw, 110, 34), (sx_, sz_)
+
+arcs = [ac.lot(i, j)["arcade"] for i in range(-300, 300) for j in range(-300, 300)
+        if ac._mix(i, j, 2501) % ac.ARCADE_ODDS == 0 and not ac.is_open(i, j)
+        and ac.lot(i, j)["arcade"] is not None]
+check("there are arcades, and not many", 3 <= len(arcs) < 150,
+      "%d in a 3000-unit square" % len(arcs))
+check("each on a proper street, and low", all(
+    ac.road_at(a["i"] + ac.FACES[a["door"]][0], a["j"] + ac.FACES[a["door"]][1])
+    and a["height"] <= max(11.0, ac.lot(a["i"], a["j"])["district"]["lo"])
+    and ac.lot(a["i"], a["j"])["district"]["name"] != "financial" for a in arcs))
+av, adoor = across("arcade")
+check("the cheat stands you in an arcade's door",
+      ac.venue_at(adoor[0], adoor[1])[0] == "arcade")
+real_neon, real_flash = list(ac.NEON), ac.FLASH
+ac.NEON[:] = [(800 + k, 900 + k) for k in range(8)]
+ac.FLASH = 990
+lit_neon = set(range(800, 808))
+frames = []
+for t_ in (300.0, 300.4, 306.0):
+    g_, c_, _ = ac.render_street(av, t_)
+    frames.append((g_, c_))
+lit_cells = [sum(1 for y in range(34) for x in range(110) if c_[y][x] in lit_neon)
+             for _, c_ in frames]
+check("from across the street the front is a wall of light",
+      min(lit_cells) > 100, "%s neon cells" % lit_cells)
+check("and it moves", len({tuple(map(tuple, c_)) for _, c_ in frames}) == 3)
+atext = "\n".join("".join(r) for r in frames[0][0])
+name_ = ac.venue_at(adoor[0], adoor[1])[1]["name"]
+check("with its name over the door, and ARCADE in big letters over that",
+      name_ in atext and "# #" in atext)
+ac.NEON[:] = real_neon
+ac.FLASH = real_flash
+arc_ = ac.venue_at(adoor[0], adoor[1])[1]
+room0 = "\n".join("".join(r) for r in ac.render_arcade(arc_, 80, 24, 5.0)[0])
+room1 = "\n".join("".join(r) for r in ac.render_arcade(arc_, 80, 24, 5.6)[0])
+check("inside, the cabinets fit an 80x24 window",
+      sum(g in room0 for g in ac.ARCADE_GAMES) >= 4 and name_ in room0
+      and "the way out" in room0)
+check("and their demos are running", room0 != room1)
+room_s = "\n".join("".join(r) for r in ac.render_arcade(arc_, 30, 10, 5.0)[0])
+check("a small window gets a line of text", "ARCADE" in room_s and "leave" in room_s)
+
+cv, cdoor = across("cinema")
+cin_ = ac.venue_at(cdoor[0], cdoor[1])[1]
+ac.FLASH = 990
+g_, c_, _ = ac.render_street(cv, 300.0)
+big_lit = sum(1 for y in range(34) for x in range(110)
+              if c_[y][x] == 990 and g_[y][x] == "#")
+want = sum(1 for _ in ac.big_cells(cin_["title"].replace(" ", "")))
+check("near enough, the film's name is up in big letters", big_lit >= want * 0.8,
+      "%d of %d cells, %s" % (big_lit, want, cin_["title"]))
+far = ac.View(cv.x - cv.dx * 60.0, cv.z - cv.dz * 60.0, cv.yaw, 110, 34)
+ac.FLASH = real_flash
+check("from further off it is the small sign",
+      ac._title_lines("THE QUIET STREET", 40) == ["THE QUIET", "STREET"]
+      and ac._title_lines("ABCDEFGHIJKLMNOP", 40) is None)
+b0 = [ac.search_beam(cin_, s_, 300.0) for s_ in (-1.0, 1.0)]
+b1 = [ac.search_beam(cin_, s_, 302.0) for s_ in (-1.0, 1.0)]
+check("its searchlights point up into the sky", all(d[1] > 0.6 for _, d in b0 + b1))
+check("and sweep", all(abs(a[1][0] - b[1][0]) + abs(a[1][2] - b[1][2]) > 0.05
+                       for a, b in zip(b0, b1)))
+ac.BEAM, ac.BEAM_DIM = 950, 951
+ccx, ccz = (cin_["i"] + 0.5) * ac.CELL, (cin_["j"] + 0.5) * ac.CELL
+# Not from everywhere - a city this dense hides most of the sky from most of
+# the street - but from a fair share of the streets round about.
+seen_from = looked = 0
+for di in range(-36, 37, 6):
+    for dj in range(-36, 37, 6):
+        px_, pz_ = ccx + di * ac.CELL, ccz + dj * ac.CELL
+        if (di * di + dj * dj < 25 or not ac.can_stand(px_, pz_)
+                or not ac.road_at(int(px_ // ac.CELL), int(pz_ // ac.CELL))):
+            continue
+        for t_ in (300.0, 305.0):
+            g_, c_, _ = ac.render_street(
+                ac.View(px_, pz_, math.atan2(ccx - px_, ccz - pz_), 110, 30), t_)
+            looked += 1
+            seen_from += sum(1 for y in range(30) for x in range(110)
+                             if c_[y][x] in (950, 951)) > 5
+check("and you can see them from down the street", seen_from >= 0.1 * looked,
+      "from %d of %d views" % (seen_from, looked))
+ac.BEAM = ac.BEAM_DIM = 1
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

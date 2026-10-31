@@ -100,6 +100,8 @@ ok &= report("the claw machine: play, drop, walk out", *run(
 ok &= report("the firing box: light a show, fire on it", *run(
     [(b"`", .5), (b"+", 1.0), (b"f", 3.0), (b"f", .5), (b"f", .5), (b"F", 1.5),
      (b"d", .4), (b"w", .4)], cols=100, rows=30))
+ok &= report("the arcade: go in, look round, walk out", *run(
+    [(b"`", .5), (b"#", 2.0), (b"s", .6), (b"s", .6), (b"w", .4)], cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
