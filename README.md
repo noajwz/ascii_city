@@ -47,6 +47,9 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   queue, a bouncer and a rope, and now and then the door opens and lets the light out; the
   windows next door shake on the kick, the puddles ripple, and at closing time the lights come
   up and everyone spills out into the street.
+- **A stock exchange** in the financial district, its ticker running across the front in green
+  and red, and inside the candles for a made-up stock you can buy and sell as it moves every
+  thirty seconds.
 - **A landmark skyscraper** a whole block wide in every part of the city, stepped like the old
   Art Deco towers with a spire on top, and a techno party on its roof that you can walk about in,
   its lasers going out over the city.

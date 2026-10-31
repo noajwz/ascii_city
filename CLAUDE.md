@@ -1368,6 +1368,30 @@ street views round it, and there is a test that holds that. They are `BEAM`/`BEA
 the lamp colours under their own names: first time round they were the moon's colours, and the
 star tests counted every beam cell as the moon drawn inside a building - the marquee lesson again.
 
+## The stock exchange
+
+In the financial district only: `EXCHANGE_ODDS` of its street fronts, about two to a district —
+one in 900 left some districts without one and the menu's search came back empty from one start
+in 96. Low and old among the glass towers: `draw_exchange_column()` is pale stone with a column in
+every bay, a cornice, and steps at the foot; `draw_exchange_front()` puts STOCK EXCHANGE over the
+columns and the **ticker** under it, the market scrolling by in screen space — every stock, its
+price, and the last tick's move in green `^` or red `v`. `;` in the menu stands you on the floor
+(it is listed under the parts of town: the first column of the panel was a row past 80x24).
+
+**The market is a function of time.** `stock_price(s, t)` for each of `STOCKS` (made-up names) is
+long slow trends, swings, smooth noise and a cubed noise term for the lurches — a boom, a crash —
+with each stock's base, volatility and phases off a hash, so it is the same market whenever you
+come back and nothing is stored. The price you trade at steps every `TICK_LEN`
+(`stock_now()`), and a `candle()` is one tick: its open and close are the two prices, its high and
+low the extremes of the path between, so each candle opens where the last closed.
+
+Inside (`render_exchange()`): the ticker along the top, the exchange's own stock's candles across
+the floor, green where it closed up and red where down, the scale down the side with the price
+marked, the seconds to the next price, and the account. `Broker` is the account, one for the night
+whichever exchange you are in, like the casino's purse: `STARTING_CASH`, shares held and what they
+cost, profit or loss. `b` buys and `n` sells at the current price, `+`/`-` step the size through
+`LOTS` (0 is as many as you can).
+
 ## The arcade
 
 `ARCADE_ODDS` on its own hash, a street front required (`_road_face()`), never in the financial
