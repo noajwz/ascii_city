@@ -459,50 +459,25 @@ river, and the test for it only ever looked at one carnival. Columns from world 
 `int(x + BIG) - BIG`, not `int()`: the first try truncated a stall at column -280.5 to -280 and
 stood it back from the wrong bank.
 
-**Every big bridge has the carnival beside it.** In the stretch with the big bridge in it,
-`carnival_col()` puts the fair on the near bank `CARNIVAL_BESIDE` cells west of the bridge, across
-the bay from the headland, so the bridge, the wheel and the lighthouse are in the one view — from
-the rock you have the cables on one side and the wheel on the other. West, because the ferry docks
-nine cells east; east past the ferry only if the west would run out of the stretch. Elsewhere the
-carnival is where its hash puts it, as before. There is a test of both: every big bridge has one
-beside it on dry ground, and from the rock the wheel and the bridge towers are in one frame.
+**Every big bridge has the carnival beside it, as near the headland as the bay allows.** In the
+big bridge's stretch of river, `carnival_col()` puts the fair wherever along the near bank, within
+45 cells of the bridge, its wheel comes nearest the headland's rock (`_by_the_headland()`, cached
+by bridge), kept `CARNIVAL_BESIDE` clear of the bridge and off the ferry's landing. It belongs to
+the bridge's whole 600-cell stretch rather than one of the 200-cell ones: it is the carnival of
+the stretch with the bridge in it and of the one it starts in, replacing the hashed one in both,
+and `carnival_over()` asks the stretch before as well, since it may run across the boundary.
 
-**The wheel is world points, not a sprite**, and its plane faces the water. A ring of 56 bulbs
-chasing round it in the neon colours, eight spokes, eight cabins that hang from the rim and stay
-upright as it turns, an A-frame under the hub. From the far bank and the pier you see the whole
-circle and, because the bulbs are `o`, the reflection pass carries it onto the water; from the
-bank you are on it comes up edge-on as you walk towards it, which is how a real one does. It is
-big on purpose — radius 10, twenty-odd units tall — because at radius 7 it was a squat little
-ring against the buildings behind it. Everything else on the ground is a billboard: the carousel
-with riders going round it on their own, four stalls in four colours, a string of bulbs the length
-of the ground sagging between the poles, and a few people looking up. `i` in the menu.
-
-### The claw machine
-
-At the end of the row of stalls, at `claw_spot()`, which is beside `carnival_spots()` rather than
-inside it because four callers already unpack that tuple. The fairground is open ground, so it is
-a trigger the way a ramen counter is: `venue_at()` looks at the carnival in this stretch before the
-5x5 ring of lots, and standing within `CASINO_REACH` of the booth draws `render_claw()` around you.
-`&` in the menu stands you at it; `claw_near()` puts a line in the HUD from across the fairground.
-
-One go is two presses of `p`: the first sends the claw sweeping back and forth along the rail, the
-second drops it, and after `CLAW_TIME` it drops by itself. That is deliberate. Curses only sees
-key repeats, never a key being let go, so a claw you steered by holding a key would lurch about;
-a single press at the right moment works the same in every terminal.
-
-`Claw` is honest the way `Slot` is. `let_go()` works out what the fingers land on and draws the
-outcome right then: the highest prize under them, held `CLAW_GRIP` of the time square on and less
-one column out, never if the fingers only brush it, and **never if another prize is sitting on
-it** (`covered()`), which is what stops you pulling one out from under the heap and leaving the one
-on top floating. From the outcome it lays out a timeline (down, shut, up, home, open, landed) and
-`claw_at()` and `moving()` read the picture off it for any instant. A slip is decided up front
-too, including the height it falls from. The win is handed over in `update()`, once, when the
-prize is out of the chute, so the panel never says WON before you have seen it come out.
-
-The heap is seeded from the carnival's column, so each carnival has its own, and it restocks
-when it is empty. What you win goes into `arms`, a list `main()` owns and gives to every machine,
-so it follows you from one carnival to the next for the session and no further. Like the
-casino's chips, it is never written anywhere.
+And there **the wheel stands out on the water**, `wheel_out()` cells off the bank — `JETTY_OUT`, or
+under a third of the way over where the water is narrow — on a planked platform with bulbs along
+its edge and a gangway back to the fair. Measured, wheel to rock: at a fixed place west of the
+bridge it was 64 to 214 units, because the river meanders away from the headland in some
+stretches; at the nearest place on the bank, a median of 78; out on its jetty, 58, and 37 at the
+closest. The bank is what limits it after that: the bay is as wide as it is so the suspension
+bridge has water worth spanning. Laying the fair out mirrored, wheel at the end nearer the rock,
+was tried and changed nothing — the search already finds the nearest bank, and the wheel lands on
+it either way. From the nearest rock the wheel is a ring of lights a third of the screen high, and
+from further back on the rock the bridge and the wheel are in the one view; there are tests of
+the distance and the view.
 
 ## The big bridge
 
@@ -549,7 +524,9 @@ And **the water reaches further behind the point than at the sides** — `HEAD_M
 `HEAD_BACK` behind, through `headland_r()`'s `back` stretch — so the far town stands back across
 the water instead of crowding up behind the lighthouse; from the landing, looking out to the
 point, the middle of the view is sky now and not a wall of buildings. Not stretched on the bay
-side: that way it would flood the near bank. `HEAD_BACK` is held where it is by `near_river()`:
+side: that way it would flood the near bank. Even unstretched it did: away from the bridge the
+bay narrows, and the ellipse reached over it and put a strip of the near bank under water — found
+when the carousel turned out to be standing in it — so `moat_at()` stops at the river's near edge. `HEAD_BACK` is held where it is by `near_river()`:
 the water's furthest edge, wobble and all, has to stay inside its 48 cells of the river's centre,
 and at 2.7 it went over.
 
