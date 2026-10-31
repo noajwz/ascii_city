@@ -191,6 +191,15 @@ CLAW_MOVE = 8.0        # columns a second, carrying it home to the chute
 CLAW_SHUT = 0.5        # seconds for the claw to close, or to open
 CLAW_HOLD = 2.5        # how long the verdict stays up afterwards
 CLAW_GRIP = [0.45, 0.2]  # chance it holds, square on and one column out
+# The strength tester, the hammer and the bell: a meter swings up and down
+# beside the post and p swings the hammer, the puck going up as far as the
+# meter was showing. Near enough the top and the bell goes, and a prize.
+STRIKE_SWING = 2.7     # how fast the meter goes, radians a second
+STRIKE_BELL = 0.93     # how near the top it has to be for the bell
+STRIKE_UP = 0.7        # seconds for the puck to go up, and again to come down
+STRIKE_HOLD = 1.6      # and how long the verdict stays up after
+STRIKE_SAYS = [(0.0, "WEAKLING"), (0.3, "NOT BAD"), (0.55, "STRONG"),
+               (0.75, "MIGHTY"), (STRIKE_BELL, "DING!")]
 
 # --- the big bridge ---
 # Once in a long way along the river it opens into a bay, and a suspension
@@ -1707,6 +1716,14 @@ def seafront_cap(i, j):
     if not 0 < back <= SEAFRONT_DEEP:
         return None
     return 6.0 + 1.5 * back
+
+
+def striker_spot(c):
+    """The strength tester: at the west end of the row the stalls are in."""
+    tip = pier_tip(c)
+    if tip is not None:
+        return (c + 0.8) * CELL, (pier_tip(c, k=0.8) + 3.8) * CELL
+    return (c + 0.8) * CELL, bank_z(c) + 3.6 * CELL
 
 
 def claw_spot(c):
@@ -5631,6 +5648,18 @@ STALL = [
     "|_______|",
 ]
 
+STRIKER_POST = [
+    " (O) ",
+    " |=| ",
+    " |-| ",
+    " |=| ",
+    " |-| ",
+    " |=| ",
+    " |-| ",
+    "_|_|_",
+    "[___]",
+]
+
 CLAW_BOOTH = [
     ".-----.",
     "|  T  |",
@@ -5748,6 +5777,9 @@ def draw_carnival(ch, co, v, walls, c, now, wet):
                     NEON[(k * 3 + 1) % len(NEON)][0])
         put_lit(ch, co, v, walls, sx_, 1.2, sz_ - 0.3, "*", BULB,
                 max(wet, 0.3), now)
+    sx_, sz_ = striker_spot(c)
+    blit_sprite(ch, co, v, walls, STRIKER_POST, sx_, sz_, 0.0, 4.6, 1.4, GOLD_DIM)
+    put_lit(ch, co, v, walls, sx_, 4.9, sz_, "O", GOLD, max(wet, 0.3), now)
     bx, bz = claw_spot(c)
     blit_sprite(ch, co, v, walls, CLAW_BOOTH, bx, bz, 0.0, 2.8, 1.7,
                 NEON[_mix(c, 1, 1307) % len(NEON)][0])
@@ -9686,6 +9718,9 @@ def venue_at(x, z):
         bx, bz = claw_spot(c)
         if (bx - x) ** 2 + (bz - z) ** 2 < CASINO_REACH ** 2:
             return "claw", {"col": c}
+        bx, bz = striker_spot(c)                # and the strength tester
+        if (bx - x) ** 2 + (bz - z) ** 2 < CASINO_REACH ** 2:
+            return "striker", {"col": c}
     for i in range(ci - 2, ci + 3):
         for j in range(cj - 2, cj + 3):
             if is_open(i, j):
@@ -10115,6 +10150,129 @@ def draw_claw(ch, co, claw, x0, y0, now):
     _text(ch, co, base + 3, x0, "'" + "-" * gw + "'", GOLD_DIM)
 
 
+class Striker:
+    """One strength tester. The meter beside the post swings for ever; p
+    swings the hammer, which takes whatever the meter says that instant as
+    the power, and the puck goes up that far and comes down. All of it is
+    worked out at the swing, so the puck's height is a function of the time
+    since, like the claw."""
+
+    def __init__(self, col, arms=None):
+        self.col = col
+        self.arms = arms if arms is not None else []
+        self.hit = None              # (when, power)
+        self.goes = self.rings = 0
+        self.paid = True
+
+    def meter(self, now):
+        return 0.5 - 0.5 * math.cos(now * STRIKE_SWING)
+
+    def ready(self, now):
+        return self.hit is None or now - self.hit[0] >= 2 * STRIKE_UP + STRIKE_HOLD
+
+    def swing(self, now):
+        if not self.ready(now):
+            return False
+        self.hit = (now, self.meter(now))
+        self.goes += 1
+        self.paid = False
+        return True
+
+    def puck(self, now):
+        """How far up the post the puck is, 0..1."""
+        if self.hit is None:
+            return 0.0
+        t = now - self.hit[0]
+        top = self.hit[1]
+        if t < STRIKE_UP:
+            k = t / STRIKE_UP
+            return top * (1.0 - (1.0 - k) ** 2)
+        if t < 2 * STRIKE_UP:
+            k = (t - STRIKE_UP) / STRIKE_UP
+            return top * (1.0 - k * k)
+        return 0.0
+
+    def rang(self):
+        return self.hit is not None and self.hit[1] >= STRIKE_BELL
+
+    def update(self, now):
+        """Hand the prize over once, when the puck hits the bell."""
+        if not self.paid and now - self.hit[0] >= STRIKE_UP:
+            self.paid = True
+            if self.rang():
+                self.rings += 1
+                self.arms.append((_spin_rng.randrange(len(CLAW_PRIZES)),
+                                  _spin_rng.randrange(8)))
+
+    def verdict(self, now):
+        if self.hit is None or self.ready(now):
+            return "p to swing", False
+        if now - self.hit[0] < STRIKE_UP:
+            return "...", False
+        say = [w for at, w in STRIKE_SAYS if self.hit[1] >= at][-1]
+        return say, self.rang()
+
+
+def render_striker(st, width, height, now):
+    """At the strength tester: the post up the middle with its scale marked
+    on it and the bell on top, the puck going up it, the meter swinging
+    beside it, and you with the hammer at the foot of it."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    say, rang = st.verdict(now)
+    if width < 36 or height < 16:
+        _text(ch, co, height // 2, 1, "STRENGTH TEST: " + say, GOLD)
+        _text(ch, co, min(height - 1, height // 2 + 2), 1, "s to leave", GOLD_DIM)
+        return ch, co
+    n = len(NEON)
+    for x in range(width):                           # bulbs strung overhead
+        lit = chase(x * 0.25, now)
+        ch[1][x] = "o" if lit else "-"
+        co[1][x] = NEON[(x // 6) % n][0] if lit else GOLD_DIM
+    cx = width // 2
+    top, foot = 4, height - 4                        # the bell's row, the base's
+    ring = rang and now - st.hit[0] >= STRIKE_UP and now - st.hit[0] < STRIKE_UP + 1.5
+    bell = (FLASH if int(now * 10) % 2 else GOLD) if ring else GOLD_DIM
+    _text(ch, co, top - 1, cx - 3, " ___ ", bell)
+    _text(ch, co, top, cx - 3, "( O )", bell)
+    if ring:
+        for k, d in enumerate((-9, -7, 7, 9)):
+            _text(ch, co, top - 1 + k % 2, cx + d, "*", FLASH)
+    span = foot - top - 1
+    for r in range(1, span + 1):
+        y = top + r
+        _text(ch, co, y, cx - 2, "|" + ("=" if r % 2 else "-") + "|", CONCRETE)
+    for at, word in STRIKE_SAYS[:-1]:                # the scale, on the left
+        y = foot - 1 - int(round(at * (span - 1)))
+        _text(ch, co, y, cx - 4 - len(word), word, GOLD_DIM)
+    py = foot - 1 - int(round(st.puck(now) * (span - 1)))
+    _text(ch, co, py, cx - 2, "[#]", FLASH if ring else ROU_RED)
+    _text(ch, co, foot, cx - 5, "[_______]", CONCRETE)
+    # The meter, on the right: a bar with the marker going up and down it.
+    mx = cx + 13
+    for r in range(span):
+        y = foot - 1 - r
+        hot = r >= int(STRIKE_BELL * (span - 1))
+        _text(ch, co, y, mx, "|", ROU_RED if hot else GOLD_DIM)
+    my = foot - 1 - int(round(st.meter(now) * (span - 1)))
+    _text(ch, co, my, mx + 1, "<", FLASH)
+    _text(ch, co, top, mx - 1, "BELL", ROU_RED)
+    # You, with the hammer: up while it swings, down on the pad after.
+    struck = st.hit is not None and now - st.hit[0] < 2 * STRIKE_UP
+    for k, line in enumerate((("  o/", " /|", " / \\") if not struck
+                              else ("  o", " /|\\_", " / \\"))):
+        _text(ch, co, foot - 2 + k, cx + 3 if struck else cx + 4, line, STAR)
+    if not struck:
+        _text(ch, co, foot - 3, cx + 5, "=T", BARK)
+    _text(ch, co, height - 3, max(1, cx - len(say) // 2), say,
+          (FLASH if int(now * 6) % 2 else GOLD) if rang and say == "DING!" else GOLD)
+    _text(ch, co, height - 2, max(1, cx - 9),
+          "goes %d   bells %d" % (st.goes, st.rings), GOLD_DIM)
+    if height > foot + 4:
+        _text(ch, co, height - 1, max(1, cx - 10), "-- the way out (s) --", GOLD_DIM)
+    return ch, co
+
+
 def render_claw(claw, width, height, now):
     """At the claw machine: the cabinet in the middle, a string of bulbs
     over it, and what you have won so far beside it when there is room. A
@@ -10341,6 +10499,7 @@ CHEAT_PLACES = [
     ("i", "the carnival", "carnival"),
     ("&", "a claw machine", "claw"),
     ("}", "pleasure pier", "pleasurepier"),
+    ("{", "strength test", "striker"),
     ("u", "the big bridge", "grand"),
     ("h", "the lighthouse", "lighthouse"),
     ("+", "lighthouse top", "lighthousedoor"),
@@ -10352,7 +10511,7 @@ CHEAT_PLACES = [
 
 # The river and the woods: listed under the parts of town, not with the city.
 OUT_OF_TOWN = {"woods", "rave", "lake", "bank", "pier", "bridge", "leaner",
-               "carnival", "claw", "pleasurepier", "grand", "lighthouse",
+               "carnival", "claw", "striker", "pleasurepier", "grand", "lighthouse",
                "lighthousedoor"}
 
 
@@ -10723,12 +10882,13 @@ def _diner_door(x, z):
     return None
 
 
-def _claw_spot(x, z):
-    """Stood at the claw machine, at the next carnival along the river."""
+def _claw_spot(x, z, where=None):
+    """Stood at the claw machine - or whatever else on the fair where says -
+    at the next carnival along the river."""
     ci = int(x / CELL + BIG) - BIG
     for k in range(-1, 3):
         c = carnival_col(ci + k * CARNIVAL_GAP)
-        bx, bz = claw_spot(c)
+        bx, bz = (where or claw_spot)(c)
         px, pz = bx, bz - 1.2
         if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
             continue
@@ -11002,6 +11162,8 @@ def find_place(x, z, kind):
         return _billboard_spot(x, z)
     if kind == "claw":
         return _claw_spot(x, z)
+    if kind == "striker":
+        return _claw_spot(x, z, striker_spot)
     if kind == "lighthousedoor":
         return _lighthouse_door_spot(x, z)
     if kind == "pleasurepier":
@@ -11666,6 +11828,8 @@ DINER_HUD = " at the diner, open 24/7, at %d,%d  -  s walks back out  -  q quit 
 CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
 ARCADE_HUD = (" in the %s arcade at %d,%d  -  the games are on their way  -  s walks"
               " back out  -  q quit ")
+STRIKER_HUD = (" at the strength tester at %d,%d  -  p swings the hammer  -  s walks"
+               " back out  -  q quit ")
 CLAW_HUD = (" at the claw machine at %d,%d  -  p plays, p again drops  -  s walks"
             " back out  -  q quit ")
 CLIMB_HUD = " on the fire escape, climbing %s "
@@ -11702,6 +11866,8 @@ def main(stdscr):
     arms = []                   # what the claw machines have given you
     claw = None                 # the last claw machine you stood at
     at_claw = False             # and are you standing at it now
+    striker = None              # the last strength tester you stood at
+    at_striker = False
     seated = None               # (which ramen counter, since when)
     lift = None                 # riding a sky-deck lift: {"up", "t0", "t"}
     on_roof = None              # the tower whose roof you are standing on
@@ -11820,6 +11986,8 @@ def main(stdscr):
                 table.hit(now)
             elif wheel is not None and key in (ord("k"), ord("K")):
                 table.stand(now)
+            elif at_striker and key in (ord("p"), ord("P")):
+                striker.swing(now)
             elif at_claw and key in (ord("p"), ord("P")):
                 claw.press(now)
             elif lift is not None:
@@ -11949,6 +12117,9 @@ def main(stdscr):
             venue = None
         if venue is None or venue[0] not in ("ramen", "diner"):
             seated = None               # stood up: the next visit is a new bowl
+        at_striker = venue is not None and venue[0] == "striker"
+        if at_striker and (striker is None or striker.col != venue[1]["col"]):
+            striker = Striker(venue[1]["col"], arms)
         at_claw = venue is not None and venue[0] == "claw"
         if at_claw and (claw is None or claw.col != venue[1]["col"]):
             claw = Claw(venue[1]["col"], arms)
@@ -12011,6 +12182,10 @@ def main(stdscr):
                 seated = (("diner", cam_x // 10, cam_z // 10), now)
             ch, co = render_diner(width, height, now, seated[1])
             hud = DINER_HUD % (cam_x, cam_z)
+        elif at_striker:
+            striker.update(now)
+            ch, co = render_striker(striker, width, height, now)
+            hud = STRIKER_HUD % (cam_x, cam_z)
         elif at_claw:
             claw.update(now)
             ch, co = render_claw(claw, width, height, now)
