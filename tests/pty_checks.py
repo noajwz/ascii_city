@@ -57,6 +57,10 @@ def report(name, status, out):
         i = plain.find("Traceback"); print(plain[i:i+1500])
     return not bad
 
+# The casino and club jumps stand you out front, to see the door; these
+# steps walk you in.
+IN = [(b"w", .25)] * 12
+
 ok = True
 ok &= report("walk, turn, sidestep", *run(
     [(b"w",.5),(b"W",.6),(b"a",.5),(b"d",.4),(b"s",.4),(b",",.3),(b".",.3)]))
@@ -66,17 +70,17 @@ ok &= report("wander on spacebar", *run([(b" ", 5.0)]))
 ok &= report("panel open, arrows still walk", *run(
     [(b"`",.6),(b"\x1bOA",.4),(b"\x1bOC",.4),(b"\x1bOB",.4),(b"`",.4),(b"w",.4)]))
 ok &= report("panel keys then esc then play", *run(
-    [(b"`",.5),(b"3",.7),(b"w",.4),(b"L",.6),(b"\x1b",.4),(b"w",.5),(b"a",.4)]))
+    [(b"`",.5),(b"y",.7),(b"w",.4),(b"L",.6),(b"\x1b",.4),(b"w",.5),(b"a",.4)]))
 ok &= report("TERM=xterm (8 colours)", *run(
-    [(b"`",.5),(b"1",.7),(b"\x1b",.3),(b"w",.4)], term="xterm"))
+    [(b"`",.5),(b"k",.7),(b"\x1b",.3),(b"w",.4)], term="xterm"))
 ok &= report("20x8 window with panel", *run(
-    [(b"`",.5),(b"2",.7),(b"w",.4)], cols=20, rows=8))
+    [(b"`",.5),(b"c",.7),(b"w",.4)], cols=20, rows=8))
 ok &= report("240x70 window with panel", *run(
     [(b"`",.5),(b"6",.7),(b"w",.4)], cols=240, rows=70))
 ok &= report("ramen counter, sit and leave", *run(
-    [(b"`", .5), (b"v", 1.0), (b"w", .3), (b"s", .6), (b"s", .6), (b"w", .4)]))
+    [(b"`", .5), (b"r", 1.0), (b"w", .3), (b"s", .6), (b"s", .6), (b"w", .4)]))
 ok &= report("casino slot: bet up, pull, bet down", *run(
-    [(b"`", .5), (b"9", 1.0), (b"+", .3), (b"p", 3.0), (b"-", .3), (b"p", 3.0),
+    [(b"`", .5), (b"c", 1.0)] + IN + [(b"+", .3), (b"p", 3.0), (b"-", .3), (b"p", 3.0),
      (b"b", .6), (b"k", 3.0)], cols=100, rows=30))
 ok &= report("sky deck: lift up, look round, lift down", *run(
     [(b"`", .5), (b"^", 1.0), (b"w", 6.0), (b"d", .5), (b"a", .5), (b"s", 6.0),
@@ -85,46 +89,45 @@ ok &= report("fire escape: climb, look round, climb down", *run(
     [(b"`", .5), (b"|", 1.0), (b"w", 1.0), (b"w", 4.0), (b"d", .5), (b"s", 1.0),
      (b"w", 4.0)], cols=100, rows=30))
 ok &= report("the pictures: go in, watch, walk out", *run(
-    [(b"`", .5), (b"*", 2.5), (b"s", .6), (b"s", .6), (b"w", .4)], cols=100, rows=30))
-ok &= report("tunnels: walk through a short one and a long one", *run(
-    [(b"`", .5), (b"[", 1.0), (b"w", 2.0), (b"`", .5), (b"]", 1.0), (b"w", 3.0)],
+    [(b"`", .5), (b"m", 2.5), (b"s", .6), (b"s", .6), (b"w", .4)], cols=100, rows=30))
+ok &= report("a lit alley, then under the el", *run(
+    [(b"`", .5), (b"y", 1.0), (b"w", 2.0), (b"`", .5), (b"=", 1.0), (b"w", 3.0)],
     cols=100, rows=30))
 ok &= report("a police car coming, then traffic off", *run(
     [(b"`", .5), (b"<", 1.5), (b"`", .5), (b">", .4), (b">", .4), (b"w", .5)],
     cols=100, rows=30))
 ok &= report("the diner: sit, coffee, walk out; then a billboard", *run(
-    [(b"`", .5), (b"(", 6.5), (b"s", .8), (b"`", .5), (b"$", 1.0), (b"w", .4)],
+    [(b"`", .5), (b"d", 6.5), (b"s", .8), (b"`", .5), (b"$", 1.0), (b"w", .4)],
     cols=100, rows=30))
 ok &= report("the claw machine: play, drop, walk out", *run(
-    [(b"`", .5), (b"&", 1.0), (b"p", 1.5), (b"p", 6.0), (b"p", .4), (b"s", .6),
+    [(b"`", .5), (b"j", 1.0), (b"p", 1.5), (b"p", 6.0), (b"p", .4), (b"s", .6),
      (b"s", .6), (b"w", .4)], cols=100, rows=30))
 ok &= report("up the lighthouse: climb, light a show, fire, climb down", *run(
-    [(b"`", .5), (b"+", 1.0), (b"w", 6.0), (b"f", 3.0), (b"f", .5), (b"F", 1.5),
+    [(b"`", .5), (b"i", 1.0), (b"w", 6.0), (b"f", 3.0), (b"f", .5), (b"F", 1.5),
      (b"d", .4), (b"s", 6.0), (b"w", .4)], cols=100, rows=30))
 ok &= report("the arcade: choose, play, play keys, leave, walk out", *run(
-    [(b"`", .5), (b"#", 2.0), (b"d", .4), (b"p", 1.0), (b"p", .3), (b"\x1bOD", .3),
+    [(b"`", .5), (b"g", 2.0), (b"d", .4), (b"p", 1.0), (b"p", .3), (b"\x1bOD", .3),
      (b"w", .3), (b"s", .3), (b"d", .3), (b"x", .5), (b"a", .3), (b"p", 1.5),
      (b"x", .4), (b"s", .6), (b"s", .6)], cols=100, rows=30))
 ok &= report("the casino: 777 next pull, pull, walk out into the gold", *run(
-    [(b"`", .5), (b"9", 1.0), (b"`", .5), (b"%", .4), (b"`", .3), (b"p", 3.5),
+    [(b"`", .5), (b"c", 1.0)] + IN + [(b"`", .5), (b"%", .4), (b"`", .3), (b"p", 3.5),
      (b"s", .6), (b"s", .6), (b"s", 1.0)], cols=100, rows=30))
 ok &= report("closing time at the club, outside and in", *run(
-    [(b"`", .5), (b"/", .4), (b"1", 4.5), (b"w", .4), (b"`", .5), (b"0", 1.5),
-     (b"s", .6)], cols=100, rows=30))
+    [(b"`", .5), (b"/", .4), (b"k", 4.5)] + IN + [(b"s", .6)], cols=100, rows=30))
 ok &= report("the strength tester: swing, swing again, walk out", *run(
-    [(b"`", .5), (b"{", 1.0), (b"p", 2.5), (b"p", 2.5), (b"s", .6), (b"s", .6)],
+    [(b"`", .5), (b"h", 1.0), (b"p", 2.5), (b"p", 2.5), (b"s", .6), (b"s", .6)],
     cols=100, rows=30))
 ok &= report("the roof party: lift up, walk about, back to the lift, down", *run(
-    [(b"`", .5), (b"~", 1.0), (b"w", 6.0), (b"w", .6), (b"a", .5), (b"W", .6),
+    [(b"`", .5), (b"p", 1.0), (b"w", 6.0), (b"w", .6), (b"a", .5), (b"W", .6),
      (b"s", .6), (b"s", .6), (b"s", .6), (b"s", .6), (b"s", 6.0)], cols=100, rows=30))
 ok &= report("the stock exchange: buy, more, sell, walk out", *run(
-    [(b"`", .5), (b";", 1.0), (b"b", .4), (b"+", .3), (b"b", .4), (b"n", .4),
+    [(b"`", .5), (b"e", 1.0), (b"b", .4), (b"+", .3), (b"b", .4), (b"n", .4),
      (b"l", .4), (b"\x1bOB", .3), (b"\x1bOB", .3), (b"b", .4), (b"\x1bOA", .3),
      (b"l", .4), (b"\x1bOC", .3), (b"-", .3), (b"s", .6), (b"s", .6)],
     cols=100, rows=30))
 ok &= report("money: +1000 in the menu, a film, a bowl, walk out", *run(
-    [(b"`", .5), (b":", .4), (b"*", 2.0), (b"s", .6), (b"s", .6), (b"`", .5),
-     (b"v", 6.0), (b"s", .6), (b"s", .6)], cols=100, rows=30))
+    [(b"`", .5), (b"+", .4), (b"m", 2.0), (b"s", .6), (b"s", .6), (b"`", .5),
+     (b"r", 6.0), (b"s", .6), (b"s", .6)], cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

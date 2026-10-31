@@ -469,42 +469,42 @@ WINDOW_GLYPHS = "08XZ:+=*%@o.#"
 DISTRICT_CELLS = 36        # about 180 world units square, a few blocks
 
 DISTRICTS = [
-    dict(key="d", name="downtown", weight=7, scale=1.5, lo=12.0, hi=58.0,
+    dict(key="1", name="downtown", weight=7, scale=1.5, lo=12.0, hi=58.0,
          dens=(0.26, 0.70), flat=0.45, hung=0.45, smoke=0.30, bulb=0.45,
          neon=None, lantern=0.0, park=False,
          glyphs="08XZ*%@#", band=None, mullion=False, ground="#", gap=4,
          pal="near", roof="=", whole_floors=False, cjk=False),
-    dict(key="r", name="residential", weight=5, scale=0.45, lo=6.0, hi=14.0,
+    dict(key="2", name="residential", weight=5, scale=0.45, lo=6.0, hi=14.0,
          dens=(0.34, 0.66), flat=0.0, hung=0.0, smoke=0.18, bulb=0.30,
          neon=None, lantern=0.0, park=False,
          glyphs="0oo.", band="\"", mullion=False, ground="n", gap=3,
          pal="warm", roof="=", whole_floors=False, cjk=False),
-    dict(key="o", name="old town", weight=4, scale=0.6, lo=7.0, hi=18.0,
+    dict(key="3", name="old town", weight=4, scale=0.6, lo=7.0, hi=18.0,
          dens=(0.30, 0.62), flat=0.15, hung=0.20, smoke=0.30, bulb=0.40,
          neon=(2, 5, 7), lantern=0.0, park=False,
          glyphs="+:8O", band=None, mullion=False, ground="n", gap=3,
          pal="mid", roof="^", whole_floors=False, cjk=False),
-    dict(key="c", name="chinatown", weight=3, scale=0.7, lo=8.0, hi=22.0,
+    dict(key="4", name="chinatown", weight=3, scale=0.7, lo=8.0, hi=22.0,
          dens=(0.38, 0.78), flat=0.80, hung=0.50, smoke=0.30, bulb=0.55,
          neon=(3, 4, 7), lantern=0.85, park=False,
          glyphs="#8%@", band="=", mullion=False, ground="#", gap=5,
          pal="red", roof="~", whole_floors=False, cjk=True),
-    dict(key="m", name="market", weight=3, scale=0.65, lo=7.0, hi=20.0,
+    dict(key="5", name="market", weight=3, scale=0.65, lo=7.0, hi=20.0,
          dens=(0.32, 0.68), flat=0.55, hung=0.32, smoke=0.35, bulb=0.60,
          neon=(4, 7), lantern=0.70, park=False,
          glyphs="oO0", band=None, mullion=False, ground="A", gap=2,
          pal="warm", roof="=", whole_floors=False, cjk=False),
-    dict(key="f", name="financial", weight=3, scale=1.9, lo=26.0, hi=64.0,
+    dict(key="6", name="financial", weight=3, scale=1.9, lo=26.0, hi=64.0,
          dens=(0.05, 0.16), flat=0.0, hung=0.0, smoke=0.08, bulb=0.15,
          neon=None, lantern=0.0, park=False,
          glyphs=":.:", band=None, mullion=False, ground=":", gap=6,
          pal="cold", roof="=", whole_floors=True, cjk=False),
-    dict(key="k", name="docks", weight=2, scale=0.45, lo=5.0, hi=13.0,
+    dict(key="7", name="docks", weight=2, scale=0.45, lo=5.0, hi=13.0,
          dens=(0.06, 0.20), flat=0.05, hung=0.05, smoke=0.25, bulb=0.55,
          neon=(4,), lantern=0.0, park=False,
          glyphs="==-", band="-", mullion=False, ground="#", gap=6,
          pal="rust", roof="=", whole_floors=False, cjk=False),
-    dict(key="p", name="park", weight=2, scale=0.5, lo=5.0, hi=10.0,
+    dict(key="8", name="park", weight=2, scale=0.5, lo=5.0, hi=10.0,
          dens=(0.20, 0.45), flat=0.0, hung=0.0, smoke=0.15, bulb=0.20,
          neon=None, lantern=0.0, park=True,
          glyphs="&%", band=None, mullion=False, ground="&", gap=3,
@@ -11851,53 +11851,47 @@ CHEAT_SKIP = 40.0      # ignore what is already underfoot, so a repeat moves on
 CHEAT_RINGS = 200      # cells of search before giving up and saying so
 
 CHEAT_PLACES = [
-    ("1", "club", "club"),
-    ("2", "casino", "casino"),
-    ("3", "dark alley", "alley"),
+    # Letters where they can be the place's own (r ramen, d diner, c casino),
+    # never a key that is another one's other case. Kinds that are not here
+    # any more - inside a casino, a dead end, far away - are still found by
+    # find_place(), for the tests, but the panel is for going somewhere.
+    ("c", "casino", "casino"),
+    ("k", "club", "club"),
+    ("p", "roof party", "roofparty"),
+    ("v", "woods rave", "rave"),
+    ("g", "arcade", "arcade"),
+    ("m", "cinema", "cinema"),
+    ("f", "carnival", "carnival"),
+    ("j", "claw machine", "claw"),
+    ("h", "strength test", "striker"),
+    ("r", "ramen", "ramen"),
+    ("d", "diner", "diner"),
+    ("^", "sky deck", "tower"),
+    ("i", "lighthouse top", "lighthousedoor"),
+    ("b", "big bridge", "grand"),
+    ("$", "billboard", "billboard"),
+    ("e", "stock exchange", "exchange"),
     ("y", "lit alley", "yokocho"),
-    ("4", "dead end", "deadend"),
-    ("5", "crossroads", "crossroads"),
-    ("6", "long street", "street"),
-    ("7", "back to start", "start"),
-    ("8", "far away", "far"),
-    ("9", "inside a casino", "inside"),
-    ("0", "inside the club", "clubdoor"),
-    ("v", "a ramen counter", "ramen"),
     ("=", "under the el", "el"),
-    ("^", "a sky deck", "tower"),
-    ("|", "a fire escape", "escape"),
-    ("_", "a car park", "carpark"),
-    ("*", "the pictures", "cinema"),
-    ("(", "the diner", "diner"),
-    ("#", "the arcade", "arcade"),
-    ("$", "a billboard", "billboard"),
-    ("[", "a short tunnel", "tunnel"),
-    ("]", "a long tunnel", "longtunnel"),
-    ("<", "a police car", "police"),
-    (")", "the highway", "highway"),
-    ("g", "the woods", "woods"),
-    ("x", "the woods rave", "rave"),
-    ("e", "the lake", "lake"),
-    ("t", "the riverbank", "bank"),
-    ("i", "the carnival", "carnival"),
-    ("&", "a claw machine", "claw"),
-    ("}", "pleasure pier", "pleasurepier"),
-    ("{", "strength test", "striker"),
-    ("~", "roof party", "roofparty"),
-    (";", "stock exchange", "exchange"),
-    ("u", "the big bridge", "grand"),
-    ("h", "the lighthouse", "lighthouse"),
-    ("+", "lighthouse top", "lighthousedoor"),
-    ("j", "end of a pier", "pier"),
-    ("b", "a bridge", "bridge"),
-    ("B", "someone leaning", "leaner"),
+    ("|", "fire escape", "escape"),
+    ("_", "car park", "carpark"),
+    ("<", "police car", "police"),
+    (")", "highway", "highway"),
+    ("o", "the woods", "woods"),
+    ("~", "the lake", "lake"),
+    ("t", "riverbank", "bank"),
 ]
 
-
-# The river and the woods: listed under the parts of town, not with the city.
-OUT_OF_TOWN = {"woods", "rave", "lake", "bank", "pier", "bridge", "leaner",
-               "carnival", "claw", "striker", "pleasurepier", "grand", "lighthouse",
-               "lighthousedoor"}
+# The panel's groups, by what you would go there for.
+CHEAT_GROUPS = [
+    ("NIGHTLIFE", ["casino", "club", "roofparty", "rave"]),
+    ("FUN", ["arcade", "cinema", "carnival", "claw", "striker"]),
+    ("EAT", ["ramen", "diner"]),
+    ("VIEWS", ["tower", "lighthousedoor", "grand", "billboard"]),
+    ("MONEY", ["exchange"]),
+    ("AROUND TOWN", ["yokocho", "el", "escape", "carpark", "police", "highway"]),
+    ("OUT OF TOWN", ["woods", "lake", "bank"]),
+]
 
 
 def _rings(ci, cj, limit):
@@ -12625,33 +12619,27 @@ def draw_cheats(ch, co, note):
     """The panel, drawn over the live frame rather than instead of it, so that
     what you change to the weather happens in front of you.
 
-    Four columns: the places in the city; the streets, with the parts of town
-    under them; out of town - the river and the woods; and the weather, the
-    sky and the special nights. Every new place used to go into the first
-    until it was taller than the terminal and the panel quietly stopped
+    Four columns, by what you go somewhere for - CHEAT_GROUPS - then the
+    parts of town, and the weather, the sky and the nights. It was once one
+    long column that grew taller than the terminal and quietly stopped
     opening at all. There is a test that it opens at 80x24."""
     height, width = len(ch), len(ch[0])
-    streets = ("alley", "yokocho", "deadend", "crossroads", "street",
-               "tunnel", "longtunnel")
-    left = [("", "IN THE CITY")]
-    left += [(k, name) for k, name, kind in CHEAT_PLACES
-             if kind not in OUT_OF_TOWN and kind not in streets and kind != "exchange"]
-    middle = [("", "STREETS")]
-    middle += [(k, name) for k, name, kind in CHEAT_PLACES if kind in streets]
-    middle += [("", ""), ("", "PARTS OF TOWN")]
-    middle += [(d["key"], d["name"]) for d in DISTRICTS]
-    # The exchange is the financial district's, and the first column is full.
-    middle += [(k, name) for k, name, kind in CHEAT_PLACES if kind == "exchange"]
-    right = [("", "OUT OF TOWN")]
-    right += [(k, name) for k, name, kind in CHEAT_PLACES if kind in OUT_OF_TOWN]
+    names = {kind: (k, name) for k, name, kind in CHEAT_PLACES}
+    groups = {g: [("", g)] + [names[kind] for kind in kinds]
+              for g, kinds in CHEAT_GROUPS}
+    gap = [("", "")]
+    left = groups["NIGHTLIFE"] + [("/", "closing time")] + gap + groups["FUN"] \
+        + gap + groups["EAT"]
+    middle = groups["MONEY"] + [("+", "+$1000"), ("%", "777 next pull")]
+    middle += gap + [("", "PARTS OF TOWN")] + [(d["key"], d["name"]) for d in DISTRICTS]
+    right = groups["AROUND TOWN"] + gap + groups["OUT OF TOWN"] + gap + groups["VIEWS"]
     sky = [("", "WEATHER & SKY"),
            ("w", weather_name()), ("L", "strike now"),
            ("s", "sky " + clouds_name()), ("a", "people " + crowd_name()),
            (">", "traffic " + traffic_name()),
            ("", ""), ("", "NIGHTS"),
-           ("n", "the next one"), ("A", "a strange night"),
+           ("n", "the next one"), ("u", "a strange night"),
            ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
-           ("%", "777 next pull"), ("/", "closing time"), (":", "+$1000"),
            ("", ""), ("`", "close")]
     columns = (left, middle, right, sky)
 
@@ -13354,7 +13342,7 @@ def main(stdscr):
                 elif key == ord("L"):
                     force_strike(now)
                     note = "lightning"
-                elif key == ord("A"):
+                elif key == ord("u"):
                     note = ("the sky is busy tonight"
                             if skip_to_alien(now) else "no such night near")
                 elif key == ord(">"):
@@ -13369,7 +13357,7 @@ def main(stdscr):
                 elif key == ord("!"):
                     note = ("fireworks over the bay tonight"
                             if skip_to_fireworks(now) else "no such night near")
-                elif key == ord(":"):
+                elif key == ord("+"):
                     wallet.give(1000)
                     note = "+$1000"
                 elif key == ord("%"):
@@ -13377,7 +13365,7 @@ def main(stdscr):
                     note = "the next pull is 777"
                 elif key == ord("/"):
                     skip_to_closing(now)
-                    note = "closing time - 1 for a club"
+                    note = "closing time - k for a club"
                 elif key == ord("z"):
                     note = ("lanterns on the river tonight"
                             if skip_to_lanterns(now) else "no such night near")

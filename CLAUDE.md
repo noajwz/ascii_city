@@ -325,7 +325,7 @@ makes it read as a pattern laid over the stars rather than as something in the w
 `draw_landing_beam()` stops one of the sweeping beams dead over a rooftop and holds it there for
 eight seconds, fading up and out so it arrives rather than switching on. No explanation offered.
 
-`A` in the cheat menu goes straight to one, and the HUD says `~ something over the city ~`. Both
+`u` in the cheat menu goes straight to one, and the HUD says `~ something over the city ~`. Both
 matter — one night in forty is unreachable by waiting, and from a street you might not look up.
 
 ## The river
@@ -442,7 +442,7 @@ The burst height is the thing that needed tuning: at seventy units they went off
 the screen from anywhere near enough to see them properly, so they burst just over the bridge's
 towers. On the waterfront they are rings in screen space along the far bank, drawn before the
 reflection. Near the bay the HUD says `~ fireworks over the bay ~`, and `!` in the menu skips to
-the next such night — then `u` or `h` for somewhere to watch from.
+the next such night — then `b` or `i` for somewhere to watch from.
 
 ## The carnival on the bank
 
@@ -486,7 +486,7 @@ as it goes round (never under 2.2, clear of the stalls), drawn through `draw_tub
 bulbs on it and legs down to the deck, and a train of `COASTER_CARS` with a light on the front.
 `coaster_at()` slows it up the climbs and speeds it down the dips as a function of where it is on
 the lap rather than anything integrated, so nothing is stored. Both are only on the pier by the big
-bridge; between them they cost about 1.6 ms a frame near it. `}` in the menu stands you on the bank
+bridge; between them they cost about 1.6 ms a frame near it. `f` in the menu stands you on the bank
 beside the pier, looking along it at them.
 
 **Behind it the town is kept low** (`seafront_cap()`, applied in `lot()` before the faces are
@@ -518,7 +518,7 @@ and `p` swings the hammer, taking whatever the meter says that instant as the po
 up the post that far and comes back (`puck()`, a function of the time since the swing), and from
 `STRIKE_BELL` up the bell rings and a prize goes into the same `arms` the claw machine fills,
 handed over once, when the puck reaches it. `STRIKE_SAYS` is the scale marked on the post. You
-cannot swing again until the puck is down and the verdict has been up a moment. `{` in the menu.
+cannot swing again until the puck is down and the verdict has been up a moment. `h` in the menu.
 
 ## The big bridge
 
@@ -544,7 +544,7 @@ you see first.
 **Where you can see it from is limited, and that is the city's doing, not the bridge's.** The
 bank is not a promenade — buildings run right down to the water — so from beside the bridge you
 are looking through a block. The views that exist are the avenue approach, where the tower stands
-over the end of the street like a gate, and the deck itself, which is where `u` in the menu puts
+over the end of the street like a gate, and the deck itself, which is where `b` in the menu puts
 you: the bracing across the sky ahead, the cables coming down either side, the far bank beyond.
 
 ## The headland, and the lighthouse
@@ -578,7 +578,7 @@ from the lantern out to `BEAM_REACH`, with a fainter one thrown the other way th
 does, going round once every `BEAM_TURN` seconds. It goes over the bridge, the bay and the town
 without asking any of them, and where it passes over water it is drawn on the water too: a beam
 that only exists in the air reads as a stick. Drawn from 420 units, further than the bridge,
-because a moving light is the first thing the eye finds. `h` in the menu puts you at the landing
+because a moving light is the first thing the eye finds. `i` in the menu puts you at the landing
 looking out to the point.
 
 ### Up the lighthouse, and firing your own show from it
@@ -657,15 +657,16 @@ units off, which is exactly the range it is for; and it paints over the far bank
 never over another light, because that is what it is meant to be seen against.
 
 The water cheats did not skip what was underfoot the way the ring search does, so `j` and `b`
-returned the same pier and bridge every press. They move along the river now, and `B` goes to a
-bridge with someone on it — the leaner is one in three, and a thing you cannot reach cannot be
+returned the same pier and bridge every press. They move along the river now, and `B` went to a
+bridge with someone on it (both off the panel now) — the leaner is one in three, and a thing you cannot reach cannot be
 checked.
 
 **No key may differ from another only by case unless it is a variant of it.** The woods went in as
 `W` next to `w` weather, and the rave as `R` next to `r` residential, and the report back was "W is
 already weather" and "the rave cheat teleports me to just city" — lowercase pressed, weather cycled,
 a housing district reached. Both were working. `b`/`B` (a bridge, the same bridge with someone on
-it) is the one pair that earns it.
+it) was the one pair that earned it, and both have since left the panel; there are no pairs now
+(`a` people and `A` a strange night was one that slipped in — the strange night is `u` now).
 
 **The rig in the trees knew.** Whoever carried a sound system into the woods on the one night in
 forty that the sky has something in it was not guessing: `rave_window()` is on from dusk to dawn on
@@ -678,7 +679,7 @@ Not a park. The parks are the small green squares the city has everywhere; the w
 dark block of trees a few districts across — Central Park sized, 700 by 420 units — with trails
 through it, a hollow in the middle, and no street, light or building in it at all. There is one per
 `WOODS_TILE` (2400 units) in each direction, jittered inside its tile, so from anywhere the nearest
-is a long walk. `g` in the menu takes you to a gate.
+is a long walk. `o` in the menu takes you to a gate.
 
 **It is placed, not picked.** `WOODS` is a district row that is not in `DISTRICTS`: `district()`
 returns it for any cell `woods_at()` says yes to, so `lot()` builds a tree there with no changes of
@@ -721,7 +722,7 @@ simply ran into the lake would end in it. The gulls stay the river's.
 The reflection pass reflects **the sky now, not only the facades** — it used to start at the
 roofline, and over a lake ringed with trees that left nothing to mirror but black. Above the
 roofline anything drawn is a light (stars, the moon, the beams on the strange night), and a canopy
-lit by the rig counts as one too; on the facades it is still only the lights that cross. `e` in the
+lit by the rig counts as one too; on the facades it is still only the lights that cross. `~` in the
 menu stands you on the shore.
 
 ## The rave in the hollow
@@ -758,7 +759,7 @@ dark, still where they move, and no light in his eyes between the kicks. Stand w
 and the HUD gives you his line instead of the bearing. He is only there while the rig is on; he
 came for it.
 
-**Rare and unreachable are different things, and the menu has to reach it.** `x` calls
+**Rare and unreachable are different things, and the menu has to reach it.** `v` calls
 `force_rave()` and stands you at the edge of the hollow facing the altar; the HUD gives a bearing
 and a rough distance from up to 700 units (`rave_hint()`), because a wood is disorienting on purpose
 and a fact you cannot walk on is no help.
@@ -837,8 +838,8 @@ avenue short of the mouth of a short or a long one, looking in. The nearby tunne
 frame (`v.tunnels`) before the walls, so the side-wall check is skipped wherever there are none;
 they cost about 0.3 ms a frame on an ordinary street.
 
-The cheat panel is **four columns** now — IN THE CITY; STREETS with PARTS OF TOWN under it; OUT OF
-TOWN; WEATHER & SKY with NIGHTS under it — eighteen wide each, inside 80x24.
+`[` and `]` are not on the panel any more (see *The cheat menu*); `find_place()` still finds
+tunnels for the tests.
 
 ## Car parks
 
@@ -947,7 +948,7 @@ blink, the window onto a wet street of towers and holo-ads with the odd car goin
 board (`DINER_MENU`, in credits) glitching, a chrome coffee machine with its little lights, a
 robot arm working the grill along its rail, three others along the counter — a visor, a hood, an
 eye that is not an eye — and `DINER_POUR` seconds after you sit down a drone comes round with the
-pot and says what diners have always said. The seat is remembered the way the ramen bowl's is. `(`
+pot and says what diners have always said. The seat is remembered the way the ramen bowl's is. `d`
 in the menu.
 
 **Billboards** are soda ads (`ADS`, made-up brands) hung out over the wide streets from low roofs
@@ -1191,7 +1192,7 @@ house used to stake you again at zero; with one balance for the whole city that 
 so it does not. It no longer pulls itself: a machine that spent your money while you stood there
 would be a bug.
 
-The one trap from before still holds: `9` puts you in the casino, and the panel used to stay open
+The one trap from before still holds: the casino jump (`c`, then a few steps in), and the panel used to stay open
 so `p` was the park. A jump closes the panel now.
 
 **Blackjack** is on the other side of the wheel, from 92 columns; the wheel moves over and gives
@@ -1217,7 +1218,7 @@ others along the counter heads down and slurping on their own counts, and steam 
 You sit down to chopsticks; the bowl arrives `RAMEN_SERVE` seconds later — egg, nori, steam — and
 the cook calls it. `seated` in `main()` is what remembers when you sat, keyed on the shop, so
 walking out and back in is a new bowl. It is all ASCII inside: the room is drawn without the
-`v.wide` bookkeeping, so the Japanese stays on the sign outside. `v` in the menu puts you at a
+`v.wide` bookkeeping, so the Japanese stays on the sign outside. `r` in the menu puts you at a
 counter, and a second press finds another.
 
 ## The sky deck
@@ -1305,7 +1306,7 @@ going up on the kick a fraction of a beat apart, and the strobe the last bar of 
 lasers (in `draw_spire()`) fan out from the booth over the city, nearly level, a new colour every
 bar — seen from across town at 250 units from about half the streets round it, and from nearer
 not at all, because they are over the top of the screen: the street camera does not tilt, which is
-the sky-deck crowns' trouble again. `~` in the menu stands you outside the lobby. About 9 ms a
+the sky-deck crowns' trouble again. `p` in the menu stands you outside the lobby. About 9 ms a
 frame on the roof at 110x34, 19 at 240x70.
 
 ## Up the fire escapes
@@ -1334,7 +1335,7 @@ roof climbs you back down into the alley. `|` in the menu stands you at the foot
 
 A cinema is as rare as a club — `CLUB_ODDS` on its own hash, a street front required — and from
 the pavement it is a marquee over lit doors: NOW SHOWING and the title in a ring of chasing bulbs,
-in screen space for the casino marquee's reason. `*` in the menu stands you in the doorway, and
+in screen space for the casino marquee's reason. `m` in the menu stands you in the doorway, and
 `venue_at()` does the rest the way it does for the casino.
 
 Inside you are in the back rows: the screen between red curtains, the projector's beam coming over
@@ -1376,7 +1377,7 @@ one in 900 left some districts without one and the menu's search came back empty
 in 96. Low and old among the glass towers: `draw_exchange_column()` is pale stone with a column in
 every bay, a cornice, and steps at the foot; `draw_exchange_front()` puts STOCK EXCHANGE over the
 columns and the **ticker** under it, the market scrolling by in screen space — every stock, its
-price, and the last tick's move in green `^` or red `v`. `;` in the menu stands you on the floor
+price, and the last tick's move in green `^` or red `v`. `e` in the menu stands you on the floor
 (it is listed under the parts of town: the first column of the panel was a row past 80x24).
 
 **The market is a function of time.** Sixteen made-up `STOCKS`, four to each of the `SECTORS`,
@@ -1432,7 +1433,7 @@ Inside (`render_arcade()`) is a row of cabinets, as many as the window takes (`a
 each with its game's name lit on top and a demo of it running on the screen (`cabinet_demo()`, a
 function of time alone); the arcade's name across the top in the big font, the carpet every arcade
 has, and two kids at the machines. `a`/`d` pick a cabinet (it lights and gets a `vvv` over it), `p`
-plays it, `s` walks you out. `#` in the menu stands you in the door.
+plays it, `s` walks you out. `g` in the menu stands you in the door.
 
 **The games** are `GAMES`, one class each on `ArcadeGame`'s fixed-step clock (`GAME_DT`, and no
 catching up more than half a second after a stall): `key()` takes `up`/`down`/`left`/`right`/`act`,
@@ -1545,6 +1546,13 @@ instruction, not a nicety: everything worth looking at is deliberately rare, so 
 to reach it cannot be checked by the person who asked for it, and will not be. If what you added is a
 place, give it a row in `CHEAT_PLACES` and a predicate for `find_place()`; if it is a condition —
 weather, time, a mode — give it a key that sets it, the way `w` and `L` do. Both are a few lines.
+
+**The panel is for going somewhere, not for testing the generator.** It was pruned of everything
+that was the latter — inside a casino and inside the club (the jump to the door is one step from
+it), the pleasure pier (the carnival is on it), the lighthouse's foot (its top is the one you want),
+back to start, far away, someone leaning, a bridge, the end of a pier, and the streets: a dark
+alley, a dead end, a crossroads, a long street, the tunnels. Their kinds are still in
+`find_place()`, which the tests use; they are just not keys. Ask before putting one back.
 Adding the feature and leaving the menu alone is an unfinished job.
 
 `` ` `` opens a panel over the live view — over, not instead of, so that weather you change happens
@@ -1552,10 +1560,13 @@ in front of you. **A jump closes it** — you went somewhere to look at it, and 
 up the next key is a district or another jump; the `-> where` note shows on the HUD for four
 seconds instead.
 
-Three columns: **IN THE CITY**, then **PARTS OF TOWN** with **SKY AND STREETS** (weather, strikes,
-nights, the overcast, people) under it, then **OUT OF TOWN** (`OUT_OF_TOWN`: the river and the
-woods). It was two, every new place went into the first, and it quietly grew past a 24-row terminal
-and then a 30-row one — `draw_cheats()` draws nothing when there is no room, so the symptom is the
+**Grouped by what you would go there for** (`CHEAT_GROUPS`): NIGHTLIFE, FUN, EAT; MONEY and the
+PARTS OF TOWN (on the digits, `1`–`8`); AROUND TOWN, OUT OF TOWN, VIEWS; then WEATHER & SKY and
+NIGHTS. Places get their own letter where they can (`r` ramen, `d` diner, `c` casino, `m` the
+movies), which is why the districts moved to the digits. A new place goes into a group, not on the
+end of a list. It was once grouped by where things were — the city, the streets, out of town —
+every new place went into the first, and it quietly grew past a 24-row terminal and then a 30-row
+one — `draw_cheats()` draws nothing when there is no room, so the symptom is the
 panel simply not opening. There is a test that it opens at 80x24. Letters belong to the panel while
 it is up; the arrow keys do not, so you can still walk about with it open.
 
@@ -1600,7 +1611,7 @@ what you get instead: the usher, the bouncer, the cook's sign, the drone. The li
 (`LIFT_FEES`: a sky deck, the roof party; the fire escapes and the lighthouse stair are free), and
 a show from the lighthouse is `SHOW_FEE`; refused, the HUD says what it costs. The balance leads
 the HUD everywhere. Nothing tops it up — the casino's old stake when you were broke would have
-been money for nothing — except `:` in the menu, `+$1000`. Like everything else you carry, it is
+been money for nothing — except `+` in the menu, `+$1000`. Like everything else you carry, it is
 for the session and nowhere else.
 
 ## Testing it
