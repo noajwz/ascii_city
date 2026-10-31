@@ -37,7 +37,7 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   with a rave going
   on, steaming ramen shops down the lit lanes, a neon bowl over the door, where you can sit
   and wait for your bowl, a cinema
-  showing a black-and-white film, with the title up over the doors in big lit letters and
+  showing a black-and-white film or a full-colour action picture, with the title up over the doors in big lit letters and
   searchlights sweeping the sky from its roof, an arcade with a front that is one big wall of
   flashing coloured lights and six games inside to play (a rooftop runner, a neon tube
   puzzle, a delivery run, a racer, a fireworks show and an owl catching moths), an all-night cyberpunk diner
