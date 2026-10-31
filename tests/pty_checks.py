@@ -111,6 +111,9 @@ ok &= report("closing time at the club, outside and in", *run(
 ok &= report("the strength tester: swing, swing again, walk out", *run(
     [(b"`", .5), (b"{", 1.0), (b"p", 2.5), (b"p", 2.5), (b"s", .6), (b"s", .6)],
     cols=100, rows=30))
+ok &= report("the roof party: lift up, walk about, back to the lift, down", *run(
+    [(b"`", .5), (b"~", 1.0), (b"w", 6.0), (b"w", .6), (b"a", .5), (b"W", .6),
+     (b"s", .6), (b"s", .6), (b"s", .6), (b"s", .6), (b"s", 6.0)], cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
