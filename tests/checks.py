@@ -3605,5 +3605,40 @@ check("and the puddles ripple out from the door, when it has rained",
       "%d cells" % ripples(open_t, 0.6))
 ac.NEON[:] = real_neon
 
+# --- the drop tower and the roller coaster on the pleasure pier ---------------
+heights = [ac.drop_car(k * 0.1) for k in range(int(ac.DROP_CYCLE * 10))]
+falls = [k for k, (h, f) in enumerate(heights) if f]
+check("the drop tower's car waits, climbs, hangs at the top and drops",
+      heights[0][0] < 2.0 and max(h for h, _ in heights) > ac.DROP_H - 4.0
+      and 0 < len(falls) * 0.1 < 1.5,
+      "falls for %.1f s" % (len(falls) * 0.1))
+pc2 = ac.carnival_col(gspan[0])
+track = [ac.coaster_point(pc2, k * math.tau / 200) for k in range(200)]
+check("the coaster's track stays up off the deck and over the pier",
+      min(y for _, y, _ in track) >= 2.0
+      and all(pc2 * ac.CELL <= x <= (pc2 + ac.FAIR_LONG) * ac.CELL
+              for x, _, _ in track))
+check("and the train goes round", len({round(ac.coaster_at(pc2, t), 2)
+                                       for t in range(0, 18, 3)}) == 6)
+ps_ = ac.find_place(x0, z0, "pleasurepier")
+check("} in the menu stands you on the bank beside the pier",
+      ps_ is not None and ac.can_stand(ps_[0], ps_[1]))
+drawn = {}
+for name in ("draw_drop_tower", "draw_coaster"):
+    real_ = getattr(ac, name)
+
+    def spy(ch, co, v, walls, c, now, wet, real_=real_, name=name):
+        before = [r[:] for r in ch]
+        real_(ch, co, v, walls, c, now, wet)
+        drawn[name] = sum(1 for y in range(len(ch)) for x in range(len(ch[0]))
+                          if ch[y][x] != before[y][x])
+    setattr(ac, name, spy)
+ac.render_street(ac.View(ps_[0], ps_[1], ps_[2], 110, 34), 405.0)
+ac.draw_drop_tower, ac.draw_coaster = (
+    getattr(ac.draw_drop_tower, "__defaults__")[0],
+    getattr(ac.draw_coaster, "__defaults__")[0])
+check("and from there you see both rides", drawn.get("draw_drop_tower", 0) > 15
+      and drawn.get("draw_coaster", 0) > 15, "%s" % drawn)
+
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

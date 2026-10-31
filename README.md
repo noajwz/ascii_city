@@ -63,7 +63,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   you will not like who is on the decks.
 - **A river**, with a promenade along it, piers, buoys, rowing boats drifting down with lanterns in
   them, mist on cold nights, footbridges with lamps along them, now and then a carnival on the bank
-  (always one beside the big bridge, out on a pleasure pier) with a big wheel turning over the
+  (always one beside the big bridge, out on a pleasure pier with a drop tower and a roller
+  coaster) with a big wheel turning over the
   water and a claw machine you can play (`p` to start, `p` to drop), and once in a long way a bay
   with a suspension bridge
   across it, lights the length of its cables, a ferry crossing beside it, landing on a headland -
