@@ -14668,7 +14668,8 @@ TAXI_SPEED = 20.0      # how fast the city goes by the window
 FARE_BASE = 3.0        # the flag
 FARE_PER = 0.015       # dollars a unit, as the crow flies
 TAXI_DESTS = [("the casino", "casino"), ("the club", "club"),
-              ("the pictures", "cinema"), ("the arcade", "arcade"), ("a ramen counter", "ramen"),
+              ("the pictures", "cinema"), ("the arcade", "arcade"),
+              ("a ramen counter", "ramen"),
               ("the diner", "diner"), ("the temple", "temple"),
               ("the stock exchange", "exchange"), ("a sky deck", "tower"),
               ("the roof party", "roofparty"), ("the carnival", "carnival"),
