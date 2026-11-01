@@ -39,8 +39,9 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   on, a temple with stained glass and a rose window, where a terminal on the altar
   gives you the word of God the way TempleOS did and a priest in the confession
   booth hears what you type, a university quarter of ivied brick round a quad, its clock tower showing the real
-  time, and a library where walking in opens a Wikipedia reader (the
-  `wiki_tui.py` from the TUI repo, when it is checked out beside this one), a Strip of casino-hotels in towers of light with palms and dancing fountains down
+  time, and a library with a reading room: a Wikipedia reader and a
+  PsychonautWiki one (copies of the TUI repo's `wiki_tui.py` and `psychonaut_tui.py`, in
+  `library/`), a Strip of casino-hotels in towers of light with palms and dancing fountains down
   the median, a fountain show on a lake in front of one of them and an airport beside it where airliners land over your head and take off, and a sightseeing flight from it, a window seat once round the
   town past the Strip and back down,
   suburbs with curving streets, white picket fences, lawns and porch lights (and a

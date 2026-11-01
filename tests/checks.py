@@ -10,6 +10,7 @@ no rendering at all.
 Runs a few hundred thousand simulated seconds of weather, so it takes a minute.
 """
 import math
+import os
 import random
 import sys
 
@@ -5211,11 +5212,17 @@ check("the library's door, onto the quad: the menu stands you in front of it",
       ac.venue_at(ldx, ldz)[0] == "library" and ac.venue_at(*lsp[:2]) is None
       and ac.can_stand(*lsp[:2]) and ac.can_stand(ldx + 3.0, ldz)
       and ac.venue_at(ldx + 3.0, ldz) is None and "library" in ac.clock_hint(*lsp[:2]))
-lapp = ac.LIBRARY_APP
-ac.LIBRARY_APP = "/nonexistent/wiki_tui.py"
-check("and with no reader beside it, the library is shut, nothing breaks",
-      "shut" in ac.read_in_library(None))
-ac.LIBRARY_APP = lapp
+check("both readers on the shelves, carried in library/: the encyclopaedia and "
+      "the restricted section",
+      [b_[3] for b_ in ac.LIBRARY_BOOKS] == ["wiki_tui.py", "psychonaut_tui.py"]
+      and all(os.path.isfile(os.path.join(ac.LIBRARY_DIR, b_[3]))
+              for b_ in ac.LIBRARY_BOOKS))
+lrt = "\n".join("".join(r) for r in ac.render_reading_room(100, 30, 0.0, "")[0])
+check("the reading room: both of them to choose, and the way out",
+      "Wikipedia" in lrt and "PsychonautWiki" in lrt and "back out" in lrt
+      and all("".join(r) for r in ac.render_reading_room(40, 12, 0.0, "x")[0]))
+check("and an empty shelf is a note, not a crash",
+      "empty" in ac.read_in_library(None, "no_such_reader.py"))
 
 # --- the metro ------------------------------------------------------------------------
 msts = list(ac.near_stations(x0, z0, 700.0))
