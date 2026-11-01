@@ -18990,10 +18990,101 @@ CENTER_HEAL = 3.4      # seconds of the machine going
 CENTER_CHIME = "~ ding  ding  da-da-ding ~"
 
 
+def _center_state(now, poke):
+    """(seconds since she took them or None, what she says, balls lit,
+    flashing, bowing) - the same whatever size it is drawn."""
+    t = None if poke["heal"] is None else now - poke["heal"]
+    says = CENTER_SAYS if t is None or t < 0 else (
+        ["Okay, I'll take your Pokemon for a few seconds."] if t < CENTER_HEAL
+        else CENTER_DONE)
+    lit = 0 if t is None or t < 0 else min(6, int(t / (CENTER_HEAL * 0.6 / 6)) + 1)
+    flash = t is not None and CENTER_HEAL * 0.6 <= t < CENTER_HEAL and int(t * 6) % 2
+    bow = t is not None and CENTER_HEAL <= t < CENTER_HEAL + 1.5
+    return t, says, lit, flash, bow
+
+
+def center_size(k):
+    """Rows the Center's interior needs at scale k, its floor aside."""
+    sy = k - 1
+    return 1 + 5 * sy + 2 + len(CENTER_SAYS) + 2 + len(JOY) * k + 2 + 4
+
+
+def render_center_big(width, height, now, poke, note, k):
+    """Inside, big: POKEMON CENTER across the back wall in block letters,
+    Nurse Joy and the healing machine k times over - shapes, so every cell
+    a block of itself, the balls big as they light - the PC a bigger
+    monitor with PC on it in block letters, the counter and the tiles wider.
+    What she says, the chime and the keys stay plain letters."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    sy = k - 1
+    t, says, lit, flash, bow = _center_state(now, poke)
+    for x in range(width):
+        ch[1][x], co[1][x] = "=", ROU_RED
+    mid = width // 2
+    top = max(2, (height - center_size(k)) // 2)
+    sign = "POKEMON CENTER"
+    _blocks(ch, co, top, mid - blocks_width(sign, sy) // 2, sign, ROU_RED, sy, sy)
+    y = top + 5 * sy + 2
+    for r, line in enumerate(says):
+        _text(ch, co, y + r, max(1, mid - len(line) // 2), line, STAR)
+    jy = y + len(says) + 2
+    # Nurse Joy.
+    art = [(" @(-_-)@ " if bow and r == 1 else line) for r, line in enumerate(JOY)]
+    _blow_up(ch, co, mid - 4 * k - k // 2, jy, art,
+             [[ROU_RED if c == "+" else FLASH if c == "@" else STAR for c in line]
+              for line in art], k)
+    cy = jy + len(JOY) * k
+    for x in range(max(0, mid - 20 * k), min(width, mid + 20 * k + 1)):
+        ch[cy][x], co[cy][x] = "=", ROU_RED
+        for r in range(1, k + 1):
+            if cy + r < height:
+                ch[cy + r][x] = "|" if x % (6 * k) == 0 else " "
+                co[cy + r][x] = CONCRETE
+    # The healing machine: drawn small, then k times over.
+    machine = ["+-------+"]
+    tint = []
+    for r in range(2):
+        row, cols = "|", [CONCRETE]
+        for n in range(3):
+            on = r * 3 + n < lit
+            row += ("o" if on else ".") + " "
+            cols += [(STAR if flash else ROU_RED) if on else CONCRETE, CONCRETE]
+        machine.append(row + " |")
+        tint.append(cols + [CONCRETE, CONCRETE])
+    machine.append("+-------+")
+    hx = mid + 12 * k
+    _blow_up(ch, co, hx, jy, machine,
+             [[CONCRETE] * 9] + tint + [[CONCRETE] * 9], k)
+    if t is not None and 0 <= t < CENTER_HEAL:
+        _text(ch, co, jy - 1, hx + (9 * k - len(CENTER_CHIME)) // 2, CENTER_CHIME, GOLD)
+    # The PC: a bigger monitor, PC on it in block letters, on its stand.
+    pw, ph_ = 8 * k, 5 * sy + 2
+    px = max(1, mid - 34 * k)
+    _box(ch, co, px, jy, pw, ph_, CONCRETE)
+    _blocks(ch, co, jy + 1, px + (pw - blocks_width("PC", sy)) // 2, "PC", CROWN_BLUE,
+            sy, sy)
+    _text(ch, co, jy + ph_, px + pw // 2 - 2, "_||_", CONCRETE)
+    # The floor, its tiles k times as far apart.
+    for y in range(cy + k + 2, height - 2):
+        for x in range(width):
+            if x % (4 * k) == 0 and y % k == 0 and (x // (4 * k) + y // k) % 2 == 0:
+                ch[y][x], co[y][x] = "+", CONCRETE
+    menu = "h  ask Nurse Joy to heal your Pokemon     c  use the PC     x  leave"
+    _text(ch, co, height - 2, max(1, mid - len(menu) // 2), menu[:width - 2], GOLD_DIM)
+    if note:
+        _text(ch, co, height - 1, max(1, mid - len(note) // 2), note[:width - 2],
+              GOLD_DIM)
+    return ch, co
+
+
 def render_center(width, height, now, poke, note):
     """Inside: the tiled floor, the counter, Nurse Joy behind it and the
     healing machine beside her - six balls lighting up one by one when she
     takes them - and the PC in the corner."""
+    k = big_scale(width, height)
+    if k > 1 and center_size(k) + 6 <= height and 70 * k <= width:
+        return render_center_big(width, height, now, poke, note, k)
     ch = [[" "] * width for _ in range(height)]
     co = [[0] * width for _ in range(height)]
     # The back wall, its red stripe, the floor tiles.
@@ -19709,6 +19800,8 @@ def main(stdscr):
                 elif key in (ord("h"), ord("H")):
                     if poke["heal"] is None or now - poke["heal"] > CENTER_HEAL + 1.5:
                         poke["heal"] = now
+                elif key in (ord("z"), ord("Z")):
+                    _big_screens[0] = not _big_screens[0]     # big screens, off and on
                 elif key in (ord("c"), ord("C")):
                     note = run_program(stdscr, CENTER_PC, "SOMEONE'S PC: logged off")
                     now = note_at = _clock[0] = time.monotonic()

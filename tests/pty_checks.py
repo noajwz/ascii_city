@@ -215,7 +215,10 @@ def cases(run, report):
                  lib_st, lib_out)
     seen = ("THE READING ROOM" in lib_txt and "wiki_tui" in lib_txt
             and "psychonaut_tui" in lib_txt
-            and lib_txt.rfind("walk in and read") > lib_txt.rfind("psychonaut_tui"))
+            # back on the street after it: its HUD. Not the library's hint -
+        # on a fog night "the fog is in" has the hint line, and the night
+        # follows the real clock.
+        and lib_txt.rfind("ws walk") > lib_txt.rfind("psychonaut_tui"))
     print("%-34s %s" % ("  and both readers came up, and went",
                         "ok" if seen else "FAIL"))
     ok &= seen
@@ -235,7 +238,7 @@ def cases(run, report):
     pc_txt = ANSI.sub(b"", pc_out).decode("utf-8", "replace")
     pc_at = max(pc_txt.rfind("Fire"), pc_txt.rfind("Water"))
     seen = ("Nurse Joy" in pc_txt and "hope to see you" in pc_txt and pc_at > 0
-            and pc_txt.rfind("a Pokemon Center: walk in") > pc_at)
+            and pc_txt.rfind("ws walk") > pc_at)      # the street's HUD, any night
     print("%-34s %s" % ("  and she healed, the PC came up", "ok" if seen else "FAIL"))
     ok &= seen
     ok &= report("the metro: down, a ticket, the train, the ride, up", *run(
@@ -269,6 +272,18 @@ def cases(run, report):
     arc_txt = ANSI.sub(b"", arc_out).decode("utf-8", "replace")
     seen = arc_txt.count("#") > 500 and "SCORE" in arc_txt
     print("%-34s %s" % ("  and z gave the small game back", "ok" if seen else "FAIL"))
+    ok &= seen
+    # The Center on a big window: heal, then z small, z big again, out.
+    pcb_st, pcb_out = run([(b"`", .5), (b",", 1.5)] + [(b"\x1bOA", .25)] * 14
+                          + [(b"h", 4.5), (b"z", .8), (b"z", .8), (b"x", 1.2),
+                             (b"w", .6)], cols=300, rows=90)
+    ok &= report("the big Pokemon Center: heal, z off and on, out", pcb_st, pcb_out)
+    pcb_txt = ANSI.sub(b"", pcb_out).decode("utf-8", "replace")
+    # curses sends only the cells that change, so look for the small
+    # machine's lid - drawn whole where nothing was - not Joy's face.
+    seen = ("@@((" in pcb_txt and "+-------+" in pcb_txt
+            and "hope to see you" in pcb_txt)
+    print("%-34s %s" % ("  and big, then small, then big", "ok" if seen else "FAIL"))
     ok &= seen
     ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)],
                                      cols=100, rows=30))

@@ -24,8 +24,9 @@ pyproject/ruff.toml, and ruff is not installed on the machine this was written o
 **This is the system for every screen that gets bigger on a big window, not just the casino.**
 The owner plays zoomed out on a MacBook (3024x1964), and there the screens that are fixed
 drawings - the casino's games, the interiors - were tiny islands in the middle. The casino was the
-first to scale (see The casino, big), the arcade the second (see The arcade, big); more venues
-are to follow, and they all work the same way:
+first to scale (see The casino, big), then the arcade (see The arcade, big) and the Pokemon
+Center (see The Pokemon Center); the cinema was looked at and does not need it. More venues are
+to follow, and they all work the same way:
 
 - **One threshold, in characters, for everything.** The scale is `min(width // 150,
   height // 44)`, capped at 3 (`big_scale()`, `BIG_W`, `BIG_H`, `BIG_MAX`): 2 from a
@@ -37,7 +38,9 @@ are to follow, and they all work the same way:
 - **Every screen uses that same scale: `big_scale(width, height)`.** No screen gets thresholds
   of its own, or two screens would switch at different zooms. `_big_screens` is the one `z`
   switch for all of them; `z` is handled with the casino's keys and the arcade's (`(wheel is not
-  None or at_arcade)`), so a newly scaled venue adds itself to that condition. Watch for a
+  None or at_arcade)`), so a newly scaled venue adds itself to that condition - unless, like the
+  Pokemon Center, it has a key branch of its own that catches every key first, in which case `z`
+  goes in that branch. Watch for a
   loop variable called `k` in the function you scale - `k` is the scale everywhere here, and an
   old `for k in` loop overwrites it; it has happened in three functions so far, and only the
   frame comparison at scale 1 caught it.
@@ -1181,7 +1184,15 @@ byte-for-byte copy of the TUI repo's type chart (as of its `fdffd17`), run throu
 `run_program()` hand-over as the library's readers, so the same rules hold — it is run, not
 imported; a fix there does not reach here without copying it over again. `q` quits the chart.
 `x` steps you back out the way you came, facing the street. `,` in the menu stands you across
-the street from the nearest one. The fifth menu column is AND THE REST now.
+the street from the nearest one.
+
+**Big** (`render_center_big()`, on the big-window system when `center_size(k)` fits): POKEMON
+CENTER across the back wall in block letters; Nurse Joy and the healing machine drawn small and
+blown up `k` times (`_blow_up()`) - they are shapes - so the balls light up big; the PC a bigger
+monitor with PC on it in block letters, since blowing the small one up would read PPCC; the
+counter and the floor tiles `k` times as wide. What she says, the chime and the keys stay plain.
+`_center_state()` works out the moment (what she says, balls lit, the bow) once for both sizes.
+`z` is in the Center's own key branch, which catches every key before the shared one. The fifth menu column is AND THE REST now.
 
 ## The arcade, big
 
