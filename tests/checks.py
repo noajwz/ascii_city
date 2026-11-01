@@ -23,6 +23,29 @@ def check(name, cond, detail=""):
     ok = ok and cond
     print("%-48s %s %s" % (name, "ok" if cond else "FAIL", detail))
 
+# --- every name the code reads is defined somewhere -----------------------
+# py_compile does not catch a list renamed by accident, and nothing draws it
+# until you are on the roof it belongs to: it once came within a commit.
+import ast as ast_
+import builtins as builtins_
+tree_ = ast_.parse(open(ac.__file__).read())
+known_ = set(dir(builtins_)) | {"__file__"}
+for n_ in ast_.walk(tree_):
+    if isinstance(n_, ast_.Name) and not isinstance(n_.ctx, ast_.Load):
+        known_.add(n_.id)
+    elif isinstance(n_, (ast_.FunctionDef, ast_.ClassDef)):
+        known_.add(n_.name)
+    elif isinstance(n_, ast_.arg):
+        known_.add(n_.arg)
+    elif isinstance(n_, (ast_.Import, ast_.ImportFrom)):
+        known_ |= {(a_.asname or a_.name).split(".")[0] for a_ in n_.names}
+    elif isinstance(n_, ast_.ExceptHandler) and n_.name:
+        known_.add(n_.name)
+unknown_ = sorted({(n_.id, n_.lineno) for n_ in ast_.walk(tree_)
+                   if isinstance(n_, ast_.Name) and isinstance(n_.ctx, ast_.Load)
+                   and n_.id not in known_})
+check("every name the code reads is defined somewhere", not unknown_, str(unknown_))
+
 # --- weather: a storm is its own kind, and the rarest -------------------
 def old_rain(now):
     v = (0.42 + 0.42*math.sin(now/41.0) + 0.26*math.sin(now/13.7+1.2)
@@ -5260,7 +5283,7 @@ check("the reading room: both of them to choose, and the way out",
       "Wikipedia" in lrt and "PsychonautWiki" in lrt and "back out" in lrt
       and all("".join(r) for r in ac.render_reading_room(40, 12, 0.0, "x")[0]))
 check("and an empty shelf is a note, not a crash",
-      "empty" in ac.read_in_library(None, "no_such_reader.py"))
+      "empty" in ac.run_program(None, "no_such_reader.py"))
 
 # --- the metro ------------------------------------------------------------------------
 msts = list(ac.near_stations(x0, z0, 700.0))

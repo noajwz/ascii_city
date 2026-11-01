@@ -1078,7 +1078,7 @@ away, or the doorway would take you straight back in.
 
 **The two readers are copies**, in `library/`: `wiki_tui.py` and `psychonaut_tui.py` from the TUI
 repo (noajwz/TUI, as of its `b65ec95`), byte for byte, so the city carries its own and does not
-need that checkout beside it. They are **run, not imported** — `read_in_library()` hands one the
+need that checkout beside it. They are **run, not imported** — `run_program()` hands one the
 terminal (`def_prog_mode` / `endwin`, a plain `subprocess.run` with the same Python), then takes it
 back (`reset_prog_mode`, `flushinp` so keys typed there do not walk you, nodelay and keypad
 again) and you are in the reading room again. They are stdlib-only and self-contained, like the
@@ -1133,7 +1133,7 @@ the healing machine with its six balls, and the PC in the corner. `h` and she ta
 the balls light one by one, flash, the chime — then she bows and hopes to see you again
 (`CENTER_DONE`); free, as it should be. `c` is the PC: **`library/pokemon_types_tui.py`**, a
 byte-for-byte copy of the TUI repo's type chart (as of its `fdffd17`), run through the same
-`read_in_library()` hand-over as the library's readers, so the same rules hold — it is run, not
+`run_program()` hand-over as the library's readers, so the same rules hold — it is run, not
 imported; a fix there does not reach here without copying it over again. `q` quits the chart.
 `x` steps you back out the way you came, facing the street. `,` in the menu stands you across
 the street from the nearest one. The fifth menu column is AND THE REST now.
@@ -1356,7 +1356,10 @@ end you have to back out of.
 palette and someone smoking outside it; a face on an alley gets the `dark` palette at any range,
 a third of the lit windows, a fire escape, a dumpster and a bare bulb over the door. No awning
 either — an alley has no shopfronts to put one over. That single boolean is why an alley reads as
-somewhere you should not go.
+somewhere you should not go. It is cached per cell (`_road_at_cache`), like
+`is_open()`: each placed part of town added a check in front of the answer, and before the cache
+it was a sixth of the frame. `zone_home()` keeps each zone's centre per map tile for the same
+reason.
 
 ## Rain and lightning
 
@@ -2175,12 +2178,33 @@ for the session and nowhere else.
 ## Testing it
 
 ```bash
-python3 tests/checks.py       # everything that needs no terminal; takes a minute
-python3 tests/pty_checks.py   # ordinary play, driven through a real pty
+python3 tests/checks.py       # everything that needs no terminal; about 40 s
+python3 tests/pty_checks.py   # ordinary play, driven through a real pty; about 2 min
 ```
+
+The pty cases are 51 separate games that mostly wait — 630 seconds of it end to end — so
+`pty_checks.py` plays them **six at a time** (`PTY_JOBS`, 1 for one at a time). The cases live in
+`cases(run, report)` and it runs that twice: a quiet dry pass with a `run()` that only records
+what it is asked for, then all of those played in a thread pool, then the real pass handed the
+results in order, reporting as it goes. A case written the old way — `ok &= report(name,
+*run(keys))`, or using the output straight after — works unchanged. Its keys must not depend on
+another case's output, since in the dry pass every output is empty. Give a case's last steps
+some slack (a second, not a third of one): six games at once are slower to draw.
 
 Both exit 0 or 1, so `&&` them. No test framework and nothing to install — `tests/harness.py`
 imports the module with its colours stubbed and the other two are plain scripts.
+
+`checks.py` also asserts that **every name the code reads is defined somewhere** in the file.
+`py_compile` does not catch a list renamed by accident, and nothing draws it until you are on
+the roof it belongs to; one came within a commit of shipping that way.
+
+**For a refactor, compare frames, not just tests.** Render a fixed set of views (streets in every
+part of town at two times, a roof, the skyline, the flight, the interiors) with each colour given
+its own number — the harness stub makes them all one — and the clock tower's `time.localtime()`
+pinned, pickle them from the old code and the new, and compare. The cleanup that cached
+`road_at()` passed every check and changed 194 cells of the street plan: the new cache had
+reused the name `_road_cache`, which `_is_road()` already had for keys of another kind, so the
+two overwrote each other. Only the frame comparison showed it.
 
 **Add to them.** Nearly every bug in this thing was found by measuring rather than looking, and
 almost all of them came back as a regression test: stars drawn inside buildings, a sign that
@@ -2191,7 +2215,7 @@ Stub the module globals `init_colors()` would have set (`PALETTES`, `NEON`, `STA
 `BULB`, …) with plain integers and call `render_street(View(x, z, yaw, w, h), now)` directly — it
 returns a grid of characters to print or assert on, no terminal needed. That covers geometry,
 determinism (render a spot, walk far enough to evict every cache, render it again, compare), and
-navigation: 4000 `wander()` steps that never end up inside a wall. A quick ASCII dump of
+navigation: the autopilot walked headless (`walk_auto()` in the checks). A quick ASCII dump of
 `is_open()` over a few hundred cells is the fastest way to judge whether the street plan is
 interesting. For the curses half, fork a pty and set the size with `TIOCSWINSZ` as with `wiki_tui`.
 
