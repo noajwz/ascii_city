@@ -81,6 +81,11 @@ BAY_W = 1.6            # world width of one window bay
 PAVE = 1.7             # pavement width, measured in from a facade
 WALK = 14.0            # world units per second
 TURN = 1.9             # radians per second
+TURN_TAP = 0.5         # a tap turns at this much of TURN...
+TURN_HELD = 1.25       # ...holding it, up to this much
+TURN_RAMP = 0.9        # seconds of holding to get from one to the other
+TURN_FIRST = 0.32      # a fresh press turns at least this long (the repeat delay)
+TURN_EASE = 12.0       # how fast the turn eases to what the key asks for
 SIDESTEP = 8.0
 
 SIGN_CLEAR = 4.2       # a projecting sign must clear anyone walking under it
@@ -12738,21 +12743,99 @@ def probe(x, z, yaw, reach):
     return reach
 
 
-def wander(x, z, yaw, now):
-    """Which way to lean, given what is open around you.
+AUTO_LOOK = 60.0       # how far ahead the autopilot looks down a street
+AUTO_TURN_ODDS = 4     # at a clear junction, one chance in this of taking it
+AUTO_TURN_GAP = 14.0   # and not within this many seconds of the last turn
 
-    Picking the single best-scoring direction makes the walk twitch, because
-    the winner changes outright from one frame to the next. Blending all of
-    them by score gives a heading that moves continuously instead, and one that
-    sits between two equally good options rather than flipping between them."""
-    acc = weight = 0.0
-    for off in (-1.15, -0.75, -0.4, -0.15, 0.0, 0.15, 0.4, 0.75, 1.15):
-        clear = probe(x, z, yaw + off, 22.0)
-        score = clear + 5.0 * math.cos(off) + 7.0 * math.sin(now * 0.11 + off * 2.7)
-        w = math.exp(score / 6.0)
-        acc += w * off
-        weight += w
-    return acc / weight
+
+def _wrap(a):
+    """An angle brought into -pi..pi."""
+    return (a + math.pi) % math.tau - math.pi
+
+
+def auto_heading(x, z, goal, now, must, trail=()):
+    """A new heading for the autopilot, in the world, not relative to where
+    you face: straight on, a turn either way, or the diagonal between, in
+    eighths of a turn from the old one - so on a grid street it is the
+    street, and in the woods or on a lawn it can go between the trees. It
+    likes going straight, then turning, and turns back only when nothing
+    else is open. Which way at a junction is a hash of the time, changing
+    every few seconds and not with every frame, so it does not drift.
+
+    Turning by the score of directions relative to your nose, as this did,
+    walks circles: whatever leaned it one way kept leaning it that way. And
+    `trail`, where it has been lately, counts against a heading that goes
+    back there - or round a courtyard it went, the same four turns for ever,
+    because the same walls gave the same answers each time round."""
+    best, pick = -1e9, goal
+    slot = int(now / 7.0)
+    for k in (0, -2, 2, -1, 1, -3, 3, 4):
+        if must and k == 0:
+            continue
+        h = goal + k * math.pi / 4.0
+        clear = probe(x, z, h, AUTO_LOOK)
+        if clear < 6.0:
+            continue
+        if k == 4 and best > -1e9:
+            continue                        # back the way you came: the last resort
+        score = clear - 7.0 * abs(k) + (_mix(slot, k + 9, 4201) % 23)
+        reach = min(clear, 30.0)
+        px, pz = x + math.sin(h) * reach, z + math.cos(h) * reach
+        if any((px - tx) ** 2 + (pz - tz) ** 2 < 14.0 ** 2 for tx, tz in trail):
+            score -= 30.0                   # been there, just now
+        if score > best:
+            best, pick = score, h
+    if best == -1e9:
+        pick = goal + math.pi               # boxed in: about turn
+    return _wrap(pick)
+
+
+def turn_rate(direction, t0, until, now):
+    """How fast a turn key turns you, radians a second: gently for a tap,
+    picking up speed the longer it is held, nothing once it is let go."""
+    if not direction or now > until:
+        return 0.0
+    held = min(1.0, (now - t0) / TURN_RAMP)
+    return direction * TURN * (TURN_TAP + (TURN_HELD - TURN_TAP) * held)
+
+
+def auto_step(auto, x, z, yaw, now, blocked):
+    """One frame of the autopilot: which way to turn and how fast to walk, as
+    fractions of the full turn and a walk. `auto` is its state - the heading
+    it holds and when it chose it - and is updated in place."""
+    if auto.get("goal") is None:
+        # Start on the nearest eighth of a turn to where you face, so it walks
+        # off the way you were looking.
+        auto["goal"] = auto_heading(x, z, round(yaw / (math.pi / 4)) * math.pi / 4,
+                                    now, False)
+        auto["t"] = auto["check"] = now
+        auto["trail"] = []
+    if now >= auto.get("mark", 0.0):
+        auto["mark"] = now + 2.0            # a crumb every two seconds,
+        auto["trail"] = (auto["trail"] + [(x, z)])[-40:]   # the last eighty
+    if now >= auto["check"] or blocked:
+        auto["check"] = now + 0.4
+        ahead = probe(x, z, auto["goal"], AUTO_LOOK)
+        err_ = abs(_wrap(auto["goal"] - yaw))
+        if blocked or ahead < 9.0:
+            auto["goal"] = auto_heading(x, z, auto["goal"], now, True,
+                                        auto["trail"][:-3])
+            auto["t"] = now
+        elif now - auto["t"] > AUTO_TURN_GAP and err_ < 0.2:
+            # Now and then, at a junction with a long way open to one side,
+            # take it - that is what makes it a walk round town and not a
+            # walk down one street for ever. Never the same way twice running:
+            # right, right, right, right is once round the block.
+            for k in (-2, 2):
+                h = auto["goal"] + k * math.pi / 4.0
+                if (k != auto.get("last") and probe(x, z, h, AUTO_LOOK) > 35.0
+                        and _mix(int(now / 2.0), k, 4203) % AUTO_TURN_ODDS == 0):
+                    auto["goal"], auto["t"], auto["last"] = _wrap(h), now, k
+                    break
+    err = _wrap(auto["goal"] - yaw)
+    turn = max(-1.0, min(1.0, err * 1.6))
+    walk = 0.66 - 0.40 * min(1.0, abs(err) / 1.2)     # slow through a corner
+    return turn, walk
 
 
 # ===========================================================================
@@ -18310,7 +18393,8 @@ def main(stdscr):
     yaw = 0.0
     fwd = side = spin = 0.0
     last = {"sky": 0.0, "f": 0.0, "s": 0.0, "t": 0.0}
-    steer = 0.0                 # the autopilot's heading, eased not snapped
+    auto = {}                   # the autopilot's state: the heading it holds
+    turn_dir, turn_t0, turn_until = 0, 0.0, 0.0     # a turn key, held or tapped
     blocked = False             # did the last step run into something
     wheel = None                # the roulette, while you stand in a casino
     wallet = Wallet()           # your money: one balance for the whole city
@@ -18433,8 +18517,9 @@ def main(stdscr):
                             note = "no " + name + " near"
                         else:
                             cam_x, cam_z, yaw = spot
-                            fwd = side = spin = steer = 0.0
+                            fwd = side = spin = 0.0
                             autopilot = False
+                            auto = {}
                             wheel = None
                             sewer = None
                             booth = None
@@ -18537,6 +18622,7 @@ def main(stdscr):
                 sky_v = fwd = side = spin = 0.0
             elif key == ord(" ") and not at_arcade:
                 autopilot = not autopilot
+                auto = {}
             elif (venue is not None and venue[0] == "lemonade"
                   and key in (ord("p"), ord("P"))):
                 if lemon["glasses"] >= len(KID_THANKS):
@@ -18714,10 +18800,16 @@ def main(stdscr):
                                     k_ + (1 if key in (ord("+"), ord("=")) else -1)))
                     pace = PACES[k_][1]
                     note, note_at = "pace: " + PACES[k_][0], now
-                elif key in (curses.KEY_LEFT, ord("a")):
-                    spin, last["t"], autopilot = -TURN, now, False
-                elif key in (curses.KEY_RIGHT, ord("d")):
-                    spin, last["t"], autopilot = TURN, now, False
+                elif key in (curses.KEY_LEFT, ord("a"), curses.KEY_RIGHT, ord("d")):
+                    d_ = -1 if key in (curses.KEY_LEFT, ord("a")) else 1
+                    if d_ != turn_dir or now > turn_until:
+                        # A fresh press. It holds long enough to bridge the
+                        # wait before the keyboard starts repeating, or a held
+                        # key turned, stopped, then turned again.
+                        turn_dir, turn_t0, turn_until = d_, now, now + TURN_FIRST
+                    else:
+                        turn_until = max(turn_until, now + KEY_GRACE)
+                    last["t"], autopilot = now, False
                 elif key == ord(","):
                     side, last["s"], autopilot = -SIDESTEP * pace, now, False
                 elif key == ord("."):
@@ -18736,14 +18828,11 @@ def main(stdscr):
         # A held-down key repeats, but with gaps. Rather than moving once per
         # keypress (jerky), we keep moving for a moment after each one.
         if autopilot:
-            # Ease towards the heading rather than jumping onto it, and slow
-            # down through a turn the way you would walking round a corner -
-            # but turn away smartly when the last step got you nowhere.
-            steer += ((wander(cam_x, cam_z, yaw, now) - steer)
-                      * min(1.0, frame_time * (7.0 if blocked else 3.0)))
-            spin = max(-TURN, min(TURN, steer * 2.0))
-            want = WALK * pace * (0.66 - 0.30 * min(1.0, abs(steer)))
-            fwd += (want - fwd) * min(1.0, frame_time * 2.5)
+            # Hold a heading down the street and ease round onto the next one,
+            # slowing through the corner the way you would.
+            t_, w_ = auto_step(auto, cam_x, cam_z, yaw, now, blocked)
+            spin += (t_ * TURN * 0.85 - spin) * min(1.0, frame_time * 5.0)
+            fwd += (WALK * pace * w_ - fwd) * min(1.0, frame_time * 2.5)
             side = 0.0
             sky_v += (WALK_SPEED * 0.6 - sky_v) * min(1.0, frame_time * 2.5)
         else:
@@ -18753,8 +18842,12 @@ def main(stdscr):
                 fwd = 0.0
             if now - last["s"] > KEY_GRACE:
                 side = 0.0
-            if now - last["t"] > KEY_GRACE:
-                spin = 0.0
+            # A tap turns a little, gently; held, it picks up speed. Either
+            # way it eases in and out rather than starting and stopping dead.
+            want_ = turn_rate(turn_dir, turn_t0, turn_until, now)
+            if not want_:
+                turn_dir = 0
+            spin += (want_ - spin) * min(1.0, frame_time * TURN_EASE)
 
         party = (on_roof if on_roof is not None and on_roof.get("kind") == "party"
                  else None)

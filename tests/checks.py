@@ -5066,6 +5066,47 @@ check("and there it is: jets over the water", show_.count("|") > quiet_.count("|
                                                                     quiet_.count("|")))
 ac._fountain_shift[0] = 0.0
 
+# --- the autopilot and the turn keys -------------------------------------------------
+def walk_auto(x, z, secs):
+    """The autopilot as the main loop runs it, minus the drawing."""
+    ft = 1.0 / ac.FPS
+    yaw = fwd = spin = 0.0
+    state, blocked, turned, path, seen = {}, False, 0.0, 0.0, set()
+    x_0, z_0 = x, z
+    for n_ in range(int(secs / ft)):
+        t_, w_ = ac.auto_step(state, x, z, yaw, n_ * ft, blocked)
+        spin += (t_ * ac.TURN * 0.85 - spin) * min(1.0, ft * 5.0)
+        fwd += (ac.WALK * w_ - fwd) * min(1.0, ft * 2.5)
+        yaw += spin * ft
+        turned += abs(spin * ft)
+        dx_, dz_ = math.sin(yaw) * fwd * ft, math.cos(yaw) * fwd * ft
+        moved = False
+        if ac.can_stand(x + dx_, z):
+            x, moved = x + dx_, True
+        if ac.can_stand(x, z + dz_):
+            z, moved = z + dz_, True
+        blocked = not moved and fwd
+        path += math.hypot(dx_, dz_) if moved else 0.0
+        seen.add((int(x // 10), int(z // 10)))
+    return turned / max(1.0, path) * 100.0, len(seen), math.hypot(x - x_0, z - z_0)
+
+
+aw = [walk_auto(*p_, 120.0) for p_ in
+      [ac.start_position()] + [ac.find_place(0, 0, k_)[:2]
+                                for k_ in ("woods", "university", "@0")]]
+check("the autopilot walks the town, not in circles: it holds a street, turns now "
+      "and then, and gets somewhere - out of the quad too",
+      # Out of the quad takes a few turns before the streets; the old walker
+      # turned 4 to 5 radians every hundred units, wherever it was.
+      all(r_ < 3.5 and sq_ > 60 and far_ > 60.0 for r_, sq_, far_ in aw)
+      and sum(r_ for r_, _, _ in aw) / len(aw) < 2.5, str(aw))
+check("a tap of a turn key turns a little, gently; held, it turns faster; let go, "
+      "it stops",
+      0 < ac.turn_rate(1, 0.0, 0.32, 0.1) < ac.TURN * 0.6
+      and ac.turn_rate(-1, 0.0, 2.0, 1.5) < -ac.TURN * 1.1
+      and ac.turn_rate(1, 0.0, 0.32, 0.4) == 0.0
+      and ac.TURN_FIRST * ac.TURN * ac.TURN_TAP < 0.45)
+
 # --- the university -----------------------------------------------------------------
 uh = [ac.zone_home("university", ti * ac.WOODS_TILE, tj * ac.WOODS_TILE)
       for ti in range(-2, 3) for tj in range(-2, 3)]
