@@ -530,7 +530,7 @@ DISTRICT_PICK = [n for n, d in enumerate(DISTRICTS) for _ in range(d["weight"])]
 
 # The woods are not in the table: they are not picked, they are placed. A
 # park's row with the trees taller and nobody smoking under them.
-WOODS = dict(key="", name="the woods", weight=0, scale=1.0, lo=9.0, hi=15.0,
+WOODS = dict(key="", name="the woods", weight=0, scale=1.4, lo=18.0, hi=30.0,
              dens=(0.0, 0.0), flat=0.0, hung=0.0, smoke=0.0, bulb=0.0,
              neon=None, lantern=0.0, park=True,
              glyphs="&%", band=None, mullion=False, ground="&", gap=3,
@@ -5571,7 +5571,11 @@ def draw_tree_column(ch, co, v, sx, dist, b, u, r_lo, r_hi):
     wob = (_mix(b["seed"], int(u * 2.5), 5) % 100) / 100.0
     top_y = b["height"] * (0.70 + 0.30 * wob)
     crown = int(round(v.horizon - (top_y - v.eye) * scale))
-    under = int(round(v.horizon - (top_y * 0.34 - v.eye) * scale))
+    # In the woods the trees are tall and the canopy starts high, so you see
+    # the trunks standing under it - the wood, not just the leaves. A park's
+    # clump is low and bushy all the way down.
+    woods = b["district"] is WOODS
+    under = int(round(v.horizon - (top_y * (0.5 if woods else 0.34) - v.eye) * scale))
     leaf = tone_colour("leaf", b["tone"])
     # A rig in a clearing throws its light up into the leaves around it, and
     # that is what you see first - long before the stack, the fire or anyone
@@ -5592,6 +5596,18 @@ def draw_tree_column(ch, co, v, sx, dist, b, u, r_lo, r_hi):
                                   < v.cover * (70 - 40 * (y - crown)
                                                / max(1, under - crown))):
                 co[y][sx] = SNOW
+    if woods:
+        # Trunks: whole columns of them, a bay apart, rough with knots, and
+        # the undergrowth at their feet.
+        trunk = int(u * 2.2) % 3 == 0
+        foot = int(round(v.horizon + v.eye * scale))
+        for y in range(max(r_lo, under + 1), r_hi + 1):
+            if trunk:
+                ch[y][sx] = "|" if _mix(sx, y, 17) % 7 else ")"
+                co[y][sx] = BARK
+            elif y >= foot - max(1, int(0.8 * scale)) and _mix(sx, y, 23) % 3 == 0:
+                ch[y][sx], co[y][sx] = ('"' if _mix(sx, y, 29) % 2 else ","), GRASS
+        return crown, None, None, None, ()
     for y in range(max(r_lo, under + 1), r_hi + 1):
         if _mix(sx, y, 17) % 5 == 0:
             ch[y][sx] = "|"
