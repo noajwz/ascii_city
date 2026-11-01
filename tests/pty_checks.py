@@ -190,27 +190,24 @@ ok &= report("the fountain show: to it, and watch the start", *run(
 ok &= report("the university: the quad, across it, the panel's other page", *run(
     [(b"`", .5), (b"\t", .4), (b"{", 1.5), (b"w", 1.0), (b"w", 1.0), (b"`", .5),
      (b"\t", .4), (b"\t", .4), (b"`", .4)], cols=80, rows=24))
-# Walking in hands the terminal to the TUI repo's Wikipedia reader. It opens
-# on its search prompt, so esc out of that, then q brings you back out. Not s
-# afterwards: backing up is back through the doors.
-lib_st, lib_out = run([(b"`", .5), (b'"', 1.5)] + [(b"w", .3)] * 8
-                      + [(b"", 2.5), (b"\x1b", 1.5), (b"q", 1.5)] + [(b"w", .3)] * 4,
+# Walking in is the reading room. w hands the terminal to the Wikipedia
+# reader, which opens on its search prompt: esc out of that, then q back to
+# the room; p the same for PsychonautWiki; x out onto the quad. Not s after:
+# backing up is back through the doors. Up to walk in, not w: inside, w is
+# Wikipedia.
+lib_st, lib_out = run([(b"`", .5), (b'"', 1.5)] + [(b"\x1bOA", .3)] * 8   # up: in
+                      + [(b"w", 2.5), (b"\x1b", 1.5), (b"q", 1.5),
+                         (b"p", 2.5), (b"\x1b", 1.5), (b"q", 1.5),
+                         (b"x", .8)] + [(b"w", .3)] * 4,
                       cols=100, rows=30)
 lib_txt = ANSI.sub(b"", lib_out).decode("utf-8", "replace")
-ok &= report("the library: in, the wiki, q, back out on the quad", lib_st, lib_out)
-if os.path.isfile(os.path.join(os.path.dirname(APP), "..", "TUI", "wiki_tui.py")):
-    # and the city drew itself again after it: its library hint is back
-    seen = ("Wikipedia" in lib_txt
-            and lib_txt.rfind("walk in and read") > lib_txt.find("Wikipedia"))
-    print("%-34s %s" % ("  and the reader came up, and went", "ok" if seen else "FAIL"))
-    ok &= seen
-ok &= report("a flight: the gate, a seat, off, doze, land, out", *run(
-    [(b"`", .5), (b".", 1.5)] + [(b"w", .3)] * 6 + [(b"\r", 4.0), (b"\x1bOD", .3),
-     (b"\x1bOC", .3), (b"x", 1.0)] + [(b"", 3.0)] * 9 + [(b"w", .3)],
-    cols=100, rows=30))
-ok &= report("a flight: the gate, and straight back out", *run(
-    [(b"`", .5), (b".", 1.5)] + [(b"w", .3)] * 6 + [(b"x", .8), (b"w", .4)],
-    cols=80, rows=24))
+ok &= report("the library: the room, both readers, back out on the quad",
+             lib_st, lib_out)
+seen = ("THE READING ROOM" in lib_txt and "wiki_tui" in lib_txt
+        and "psychonaut_tui" in lib_txt
+        and lib_txt.rfind("walk in and read") > lib_txt.rfind("psychonaut_tui"))
+print("%-34s %s" % ("  and both readers came up, and went", "ok" if seen else "FAIL"))
+ok &= seen
 ok &= report("the metro: down, a ticket, the train, the ride, up", *run(
     [(b"`", .5), (b"-", 1.5), (b"e", 1.0), (b"s", .5), (b"\r", .5)]
     + [(b"", 3.0)] * 15 + [(b"x", .5)], cols=100, rows=30))

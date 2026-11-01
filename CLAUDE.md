@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 
 An endless procedurally generated ASCII city, walked through in the terminal. Written for fun.
 **No package, no dependencies, no config files** — it is one stdlib-only Python script
-(`curses`, `math`, `random`, `unicodedata`) and nothing else. Adding a third-party import would be
-a departure from the premise; prefer stdlib.
+(`curses`, `math`, `random`, `unicodedata`) and nothing else — plus the library's two readers,
+copied in under `library/` and run as programs of their own, stdlib-only too (see The
+university). Adding a third-party import would be a departure from the premise; prefer stdlib.
 
 ```bash
 python3 ascii_city.py
@@ -1069,15 +1070,25 @@ the quad eleven cells deep. On the hour the HUD has it striking (`clock_hint()`)
 stands you at the south end of the quad looking at it.
 
 **The library's doors** are open, lit, in the middle of its quad side (`library_door()`, the
-cell with `libdoor`), and walking in — a venue in `venue_at()`, so the hurry rule applies — runs
-**`../TUI/wiki_tui.py`**, the Wikipedia reader from the TUI repo beside this one (`LIBRARY_APP`).
-`read_in_library()` hands it the terminal (`def_prog_mode` / `endwin`, a plain `subprocess.run`
-with the same Python), then takes it back (`reset_prog_mode`, `flushinp` so keys typed there do not
-walk you, nodelay and keypad again) and puts you three steps out on the quad facing away, or the
-doorway would take you straight back in. Without the TUI checkout next to this one the library
-is just shut, with a note. The reader opens on its search prompt, so to quit it from a test it is
-Esc, then q; and it is the city's `q` the pty harness sends last and then `waitpid`s on, so a
-test that leaves you inside the reader hangs. `"` in the menu stands you in front of the doors.
+cell with `libdoor`), and walking in — a venue in `venue_at()`, so the hurry rule applies — is
+**the reading room** (`render_reading_room()`, the `reading` flag in `main()`): the stacks, green
+lamps on the long tables, and `LIBRARY_BOOKS` to choose from — `w` Wikipedia, `p`
+PsychonautWiki (the restricted section), `x` back out onto the quad, three steps out and facing
+away, or the doorway would take you straight back in.
+
+**The two readers are copies**, in `library/`: `wiki_tui.py` and `psychonaut_tui.py` from the TUI
+repo (noajwz/TUI, as of its `b65ec95`), byte for byte, so the city carries its own and does not
+need that checkout beside it. They are **run, not imported** — `read_in_library()` hands one the
+terminal (`def_prog_mode` / `endwin`, a plain `subprocess.run` with the same Python), then takes it
+back (`reset_prog_mode`, `flushinp` so keys typed there do not walk you, nodelay and keypad
+again) and you are in the reading room again. They are stdlib-only and self-contained, like the
+city. A fix to one in the TUI repo does not reach here by itself: copy the file over again (and
+the reverse). A missing file is "that shelf is empty", not a crash.
+
+Both readers open on their search prompt, so from a test it is Esc, then q. And walk in with the
+arrow, not `w`: in the room `w` is Wikipedia. The pty harness sends the city's `q` last and then
+`waitpid`s on it, so a test that leaves you inside a reader hangs. `"` in the menu stands you in
+front of the doors.
 
 **The menu has a fifth column** now, CAMPUS & METRO (`CHEAT_MORE`): drawn when the window is wide
 enough for five, and on an 80-column one Tab inside the panel flips the fourth column to it and

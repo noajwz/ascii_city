@@ -2043,10 +2043,13 @@ def campus_solid(i, j):
             or (i == ci - QUAD_HI - 1 and abs(j - cj) <= QUAD_HJ))
 
 
-# What is in the library: the Wikipedia reader from the TUI repo next door,
-# run in the whole terminal, the city waiting for you to come out.
-LIBRARY_APP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "TUI",
-                           "wiki_tui.py")
+# What is in the library: two readers, copies of the ones in the TUI repo
+# (noajwz/TUI), kept in library/ so the city carries its own. They are run
+# as they are, in the whole terminal, the city waiting for you to come out;
+# nothing of theirs is imported.
+LIBRARY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "library")
+LIBRARY_BOOKS = [("w", "Wikipedia", "the encyclopaedia", "wiki_tui.py"),
+                 ("p", "PsychonautWiki", "the restricted section", "psychonaut_tui.py")]
 
 
 def library_door(i, j):
@@ -2056,15 +2059,16 @@ def library_door(i, j):
     return x, z
 
 
-def read_in_library(stdscr):
-    """Hand the terminal to the Wikipedia reader and take it back after.
+def read_in_library(stdscr, app):
+    """Hand the terminal to one of the readers and take it back after.
     Returns what to say on the way out."""
-    if not os.path.isfile(LIBRARY_APP):
-        return "the library is shut (no %s)" % os.path.normpath(LIBRARY_APP)
+    path = os.path.join(LIBRARY_DIR, app)
+    if not os.path.isfile(path):
+        return "that shelf is empty (no %s)" % os.path.normpath(path)
     curses.def_prog_mode()
     curses.endwin()
     try:
-        subprocess.run([sys.executable, LIBRARY_APP])
+        subprocess.run([sys.executable, path])
     except (OSError, KeyboardInterrupt):
         pass
     curses.reset_prog_mode()
@@ -2073,7 +2077,43 @@ def read_in_library(stdscr):
     stdscr.nodelay(True)
     stdscr.keypad(True)
     stdscr.clear()
-    return "back on the quad"
+    return "back in the reading room"
+
+
+def render_reading_room(width, height, now, note):
+    """Inside the library: the stacks, the green lamps on the long tables,
+    and the two readers to choose between."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    # The stacks, floor to ceiling, the spines of the books.
+    for y in range(1, max(2, height // 2 - 1)):
+        for x in range(2, width - 2):
+            if y % 4 == 0:
+                ch[y][x], co[y][x] = "=", BARK                      # a shelf
+            else:
+                k = _mix(x, y // 4, 4301)
+                ch[y][x] = "|" if k % 7 else ("I" if k % 3 else "]")
+                co[y][x] = (BARK, CURB, GOLD_DIM, ROU_RED, ROU_GREEN)[k % 5]
+    # The long tables, a green lamp on each.
+    ty = height // 2
+    for x in range(4, width - 4):
+        if ty < height:
+            ch[ty][x], co[ty][x] = "_", BARK
+    for x in range(10, width - 10, 18):
+        _text(ch, co, ty - 1, x, "_n_", ROU_GREEN)
+        _text(ch, co, ty, x + 1, "|", CURB)
+    y = ty + 2
+    _text(ch, co, y, max(1, width // 2 - 10), "THE READING ROOM", GOLD)
+    for r, (k, name, shelf, _) in enumerate(LIBRARY_BOOKS):
+        _text(ch, co, y + 2 + r, max(1, width // 2 - 18), k, GOLD)
+        _text(ch, co, y + 2 + r, max(1, width // 2 - 16), "%-15s %s" % (name, shelf),
+              HUD)
+    _text(ch, co, y + 3 + len(LIBRARY_BOOKS), max(1, width // 2 - 18), "x", GOLD)
+    _text(ch, co, y + 3 + len(LIBRARY_BOOKS), max(1, width // 2 - 16),
+          "back out onto the quad", HUD)
+    if note:
+        _text(ch, co, height - 2, max(1, width // 2 - len(note) // 2), note, GOLD_DIM)
+    return ch, co
 
 
 def clock_tower(i, j):
@@ -18785,6 +18825,7 @@ def main(stdscr):
     taxi = None                 # hailed, choosing, or riding: {"phase", ...}
     metro = None                # on a platform or riding: {"phase", ...}
     flight = None               # at the gate or in the air: {"phase", ...}
+    reading = False             # in the library's reading room
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -18897,6 +18938,7 @@ def main(stdscr):
                             taxi = None
                             metro = None
                             flight = None
+                            reading = False
                             ledger["jumps"] += 1
                             street = True
                             note = "-> " + name
@@ -18915,6 +18957,19 @@ def main(stdscr):
                                 note = "-> the woods rave (starting)"
                                 note_at = now
                         break
+            elif reading and key not in (ord("q"), CHEAT_KEY):
+                book_ = [b_ for b_ in LIBRARY_BOOKS if key in (ord(b_[0]),
+                                                              ord(b_[0].upper()))]
+                if key in (27, ord("x"), ord("X")):
+                    # Out of the doors and a few steps onto the quad, facing
+                    # it, so the doorway does not take you straight back in.
+                    lx_, lz_ = library_door(int(cam_x // CELL), int(cam_z // CELL))
+                    cam_x, cam_z, yaw = lx_ + 3.0, lz_, math.pi / 2
+                    reading = False
+                    note, note_at = "back on the quad", now
+                elif book_:
+                    note = read_in_library(stdscr, book_[0][3])
+                    now = note_at = _clock[0] = time.monotonic()
             elif flight is not None and key not in (ord("q"), CHEAT_KEY):
                 if flight["phase"] == "gate":
                     if key in (27, ord("x"), ord("X")):
@@ -19263,11 +19318,11 @@ def main(stdscr):
                 lift = {"up": False, "t0": now, "t": party}
         if (lift is not None or on_roof is not None or sewer is not None
                 or booth is not None or taxi is not None or metro is not None
-                or flight is not None):
+                or flight is not None or reading):
             fwd = side = 0.0            # on the roof you can only look round
             autopilot = False
             if (lift is not None or sewer is not None or booth is not None or taxi
-                    or metro is not None or flight is not None):
+                    or metro is not None or flight is not None or reading):
                 spin = 0.0
         if flight is not None and flight["phase"] == "air":
             # Looking round eases, the way your head would.
@@ -19328,7 +19383,7 @@ def main(stdscr):
         was_ = venue
         venue = (venue_at(cam_x, cam_z)
                  if street and sewer is None and taxi is None and metro is None
-                 and flight is None else None)
+                 and flight is None and not reading else None)
         # Going past faster than a walk, a doorway does not take you in: you
         # were going somewhere else. Slow to a walk or stop at it and it does,
         # and once you are in, you stay in.
@@ -19341,14 +19396,10 @@ def main(stdscr):
             autopilot = False
             venue = None
         if venue is not None and venue[0] == "library":
-            note, note_at = read_in_library(stdscr), time.monotonic()
-            # Out of the doors and a few steps onto the quad, facing it, so
-            # the doorway does not take you straight back in.
-            lx_, lz_ = library_door(int(cam_x // CELL), int(cam_z // CELL))
-            cam_x, cam_z, yaw = lx_ + 3.0, lz_, math.pi / 2
+            reading = True
             fwd = side = spin = 0.0
+            autopilot = False
             venue = None
-            now = _clock[0] = time.monotonic()
         # The sky deck: walking into the lobby is stepping into the lift.
         if lift is not None:
             venue = None
@@ -19562,6 +19613,10 @@ def main(stdscr):
                 seated = (venue[1]["seed"], now)    # sat down just now
             ch, co = render_ramen(venue[1], width, height, now, seated[1])
             hud = RAMEN_HUD % (cam_x, cam_z)
+        elif street and reading:
+            ch, co = render_reading_room(width, height, now,
+                                         note if now - note_at < 4.0 else "")
+            hud = " the library  -  pick a reader, x goes back out "
         elif street and flight is not None:
             if flight["phase"] == "gate":
                 ch, co = render_gate(width, height, now, flight)
