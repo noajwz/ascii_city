@@ -1952,7 +1952,7 @@ ZONES = {
     # On the strip's own hash, so it is always the same distance off its side.
     "airport": dict(salt=3901, off_i=70, off_j=240, half_i=29, half_j=59),
 }
-PLANE_SCALE = 1.7      # an airliner against the city's five-unit cells
+PLANE_SCALE = 2.3      # an airliner, big enough to make out from the end of the runway
 RUNWAY_DI = 8          # the runway's middle, in cells east of the airport's
 RUNWAY_W = 14.0        # half its width, in units
 RUNWAY_HALF = 52       # half its length, in cells
@@ -2379,7 +2379,37 @@ def lake_at(i, j):
 
 def water_at(i, j):
     """Anything you can see across but not stand on."""
-    return river_at(i, j) or moat_at(i, j) or lake_at(i, j)
+    return river_at(i, j) or moat_at(i, j) or lake_at(i, j) or strip_lake(i, j)
+
+
+FOUNTAIN_PERIOD = 150.0  # a show every this many seconds
+FOUNTAIN_LEN = 50.0      # and this long
+_fountain_shift = [0.0]  # the menu's way of starting one now
+
+
+def fountain_rows(i, j):
+    """(first row, last row, x0, x1) of the fountain lake on the Strip this
+    cell is in: in front of one hotel, the one at the middle of the east
+    side, where its first two cells would be."""
+    ci, cj = strip_home(i, j)
+    seg = cj // ZP
+    return seg * ZP, seg * ZP + ZP - 1, ci + 2, ci + 3
+
+
+def strip_lake(i, j):
+    """Is this cell the fountain lake: water, the Strip's, in front of a
+    hotel - and not the cross street, which goes past it."""
+    ci, cj = strip_home(i, j)
+    if not (ci + 2 <= i <= ci + 3) or abs(j - cj) > ZP:
+        return False
+    j0, j1, _, _ = fountain_rows(i, j)
+    return j0 <= j <= j1 and not _is_road(j, ZP, 137)
+
+
+def fountain_time(now):
+    """Seconds into the fountain show, or None between shows."""
+    t = (now + _fountain_shift[0]) % FOUNTAIN_PERIOD
+    return t if t < FOUNTAIN_LEN else None
 
 
 def nearest_hollow(x, z):
@@ -4948,6 +4978,92 @@ def draw_strip_sign(ch, co, v, walls, x, z, st, now):
                      FLASH if flash else lit)
 
 
+def fountain_heights(t, k, row, n):
+    """How high jet k of n in a row stands, and how far it leans, t seconds
+    into the show: the lights coming up, the jets rising together, a wave
+    running down the lake, the rows sweeping side to side against each other,
+    a chase, the shooters going up with a boom, and the finale."""
+    if t < 3.0:
+        return 0.6, 0.0
+    if t < 10.0:
+        q = min(1.0, (t - 3.0) / 4.0)
+        return 2.0 + 12.0 * q * q * (3.0 - 2.0 * q), 0.0
+    if t < 18.0:
+        return 4.0 + 10.0 * (0.5 + 0.5 * math.sin(k * 0.6 - t * 3.0)), 0.0
+    if t < 26.0:
+        return 12.0, 0.7 * math.sin(t * 1.6) * (1 if row else -1)
+    if t < 34.0:
+        return (17.0 if (k - int((t - 26.0) * 14.0)) % 8 == 0 else 2.5), 0.0
+    if t < 44.0:
+        beat = (t - 34.0) % 1.25
+        if k % 4 == (int((t - 34.0) / 1.25) % 4):
+            return 6.0 + 38.0 * max(0.0, 1.0 - beat / 1.1), 0.0
+        return 3.0 + 3.0 * (0.5 + 0.5 * math.sin(k + t * 5.0)), 0.0
+    if t < 48.5:
+        return (44.0 if k % 3 == 0 else 18.0), 0.25 * math.sin(t * 3.0 + k)
+    q = min(1.0, (t - 48.5) / 1.5)
+    return 18.0 * (1.0 - q) + 0.6, 0.0                 # and down
+
+
+def draw_fountains(ch, co, v, walls, now):
+    """The fountain show on the Strip's lake: two rows of jets, lit from
+    below, white at the top with the spray coming off it, mist hanging over
+    the water after the shooters - and between shows, a still lake."""
+    t = fountain_time(now)
+    if t is None:
+        return
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    j0, j1, i0, i1 = fountain_rows(ci, cj)
+    x0, x1 = i0 * CELL, (i1 + 1) * CELL
+    z0, z1 = j0 * CELL + 1.0, (j1 + 1) * CELL - 1.0
+    mx, mz = (x0 + x1) * 0.5, (z0 + z1) * 0.5
+    if (mx - v.x) ** 2 + (mz - v.z) ** 2 > 220.0 ** 2:
+        return
+    dist = math.hypot(mx - v.x, mz - v.z)
+    step = max(0.7, dist / v.fy * 1.4)
+    n = int((z1 - z0) / 2.0) + 1
+    for row, jx in enumerate((x0 + 3.0, x1 - 3.0)):
+        for k in range(n):
+            jz = z0 + k * 2.0
+            if _is_road(int(jz / CELL + BIG) - BIG, ZP, 137):
+                continue
+            h, lean = fountain_heights(t, k, row, n)
+            y = 0.3
+            while y < h:
+                f = y / h
+                x = jx + lean * f * f * h * 0.5
+                attr = (NEON[2][0] if f < 0.3 else STAR if f < 0.85 else FLASH)
+                put_point(ch, co, v, walls, x, y, jz,
+                          "|" if abs(lean) < 0.2 else ("/" if lean > 0 else "\\"), attr)
+                y += step
+            tx = jx + lean * h * 0.5
+            put_point(ch, co, v, walls, tx, h, jz, "*", FLASH)
+            if h > 8.0:
+                for d in (-1, 1):
+                    put_point(ch, co, v, walls, tx + d * 0.8, h - 1.5, jz, ".", STAR)
+    if t > 34.0:
+        # The mist the shooters leave, hanging over the water and drifting.
+        for k in range(60):
+            m = _mix(k, int(t * 2), 3921)
+            px = x0 + (m % 100) / 100.0 * (x1 - x0)
+            pz = z0 + ((m >> 7) % 100) / 100.0 * (z1 - z0)
+            put_point(ch, co, v, walls, px, 2.0 + ((m >> 14) % 100) / 10.0, pz, ".",
+                      HAZE)
+
+
+def fountain_hint(x, z, now):
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    hi, hj = strip_home(ci, cj)
+    if abs(hi * CELL - x) > 120.0 or abs(hj * CELL - z) > 200.0:
+        return ""
+    t = fountain_time(now)
+    if t is not None:
+        return "  ~ the fountains are dancing ~"
+    if (now + _fountain_shift[0]) % FOUNTAIN_PERIOD > FOUNTAIN_PERIOD - 15.0:
+        return "  ~ the fountain show starts soon ~"
+    return ""
+
+
 def draw_strip_median(ch, co, v, walls, now, wet):
     """Down the middle of the boulevard: palms, lit from below, and between
     them pools whose fountains dance - rows of jets going up and down in
@@ -5102,6 +5218,14 @@ def plane_states(ci, cj, now):
         z = z0 + (gz - z0) * k
         n = math.hypot(gx - rx, gz - z0) or 1.0
         out.append((x, 1.2, z, (gx - rx) / n, (gz - z0) / n, False))
+    # The next one, already out there: a long way off down the approach,
+    # lights only to look at, while this one is on the ground.
+    if t >= 14.0:
+        u = (t - 14.0) / (APT_CYCLE - 14.0)
+        # High, the way they come in to join the approach: low down out there
+        # the far city's towers stand in front of it.
+        out.append((rx, 71.2 + 260.0 * (1.0 - u), zn + 520.0 + 1100.0 * (1.0 - u),
+                    0.0, -1.0, True))
     # The take-off, half a cycle on.
     t2 = (now + APT_CYCLE * 0.5) % APT_CYCLE
     if t2 < 4.0:
@@ -5129,10 +5253,10 @@ def draw_plane(ch, co, v, walls, x, y, z, hx, hz, lights, now, wet):
                 z + (hz * t + pz * side) * sc)
     for k in range(-30, 31):
         t = k * 0.3
-        put_point(ch, co, v, walls, *at(t, 0.0, -0.3), "_", STAR)
-        put_point(ch, co, v, walls, *at(t, 0.0, 0.9), "-", STAR)
+        put_point(ch, co, v, walls, *at(t, 0.0, -0.3), "_", FLASH)
+        put_point(ch, co, v, walls, *at(t, 0.0, 0.9), "-", FLASH)
         if k % 2 == 0 and abs(t) < 7.5:
-            put_point(ch, co, v, walls, *at(t, 0.0, 0.3), "o", GOLD)
+            put_point(ch, co, v, walls, *at(t, 0.0, 0.3), "o", BULB)
     for k in range(-16, 17):
         side = k * 0.55
         put_point(ch, co, v, walls, *at(-0.6 - abs(side) * 0.2, side, -0.1), "-", CURB)
@@ -5142,12 +5266,21 @@ def draw_plane(ch, co, v, walls, x, y, z, hx, hz, lights, now, wet):
         put_point(ch, co, v, walls, *at(-8.6, 0.0, h * 0.7), "|", STAR)
     for k in range(-5, 6):
         put_point(ch, co, v, walls, *at(-8.8, k * 0.55, 0.3), "-", CURB)
-    put_lit(ch, co, v, walls, *at(-1.0, -9.0, -0.1), "o", ROU_RED, max(wet, 0.3), now)
-    put_lit(ch, co, v, walls, *at(-1.0, 9.0, -0.1), "o", ROU_GREEN, max(wet, 0.3), now)
+    put_lit(ch, co, v, walls, *at(-1.0, -9.0, -0.1), "O", ROU_RED, max(wet, 0.3), now)
+    put_lit(ch, co, v, walls, *at(-1.0, 9.0, -0.1), "O", ROU_GREEN, max(wet, 0.3), now)
     if int(now * 1.5) % 2:
         put_lit(ch, co, v, walls, *at(-9.4, 0.0, 3.6), "*", FLASH, max(wet, 0.3), now)
         put_point(ch, co, v, walls, *at(0.0, 0.0, 1.0), "o", ROU_RED)
     if lights:
+        # The beam they throw, ahead and down, lit in the night - first, so
+        # that from in front the lights themselves are on top of it.
+        for k in range(1, 14):
+            d = 9.6 + k * 2.2
+            for side in (-0.3 * k / 4.0, 0.3 * k / 4.0):
+                bx, by, bz = at(d, side, -0.3 - k * 0.18)
+                if by > 0.1:
+                    put_point(ch, co, v, walls, bx, by, bz, ":" if k < 6 else ".",
+                              BULB if k < 8 else BULB_DIM)
         for side in (-0.6, 0.6):
             put_lit(ch, co, v, walls, *at(9.6, side, -0.3), "@", FLASH, max(wet, 0.4),
                     now)
@@ -5210,8 +5343,13 @@ def draw_airport(ch, co, v, walls, home, now, wet):
             put_point(ch, co, v, walls, fx + 1.0 + k * 0.9, 3.4, gz + 2.0, "=", CURB)
         draw_plane(ch, co, v, walls, fx + 16.0, 1.2, gz, -1.0, 0.0, False, now + g, wet)
     for x, y, z_, hx, hz, lights in plane_states(ci, cj, now):
-        if (x - v.x) ** 2 + (z_ - v.z) ** 2 < 700.0 ** 2:
+        d2 = (x - v.x) ** 2 + (z_ - v.z) ** 2
+        if d2 < 700.0 ** 2:
             draw_plane(ch, co, v, walls, x, y, z_, hx, hz, lights, now, wet)
+        elif d2 < 2400.0 ** 2:
+            # A long way out all you see of one is its lights.
+            put_lit(ch, co, v, walls, x, y, z_, "@",
+                    FLASH if int(now * 1.5) % 4 else ROU_RED, max(wet, 0.3), now)
 
 
 def airport_hint(x, z, now):
@@ -12188,6 +12326,7 @@ def render_street(v, now):
         draw_airport(ch, co, v, walls, apt_, now, wet)
     if v.eye < 10.0:
         draw_strip_median(ch, co, v, walls, now, wet)
+        draw_fountains(ch, co, v, walls, now)
         draw_strip_traffic(ch, co, v, walls, now, wet)
         far_first = sorted(strip_signs(v, 200.0),
                            key=lambda s_: -((s_[0] - v.x) ** 2 + (s_[1] - v.z) ** 2))
@@ -14940,6 +15079,7 @@ CHEAT_PLACES = [
     ("0", "the suburbs", "suburbs"),
     (":", "the strip", "strip"),
     ("'", "the airport", "airport"),
+    ("(", "fountain show", "fountain"),
     (";", "lemonade, 3am", "lemonade"),
     ("?", "the stargazer", "telescope"),
     ("r", "ramen", "ramen"),
@@ -15283,6 +15423,21 @@ def _suburb_spot(x, z):
                 return px, pz, max((k * math.pi / 2 for k in range(4)),
                                    key=lambda a: probe(px, pz, a, 60.0))
     return None
+
+
+def _fountain_spot(x, z):
+    """On the boulevard across from the fountain lake, facing it - and the
+    show starts in a few seconds, the way the rave does when you ask for it."""
+    sp = _strip_spot(x, z)
+    if sp is None:
+        return None
+    ci, cj = int(sp[0] / CELL + BIG) - BIG, int(sp[1] / CELL + BIG) - BIG
+    j0, j1, i0, i1 = fountain_rows(ci, cj)
+    px, pz = (i0 - 3 + 0.5) * CELL, (j0 + j1 + 1) * 0.5 * CELL
+    now = _clock[0]
+    into = (now + _fountain_shift[0]) % FOUNTAIN_PERIOD
+    _fountain_shift[0] += FOUNTAIN_PERIOD - 3.0 - into
+    return px, pz, math.pi / 2
 
 
 def _airport_spot(x, z):
@@ -15869,6 +16024,8 @@ def find_place(x, z, kind):
         return _strip_spot(x, z)
     if kind == "airport":
         return _airport_spot(x, z)
+    if kind == "fountain":
+        return _fountain_spot(x, z)
     if kind in ("lemonade", "telescope"):
         return _egg_spot(x, z, kind)
     if kind == "exchange":
@@ -15943,8 +16100,8 @@ def draw_cheats(ch, co, note):
            ("n", "the next one"), ("u", "a strange night"),
            ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
            ("&", "a blackout"), ("#", "a fog night"),
-           names["lemonade"], names["telescope"],
-           ("", ""), ("`", "close")]
+           names["lemonade"], names["telescope"], names["fountain"],
+           ("`", "close")]
     columns = (left, middle, right, sky)
 
     col = 18
@@ -18212,6 +18369,7 @@ def main(stdscr):
                 or factory_hint(cam_x, cam_z)
                 or suburb_hint(cam_x, cam_z, now)
                 or airport_hint(cam_x, cam_z, now)
+                or fountain_hint(cam_x, cam_z, now)
                 or landmark_hint(cam_x, cam_z)
                 or rave_hint(v, now)
                 or ("  ~ something over the city ~" if night(now)["alien"]

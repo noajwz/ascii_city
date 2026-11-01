@@ -183,6 +183,8 @@ ok &= report("the strip: to it, run up the boulevard, into a hotel's casino", *r
 ok &= report("the airport: the end of the runway, watch one land, turn round", *run(
     [(b"`", .5), (b"'", 6.0), (b"a", .4), (b"a", .4), (b"a", 3.0), (b"w", 1.0)],
     cols=100, rows=30))
+ok &= report("the fountain show: to it, and watch the start", *run(
+    [(b"`", .5), (b"(", 14.0), (b"a", .4), (b"d", .4)], cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
