@@ -7407,6 +7407,72 @@ def ground_cell(i, j):
     return hit
 
 
+def far_lights(ch, co, walls, y, d, far, bearings):
+    """One row of the city past where it is drawn, seen from up high: a
+    carpet of lights - mostly the haze's dots, now and then a warmer one -
+    thicker towards the horizon, where each row holds more of the city.
+    By the bearing of each column and how far the row is, the way the
+    distant skyline over the horizon is done, so it holds still as you fly
+    rather than flickering; at that distance nothing should move much."""
+    k = int(math.log(d) * 16.0)
+    dens = int(120 + 230 * (1.0 - far / d))      # in a thousand
+    row_c, row_o = ch[y], co[y]
+    for sx, bearing in enumerate(bearings):
+        if row_c[sx] != " " or hidden(walls, sx, y, d):
+            continue                             # a building, standing in front
+        m = _mix(bearing, k, 4601)
+        if m % 1000 >= dens:
+            continue
+        row_c[sx] = ":" if (m >> 10) % 6 == 0 else "."
+        row_o[sx] = (BULB_DIM, GOLD_DIM)[(m >> 13) % 2] if (m >> 4) % 7 == 0 else HAZE
+
+
+FAR_LAMP_STEP = 15.0   # units between the lamps seen from up high, along a street
+FAR_LAMP_NEAR = 60.0   # nearer than this the street's own lights are drawn
+
+
+def draw_far_lamps(ch, co, v, walls, now):
+    """From up high, the street lights: a lamp every FAR_LAMP_STEP along
+    every avenue and cross street out to the edge of what is drawn, on
+    both kerbs, sodium orange and now and then a white one. Without
+    them the city past the nearest streets was dark fronts and black road -
+    a black blob, its edge sliding along the roofs as the plane flew. They
+    are points in the world, at fixed places along the streets, so they
+    move with the city and hold still rather than flicker; a building in
+    front hides them; a blacked-out block's are off."""
+    reach = v.reach
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    n = int(reach / CELL) + 1
+    for axis, period, salt in ((0, XP, 91), (1, ZP, 137)):
+        c0 = ci if axis == 0 else cj
+        along0 = v.z if axis == 0 else v.x
+        k0 = int((along0 - reach) // FAR_LAMP_STEP)
+        k1 = int((along0 + reach) // FAR_LAMP_STEP) + 1
+        for c in range(c0 - n, c0 + n + 1):
+            span = road_span(c, period, salt)
+            if span is None or span[0] != c:
+                continue                      # once a street, from its first cell
+            for across in ((span[0] + 0.15) * CELL, (span[0] + span[1] - 0.15) * CELL):
+                for k in range(k0, k1):
+                    along = k * FAR_LAMP_STEP
+                    x, z = (across, along) if axis == 0 else (along, across)
+                    rx, rz = x - v.x, z - v.z
+                    f = rx * v.dx + rz * v.dz         # how far ahead
+                    if not FAR_LAMP_NEAR < f < reach:
+                        continue
+                    lat = rx * v.dz - rz * v.dx       # and across: in the view?
+                    if abs(lat) > f * PLANE:
+                        continue
+                    li, lj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+                    if not road_at(li, lj):
+                        continue              # the woods, a lawn, the Strip...
+                    if v.blackout and power_off(li, lj, now):
+                        continue
+                    put_cell(ch, co, v, walls, int(round(v.cx + lat * v.fx / f)),
+                             int(round(v.horizon - (4.0 - v.eye) * v.fy / f)), f, ".",
+                             BULB if _mix(c, k, 4611) % 9 == 0 else EMBER)
+
+
 def draw_ground(ch, co, v, walls, glow, wet, now):
     """Road, pavement and kerb.
 
@@ -7425,10 +7491,20 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
     # ever needs - at seventy units up the nearest is a hundred away - so the
     # ground goes as far as the view does.
     far = GROUND_FAR if v.eye < 10.0 else v.reach
+    bearings = None
 
     for y in range(v.horizon + 1, v.height):
         d = v.eye * v.fy / (y - v.horizon)
         if d > far:
+            if v.eye >= 10.0:
+                # Up high the ground goes on for miles past what is drawn,
+                # and left empty it was a black band under the horizon, its
+                # edge sliding along the roofs as the plane flew.
+                if bearings is None:
+                    bearings = [int((v.yaw + math.atan((2.0 * sx / (width - 1) - 1.0)
+                                                       * PLANE)) * 200.0)
+                                for sx in range(width)]
+                far_lights(ch, co, walls, y, d, far, bearings)
             continue
         wx = v.x + rdx0 * d
         wz = v.z + rdz0 * d
@@ -13054,6 +13130,8 @@ def render_street(v, now):
     walls = draw_walls(ch, co, v, now)
     draw_sky(ch, co, v, walls, wet, now)
     draw_ground(ch, co, v, walls, collect_glow(v, now, wet), wet, now)
+    if v.eye >= 10.0:
+        draw_far_lamps(ch, co, v, walls, now)
     tunnels = v.tunnels
     draw_tunnel_ceiling(ch, co, v, walls, now, tunnels)
     draw_flash(ch, co, v, walls, v.flash)
