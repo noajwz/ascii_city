@@ -1802,6 +1802,7 @@ for n, d in enumerate(ac.DISTRICTS):
             # they are meant to ignore the district.
             if (b["club"] is None and b["casino"] is None and b["tower"] is None
                     and b["diner"] is None and ac.seafront_cap(i, j) is None
+                    and ac.approach_cap(i, j) is None
                     and b["landmark"] is None):
                 hs.append(b["height"])
             trees += b["tree"]
@@ -4973,6 +4974,53 @@ check("a wall of light", lit3 > 600, "%d lit cells" % lit3)
 check("and no El or tunnel through it", not ac.el_runs(shi2 * ac.CELL, shj2 * ac.CELL)
       and not any(ac.tunnel_at(i, j) for i in range(shi2 - 6, shi2 + 6)
                   for j in range(shj2 - 60, shj2 + 61)))
+
+# --- the airport ------------------------------------------------------------------
+ah = [ac.zone_home("airport", ti * ac.WOODS_TILE, tj * ac.WOODS_TILE)
+      for ti in range(-2, 3) for tj in range(-2, 3)]
+check("an airport beside every Strip, clear of everything else", all(
+    ac.district(*h_) is ac.AIRPORT and not ac.strip_at(h_[0] - 29, h_[1])
+    for h_ in ah) and not any(
+    ac.woods_at(h_[0] + di, h_[1] + dj) or ac.water_at(h_[0] + di, h_[1] + dj)
+    or ac.strip_at(h_[0] + di, h_[1] + dj) or ac.industrial_at(h_[0] + di, h_[1] + dj)
+    or ac.suburb_at(h_[0] + di, h_[1] + dj)
+    for h_ in ah for di in range(-28, 29, 4) for dj in range(-58, 59, 6)))
+ahi, ahj = ah[12]
+rx_, zn_, zs_ = ac.runway(ahi, ahj)
+check("a runway the length of it, open tarmac, no road and nobody walking on it", all(
+    ac.is_open(int(x_ / ac.CELL + ac.BIG) - ac.BIG, j) and not ac.road_at(
+        int(x_ / ac.CELL + ac.BIG) - ac.BIG, j)
+    for x_ in (rx_ - 12, rx_, rx_ + 12) for j in range(ahj - 52, ahj + 53)))
+check("a terminal, hangars and a control tower, standing",
+      not ac.is_open(ahi - 24, ahj) and not ac.is_open(ahi - 24, ahj - 44)
+      and not ac.is_open(ahi - 19, ahj + 38)
+      and ac.lot(ahi - 19, ahj + 38)["height"] > ac.lot(ahi - 24, ahj)["height"])
+traj = [ac.plane_states(ahi, ahj, float(t_) * 0.25)
+        for t_ in range(int(ac.APT_CYCLE * 4))]
+landing_ = [p_[0] for p_ in traj if p_ and p_[0][5] and p_[0][2] > zn_ - 400]
+check("planes land and take off, two a cycle",
+      sum(1 for p_ in traj if len(p_) == 2) > 40)
+gaps_ = [math.dist(traj[k][0][:3], traj[k + 1][0][:3]) for k in range(len(traj) - 1)
+         if traj[k] and traj[k + 1] and len(traj[k]) == len(traj[k + 1])
+         and traj[k][0][5] == traj[k + 1][0][5]]
+check("smoothly, nothing jumping", max(gaps_) < 40.0, "%.1f" % max(gaps_))
+low_ = [p_ for p_ in landing_ if p_[1] < 2.0]
+check("they come down onto the runway, and touch down on it", low_ and all(
+    abs(p_[0] - rx_) < 1.0 and zs_ <= p_[2] <= zn_ for p_ in low_))
+check("and the town under the approach is kept low", all(
+    ac.lot(i, j)["height"] <= ac.approach_cap(i, j) + 1e-9
+    for i in range(ahi + 3, ahi + 14) for j in range(ahj + 56, ahj + 120)
+    if not ac.is_open(i, j) and ac.approach_cap(i, j) is not None))
+asp = ac.find_place(x0, z0, "airport")
+av = ac.View(asp[0], asp[1], asp[2], 100, 30)
+coming = "\n".join("".join(r) for r in ac.render_street(
+    av, ac.APT_CYCLE * 10 + 6.0)[0])
+check("the menu stands you at the end of the runway, and one comes in at you",
+      asp is not None and ac.airport_at(int(asp[0] / ac.CELL + ac.BIG) - ac.BIG,
+                                        int(asp[1] / ac.CELL + ac.BIG) - ac.BIG)
+      and "@" in coming)
+check("the HUD hears it", ac.airport_hint(asp[0], asp[1], ac.APT_CYCLE * 10 + 6.0)
+      == "  ~ a plane coming in to land ~")
 
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
