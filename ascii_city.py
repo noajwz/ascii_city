@@ -14481,6 +14481,198 @@ def _big(ch, co, y, x, s, attr):
             col += 2
 
 
+# --- the casino, big, on a big window -------------------------------------
+# Zoomed out, a window can be three hundred columns across, and the room was
+# drawn for a third of that: the wheel stopped growing at 42 columns, the
+# machine and the table were fixed drawings, all of it an island in the
+# middle. On a window with room for twice the room (or three times) the
+# wheel grows to fill it, and the machine and the table are drawn again
+# bigger, with what matters - the symbols on the payline, the cards, the
+# money, the winning number - in block letters. A window that size or less
+# gets exactly the room it always did. z in the casino turns it off and on.
+CASINO_W, CASINO_H = 150, 44    # a window this many times over gets that scale
+CASINO_MAX = 3
+RIM = 1.09                      # the big wheel's rim, as a fraction of its radius
+_casino_big = [True]            # z in the casino: off and on again
+CASINO_FONT = {                 # the symbols the slot and the cards need
+    "$": ("###", "## ", " # ", " ##", "###"),
+    "@": ("###", "# #", "###", "#  ", "###"),
+    "*": ("   ", "# #", " # ", "# #", "   "),
+    "&": (" # ", "# #", " # ", "# #", " ##"),
+    "%": ("# #", "  #", " # ", "#  ", "# #"),
+    "^": (" # ", "###", "###", " # ", " # "),     # spades
+    "v": ("# #", "###", "###", " # ", "   "),     # hearts
+    "o": (" # ", "###", "###", " # ", "   "),     # diamonds
+}
+
+
+def casino_scale(width, height):
+    """1 on an ordinary window; 2 or 3 on one with room for that many rooms."""
+    if not _casino_big[0]:
+        return 1
+    return max(1, min(width // CASINO_W, height // CASINO_H, CASINO_MAX))
+
+
+def _blocks(ch, co, y, x, text, attr, sx=2, sy=1):
+    """Words in the 3x5 block font, each dot sx columns by sy rows."""
+    h, w = len(ch), len(ch[0])
+    col = x
+    for c in text:
+        rows = CASINO_FONT.get(c) or BIG_FONT.get(c.upper(), BIG_FONT["?"])
+        for r, line in enumerate(rows):
+            for dx, px in enumerate(line):
+                if px == " ":
+                    continue
+                for yy in range(sy):
+                    for xx in range(sx):
+                        y_, x_ = y + r * sy + yy, col + dx * sx + xx
+                        if 0 <= y_ < h and 0 <= x_ < w:
+                            ch[y_][x_], co[y_][x_] = "#", attr
+        col += 4 * sx
+    return col - sx
+
+
+def blocks_width(text, sx):
+    return max(0, len(text) * 4 * sx - sx)
+
+
+def _box(ch, co, x0, y0, w, h, attr):
+    """A frame: dotted corners, as the small machine and table have."""
+    _text(ch, co, y0, x0, "." + "-" * (w - 2) + ".", attr)
+    _text(ch, co, y0 + h - 1, x0, "'" + "-" * (w - 2) + "'", attr)
+    for y in range(y0 + 1, y0 + h - 1):
+        _text(ch, co, y, x0, "|", attr)
+        _text(ch, co, y, x0 + w - 1, "|", attr)
+
+
+def slot_size(k):
+    """(width, height) of the machine at scale k, without the pay table."""
+    if k <= 1:
+        return SLOT_W, SLOT_H
+    sy = k - 1
+    return SLOT_W * k, 1 + 5 * sy + 1 + (5 * sy + 4) + 1 + 5 * sy + 1 + 5 * sy + 2 + 1
+
+
+def draw_slot_big(ch, co, slot, x0, y0, now, k, paytable=True):
+    """The machine at scale k: LUCKY 7 over it, the payline's three symbols
+    in block letters with the rows above and below small, the verdict and
+    your money in block letters too."""
+    w, h = slot_size(k)
+    sx, sy = k - 1, k - 1               # the lettering
+    _box(ch, co, x0, y0, w, h, GOLD_DIM)
+    y = y0 + 1
+    title = "LUCKY 7"
+    _blocks(ch, co, y, x0 + (w - blocks_width(title, sx)) // 2, title, GOLD, sx, sy)
+    y += 5 * sy
+    _text(ch, co, y, x0, "|" + "=" * (w - 2) + "|", GOLD_DIM)
+    y += 1
+    # The reels: each a window with the payline's symbol in it big, and the
+    # ones above and below it small, going by.
+    reels = [slot.reel_at(r, now) for r in range(3)]
+    cell = 3 * k + 4
+    left = x0 + (w - (3 * cell + 4)) // 2
+    for r in range(3):
+        cx = left + r * (cell + 2)
+        _text(ch, co, y, cx + cell // 2 - 1, "[%s]" % reels[r][0], CONCRETE)
+        _box(ch, co, cx, y + 1, cell, 5 * sy + 2, GOLD_DIM)
+        _blocks(ch, co, y + 2, cx + 2, reels[r][1], ROU_RED, k, sy)
+        _text(ch, co, y + 3 + 5 * sy, cx + cell // 2 - 1, "[%s]" % reels[r][2],
+              CONCRETE)
+    mid = y + 2 + (5 * sy) // 2
+    _text(ch, co, mid, x0, ">", GOLD)
+    _text(ch, co, mid, x0 + w - 1, "<", GOLD)
+    y += 4 + 5 * sy
+    _text(ch, co, y, x0, "|" + "=" * (w - 2) + "|", GOLD_DIM)
+    y += 1
+    verdict = slot.payout(now)
+    if slot.short:
+        _text(ch, co, y + 2 * sy, x0 + (w - 10) // 2, "NOT ENOUGH", ROU_RED)
+    elif verdict is not None and slot.won > slot.bet:
+        say = "WIN %d" % slot.won
+        attr = FLASH if int(now * 6) % 2 == 0 else GOLD
+        _blocks(ch, co, y, x0 + (w - blocks_width(say, sx)) // 2, say, attr, sx, sy)
+    else:
+        say = (verdict if verdict is not None else
+               "* spinning *" if slot.t0 is not None else "p to pull")
+        _text(ch, co, y + 2 * sy, x0 + (w - len(say)) // 2, say[:w - 2], GOLD_DIM)
+    y += 5 * sy
+    _text(ch, co, y, x0, "|" + "=" * (w - 2) + "|", GOLD_DIM)
+    y += 1
+    cash = "$%d" % slot.wallet.money
+    _blocks(ch, co, y, x0 + (w - blocks_width(cash, sx)) // 2, cash, GOLD, sx, sy)
+    y += 5 * sy + 1
+    bet = "bet %d    - +" % slot.bet
+    _text(ch, co, y, x0 + (w - len(bet)) // 2, bet, GOLD_DIM)
+    if paytable:
+        lines = ["%s%s%s  x%d" % (s_, s_, s_, p_)
+                 for s_, p_ in zip(SLOT_SYMBOLS, SLOT_PAYS)]
+        lines.append("any pair  bet back")
+        for r, line in enumerate(lines):
+            _text(ch, co, y0 + h + 1 + r, x0 + 2, line, GOLD_DIM)
+
+
+def table_size(k):
+    """(width, height) of the blackjack table at scale k."""
+    if k <= 1:
+        return 40, 13
+    sy = k - 1
+    card_h = 5 * sy + 2
+    return 40 * k, 1 + 5 * sy + 1 + 1 + card_h + 1 + 1 + card_h + 1 + 5 * sy + 1 + 1
+
+
+def _card_big(ch, co, y, x, card, k, hidden=False):
+    """A card at scale k: the rank in block letters in the suit's colour,
+    and the suit itself small in two corners."""
+    sx = sy = k - 1
+    w, h = 3 * 2 * sx + 2 * sx + 4 + 1, 5 * sy + 2
+    if hidden:
+        _box(ch, co, x, y, w, h, CONCRETE)
+        for r in range(1, h - 1):
+            _text(ch, co, y + r, x + 1, ":" * (w - 2), CONCRETE)
+        return w
+    r_, s_ = card
+    attr = ROU_RED if s_ in "vo" else ROU_BLACK
+    _box(ch, co, x, y, w, h, attr)
+    _text(ch, co, y + 1, x + 1, s_, attr)
+    _text(ch, co, y + h - 2, x + w - 2, s_, attr)
+    _blocks(ch, co, y + 1, x + (w - blocks_width(r_, sx)) // 2, r_, attr, sx, sy)
+    return w
+
+
+def draw_blackjack_big(ch, co, bj, x0, y0, now, k):
+    """The table at scale k: BLACKJACK and your money in block letters, the
+    cards big, the outcome in block letters across the bottom."""
+    w, h = table_size(k)
+    sx = sy = k - 1
+    _box(ch, co, x0, y0, w, h, GOLD_DIM)
+    y = y0 + 1
+    _blocks(ch, co, y, x0 + 2, "BLACKJACK", GOLD, sx, sy)
+    cash = "$%d" % bj.money
+    _blocks(ch, co, y, x0 + w - 2 - blocks_width(cash, sx), cash, GOLD, sx, sy)
+    y += 5 * sy + 1
+    showing = bj.phase in ("dealer", "done")
+    card_h = 5 * sy + 2
+    for who, cards in (("dealer", bj.dealer), ("you", bj.player)):
+        _text(ch, co, y, x0 + 2, who, GOLD_DIM)
+        if cards:
+            seen = cards if (showing or who == "you") else cards[:1]
+            _text(ch, co, y, x0 + w - 7, "(%2d)" % hand_value(seen), GOLD_DIM)
+        cx = x0 + 2
+        for n, card in enumerate(cards[:6]):
+            cx += _card_big(ch, co, y + 1, cx, card, k,
+                            hidden=(who == "dealer" and n == 1 and not showing)) + 1
+        y += 1 + card_h + 1
+    keys = ("h hit   k stand" if bj.phase == "player" else
+            "dealer's turn" if bj.phase == "dealer" else "b deals a hand")
+    _text(ch, co, y, x0 + 2, keys, GOLD_DIM)
+    y += 1
+    if bj.outcome:
+        win = bj.outcome in ("BLACKJACK", "YOU WIN", "DEALER BUSTS")
+        attr = (FLASH if int(now * 6) % 2 == 0 else GOLD) if win else ROU_RED
+        _blocks(ch, co, y, x0 + (w - blocks_width(bj.outcome, sx)) // 2, bj.outcome,
+                attr, sx, sy)
+
+
 def render_casino_room(spin, width, height, now, slot=None, table=None, party=False,
                        plinko=None, races=None, flyer=None):
     """Inside.
@@ -14496,6 +14688,8 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
     cx = (width - 1) / 2.0
     top, floor = 1, height - 1
     roomy = width >= 46 and height >= 22
+    k = casino_scale(width, height)
+    sy = k - 1                       # the block letters' rows, when big
 
     if roomy:
         for x in range(width):                       # the ceiling, in lights
@@ -14504,41 +14698,63 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
             co[top][x] = ((FLASH if int(now * 8 + x) % 2 else GOLD) if party
                           else GOLD if lit else GOLD_DIM)
         banner = "CASINO  %s" % spin.name
-        _text(ch, co, top + 1, int(cx - len(banner) / 2), banner, GOLD)
+        if k > 1:
+            half = blocks_width(banner, sy) / 2.0
+            _blocks(ch, co, top + 1, int(cx - half), banner, GOLD, sy, sy)
+            wall = top + 1 + 5 * sy - 3          # the slots either side of it
+        else:
+            half = len(banner) / 2.0
+            _text(ch, co, top + 1, int(cx - half), banner, GOLD)
+            wall = top + 2
         for x in range(2, width - 6, 9):             # a back wall of slots
-            if abs(x + 2 - cx) < len(banner) / 2 + 3:
+            if abs(x + 2 - cx) < half + 3:
                 continue
-            reel = "".join("7$@&%"[(_mix(x, k, 53) + int(now * (3 + k))) % 5]
-                           for k in range(2))
-            _text(ch, co, top + 2, x, ".--.", GOLD_DIM)
-            _text(ch, co, top + 3, x, "|" + reel + "|", ROU_RED)
-        band_top, band_bot = top + 5, floor - 5
+            reel = "".join("7$@&%"[(_mix(x, n, 53) + int(now * (3 + n))) % 5]
+                           for n in range(2))
+            _text(ch, co, wall, x, ".--.", GOLD_DIM)
+            _text(ch, co, wall + 1, x, "|" + reel + "|", ROU_RED)
+        band_top, band_bot = wall + 3, floor - 5 * k
     else:
         band_top, band_bot = top, floor - 1
 
     cy = (band_top + band_bot) / 2.0
-    rx = min(width * 0.36, 42.0)
-    ry = min((band_bot - band_top) / 2.0 - 0.5, 10.0)
+    rx = min(width * 0.36, 42.0 * k)
+    ry = min((band_bot - band_top) / 2.0 - 0.5, 10.0 * k)
+    if k > 1:
+        # Big, the wheel has a rim round it to fit in as well, and a little
+        # more height: at the small one's flatness it left the bottom of a
+        # tall window empty. The lip and the people under it come along.
+        ry = min((band_bot - band_top - 6) / 2.0 / RIM, 16.0 * k)
+        cy = band_top + 1 + ry * RIM
     # The slot machine stands to the right of the wheel and the blackjack
     # table to its left when there is room for them; the wheel moves over
     # and gives up some radius so that all three fit.
     # With the plinko machine up (`plinko`), it takes the wheel's place and
     # the slot machine stands aside for it.
+    slot_w, slot_h = slot_size(k)
+    table_w, table_h = table_size(k)
     machine = (slot is not None and plinko is None and races is None and flyer is None
-               and width >= 62 and height >= SLOT_H + 3)
+               and width >= 62 * k and height >= slot_h + 3)
     cards = (roomy and table is not None and races is None and flyer is None
-             and width >= (92 if plinko is None else 108))
-    left = 43.0 if cards else 1.0
-    right = width - SLOT_W - 3.0 if machine else width - 2.0
+             and width >= (92 if plinko is None else 108) * k)
+    left = table_w + 3.0 * k if cards else 1.0
+    right = width - slot_w - 3.0 if machine else width - 2.0
     if machine or cards:
         cx = (left + right) / 2.0
-        rx = min(rx, (right - left) / 2.0 - 1.0)
+        rx = min(rx, ((right - left) / 2.0 - 1.0) / (RIM if k > 1 else 1.0))
     if machine:
-        sy = band_top + 1 if roomy else 1
-        draw_slot(ch, co, slot, width - SLOT_W - 1, sy, now,
-                  paytable=sy + SLOT_H + 8 < height)
+        top_ = band_top + 1 if roomy else 1
+        if k > 1:
+            draw_slot_big(ch, co, slot, width - slot_w - 1, top_, now, k,
+                          paytable=top_ + slot_h + 8 < height)
+        else:
+            draw_slot(ch, co, slot, width - SLOT_W - 1, top_, now,
+                      paytable=top_ + SLOT_H + 8 < height)
     if cards:
-        draw_blackjack(ch, co, table, 1, band_top + 1, now)
+        if k > 1:
+            draw_blackjack_big(ch, co, table, 1, band_top + 1, now, k)
+        else:
+            draw_blackjack(ch, co, table, 1, band_top + 1, now)
 
     if flyer is not None:
         y1 = floor - 2
@@ -14610,8 +14826,19 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
         return ch, co
 
     wa = spin.wheel_at(t)
-    for k, num in enumerate(WHEEL):
-        a = wa + k * math.tau / 37.0
+    if k > 1:
+        # The rim round the numbers and the cone inside them, so the wheel
+        # reads as a wheel rather than a ring of numbers in the air.
+        steps = int(2 * math.pi * max(rx, ry))
+        for n in range(steps):
+            a = n * math.tau / steps
+            for r_, g_ in ((RIM, ":"), (0.62, ".")):
+                x = int(round(cx + rx * r_ * math.cos(a)))
+                y = int(round(cy - ry * r_ * math.sin(a)))
+                if 0 <= y < height and 0 <= x < width:
+                    ch[y][x], co[y][x] = g_, GOLD_DIM
+    for n, num in enumerate(WHEEL):
+        a = wa + n * math.tau / 37.0
         label = str(num)
         x = int(round(cx + rx * math.cos(a))) - (len(label) - 1) // 2
         y = int(round(cy - ry * math.sin(a)))
@@ -14630,7 +14857,18 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
         co[by][bx] = FLASH
 
     mid = int(cy)
-    if spin.settled(now):
+    if spin.settled(now) and k > 1:
+        label = str(spin.result)
+        _blocks(ch, co, mid - 5 * sy // 2 - 2, int(cx - blocks_width(label, 2 * k) / 2),
+                label, pocket_colour(spin.result), 2 * k, k)
+        word = "ZERO" if spin.result == 0 else (
+            "RED" if spin.result in REDS else "BLACK")
+        if spin.result:
+            word += "  %s  %s" % ("EVEN" if spin.result % 2 == 0 else "ODD",
+                                  "1-18" if spin.result <= 18 else "19-36")
+        _text(ch, co, mid + 5 * k // 2 + 2, int(cx - len(word) / 2), word,
+              pocket_colour(spin.result))
+    elif spin.settled(now):
         label = str(spin.result)
         w = len(label) * 8 - 2
         _big(ch, co, mid - 2, int(cx - w / 2), label, pocket_colour(spin.result))
@@ -14643,15 +14881,20 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
               pocket_colour(spin.result))
     else:
         say = "RIEN NE VA PLUS" if t > SPIN_TIME * 0.45 else "FAITES VOS JEUX"
-        _text(ch, co, mid, int(cx - len(say) / 2), say, GOLD_DIM)
+        if k > 1 and blocks_width(say, sy) < rx * 1.1:
+            _blocks(ch, co, mid - 5 * sy // 2, int(cx - blocks_width(say, sy) / 2), say,
+                    GOLD_DIM, sy, sy)
+        else:
+            _text(ch, co, mid, int(cx - len(say) / 2), say, GOLD_DIM)
 
     if roomy:
-        edge = min(height - 4, int(cy + ry) + 2)     # the near lip of the table
+        edge = min(height - 4, int(cy + ry * (RIM if k > 1 else 1.0)) + 2)
+        # the near lip of the table, under the rim when there is one
         for x in range(max(0, int(cx - rx - 4)), min(width, int(cx + rx + 5))):
             ch[edge][x] = "="
             co[edge][x] = GOLD_DIM
-        for k in range(-2, 3):                       # and who is round it
-            px = int(cx + k * 15) - 2
+        for n in range(-2, 3):                       # and who is round it
+            px = int(cx + n * 15 * k) - 2
             for r, line in enumerate((" ,-. ", "(- -)", "_/|\\_")):
                 if edge + 1 + r < height:
                     _text(ch, co, edge + 1 + r, px, line, CURB)
@@ -19341,6 +19584,10 @@ def main(stdscr):
                     said_[-1] += " " + word_
                 oracle["said"] = said_[-20:]
                 oracle["at"], oracle["sung"] = now, word_
+            elif wheel is not None and key in (ord("z"), ord("Z")):
+                _casino_big[0] = not _casino_big[0]     # the big room, off and on
+                note, note_at = ("the big casino " + ("on" if _casino_big[0]
+                                                      else "off")), now
             elif wheel is not None and key in (ord("o"), ord("O")):
                 at_plinko, at_races, at_flyer = not at_plinko, False, False
             elif wheel is not None and key in (ord("r"), ord("R")):
