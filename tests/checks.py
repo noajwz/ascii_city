@@ -5092,7 +5092,7 @@ ac._fountain_shift[0] = 0.0
 
 # --- the casino, big, on a big window ------------------------------------------------
 check("the casino grows only on a window with room for two of it, or three",
-      [ac.casino_scale(w_, h_) for w_, h_ in ((100, 30), (213, 57), (299, 87),
+      [ac.big_scale(w_, h_) for w_, h_ in ((100, 30), (213, 57), (299, 87),
                                               (300, 88), (449, 131), (450, 132),
                                               (900, 300))] == [1, 1, 1, 2, 2, 3, 3])
 cw_ = ac.Wallet()
@@ -5116,12 +5116,12 @@ check("big: the banner, the money and the winning number in block letters, the "
       and ctx_b.count(".--------.") >= 3 and ctx_s.count("#") < ctx_b.count("#") / 4)
 check("and the big wheel's rim stays out of the slot machine",
       len(slot_box) > 10 and not any(":" in "".join(r_) for r_ in slot_box))
-ac._casino_big[0] = False
+ac._big_screens[0] = False
 coff = "\n".join("".join(r) for r in ac.render_casino_room(csp, 300, 90, 9.0, cslot,
                                                             cbj)[0])
-ac._casino_big[0] = True
+ac._big_screens[0] = True
 check("z turns it off: the room as it always was, however big the window",
-      "CASINO  GOLDEN PALM" in coff and ac.casino_scale(300, 90) == 2)
+      "CASINO  GOLDEN PALM" in coff and ac.big_scale(300, 90) == 2)
 crc = ac.Races(cw_)
 crc.update(9.0)
 cfl = ac.Flyer(cw_)
@@ -5176,6 +5176,57 @@ cf_s, cf_b = cgrid_(120, 40, cft, flyer=cfl2), cgrid_(300, 90, cft, flyer=cfl2)
 check("high flyer, big: the name, the figure and FLEW AWAY in block letters",
       "FLEW AWAY AT" in cf_s and "FLEW AWAY AT" not in cf_b
       and "HIGH FLYER  -" not in cf_b and cf_b.count("#") > 4 * cf_s.count("#"))
+
+# --- the arcade, big, on a big window -------------------------------------------------
+aarc = {"name": "PIXEL PALACE", "seed": 7}
+ar_s = "\n".join("".join(r) for r in ac.render_arcade(aarc, 213, 57, 4.3, sel=1)[0])
+ar_b = "\n".join("".join(r) for r in ac.render_arcade(aarc, 300, 90, 4.3, sel=1)[0])
+check("the arcade, big: cabinets twice the size, the name bigger, the same games in "
+      "the row; small, just as it was",
+      ar_s.count(".-------------.") == len(ac.arcade_order(aarc, 213, 57))
+      and ar_b.count("." + "-" * (ac.cab_size(2)[0] - 2) + ".") == len(
+          ac.arcade_order(aarc, 300, 90))
+      and ac.cab_size(1) == (ac.CAB_W, ac.CAB_H)
+      and all(n_ in ar_b for n_ in ac.arcade_order(aarc, 300, 90)))
+agame = ac.GAMES["ROOFTOP RUN"](1234, 0.0)
+for t_ in range(1, 12):
+    agame.tick(t_ * 0.1)
+ag_s = "\n".join("".join(r) for r in ac.render_game(agame, 0, 213, 57, 1.2)[0])
+ag_b = ac.render_game(agame, 0, 300, 90, 1.2)[0]
+ag_bt = "\n".join("".join(r) for r in ag_b)
+pf_ = agame.draw(1.2)[0]
+lit_ = [(x_, y_) for y_ in range(ac.GAME_H) for x_ in range(ac.GAME_W)
+        if pf_[y_][x_] != " "]
+# Every cell of the playfield is a 2x2 block of itself on the big screen.
+ax0 = (300 - ac.GAME_W * 2) // 2
+ay0 = max(1, (90 - ac.game_size(2)[1]) // 2) + 5 + 2
+check("a game, big: the playfield twice over, every cell a block of itself; the "
+      "name and the score in block letters",
+      "ROOFTOP RUN" in ag_s and "ROOFTOP RUN" not in ag_bt and "SCORE" not in ag_bt
+      and len(lit_) > 20 and all(
+          ag_b[ay0 + y_ * 2 + dy_][ax0 + x_ * 2 + dx_] == pf_[y_][x_]
+          for x_, y_ in lit_ for dy_ in (0, 1) for dx_ in (0, 1)))
+agame.over, agame.why = True, "fell"
+ag_o = "\n".join("".join(r) for r in ac.render_game(agame, 0, 300, 90, 1.3)[0])
+check("and GAME OVER across it in block letters, why under it",
+      "GAME OVER" not in ag_o and "fell" in ag_o and ag_o.count("#") > 300)
+ac._big_screens[0] = False
+ag_z = "\n".join("".join(r) for r in ac.render_game(agame, 0, 300, 90, 1.3)[0])
+ar_z = "\n".join("".join(r) for r in ac.render_arcade(aarc, 300, 90, 4.3, sel=1)[0])
+ac._big_screens[0] = True
+check("z gives the small arcade back too: one switch for every big screen",
+      "GAME OVER" in ag_z and ".-------------." in ar_z)
+adraws = 0
+for w_, h_ in ((300, 88), (333, 101), (450, 132), (900, 88)):
+    ac.render_arcade(aarc, w_, h_, 2.0, sel=0)
+    for n_ in ac.ARCADE_GAMES:
+        g_ = ac.GAMES[n_](99, 0.0)
+        for t_ in range(1, 30):
+            g_.key(("act", "left", "up", "right", "down")[t_ % 5])
+            g_.tick(t_ * 0.2)
+        ac.render_game(g_, 5, w_, h_, 6.0)
+        adraws += 1
+check("every game draws big on every big window", adraws == 4 * len(ac.ARCADE_GAMES))
 
 # --- the Pokemon Center -------------------------------------------------------------
 pcs = list(ac.near_centers(x0, z0, 1500.0))

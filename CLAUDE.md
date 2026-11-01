@@ -24,23 +24,28 @@ pyproject/ruff.toml, and ruff is not installed on the machine this was written o
 **This is the system for every screen that gets bigger on a big window, not just the casino.**
 The owner plays zoomed out on a MacBook (3024x1964), and there the screens that are fixed
 drawings - the casino's games, the interiors - were tiny islands in the middle. The casino was the
-first to scale (see The casino, big); more are to follow, and they all work the same way:
+first to scale (see The casino, big), the arcade the second (see The arcade, big); more venues
+are to follow, and they all work the same way:
 
 - **One threshold, in characters, for everything.** The scale is `min(width // 150,
-  height // 44)`, capped at 3 (`casino_scale()`, `CASINO_W`, `CASINO_H`, `CASINO_MAX`): 2 from a
+  height // 44)`, capped at 3 (`big_scale()`, `BIG_W`, `BIG_H`, `BIG_MAX`): 2 from a
   300x88 window up, 3 from 450x132. The game never sees the zoom level or the screen - only the
   terminal's columns and rows - so where the switch lands depends on the screen, the window, the
   font and its size. **On the owner's MacBook, full screen, in Fixedsys Excelsior, it switches at
-  exactly 5x zoomed out, and they want it kept there.** Do not change `CASINO_W` / `CASINO_H`
+  exactly 5x zoomed out, and they want it kept there.** Do not change `BIG_W` / `BIG_H`
   without asking; there, the 300 columns are what decide it, the rows are already past 88.
-- **Every screen uses that same scale.** No screen gets thresholds of its own, or two screens
-  would switch at different zooms. When the second screen is scaled, rename `casino_scale()` to a
-  general name and have both call it; likewise `_casino_big` (the `z` switch) becomes one switch
-  for every big screen, and `z` keeps working wherever a scaled screen is.
+- **Every screen uses that same scale: `big_scale(width, height)`.** No screen gets thresholds
+  of its own, or two screens would switch at different zooms. `_big_screens` is the one `z`
+  switch for all of them; `z` is handled with the casino's keys and the arcade's (`(wheel is not
+  None or at_arcade)`), so a newly scaled venue adds itself to that condition. Watch for a
+  loop variable called `k` in the function you scale - `k` is the scale everywhere here, and an
+  old `for k in` loop overwrites it; it has happened in three functions so far, and only the
+  frame comparison at scale 1 caught it.
 - **At scale 1 nothing changes.** A screen on an ordinary window - 1920x1080 and the like -
   stays exactly what it was. Prove it: render it from the old code and the new at several sizes
   below the threshold, with each colour given its own number, and compare frame for frame (as was
-  done for the casino at 60x20 to 299x87).
+  done for the casino at 60x20 to 299x87, through every phase of its games, and the arcade's
+  room and six games at the same sizes).
 - **How a screen scales:** shapes worked out from maths (the wheel, pegs, a track, a graph) grow
   by raising their caps and spacing - redrawn, never stretched. Fixed ASCII drawings get a second,
   bigger version (`draw_slot_big()`, `draw_blackjack_big()`), with a size helper (`slot_size(k)`,
@@ -49,7 +54,10 @@ first to scale (see The casino, big); more are to follow, and they all work the 
   columns by `sy` rows; `sx = sy = k - 1` for lettering has kept things in proportion so far.
   **Ordinary text stays small** - a terminal cannot draw a letter bigger than its font, and a
   sentence in block letters is four columns a letter. Keep cells about twice as wide as tall
-  (sx = 2 * sy for something meant to look square).
+  (sx = 2 * sy for something meant to look square). **A grid of shapes** - an arcade game's
+  playfield, a cabinet's demo - is the one thing drawn k times over cell by cell (`_blow_up()`):
+  every character a k by k block of itself, the way arcade games are scaled. Never words that
+  way: "BET" would come out "BBEETT".
 - **Tests for each scaled screen:** the scale at a few sizes either side of the threshold; the big
   version has its block letters and big drawings and the small one does not; nothing big overlaps
   its neighbours (the wheel's rim got into the slot machine once); every mode of the screen draws
@@ -1175,12 +1183,26 @@ imported; a fix there does not reach here without copying it over again. `q` qui
 `x` steps you back out the way you came, facing the street. `,` in the menu stands you across
 the street from the nearest one. The fifth menu column is AND THE REST now.
 
+## The arcade, big
+
+The second screen on the big-window system. `render_arcade()` puts the arcade's name up in bigger
+block letters (`k` columns by `k - 1` rows a dot, a colour a letter) and draws each cabinet with
+`draw_cabinet_big()` at `cab_size(k)` - the screen `k` times over, its demo blown up with
+`_blow_up()`, the game's name and COMING SOON / INSERT COIN left in plain letters so they stay
+words. `arcade_order(arc, width, height)` counts the cabinets that fit at that size, and `main()`
+passes it the height, or the cabinet you pick and the one you get would disagree on a big
+window. Playing (`render_game()` hands over to `render_game_big()` when `game_size(k)` fits):
+the playfield every cell a `k` by `k` block of itself - the games themselves are untouched and
+still draw their 40 by 16 - the name and SCORE / HI in block letters, GAME OVER across the
+middle in block letters on a cleared band with the reason under it, the controls in plain
+letters. At scale 1 the room and all six games are frame for frame what they were.
+
 ## The casino, big
 
 Zoomed out, a window can be three hundred columns across, and the casino was drawn for a third of
 that: the wheel stopped growing at 42 columns by 10 rows, and the slot machine and the blackjack
-table are fixed drawings, so on a big window it was an island in the middle. `casino_scale()`
-gives a scale of 2 on a window with room for two rooms (`CASINO_W` by `CASINO_H`, 150 by 44 —
+table are fixed drawings, so on a big window it was an island in the middle. `big_scale()`
+gives a scale of 2 on a window with room for two rooms (`BIG_W` by `BIG_H`, 150 by 44 —
 so 300 by 88) and 3 on one with room for three; anything smaller is scale 1, and **at scale 1 the
 room is exactly what it was** — checked frame for frame against the old code at five sizes up to
 299 by 87.
@@ -1196,7 +1218,7 @@ table's 40): the payline's three symbols big in their own windows with the rows 
 small, the cards with their ranks in block letters and the suit in two corners, the money, the
 win and the outcome in block letters. **Ordinary text stays small** — the paytable, the keys,
 "dealer" — because a terminal cannot draw a letter bigger than its font, and a sentence in block
-letters is four columns a letter. `z` in the casino turns the big room off and on (`_casino_big`), for comparing the two on one
+letters is four columns a letter. `z` in the casino turns the big room off and on (`_big_screens`), for comparing the two on one
 window.
 
 **Plinko, the races and High Flyer** scale too, each at the biggest scale that fits it in the

@@ -260,6 +260,16 @@ def cases(run, report):
                       + [(b"o", .8), (b"p", 3.0), (b"o", .5), (b"r", .8), (b"1", .5),
                          (b"r", .5), (b"f", .8), (b"p", 2.5), (b"f", .5), (b"s", .6),
                          (b"s", .6)], cols=300, rows=90))
+    # The arcade on a big window: the menu puts you inside; a game, big, then
+    # z gives the small one - its plain-letter name - and z again the big.
+    arc_st, arc_out = run([(b"`", .5), (b"g", 2.0), (b"p", 1.0), (b"p", .5),
+                           (b"p", .5), (b"z", .8), (b"z", .8), (b"x", .6), (b"s", .6),
+                           (b"s", .6)], cols=300, rows=90)
+    ok &= report("the big arcade: in, a game, z off and on, out", arc_st, arc_out)
+    arc_txt = ANSI.sub(b"", arc_out).decode("utf-8", "replace")
+    seen = arc_txt.count("#") > 500 and "SCORE" in arc_txt
+    print("%-34s %s" % ("  and z gave the small game back", "ok" if seen else "FAIL"))
+    ok &= seen
     ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)],
                                      cols=100, rows=30))
     return ok
