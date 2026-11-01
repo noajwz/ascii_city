@@ -1782,7 +1782,7 @@ def measure(px, pz, yaw):
     v = ac.View(px, pz, yaw, 100, 30)
     g = [[" "] * 100 for _ in range(30)]
     c = [[0] * 100 for _ in range(30)]
-    ac.draw_hung_sign(g, c, v, ([None]*100, [30]*100, [-1]*100),
+    ac.draw_hung_sign(g, c, v, ([None]*100, [30]*100, [-1]*100, [30]*100, [[]]*100),
                       sg, wp, (nx, nz), 400.0, 0.0)
     bars = [x for y in range(30) for x in range(100)
             if g[y][x] == "|" and c[y][x] in (700 + k for k in range(8))]
@@ -5346,6 +5346,27 @@ check("out of the window: the frame round it, the seatbelt sign, the wingtip lig
 check("and dozing off wakes you on the approach",
       ac.flight_stage(fhome, ac.flight_marks(fhome)[0] + 10.0) == "on approach"
       and ac.flight_time_at(ac.flight_marks(fhome)[0], fhome) < flen)
+
+# --- what hides behind a building, up high ------------------------------------------
+# A low building near you, rows 20 to 29, and a tall one behind it showing over
+# its roof, rows 5 to 19. Everything drawn in a column counts, not only the
+# nearest: rain beyond the tall one went straight through it.
+hw_ = (None, None, None, None, [[(10.0, 20, 29), (30.0, 5, 19)]])
+check("behind any building in the column is hidden, not only the nearest",
+      ac.hidden(hw_, 0, 10, 50.0) and not ac.hidden(hw_, 0, 10, 20.0)
+      and ac.hidden(hw_, 0, 25, 15.0) and not ac.hidden(hw_, 0, 2, 100.0)
+      and not ac.hidden((None,) * 4 + ([[]],), 0, 10, 1.0))
+# Up on a roof the first thing a column hits is often below the screen, or
+# the building you are on. The nearest facade drawn is the one to keep, or
+# the column has no wall at all and the ground and the rain go over the lot.
+hv_ = ac.roof_view(tw, 0.9, 300, 90)
+hch_ = [[" "] * 300 for _ in range(90)]
+hco_ = [[0] * 300 for _ in range(90)]
+hwl_ = ac.draw_walls(hch_, hco_, hv_, 600.0)
+check("on a roof every column that draws a building keeps it",
+      all((hwl_[0][x_] is None) == (not hwl_[4][x_])
+          and (not hwl_[4][x_] or hwl_[0][x_] == hwl_[4][x_][0][0])
+          for x_ in range(300)) and sum(1 for r in hwl_[4] if len(r) > 1) > 100)
 
 # --- the autopilot and the turn keys -------------------------------------------------
 def walk_auto(x, z, secs):
