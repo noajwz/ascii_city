@@ -14612,19 +14612,30 @@ def _big(ch, co, y, x, s, attr):
             col += 2
 
 
-# --- the casino, big, on a big window -------------------------------------
-# Zoomed out, a window can be three hundred columns across, and the room was
-# drawn for a third of that: the wheel stopped growing at 42 columns, the
-# machine and the table were fixed drawings, all of it an island in the
-# middle. On a window with room for twice the room (or three times) the
-# wheel grows to fill it, and the machine and the table are drawn again
-# bigger, with what matters - the symbols on the payline, the cards, the
-# money, the winning number - in block letters. A window that size or less
-# gets exactly the room it always did. z in the casino turns it off and on.
-CASINO_W, CASINO_H = 150, 44    # a window this many times over gets that scale
-CASINO_MAX = 3
+# --- big screens, on a big window ------------------------------------------
+# Zoomed out, a window can be three hundred columns across, and the screens
+# that are fixed drawings - the casino's games, the arcade - were drawn for a
+# third of that, islands in the middle. On a window with room for two of
+# them (or three), every such screen is drawn at that scale; on anything
+# smaller, exactly as it always was. One scale for all of them, so they all
+# switch at once - on the owner's MacBook at 5x zoomed out, where it is to
+# stay (see CLAUDE.md). z, in any of them, turns it off and on.
+BIG_W, BIG_H = 150, 44          # a window this many times over gets that scale
+BIG_MAX = 3
+_big_screens = [True]           # z: off and on again, for every big screen
+
+
+def big_scale(width, height):
+    """1 on an ordinary window; 2 or 3 on one with room for that many."""
+    if not _big_screens[0]:
+        return 1
+    return max(1, min(width // BIG_W, height // BIG_H, BIG_MAX))
+
+
+# The casino, big: the wheel grows to fill the room and the machine and the
+# table are drawn again bigger, with what matters - the symbols on the
+# payline, the cards, the money, the winning number - in block letters.
 RIM = 1.09                      # the big wheel's rim, as a fraction of its radius
-_casino_big = [True]            # z in the casino: off and on again
 CASINO_FONT = {                 # the symbols the slot and the cards need
     "$": ("###", "## ", " # ", " ##", "###"),
     "@": ("###", "# #", "###", "#  ", "###"),
@@ -14635,13 +14646,6 @@ CASINO_FONT = {                 # the symbols the slot and the cards need
     "v": ("# #", "###", "###", " # ", "   "),     # hearts
     "o": (" # ", "###", "###", " # ", "   "),     # diamonds
 }
-
-
-def casino_scale(width, height):
-    """1 on an ordinary window; 2 or 3 on one with room for that many rooms."""
-    if not _casino_big[0]:
-        return 1
-    return max(1, min(width // CASINO_W, height // CASINO_H, CASINO_MAX))
 
 
 def _blocks(ch, co, y, x, text, attr, sx=2, sy=1):
@@ -14819,7 +14823,7 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
     cx = (width - 1) / 2.0
     top, floor = 1, height - 1
     roomy = width >= 46 and height >= 22
-    k = casino_scale(width, height)
+    k = big_scale(width, height)
     sy = k - 1                       # the block letters' rows, when big
 
     if roomy:
@@ -15538,6 +15542,59 @@ def cabinet_demo(game, t):
     return ["".join(r) for r in rows]
 
 
+def cab_size(k):
+    """(columns, rows) of a cabinet at scale k: its screen k times over."""
+    return CAB_SCREEN[0] * k + 4, CAB_SCREEN[1] * k + 8
+
+
+def _blow_up(ch, co, x0, y0, g, c, k):
+    """A grid drawn k times over, every cell a k by k block of itself: how a
+    playfield - shapes, not words - gets bigger, the way arcade games do."""
+    h, w = len(ch), len(ch[0])
+    for y, row in enumerate(g):
+        for x, cell in enumerate(row):
+            if cell == " ":
+                continue
+            for dy in range(k):
+                for dx in range(k):
+                    yy, xx = y0 + y * k + dy, x0 + x * k + dx
+                    if 0 <= yy < h and 0 <= xx < w:
+                        ch[yy][xx], co[yy][xx] = cell, c[y][x]
+
+
+def draw_cabinet_big(ch, co, x0, y0, game, colour, now, k):
+    """A cabinet at scale k: the demo on its screen k times over, the name and
+    COMING SOON / INSERT COIN in plain letters still, so they stay words."""
+    w, _ = cab_size(k)
+    sw, sh = CAB_SCREEN
+    _text(ch, co, y0, x0, "." + "-" * (w - 2) + ".", colour)
+    _text(ch, co, y0 + 1, x0, "|" + game[:w - 2].center(w - 2) + "|", colour)
+    _text(ch, co, y0 + 2, x0, "|" + "=" * (w - 2) + "|", GOLD_DIM)
+    t = now + len(game) * 1.7
+    demo = cabinet_demo(game, t)
+    for r in range(sh * k):
+        _text(ch, co, y0 + 3 + r, x0, "||", GOLD_DIM)
+        _text(ch, co, y0 + 3 + r, x0 + w - 2, "||", GOLD_DIM)
+    _blow_up(ch, co, x0 + 2, y0 + 3, demo, [[colour] * sw for _ in range(sh)], k)
+    say = int(t / 3.0) % 3
+    line = ("COMING SOON" if say == 1 else
+            "INSERT COIN" if say == 2 and int(now * 2) % 2 else "")
+    if line:
+        y = y0 + 3 + sh * k // 2
+        if 0 <= y < len(ch):
+            for x in range(max(0, x0 + 2), min(len(ch[0]), x0 + 2 + sw * k)):
+                ch[y][x], co[y][x] = " ", 0
+        _text(ch, co, y, x0 + 2 + (sw * k - len(line)) // 2, line, FLASH)
+    y = y0 + 3 + sh * k
+    _text(ch, co, y, x0, "|" + "=" * (w - 2) + "|", GOLD_DIM)
+    _text(ch, co, y + 1, x0, "/" + "o   o o o".center(w - 2) + "\\", CONCRETE)
+    coin = "[ $1  ]".center(w - 2)
+    _text(ch, co, y + 2, x0, "|" + coin + "|", GOLD_DIM)
+    _text(ch, co, y + 2, x0 + 1 + coin.index("["), "[",
+          FLASH if int(now * 1.5) % 2 else GOLD_DIM)
+    _text(ch, co, y + 3, x0, "|" + "_" * (w - 2) + "|", CONCRETE)
+
+
 def draw_cabinet(ch, co, x0, y0, game, colour, now):
     """One cabinet: the game's name lit along the top, the screen running its
     demo with COMING SOON and INSERT COIN taking turns over it, the stick and
@@ -15575,6 +15632,8 @@ def render_arcade(arc, width, height, now, sel=None):
     ch = [[" "] * width for _ in range(height)]
     co = [[0] * width for _ in range(height)]
     n = len(NEON)
+    k = big_scale(width, height)
+    cab_w, cab_h = cab_size(k)
     if width < CAB_W + 4 or height < CAB_H + 4:
         _text(ch, co, height // 2, 1, "%s ARCADE" % arc["name"], GOLD)
         _text(ch, co, min(height - 1, height // 2 + 1), 1, "the games are coming",
@@ -15586,43 +15645,53 @@ def render_arcade(arc, width, height, now, sel=None):
         co[1][x] = NEON[(x // 4 + int(now * 6.0)) % n][0]
     y = 2
     name = arc["name"]
-    if height >= CAB_H + 12 and big_width(name) <= width - 2:
+    if k > 1 and blocks_width(name, k) <= width - 2:
+        # The name, big: a letter in every colour, k columns a dot.
+        lx = (width - blocks_width(name, k)) // 2
+        for i, c in enumerate(name):
+            _blocks(ch, co, 3, lx + i * 4 * k, c, NEON[(i + int(now * 2.0)) % n][0],
+                    k, k - 1)
+        y = 3 + 5 * (k - 1) + 2
+    elif height >= CAB_H + 12 and big_width(name) <= width - 2:
         lx = (width - big_width(name)) // 2
-        for dx, dy, k in big_cells(name):
-            _text(ch, co, 3 + dy, lx + dx, "#", NEON[(k + int(now * 2.0)) % n][0])
+        for dx, dy, i in big_cells(name):
+            _text(ch, co, 3 + dy, lx + dx, "#", NEON[(i + int(now * 2.0)) % n][0])
         y = 9
     else:
         _text(ch, co, 2, (width - len(name)) // 2, name, GOLD)
         y = 4
-    order = arcade_order(arc, width)
+    order = arcade_order(arc, width, height)
     count = len(order)
-    span = count * (CAB_W + 2) - 2
+    span = count * (cab_w + 2) - 2
     left = (width - span) // 2
-    for k, game in enumerate(order):
-        mine = sel is not None and k == sel % count
-        draw_cabinet(ch, co, left + k * (CAB_W + 2), y, game,
-                     (FLASH if int(now * 3) % 2 else GOLD) if mine
-                     else NEON[(arc["seed"] + k * 3) % n][0], now)
+    for m_, game in enumerate(order):
+        mine = sel is not None and m_ == sel % count
+        colour = ((FLASH if int(now * 3) % 2 else GOLD) if mine
+                  else NEON[(arc["seed"] + m_ * 3) % n][0])
+        if k > 1:
+            draw_cabinet_big(ch, co, left + m_ * (cab_w + 2), y, game, colour, now, k)
+        else:
+            draw_cabinet(ch, co, left + m_ * (CAB_W + 2), y, game, colour, now)
         if mine:
-            _text(ch, co, y - 1, left + k * (CAB_W + 2) + CAB_W // 2 - 1, "vvv",
+            _text(ch, co, y - 1, left + m_ * (cab_w + 2) + cab_w // 2 - 1, "vvv",
                   FLASH)
     # The carpet: the loud one every arcade has, under everything else.
-    for yy in range(y + CAB_H, height - 1):
+    for yy in range(y + cab_h, height - 1):
         for x in range(width):
             m = _mix(x // 2, yy, 2511)
             if m % 7 == 0:
                 ch[yy][x] = "*+o~^"[(m >> 4) % 5]
                 co[yy][x] = NEON[(m >> 8) % n][1]
     # Two kids at the machines, from behind, and one of them is winning.
-    for k in (0, count - 1) if count > 1 else (0,):
-        px = left + k * (CAB_W + 2) + CAB_W // 2 - 2
+    for m_ in (0, count - 1) if count > 1 else (0,):
+        px = left + m_ * (cab_w + 2) + cab_w // 2 - 2
         for r, line in enumerate((" ,-. ", "(   )", "/|#|\\", " | | ")):
-            yy = y + CAB_H - 4 + r
+            yy = y + cab_h - 4 + r
             for dx, c in enumerate(line):         # solid: nothing shows through
                 if yy < height - 1 and 0 <= px + dx < width:
                     ch[yy][px + dx], co[yy][px + dx] = c, CURB
-        if k == 0 and int(now * 4) % 2:
-            _text(ch, co, y + CAB_H - 5, px + 5, "!", FLASH)
+        if m_ == 0 and int(now * 4) % 2:
+            _text(ch, co, y + cab_h - 5, px + 5, "!", FLASH)
     _text(ch, co, height - 1, max(1, width // 2 - 10), "-- the way out (s) --",
           GOLD_DIM)
     return ch, co
@@ -16170,16 +16239,75 @@ GAMES = {g.name: g for g in (RooftopRun, FixTheNeon, LateDelivery, NeonDrift,
                              SkyShow, NightOwl)}
 
 
-def arcade_order(arc, width):
-    """The cabinets in the row, as many as the window has room for."""
-    count = max(1, min(len(ARCADE_GAMES), (width - 2) // (CAB_W + 2)))
+def arcade_order(arc, width, height=0):
+    """The cabinets in the row, as many as the window has room for - at the
+    big screens' scale, when it is given the height to work that out."""
+    cab_w = cab_size(big_scale(width, height) if height else 1)[0]
+    count = max(1, min(len(ARCADE_GAMES), (width - 2) // (cab_w + 2)))
     return [ARCADE_GAMES[(arc["seed"] + k) % len(ARCADE_GAMES)] for k in range(count)]
+
+
+def game_size(k):
+    """(columns, rows) the game's screen needs at scale k."""
+    sy = k - 1
+    return GAME_W * k + 4, 5 * sy + 2 + GAME_H * k + 2 + 5 * sy + 3
+
+
+def render_game_big(game, hi, width, height, now, k):
+    """Playing one, big: the playfield k times over, every cell a block - the
+    way an arcade game gets bigger - its name over it and the score under it
+    in block letters, GAME OVER across it in block letters too."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    sy = k - 1
+    pw, ph = GAME_W * k, GAME_H * k
+    tall = game_size(k)[1]
+    x0 = (width - pw) // 2
+    top = max(1, (height - tall) // 2)
+    nw = blocks_width(game.name, sy)
+    for i, c in enumerate(game.name):             # the name, a colour a letter
+        _blocks(ch, co, top, (width - nw) // 2 + i * 4 * sy, c,
+                NEON[(i + len(game.name)) % len(NEON)][0], sy, sy)
+    y0 = top + 5 * sy + 2
+    _text(ch, co, y0 - 1, x0 - 1, "." + "-" * pw + ".", GOLD_DIM)
+    _text(ch, co, y0 + ph, x0 - 1, "'" + "-" * pw + "'", GOLD_DIM)
+    for y in range(ph):
+        _text(ch, co, y0 + y, x0 - 1, "|", GOLD_DIM)
+        _text(ch, co, y0 + y, x0 + pw, "|", GOLD_DIM)
+    g, c = game.draw(now)
+    _blow_up(ch, co, x0, y0, g, c, k)
+    yb = y0 + ph + 2
+    score = "SCORE %d  HI %d" % (game.score, max(hi, game.score))
+    if blocks_width(score, sy) <= width - 2:
+        _blocks(ch, co, yb, (width - blocks_width(score, sy)) // 2, score, GOLD, sy, sy)
+        yb += 5 * sy + 1
+    else:
+        _text(ch, co, yb, (width - len(score)) // 2, score, GOLD)
+        yb += 1
+    hint = (game.status() + "   " if game.status() else "") + (
+        "p plays again  x leaves" if game.over else game.controls + "   x leaves")
+    _text(ch, co, yb, (width - len(hint)) // 2, hint, GOLD_DIM)
+    if game.over:
+        # GAME OVER across the middle of the playfield, on a cleared band.
+        gw = blocks_width("GAME OVER", sy)
+        gy = y0 + (ph - 5 * sy) // 2 - 1
+        for y in range(gy - 1, gy + 5 * sy + 3):
+            for x in range(max(x0, (width - gw) // 2 - 2),
+                           min(x0 + pw, (width + gw) // 2 + 3)):
+                ch[y][x], co[y][x] = " ", 0
+        _blocks(ch, co, gy, (width - gw) // 2, "GAME OVER",
+                FLASH if int(now * 3) % 2 else GOLD, sy, sy)
+        _text(ch, co, gy + 5 * sy + 1, (width - len(game.why)) // 2, game.why, GOLD_DIM)
+    return ch, co
 
 
 def render_game(game, hi, width, height, now):
     """Playing one: the cabinet's screen filling the window - the game's name
     lit along the top, the playfield in the bezel, the score and the high
     score under it, and GAME OVER over it when it is."""
+    k = big_scale(width, height)
+    if k > 1 and game_size(k)[0] <= width and game_size(k)[1] <= height:
+        return render_game_big(game, hi, width, height, now, k)
     ch = [[" "] * width for _ in range(height)]
     co = [[0] * width for _ in range(height)]
     if width < GAME_W + 4 or height < GAME_H + 6:
@@ -19727,10 +19855,10 @@ def main(stdscr):
                     said_[-1] += " " + word_
                 oracle["said"] = said_[-20:]
                 oracle["at"], oracle["sung"] = now, word_
-            elif wheel is not None and key in (ord("z"), ord("Z")):
-                _casino_big[0] = not _casino_big[0]     # the big room, off and on
-                note, note_at = ("the big casino " + ("on" if _casino_big[0]
-                                                      else "off")), now
+            elif (wheel is not None or at_arcade) and key in (ord("z"), ord("Z")):
+                _big_screens[0] = not _big_screens[0]     # big screens, off and on
+                note, note_at = ("big screens " + ("on" if _big_screens[0]
+                                                   else "off")), now
             elif wheel is not None and key in (ord("o"), ord("O")):
                 at_plinko, at_races, at_flyer = not at_plinko, False, False
             elif wheel is not None and key in (ord("r"), ord("R")):
@@ -19816,8 +19944,9 @@ def main(stdscr):
                                        ord("d")):
                 play["sel"] += -1 if key in (curses.KEY_LEFT, ord("a")) else 1
             elif at_arcade and key in (ord("p"), ord("P")):
-                name = arcade_order(play["arc"], stdscr.getmaxyx()[1])[
-                    play["sel"] % len(arcade_order(play["arc"], stdscr.getmaxyx()[1]))]
+                order_ = arcade_order(play["arc"], stdscr.getmaxyx()[1],
+                                      stdscr.getmaxyx()[0])
+                name = order_[play["sel"] % len(order_)]
                 if wallet.take(ARCADE_COST):
                     play["game"] = GAMES[name](_spin_rng.randrange(1 << 30), now)
                 else:
