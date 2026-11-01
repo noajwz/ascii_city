@@ -46,12 +46,28 @@ lighthouse door the same. Slow to a walk or stop at a door and in you go, as bef
 through a pty along the pavement past a casino door: walking takes you in, hurrying and running do
 not.
 
-`wander()`, behind the spacebar, blends every direction it probes by score instead of picking the
-best one. Picking the winner outright makes the walk twitch, because the winner changes from one
-frame to the next: measured over eighty seconds that was 395 hard snaps, some of them a full
-3.8-radian flip. Blending gives a heading that moves continuously and sits between two equally good
-options rather than flapping between them; `main()` then eases towards it and slows down through
-the turn, which takes the frame-to-frame change from 0.28 rad to 0.01.
+**The autopilot** (spacebar, `auto_step()`) holds a heading **in the world** and eases onto it,
+slowing through the corner. It used to be `wander()`, which blended every direction it probed by
+score *relative to your nose*, plus a slow sine bias stronger than its pull to go straight: for
+half a minute at a time the bias leaned the same way, so it walked circles — about 4 to 5
+radians of turning every hundred units. Now `auto_heading()` picks a heading in eighths of a
+turn from the old one (so on a grid street it is the street, and in the woods or on a lawn the
+diagonal can go between the trees), only when the way ahead closes within 9 units or the last
+step got nowhere. At a junction with 35 units open to one side it sometimes takes it
+(`AUTO_TURN_ODDS`, at least `AUTO_TURN_GAP` s apart) and **never the same way twice running** —
+right, right, right, right is once round the block. It also drops a crumb every two seconds
+(`trail`, the last eighty seconds) and a heading leading back to one scores 30 worse: without it,
+it went round the quad for ever, the same four turns, because the same walls gave the same
+answers each time. Junction choices hash `int(now / 7)`, not the frame. Measured on a headless
+three-minute walk from five starts: turning down to 0.9–2.4 rad per hundred units, and two to
+five times as far from where it started. The check in `tests/checks.py` (`walk_auto()`) is
+that same walk.
+
+**Turning by key** goes through `turn_rate()`: a tap turns at `TURN_TAP` of `TURN`, holding
+ramps to `TURN_HELD` over `TURN_RAMP` s, and `main()` eases `spin` to it (`TURN_EASE`) rather than
+snapping. A fresh press holds for `TURN_FIRST` (0.32 s), not `KEY_GRACE`: the keyboard waits about
+that long before it repeats a held key, and with the 0.15 s grace a held arrow turned, stopped,
+then turned again — which is what made aiming hard.
 
 Nothing about the city is stored. The skyline is cut into chunks seeded by name
 (`f"city|{layer}|{i}"`); the street's every question is answered by a hash of the cell's own
