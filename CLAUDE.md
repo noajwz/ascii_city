@@ -1138,6 +1138,30 @@ imported; a fix there does not reach here without copying it over again. `q` qui
 `x` steps you back out the way you came, facing the street. `,` in the menu stands you across
 the street from the nearest one. The fifth menu column is AND THE REST now.
 
+## The casino, big
+
+Zoomed out, a window can be three hundred columns across, and the casino was drawn for a third of
+that: the wheel stopped growing at 42 columns by 10 rows, and the slot machine and the blackjack
+table are fixed drawings, so on a big window it was an island in the middle. `casino_scale()`
+gives a scale of 2 on a window with room for two rooms (`CASINO_W` by `CASINO_H`, 150 by 44 —
+so 300 by 88) and 3 on one with room for three; anything smaller is scale 1, and **at scale 1 the
+room is exactly what it was** — checked frame for frame against the old code at five sizes up to
+299 by 87.
+
+At scale 2 or 3 `render_casino_room()` draws the banner in block letters (`_blocks()`, the 3x5
+`BIG_FONT` plus `CASINO_FONT` for `$ @ * & %` and the suits), lets the wheel grow into the room —
+with a rim and an inner cone (`RIM`) so a wheel that size reads as a wheel and not a ring of
+numbers, and a little taller than the small one's flatness, or a tall window's bottom third was
+empty — and puts the winning number and FAITES VOS JEUX in block letters. The machine and the
+table are drawn again by `draw_slot_big()` and `draw_blackjack_big()` (`slot_size()`,
+`table_size()` give their footprints, which the room's layout uses in place of `SLOT_W` and the
+table's 40): the payline's three symbols big in their own windows with the rows above and below
+small, the cards with their ranks in block letters and the suit in two corners, the money, the
+win and the outcome in block letters. **Ordinary text stays small** — the paytable, the keys,
+"dealer" — because a terminal cannot draw a letter bigger than its font, and a sentence in block
+letters is four columns a letter. Plinko, the races and High Flyer are not scaled yet. `z` in the
+casino turns the big room off and on (`_casino_big`), for comparing the two on one window.
+
 ## People walking
 
 The streets used to be empty but for smokers and queues. `near_walkers()` puts a **lane down each

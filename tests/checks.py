@@ -5090,6 +5090,49 @@ check("and there it is: jets over the water", show_.count("|") > quiet_.count("|
                                                                     quiet_.count("|")))
 ac._fountain_shift[0] = 0.0
 
+# --- the casino, big, on a big window ------------------------------------------------
+check("the casino grows only on a window with room for two of it, or three",
+      [ac.casino_scale(w_, h_) for w_, h_ in ((100, 30), (213, 57), (299, 87),
+                                              (300, 88), (449, 131), (450, 132),
+                                              (900, 300))] == [1, 1, 1, 2, 2, 3, 3])
+cw_ = ac.Wallet()
+ac._spin_rng.seed(5)
+csp = ac.Spin(0.0, "GOLDEN PALM")
+cslot = ac.Slot(cw_)
+cslot.pull(0.0)
+cbj = ac.Blackjack(cw_)
+cbj.deal(0.0)
+csmall = ac.render_casino_room(csp, 120, 36, 9.0, cslot, cbj)[0]
+cbig = ac.render_casino_room(csp, 300, 90, 9.0, cslot, cbj)[0]
+ctx_s = "\n".join("".join(r) for r in csmall)
+ctx_b = "\n".join("".join(r) for r in cbig)
+sw_, sh_ = ac.slot_size(2)
+slot_box = [cbig[y_][300 - sw_ - 1:299] for y_ in range(len(cbig))
+            if "".join(cbig[y_][300 - sw_ - 1:299]).startswith(("|", ".", "'", ">"))]
+check("big: the banner, the money and the winning number in block letters, the "
+      "cards and the reels in their own boxes; small, just as it was",
+      "CASINO  GOLDEN PALM" in ctx_s and "CASINO  GOLDEN PALM" not in ctx_b
+      and ctx_b.count("#") > 400 and ctx_b.count(".-----------.") >= 3
+      and ctx_b.count(".--------.") >= 3 and ctx_s.count("#") < ctx_b.count("#") / 4)
+check("and the big wheel's rim stays out of the slot machine",
+      len(slot_box) > 10 and not any(":" in "".join(r_) for r_ in slot_box))
+ac._casino_big[0] = False
+coff = "\n".join("".join(r) for r in ac.render_casino_room(csp, 300, 90, 9.0, cslot,
+                                                            cbj)[0])
+ac._casino_big[0] = True
+check("z turns it off: the room as it always was, however big the window",
+      "CASINO  GOLDEN PALM" in coff and ac.casino_scale(300, 90) == 2)
+crc = ac.Races(cw_)
+crc.update(9.0)
+cfl = ac.Flyer(cw_)
+cfl.update(9.0)
+cdraws = 0
+for w_, h_ in ((300, 88), (333, 101), (450, 132), (521, 160)):
+    for kw_ in ({}, {"plinko": ac.Plinko(cw_)}, {"races": crc}, {"flyer": cfl}):
+        ac.render_casino_room(csp, w_, h_, 9.0, cslot, cbj, **kw_)
+        cdraws += 1
+check("every game in the room draws on every big window", cdraws == 16)
+
 # --- the Pokemon Center -------------------------------------------------------------
 pcs = list(ac.near_centers(x0, z0, 1500.0))
 check("a few Pokemon Centers about town, solid, on a street, out of the parks and "

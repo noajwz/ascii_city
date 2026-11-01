@@ -244,6 +244,17 @@ def cases(run, report):
     ok &= report("the metro: down and straight back up", *run(
         [(b"`", .5), (b"-", 1.5), (b"e", 1.0), (b"w", .4), (b"x", .8), (b"w", .5)],
         cols=80, rows=24))
+    # A zoomed-out window: the room in block letters, and z gives back the
+    # small one - its banner in plain letters - and z again the big.
+    big_st, big_out = run([(b"`", .5), (b"c", 1.0)] + IN
+                          + [(b"p", 2.0), (b"b", 1.0), (b"z", .8), (b"z", .8),
+                             (b"s", .6), (b"s", .6)], cols=300, rows=90)
+    ok &= report("the big casino on a big window: spin, pull, deal, z off and on",
+                 big_st, big_out)
+    big_txt = ANSI.sub(b"", big_out).decode("utf-8", "replace")
+    seen = big_txt.count("#") > 500 and bool(re.search(r"CASINO  [A-Z]", big_txt))
+    print("%-34s %s" % ("  and z gave the small room back", "ok" if seen else "FAIL"))
+    ok &= seen
     ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)],
                                      cols=100, rows=30))
     return ok
