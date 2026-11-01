@@ -4942,7 +4942,9 @@ sth = [ac.strip_home(ti * ac.WOODS_TILE, tj * ac.WOODS_TILE)
        for ti in range(-2, 3) for tj in range(-2, 3)]
 check("a Strip in every tile, clear of the woods, the river and the other zones",
       all(ac.district(*h_) is ac.STRIP for h_ in sth) and not any(
-          ac.woods_at(h_[0] + di, h_[1] + dj) or ac.water_at(h_[0] + di, h_[1] + dj)
+          ac.woods_at(h_[0] + di, h_[1] + dj)
+          or (ac.water_at(h_[0] + di, h_[1] + dj)
+              and not ac.strip_lake(h_[0] + di, h_[1] + dj))
           or ac.industrial_at(h_[0] + di, h_[1] + dj)
           or ac.suburb_at(h_[0] + di, h_[1] + dj)
           for h_ in sth for di in range(-6, 6) for dj in range(-60, 61, 3)))
@@ -5021,6 +5023,43 @@ check("the menu stands you at the end of the runway, and one comes in at you",
       and "@" in coming)
 check("the HUD hears it", ac.airport_hint(asp[0], asp[1], ac.APT_CYCLE * 10 + 6.0)
       == "  ~ a plane coming in to land ~")
+
+# --- the fountain show ---------------------------------------------------------------
+fj0, fj1, fi0, fi1 = ac.fountain_rows(shi2, shj2)
+lake_ = [(i, j) for i in range(fi0, fi1 + 1) for j in range(fj0, fj1 + 1)
+         if not ac._is_road(j, ac.ZP, 137)]
+check("a lake on the Strip in front of one hotel, water you cannot walk on",
+      len(lake_) >= 10 and all(ac.water_at(i, j) and ac.is_open(i, j)
+                               and not ac.dry_at((i + .5) * ac.CELL, (j + .5) * ac.CELL)
+                               for i, j in lake_)
+      and ac.strip_road(fi0 - 1, (fj0 + fj1) // 2))
+shows_ = sum(ac.fountain_time(t_ * 0.5) is not None
+             for t_ in range(int(ac.FOUNTAIN_PERIOD * 2)))
+check("a show every couple of minutes", 0.2 < shows_ / (ac.FOUNTAIN_PERIOD * 2) < 0.5)
+hs_ = {ph_: [ac.fountain_heights(t_, k, 0, 20)[0] for k in range(20)]
+       for ph_, t_ in (("rise", 8.0), ("wave", 14.0), ("chase", 30.0),
+                       ("shoot", 34.05))}
+check("the jets rise together, then wave, then chase, then the shooters go up",
+      max(hs_["rise"]) - min(hs_["rise"]) < 0.01
+      and max(hs_["wave"]) - min(hs_["wave"]) > 5
+      and sorted(hs_["chase"])[-1] > 15 and sorted(hs_["chase"])[0] < 3
+      and max(hs_["shoot"]) > 40)
+check("and the rows sweep against each other",
+      ac.fountain_heights(20.0, 3, 0, 20)[1]
+      == -ac.fountain_heights(20.0, 3, 1, 20)[1] != 0)
+ac._clock[0] = 5000.0
+fsp2 = ac.find_place(x0, z0, "fountain")
+fv2 = ac.View(fsp2[0], fsp2[1], fsp2[2], 100, 30)
+quiet_ = "\n".join("".join(r) for r in ac.render_street(fv2, 5000.0)[0])
+show_ = "\n".join("".join(r) for r in ac.render_street(fv2, 5014.0)[0])
+check("the menu stands you across the boulevard from it as a show starts",
+      ac.fountain_time(5000.0) is None and ac.fountain_time(5004.0) is not None
+      and ac.fountain_hint(fsp2[0], fsp2[1], 5014.0)
+      == "  ~ the fountains are dancing ~")
+check("and there it is: jets over the water", show_.count("|") > quiet_.count("|") + 100
+      and show_.count("*") > quiet_.count("*"), "%d | against %d" % (show_.count("|"),
+                                                                    quiet_.count("|")))
+ac._fountain_shift[0] = 0.0
 
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()

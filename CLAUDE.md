@@ -946,6 +946,19 @@ from below, and **fountains**: a pool with a row of jets rising and falling in a
 now and then, headlights coming and tail lights going, never through you. `:` in the menu stands
 you at one end in the middle of the boulevard, looking up it.
 
+**The fountain show.** In front of the hotel at the middle of the east side, its first two cells
+are a lake (`strip_lake()`, `fountain_rows()`) — in `water_at()`, so it is water the way the
+river is: open to see across, not to stand on, and the ground pass and the reflection lay the
+hotel and the show on it with nothing told. Every `FOUNTAIN_PERIOD` seconds, for
+`FOUNTAIN_LEN`, `draw_fountains()` puts two rows of jets up out of it, lit blue from below, white
+up the column, spray at the top, and `fountain_heights()` is the choreography: the lights coming
+up, the jets rising together, a wave running down the lake, the rows sweeping side to side
+against each other, a chase, the shooters going up forty units on the beat with mist hanging
+after them, the finale, and down. Points are spaced by distance, the chimney's lesson. The HUD
+says when it is on and when it is about to be. `(` in the menu stands you across the boulevard
+facing it and shifts the show (`_fountain_shift`) to start in three seconds, the way the rave is
+started when you ask for it.
+
 ## The airport
 
 Beside every Strip, on the Strip's own hash so it is always the same distance off its side
@@ -964,9 +977,12 @@ out to them.
 **Planes on a timetable** (`plane_states()`, a function of time on `APT_CYCLE`): one comes in
 from the north down the glide slope, landing lights blazing, touches down, brakes and turns off
 for the gates; half a cycle on, another lines up, rolls, rotates and climbs away south.
-`draw_plane()` is world points at `PLANE_SCALE`: fuselage with its windows lit, wings, engines,
-fin and tailplane, red and green on the wingtips, the strobe and the beacon, the landing lights
-at the nose. The HUD hears them.
+`draw_plane()` is world points at `PLANE_SCALE`: fuselage white with its windows lit, wings,
+engines, fin and tailplane, red and green on the wingtips, the strobe and the beacon, the
+landing lights at the nose and the beam they throw ahead and down. While one is on the ground
+**the next is already out there**, high, coming in to join the approach — lights only past 700
+units, which is all you would see of one. It came in low at first and was behind the far city's
+towers the whole way; up there it is a light in the sky the whole cycle. The HUD hears them.
 
 **Where to watch from was the work.** Side on, a hundred units off, a landing was a few
 characters at the horizon, and from sixty it was off either edge of the view. So `'` in the menu
