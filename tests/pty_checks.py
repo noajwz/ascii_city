@@ -255,6 +255,11 @@ def cases(run, report):
     seen = big_txt.count("#") > 500 and bool(re.search(r"CASINO  [A-Z]", big_txt))
     print("%-34s %s" % ("  and z gave the small room back", "ok" if seen else "FAIL"))
     ok &= seen
+    ok &= report("the big casino's games: plinko, the races, high flyer, and back",
+                 *run([(b"`", .5), (b"c", 1.0)] + IN
+                      + [(b"o", .8), (b"p", 3.0), (b"o", .5), (b"r", .8), (b"1", .5),
+                         (b"r", .5), (b"f", .8), (b"p", 2.5), (b"f", .5), (b"s", .6),
+                         (b"s", .6)], cols=300, rows=90))
     ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)],
                                      cols=100, rows=30))
     return ok

@@ -34,7 +34,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
 - **Places you can go into** — a casino (a blade sign up the corner, a red carpet and a doorman,
   and the whole building in gold when somebody hits 777) with a roulette wheel that spins
   honestly, a slot machine, a blackjack table that deals straight and a
-  plinko machine with up to 1000x on its outside edges, horse races to bet on, a High Flyer crash game, on a big window the casino drawn big, in block letters (`z` toggles), a club
+  plinko machine with up to 1000x on its outside edges, horse races to bet on, a High Flyer crash game, on a big window the casino and its games drawn big, in block letters (`z`
+  toggles), a club
   with a rave going
   on, a temple with stained glass and a rose window, where a terminal on the altar
   gives you the word of God the way TempleOS did and a priest in the confession
