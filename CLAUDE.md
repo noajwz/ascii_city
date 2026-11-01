@@ -1018,6 +1018,17 @@ camera's vertical focal length is bigger than it looks — 27.5 at 30 rows), so 
 the quad eleven cells deep. On the hour the HUD has it striking (`clock_hint()`). `{` in the menu
 stands you at the south end of the quad looking at it.
 
+**The library's doors** are open, lit, in the middle of its quad side (`library_door()`, the
+cell with `libdoor`), and walking in — a venue in `venue_at()`, so the hurry rule applies — runs
+**`../TUI/wiki_tui.py`**, the Wikipedia reader from the TUI repo beside this one (`LIBRARY_APP`).
+`read_in_library()` hands it the terminal (`def_prog_mode` / `endwin`, a plain `subprocess.run`
+with the same Python), then takes it back (`reset_prog_mode`, `flushinp` so keys typed there do not
+walk you, nodelay and keypad again) and puts you three steps out on the quad facing away, or the
+doorway would take you straight back in. Without the TUI checkout next to this one the library
+is just shut, with a note. The reader opens on its search prompt, so to quit it from a test it is
+Esc, then q; and it is the city's `q` the pty harness sends last and then `waitpid`s on, so a
+test that leaves you inside the reader hangs. `"` in the menu stands you in front of the doors.
+
 **The menu has a fifth column** now, CAMPUS & METRO (`CHEAT_MORE`): drawn when the window is wide
 enough for five, and on an 80-column one Tab inside the panel flips the fourth column to it and
 back (`_panel_page`). Every key works whichever page is showing.

@@ -22,8 +22,11 @@ On Windows:  pip install windows-curses
 
 import curses
 import math
+import os
 import random
 import re
+import subprocess
+import sys
 import time
 import unicodedata
 
@@ -2035,6 +2038,39 @@ def campus_solid(i, j):
             or (i == ci - QUAD_HI - 1 and abs(j - cj) <= QUAD_HJ))
 
 
+# What is in the library: the Wikipedia reader from the TUI repo next door,
+# run in the whole terminal, the city waiting for you to come out.
+LIBRARY_APP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "TUI",
+                           "wiki_tui.py")
+
+
+def library_door(i, j):
+    """The library's door: in the middle of its long side, onto the quad."""
+    ci, cj = zone_home("university", i, j)
+    x, _, z = face_point(ci - QUAD_HI - 1, cj, 1, CELL * 0.5, 1.4, 0.0)
+    return x, z
+
+
+def read_in_library(stdscr):
+    """Hand the terminal to the Wikipedia reader and take it back after.
+    Returns what to say on the way out."""
+    if not os.path.isfile(LIBRARY_APP):
+        return "the library is shut (no %s)" % os.path.normpath(LIBRARY_APP)
+    curses.def_prog_mode()
+    curses.endwin()
+    try:
+        subprocess.run([sys.executable, LIBRARY_APP])
+    except (OSError, KeyboardInterrupt):
+        pass
+    curses.reset_prog_mode()
+    curses.flushinp()               # what you typed in there stays in there
+    curses.curs_set(0)
+    stdscr.nodelay(True)
+    stdscr.keypad(True)
+    stdscr.clear()
+    return "back on the quad"
+
+
 def clock_tower(i, j):
     """(i, j) of the clock tower of the university this cell is in: on the
     north side of the quad, in the middle."""
@@ -2968,6 +3004,7 @@ def lot(i, j):
             elif i == ci_ - QUAD_HI - 1 and abs(j - cj_) <= QUAD_HJ:
                 b["height"] = 14.0
                 b["campus"] = "library"
+                b["libdoor"] = j == cj_
             else:
                 b["campus"] = "hall"
         if d is AIRPORT:
@@ -5466,6 +5503,11 @@ def draw_campus_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
             elif (y + sx) % 5 == 0:
                 ch[y][sx], co[y][sx] = ".", brick
             continue
+        if b.get("libdoor") and face == 1 and abs(u - CELL * 0.5) < 1.0 and h < 2.8:
+            side_ = abs(u - CELL * 0.5) > 0.7 or h > 2.5
+            ch[y][sx] = "|" if side_ else ("#" if (y + sx) % 2 else ":")
+            co[y][sx] = BARK if side_ else GOLD           # the doors, open, lit
+            continue
         window = 0.3 < frac < 0.7 and 0.5 < in_floor < 1.9 and h > 1.0
         ivy = ivy_bay and h < 2.0 + 6.0 * (_mix(sx, 0, 4013) % 100) / 100.0
         if ivy and _mix(sx, y, 4015) % 3:
@@ -5583,6 +5625,9 @@ def clock_hint(x, z):
         return "  ~ the clock strikes %s ~" % ["one", "two", "three", "four", "five",
                                                "six", "seven", "eight", "nine", "ten",
                                                "eleven", "twelve"][n - 1]
+    lx, lz = library_door(ci, cj)
+    if (lx - x) ** 2 + (lz - z) ** 2 < 12.0 ** 2:
+        return "  ~ the library: walk in and read ~"
     if university_at(ci, cj):
         return "  ~ the university, late ~"
     return ""
@@ -13881,6 +13926,10 @@ def venue_at(x, z):
             if (ux - x) ** 2 + (uz - z) ** 2 < CASINO_REACH ** 2:
                 return kind, {"i": egg[0], "j": egg[1], "f": egg[2],
                               "seed": _mix(egg[0], egg[1], 3831)}
+    if zone_depth("university", ci, cj) > -2.0:
+        lx, lz = library_door(ci, cj)
+        if (lx - x) ** 2 + (lz - z) ** 2 < CASINO_REACH ** 2:
+            return "library", {"i": int(lx // CELL), "j": int(lz // CELL)}
     c = carnival_over(ci)
     if c is not None:                           # the claw machine, on the fair
         bx, bz = claw_spot(c)
@@ -15331,6 +15380,7 @@ CHEAT_PLACES = [
     ("(", "fountain show", "fountain"),
     ("{", "the university", "university"),
     ("-", "a metro station", "metro"),
+    ('"', "the library", "library"),
     (";", "lemonade, 3am", "lemonade"),
     ("?", "the stargazer", "telescope"),
     ("r", "ramen", "ramen"),
@@ -16296,6 +16346,13 @@ def find_place(x, z, kind):
         return _fountain_spot(x, z)
     if kind == "university":
         return _university_spot(x, z)
+    if kind == "library":
+        sp = _university_spot(x, z)
+        if sp is None:
+            return None
+        ci, cj = int(sp[0] / CELL + BIG) - BIG, int(sp[1] / CELL + BIG) - BIG
+        lx, lz = library_door(ci, cj)
+        return lx + 5.0, lz, -math.pi / 2            # facing its open doors
     if kind == "metro":
         for st in sorted(near_stations(x, z, 900.0),
                          key=lambda s_: (s_["x"] - x) ** 2 + (s_["z"] - z) ** 2):
@@ -16353,7 +16410,7 @@ def find_place(x, z, kind):
     return None
 
 
-CHEAT_MORE = ["university", "metro"]     # the fifth column
+CHEAT_MORE = ["university", "library", "metro"]     # the fifth column
 _panel_page = [0]       # which page an 80-column panel is showing
 
 
@@ -18779,6 +18836,15 @@ def main(stdscr):
         hurry_ = abs(fwd) > WALK * 1.05 or abs(side) > SIDESTEP * 1.05
         if venue is not None and hurry_ and not same_venue(venue, was_):
             venue = None
+        if venue is not None and venue[0] == "library":
+            note, note_at = read_in_library(stdscr), time.monotonic()
+            # Out of the doors and a few steps onto the quad, facing it, so
+            # the doorway does not take you straight back in.
+            lx_, lz_ = library_door(int(cam_x // CELL), int(cam_z // CELL))
+            cam_x, cam_z, yaw = lx_ + 3.0, lz_, math.pi / 2
+            fwd = side = spin = 0.0
+            venue = None
+            now = _clock[0] = time.monotonic()
         # The sky deck: walking into the lobby is stepping into the lift.
         if lift is not None:
             venue = None
