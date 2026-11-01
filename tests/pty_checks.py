@@ -208,6 +208,25 @@ seen = ("THE READING ROOM" in lib_txt and "wiki_tui" in lib_txt
         and lib_txt.rfind("walk in and read") > lib_txt.rfind("psychonaut_tui"))
 print("%-34s %s" % ("  and both readers came up, and went", "ok" if seen else "FAIL"))
 ok &= seen
+ok &= report("a flight: the gate, a seat, off, doze, land, out", *run(
+    [(b"`", .5), (b".", 1.5)] + [(b"w", .3)] * 6 + [(b"\r", 4.0), (b"\x1bOD", .3),
+     (b"\x1bOC", .3), (b"x", 1.0)] + [(b"", 3.0)] * 9 + [(b"w", .3)],
+    cols=100, rows=30))
+ok &= report("a flight: the gate, and straight back out", *run(
+    [(b"`", .5), (b".", 1.5)] + [(b"w", .3)] * 6 + [(b"x", .8), (b"w", .4)],
+    cols=80, rows=24))
+# Up to walk in, not w; h to heal, c the PC - the type chart, which q quits -
+# then x out, and the street again: its "walk in" hint is back after the PC.
+pc_st, pc_out = run([(b"`", .5), (b",", 1.5)] + [(b"\x1bOA", .25)] * 14
+                    + [(b"h", 4.5), (b"c", 2.5), (b"q", 1.5), (b"x", .8), (b"w", .3)],
+                    cols=100, rows=30)
+ok &= report("the Pokemon Center: in, heal, the PC, q, out", pc_st, pc_out)
+pc_txt = ANSI.sub(b"", pc_out).decode("utf-8", "replace")
+pc_at = max(pc_txt.rfind("Fire"), pc_txt.rfind("Water"))
+seen = ("Nurse Joy" in pc_txt and "hope to see you" in pc_txt and pc_at > 0
+        and pc_txt.rfind("a Pokemon Center: walk in") > pc_at)
+print("%-34s %s" % ("  and she healed, the PC came up", "ok" if seen else "FAIL"))
+ok &= seen
 ok &= report("the metro: down, a ticket, the train, the ride, up", *run(
     [(b"`", .5), (b"-", 1.5), (b"e", 1.0), (b"s", .5), (b"\r", .5)]
     + [(b"", 3.0)] * 15 + [(b"x", .5)], cols=100, rows=30))
