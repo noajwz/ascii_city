@@ -155,16 +155,20 @@ ok &= report("the confession booth: in, type with q and s in it, confess, esc, o
                   + [(b"\x7f", .1), (b"l", .1), (b"\r", 3.0), (b"\x1b", .5), (b"s", .6),
                      (b"s", .6)], cols=100, rows=30))
 ok &= report("a blackout: to the night, the power going, walking in the dark", *run(
-    [(b"`", .5), (b"0", 8.0), (b"w", 1.0), (b"`", .4), (b"c", 1.5)], cols=100, rows=30))
+    [(b"`", .5), (b"&", 8.0), (b"w", 1.0), (b"`", .4), (b"c", 1.5)], cols=100, rows=30))
 ok &= report("a taxi: hail, it pulls up, choose, ride, arrive", *run(
     [(b"t", 3.6), (b"\x1bOB", .3), (b"s", .3), (b"w", .3), (b"\r", 15.0), (b"w", .5)],
     cols=100, rows=30))
 ok &= report("a fog night: to it, walk, a taxi through it", *run(
-    [(b"`", .5), (b"9", 1.0), (b"w", 1.0), (b"W", 1.0), (b"t", 3.6), (b"\r", 8.0)],
+    [(b"`", .5), (b"#", 1.0), (b"w", 1.0), (b"W", 1.0), (b"t", 3.6), (b"\r", 8.0)],
     cols=100, rows=30))
 ok &= report("pace: up to very fast, walk, run into a wall, back down", *run(
     [(b"+", .2)] * 4 + [(b"w", .5), (b"W", .2), (b"W", 1.0)] + [(b"-", .2)] * 3
     + [(b"w", .5)], cols=100, rows=30))
+ok &= report("the factories: the zone, the site, into the rave and out", *run(
+    [(b"`", .5), (b"9", 1.5), (b"W", 1.0), (b"`", .5), (b"]", 1.5), (b"`", .5),
+     (b"[", 1.5)] + [(b"w", .25)] * 14 + [(b"x", 1.0), (b"s", .6), (b"s", .6)],
+    cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

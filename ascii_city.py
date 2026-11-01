@@ -556,11 +556,21 @@ def district_at(i, j):
 
 
 HEADLAND = dict(WOODS, name="the headland", park=False)
+# The factories: low sheds in rust, a ridge of saw-tooth roofs, a few lit
+# windows high up for the night shift, roller doors, bare bulbs over them and
+# somebody on a break outside.
+INDUSTRIAL = dict(key="", name="the factories", weight=0, scale=0.4, lo=5.5, hi=9.5,
+                  dens=(0.03, 0.12), flat=0.0, hung=0.0, smoke=0.35, bulb=0.7,
+                  neon=None, lantern=0.0, park=False,
+                  glyphs="#=", band="-", mullion=False, ground="#", gap=7,
+                  pal="rust", roof="=", whole_floors=False, cjk=False)
 
 
 def district(i, j):
     if woods_at(i, j):
         return WOODS
+    if industrial_at(i, j):
+        return INDUSTRIAL
     if headland_at(i, j):
         return HEADLAND
     return DISTRICTS[district_at(i, j)]
@@ -1904,6 +1914,107 @@ def woods_at(i, j):
     return woods_depth(i, j) > 0.0
 
 
+# Two more parts of town that are placed rather than picked, the way the woods
+# are: one of each in every WOODS_TILE square, the factories between the river
+# and the woods and the suburbs beyond the woods, so nothing that was already
+# in the city moves. Each is a rough rectangle whose edges wander.
+ZONES = {
+    "industrial": dict(salt=3701, off_i=240, off_j=118, half_i=28, half_j=16),
+    "suburbs": dict(salt=3801, off_i=240, off_j=370, half_i=40, half_j=24),
+}
+_zone_cache = {}
+
+
+def zone_home(kind, i, j):
+    """Centre (ci, cj) of this kind of zone in the tile this cell is in."""
+    z = ZONES[kind]
+    ti, tj = i // WOODS_TILE, j // WOODS_TILE
+    m = _mix(ti, tj, z["salt"])
+    return (ti * WOODS_TILE + z["off_i"] + (m & 31) - 16,
+            tj * WOODS_TILE + z["off_j"] + ((m >> 5) & 7) - 4)
+
+
+def zone_depth(kind, i, j):
+    """How far inside the zone this cell is, in cells; negative outside."""
+    key = (kind, i, j)
+    hit = _zone_cache.get(key)
+    if hit is None:
+        _evict(_zone_cache, 80000)
+        z = ZONES[kind]
+        ci, cj = zone_home(kind, i, j)
+        di, dj = i - ci, j - cj
+        ei = z["half_i"] + 2.0 * math.sin(dj / 7.0 + ci)
+        ej = z["half_j"] + 1.5 * math.sin(di / 9.0 + cj)
+        hit = min(ei - abs(di), ej - abs(dj))
+        _zone_cache[key] = hit
+    return hit
+
+
+def industrial_at(i, j):
+    return zone_depth("industrial", i, j) > 0.0
+
+
+_site_cache = {}
+
+
+def zone_site(ci, cj):
+    """The construction site in the factories round (ci, cj): three cells by
+    two, none of them a road, near the middle. (i0, j0, i1, j1), inclusive."""
+    hit = _site_cache.get((ci, cj))
+    if hit is None:
+        hit = (ci, cj, ci + 2, cj + 1)
+        for r in range(0, 12):
+            found = None
+            for di in range(-r, r + 1):
+                for dj in (-r, r) if abs(di) != r else range(-r, r + 1):
+                    i0, j0 = ci + 4 + di, cj - 2 + dj
+                    if all(not road_at(a, b) and not water_at(a, b)
+                           for a in range(i0, i0 + 3) for b in range(j0, j0 + 2)):
+                        found = (i0, j0, i0 + 2, j0 + 1)
+                        break
+                if found:
+                    break
+            if found:
+                hit = found
+                break
+        _site_cache[(ci, cj)] = hit
+    return hit
+
+
+def site_at(i, j):
+    if not industrial_at(i, j):
+        return False
+    i0, j0, i1, j1 = zone_site(*zone_home("industrial", i, j))
+    return i0 <= i <= i1 and j0 <= j <= j1
+
+
+_warehouse_cache = {}
+
+
+def zone_warehouse(ci, cj):
+    """The old factory with the rave in it: a building beside the site with a
+    street front. (i, j, face)."""
+    hit = _warehouse_cache.get((ci, cj))
+    if hit is None:
+        i0, j0, i1, j1 = zone_site(ci, cj)
+        hit = None
+        for r in range(1, 10):
+            for i in range(i0 - r, i1 + r + 1):
+                for j in (j0 - r, j1 + r):
+                    if (not is_open(i, j) and not road_at(i, j)
+                            and not (i0 <= i <= i1 and j0 <= j <= j1)):
+                        f = _road_face(i, j, 3)
+                        if f is not None:
+                            hit = (i, j, f)
+                            break
+                if hit:
+                    break
+            if hit:
+                break
+        _warehouse_cache[(ci, cj)] = hit
+    return hit
+
+
 def hollow_centre(ci, cj):
     """The hollow is near the middle of the woods, never exactly at it."""
     m = _mix(ci, cj, 1207)
@@ -2119,7 +2230,8 @@ def landmark_of(ti, tj):
         ci = ti * LANDMARK_TILE + 40 + m % (LANDMARK_TILE - 80)
         cj = tj * LANDMARK_TILE + 40 + (m >> 12) % (LANDMARK_TILE - 80)
         if (abs(cj - river_centre(ci)) < 70 or _is_road(ci, XP, 91)
-                or _is_road(cj, ZP, 137)):
+                or _is_road(cj, ZP, 137)
+                or any(zone_depth(k_, ci, cj) > -14 for k_ in ZONES)):
             continue
         i_lo, i_hi, j_lo, j_hi = ci, ci, cj, cj
         while not _is_road(i_lo - 1, XP, 91) and ci - i_lo < 20:
@@ -2190,8 +2302,8 @@ def is_open(i, j):
         elif landmark_at(i, j) is not None:
             hit = False         # the landmark: solid, a whole block of it
         elif (fair_at(i, j) or headland_at(i, j) or prom_at(i, j)
-              or car_park_at(i, j)):
-            hit = True          # fairground, headland, promenade: nothing built
+              or car_park_at(i, j) or site_at(i, j)):
+            hit = True          # fairground, headland, promenade, a building site
         elif woods_at(i, j):
             # Trails, the hollow, and otherwise trees thick enough that the
             # open cells do not join up: off a trail you get a few cells in and
@@ -2458,8 +2570,14 @@ def lot(i, j):
         # and be invisible.
         b["club"] = b["casino"] = b["tower"] = b["cinema"] = None
         b["diner"] = b["billboard"] = b["arcade"] = b["exchange"] = None
-        b["temple"] = None
-        if d["park"]:
+        b["temple"] = b["warehouse"] = None
+        if d is INDUSTRIAL:
+            wh = zone_warehouse(*zone_home("industrial", i, j))
+            if wh is not None and (i, j) == wh[:2]:
+                b["height"] = 11.0
+                b["warehouse"] = {"door": wh[2], "u": CELL * 0.5, "i": i, "j": j,
+                                  "height": 11.0, "seed": _mix(i, j, 3721) % 9973}
+        if d["park"] or b["warehouse"] is not None:
             pass
         elif _mix(i, j, 909) % CLUB_ODDS == 0:
             b["height"] = rng.uniform(7.5, 12.0)      # squat, windowless
@@ -2551,7 +2669,7 @@ def lot(i, j):
         if (b["club"] is None and b["casino"] is None and b["tower"] is None
                 and b["cinema"] is None and b["diner"] is None
                 and b["arcade"] is None and b["exchange"] is None and not d["park"]
-                and b["temple"] is None
+                and b["temple"] is None and b["warehouse"] is None
                 and d["name"] in BILL_DISTRICTS and 8.0 <= b["height"] <= 12.0
                 and _mix(i, j, 2405) % BILL_ODDS == 0):
             face = _wide_face(i, j, _mix(i, j, 2407) % 4)
@@ -2566,7 +2684,7 @@ def lot(i, j):
             b["height"] = LANDMARK_BASE if ring == 0 else LANDMARK_H
             b["club"] = b["casino"] = b["cinema"] = b["diner"] = None
             b["arcade"] = b["billboard"] = b["tower"] = b["exchange"] = None
-            b["temple"] = None
+            b["temple"] = b["warehouse"] = None
             b["tree"] = False
             if (i, j) == lm["lobby"]:
                 b["tower"] = {"door": 3, "u": CELL * 0.5, "i": i, "j": j,
@@ -2644,6 +2762,7 @@ class View:
         self.snow = 0.0         # how hard it is snowing
         self.dawn = 0.0         # how far into the morning, 0..1
         self.blackout = False   # is tonight the night the power goes
+        self.ind_lamps = []     # the factory streets' sodium lamps in view
         self.fog = False        # and is it a fog night
         self.cover = 0.0        # and how much is lying
         self.flash = 0.0        # how bright the lightning is this instant
@@ -3603,6 +3722,394 @@ def draw_temple_front(ch, co, v, walls, tp, world, now):
             put_cell(ch, co, v, walls, x0 + k, int(round(pr[1])), pr[2], c, GOLD)
 
 
+WAREHOUSE_BPM = 140.0
+
+
+def warehouse_light(now):
+    """The rig in the old factory: (colour, strobe). A new colour every beat,
+    the strobe the last bar of every eight."""
+    t = now * WAREHOUSE_BPM / 60.0
+    strobe = (int(t) // 4) % 8 == 7 and int(t * 8) % 2 == 0
+    return (FLASH if strobe else NEON[int(t) % len(NEON)][0]), strobe
+
+
+def draw_warehouse_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
+                          cont, now):
+    """One column of the old factory: dark rust brick, two rows of tall iron
+    windows nearly all broken, a few of them lit from inside in whatever
+    colour the rig is on this beat - the strobe takes them all - and on the
+    front a roller door stuck a third of the way up with the light pouring
+    out under it, and paint on the brick."""
+    scale = v.fy / dist
+    wh = b["warehouse"]
+    brick = tone_colour("rust", 0.25)
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    if edge:
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx], co[y][sx] = "|", brick
+        return roof, None, foot, None, ()
+    prev_roof, prev_awn, prev_foot = cont[:3]
+    facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "/", ROOF)
+    lit, strobe = warehouse_light(now)
+    front = face == wh["door"]
+    frac = u / BAY_W - int(u / BAY_W)
+    bay = int(u / BAY_W)
+    for y in range(max(r_lo, roof + 1), min(r_hi, foot - 1) + 1):
+        h = v.eye + (v.horizon - y) / scale
+        pane = (3.4 < h < 5.8 or 6.8 < h < 9.2) and 0.2 < frac < 0.8
+        if pane:
+            m = _mix(bay + face * 31, int(h * 2), wh["seed"])
+            if strobe or m % 5 == 0:
+                ch[y][sx], co[y][sx] = "#", lit           # the rave, through it
+            elif m % 5 == 1:
+                ch[y][sx], co[y][sx] = " ", 0             # no glass at all
+            else:
+                ch[y][sx], co[y][sx] = ("x" if m % 3 else "/"), CONCRETE
+        elif front and abs(u - CELL * 0.5) < 1.2 and h < 3.0:
+            if h < 1.1:                                   # under the door
+                ch[y][sx], co[y][sx] = "=", lit
+            else:
+                ch[y][sx], co[y][sx] = "-", brick         # the shutter
+        elif h < 2.2 and _mix(int(u * 3), int(h * 3), wh["seed"] + face) % 4 == 0:
+            ch[y][sx] = "~@#S"[_mix(int(u * 2), face, 3723) % 4]   # paint
+            co[y][sx] = NEON[(int(u * 1.3) + face) % len(NEON)][1]
+        elif (y + sx) % 6 == 0:
+            ch[y][sx], co[y][sx] = ".", brick
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, None, foot, None, ()
+
+
+CHIMNEY_ODDS = 9       # one shed in this many has a stack
+
+
+def chimney_at(i, j):
+    """A chimney on this factory, if it has one."""
+    if _mix(i, j, 3711) % CHIMNEY_ODDS or not industrial_at(i, j) or is_open(i, j):
+        return None
+    b = lot(i, j)
+    if b["warehouse"] is not None:
+        return None
+    m = _mix(i, j, 3713)
+    return {"x": (i + 0.5) * CELL + ((m & 7) - 3.5) * 0.3,
+            "z": (j + 0.5) * CELL + (((m >> 3) & 7) - 3.5) * 0.3,
+            "base": b["height"], "top": b["height"] + 22.0 + (m >> 6) % 13,
+            "seed": m % 997, "i": i, "j": j}
+
+
+_chimney_blocks = {}
+
+
+def chimneys_in_block(bi, bj):
+    key = (bi, bj)
+    hit = _chimney_blocks.get(key)
+    if hit is None:
+        _evict(_chimney_blocks, 4000)
+        hit = []
+        if any(zone_depth("industrial", bi * XP + a, bj * ZP + b) > -2
+               for a in (0, XP - 1) for b in (0, ZP - 1)):
+            for i in range(bi * XP, bi * XP + XP):
+                for j in range(bj * ZP, bj * ZP + ZP):
+                    c = chimney_at(i, j)
+                    if c is not None:
+                        hit.append(c)
+        _chimney_blocks[key] = hit
+    return hit
+
+
+def near_chimneys(v, reach):
+    """The factory chimneys in front of you, by block, worked out once."""
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    if zone_depth("industrial", ci, cj) < -reach / CELL - 30:
+        return
+    b0, b1 = int((v.x - reach) // (XP * CELL)), int((v.x + reach) // (XP * CELL))
+    c0, c1 = int((v.z - reach) // (ZP * CELL)), int((v.z + reach) // (ZP * CELL))
+    for bi in range(b0, b1 + 1):
+        for bj in range(c0, c1 + 1):
+            for c in chimneys_in_block(bi, bj):
+                rx, rz = c["x"] - v.x, c["z"] - v.z
+                if rx * v.dx + rz * v.dz < -CELL or rx * rx + rz * rz > reach * reach:
+                    continue
+                yield c
+
+
+def draw_chimney(ch, co, v, walls, c, now, wet):
+    """A brick stack off a factory roof: filled dark so what is behind does
+    not show through, banded, tapering, the top lit orange from the fire
+    under it, a red light for the aircraft - and the smoke rolling off it,
+    lit from below where it comes out, thinning to haze as it goes."""
+    pl = math.hypot(v.plx, v.plz) or 1.0
+    px, pz = v.plx / pl, v.plz / pl                  # across, on screen
+    x, z, base, top = c["x"], c["z"], c["base"], c["top"]
+    brick = tone_colour("rust", 0.95)
+    dist = math.hypot(x - v.x, z - v.z)
+    # Points no closer together than a cell on screen: further off, fewer.
+    step = max(0.5, dist / v.fy * 1.2)
+    across = max(0.25, dist / v.fx * 1.2)
+    h = base
+    while h < top:
+        r = 1.6 - 0.6 * (h - base) / (top - base)
+        a = -r
+        while a <= r + 1e-9:
+            edge_ = abs(a) > r - across
+            band_ = int(h / 2.5) != int((h + step) / 2.5)
+            put_point(ch, co, v, walls, x + px * a, h, z + pz * a,
+                      "|" if edge_ else ("-" if band_ else " "),
+                      brick if edge_ or band_ else 0)
+            a += across
+        h += step
+    for k in range(-4, 5):                          # the lip, glowing
+        put_point(ch, co, v, walls, x + px * k * 0.25, top, z + pz * k * 0.25,
+                  "#" if abs(k) < 3 else "=", EMBER_HOT if (int(now * 6) + k) % 3
+                  else EMBER)
+    if int(now / 1.4 + c["seed"]) % 2:
+        put_lit(ch, co, v, walls, x, top + 0.6, z, "o", ROU_RED, max(wet, 0.3), now)
+    wind = 0.6 + 0.4 * math.sin(now * 0.02)
+    wx, wz = math.cos(wind * 2.0), math.sin(wind * 2.0)
+    if c["seed"] % 3 == 0 or dist > 170.0:
+        return                                       # not every stack is going
+    far = dist > 110.0
+    for k in range(10):
+        age = (now * 0.10 + k / 10.0 + c["seed"] * 0.013) % 1.0
+        if age > 0.8:
+            continue                                 # gone into the night
+        cx = x + wx * age * 16.0
+        cz = z + wz * age * 16.0
+        cy = top + 0.8 + age * 11.0
+        rr = 0.4 + age * 2.6
+        tone = EMBER if age < 0.12 else SMOKE if age < 0.45 else HAZE
+        puff = ((0.0, 0.0, "~"),) if far else (
+            (0.0, 0.0, "~"), (-rr, 0.0, "("), (rr, 0.0, ")"), (0.0, rr * 0.45, "~"))
+        for da, dh, g in puff:
+            if age > 0.55 and g in "()" and (k + int(now * 2)) % 2:
+                continue
+            put_point(ch, co, v, walls, cx + px * da, cy + dh, cz + pz * da,
+                      g if age > 0.12 else "*", tone)
+
+
+def near_ind_lamps(v, reach):
+    """Sodium lamps along the factory streets: every few cells of road, at
+    the kerb, as (x, z)."""
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    if zone_depth("industrial", ci, cj) < -reach / CELL:
+        return []
+    out = []
+    n = int(reach / CELL) + 1
+    for i in range(ci - n, ci + n + 1):
+        for j in range(cj - n, cj + n + 1):
+            if (i * 7 + j * 3) % 5 or not industrial_at(i, j) or not road_at(i, j):
+                continue
+            for f in range(4):
+                nx, nz = FACES[f]
+                if not is_open(i + nx, j + nz):
+                    out.append(((i + 0.5 + nx * 0.34) * CELL,
+                                (j + 0.5 + nz * 0.34) * CELL))
+                    break
+    return out
+
+
+def draw_ind_lamps(ch, co, v, walls, lamps, now, wet):
+    for x, z in lamps:
+        for h in (0.6, 1.6, 2.6, 3.6):
+            put_point(ch, co, v, walls, x, h, z, "|", CONCRETE)
+        put_lit(ch, co, v, walls, x, 4.4, z, "o", EMBER_HOT, max(wet, 0.35), now)
+
+
+def draw_site(ch, co, v, walls, site, now, wet):
+    """The building site: a hoarding round it with KEEP OUT on it and a gap
+    for the gate, a steel frame three storeys up and a fourth half done, work
+    lights on it, two floodlights on poles - and over all of it a tower crane,
+    yellow, its jib turning slowly round with a girder swinging off the hook
+    and a red light at each end."""
+    i0, j0, i1, j1 = site
+    x0, z0, x1, z1 = i0 * CELL, j0 * CELL, (i1 + 1) * CELL, (j1 + 1) * CELL
+    seed = _mix(i0, j0, 3731)
+    wood = tone_colour("rust", 0.6)
+    per = []
+    k = 0.0
+    while k < x1 - x0:
+        per += [(x0 + k, z0), (x0 + k, z1)]
+        k += 0.5
+    k = 0.0
+    while k < z1 - z0:
+        per += [(x0, z0 + k), (x1, z0 + k)]
+        k += 0.5
+    gate = (x0 + x1) * 0.5
+    for px_, pz_ in per:
+        if abs(px_ - gate) < 1.2 and abs(pz_ - z0) < 0.01:
+            continue                                 # the gate
+        for h in (0.4, 0.9, 1.4):
+            put_point(ch, co, v, walls, px_, h, pz_, "#", wood)
+        put_point(ch, co, v, walls, px_, 1.9, pz_, "=", CURB)
+    # The frame.
+    fx0, fz0, fx1, fz1 = x0 + 2.0, z0 + 2.0, x1 - 2.0, z1 - 2.0
+    steel = NEON[3][1]
+    floors = 4
+    cols = [(fx0 + (fx1 - fx0) * a / 3.0, fz0 + (fz1 - fz0) * b_ / 2.0)
+            for a in range(4) for b_ in range(3)]
+    for n_, (cx, cz) in enumerate(cols):
+        hmax = floors * FLOOR_H if _mix(n_, 0, seed) % 3 else (floors - 1) * FLOOR_H
+        draw_tube(ch, co, v, walls,
+                  [(cx, h * 0.3, cz) for h in range(int(hmax / 0.3) + 1)], steel)
+    for f_ in range(1, floors + 1):
+        hy = f_ * FLOOR_H
+        for a in range(4):
+            if f_ == floors and a > 1:
+                break                                 # the top is not finished
+            ax = fx0 + (fx1 - fx0) * a / 3.0
+            draw_tube(ch, co, v, walls, [(ax, hy, fz0 + (fz1 - fz0) * t / 10.0)
+                                         for t in range(11)], steel)
+        for b_ in range(3):
+            bz = fz0 + (fz1 - fz0) * b_ / 2.0
+            end = fx1 if f_ < floors else fx0 + (fx1 - fx0) / 3.0
+            draw_tube(ch, co, v, walls, [(fx0 + (end - fx0) * t / 12.0, hy, bz)
+                                         for t in range(13)], steel)
+        if f_ <= 2:
+            for t in range(9):
+                put_point(ch, co, v, walls, fx0 + (fx1 - fx0) * t / 8.0, hy - 0.1, fz0,
+                          "=", CONCRETE)
+    for cx, cz in cols[::5]:
+        put_lit(ch, co, v, walls, cx, FLOOR_H - 0.3, cz, "o", BULB, max(wet, 0.3), now)
+    # Floodlights.
+    for lx, lz in ((x0 + 0.6, z1 - 0.6), (x1 - 0.6, z0 + 0.6)):
+        for h in range(1, 7):
+            put_point(ch, co, v, walls, lx, h, lz, "|", CONCRETE)
+        put_lit(ch, co, v, walls, lx, 7.0, lz, "#", FLASH, max(wet, 0.4), now)
+    # The crane.
+    mx, mz = x1 - 1.0, z1 - 1.0
+    mast = 30.0
+    yellow = GOLD
+    h = 0.0
+    while h < mast:
+        for side in (-0.5, 0.5):
+            pl = math.hypot(v.plx, v.plz) or 1.0
+            put_point(ch, co, v, walls, mx + v.plx / pl * side, h,
+                      mz + v.plz / pl * side, "|", yellow)
+        if int(h) % 2 == 0:
+            put_point(ch, co, v, walls, mx, h + 0.5, mz, "X", GOLD_DIM)
+        h += 0.5
+    a = now * 0.04 + seed % 7
+    dx, dz = math.cos(a), math.sin(a)
+    for t in range(-14, 41):
+        d = t * 0.5
+        put_point(ch, co, v, walls, mx + dx * d, mast, mz + dz * d, "=", yellow)
+    for t in range(4):                               # the counterweight
+        put_point(ch, co, v, walls, mx - dx * (6.0 + t * 0.3), mast - 0.6,
+                  mz - dz * (6.0 + t * 0.3), "#", CONCRETE)
+    put_point(ch, co, v, walls, mx, mast + 0.8, mz, "A", yellow)
+    trolley = 9.0 + 6.0 * math.sin(now * 0.05 + seed)
+    hook = 11.0 + 4.0 * math.sin(now * 0.07)
+    tx, tz = mx + dx * trolley, mz + dz * trolley
+    hh = mast - 0.5
+    while hh > hook:
+        put_point(ch, co, v, walls, tx, hh, tz, "|", CURB)
+        hh -= 0.8
+    sway = 0.4 * math.sin(now * 0.9)
+    for t in range(-3, 4):
+        put_point(ch, co, v, walls, tx + dz * t * 0.5 + dx * sway, hook - 0.4,
+                  tz - dx * t * 0.5 + dz * sway, "=", steel)
+    if int(now * 1.2) % 2:
+        put_lit(ch, co, v, walls, mx, mast + 1.4, mz, "o", ROU_RED, max(wet, 0.3), now)
+        put_lit(ch, co, v, walls, mx + dx * 20.0, mast + 0.4, mz + dz * 20.0, "o",
+                ROU_RED, max(wet, 0.3), now)
+    pr = v.project((x0 + gate) * 0.5, 1.1, z0)       # on the hoarding, last
+    if pr is not None and pr[2] < 40.0:
+        for n_, c_ in enumerate("KEEP OUT"):
+            put_cell(ch, co, v, walls, int(round(pr[0])) - 4 + n_, int(round(pr[1])),
+                     pr[2] - 0.1, c_, ROU_RED)
+
+
+def near_sites(v, reach):
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    if zone_depth("industrial", ci, cj) < -reach / CELL:
+        return
+    site = zone_site(*zone_home("industrial", ci, cj))
+    sx_, sz_ = (site[0] + 1.5) * CELL, (site[1] + 1.0) * CELL
+    rx, rz = sx_ - v.x, sz_ - v.z
+    if rx * rx + rz * rz < reach * reach and rx * v.dx + rz * v.dz > -3 * CELL:
+        yield site
+
+
+def render_warehouse(wh, width, height, now):
+    """Inside the old factory: the roof trusses and the broken skylights with
+    the night coming through, a stage of pallets at the far end with the DJ on
+    it and the stacks, lasers fanning out of the rig through the smoke, and
+    the crowd in three depths, going up on the kick - in the colour of the
+    beat, and all of it white when the strobe goes."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    lit, strobe = warehouse_light(now)
+    t = now * WAREHOUSE_BPM / 60.0
+    beat = t % 1.0
+    kick = beat < 0.2
+    if width < 40 or height < 16:
+        _text(ch, co, height // 2, 1, "~ a rave in the old factory ~", lit)
+        _text(ch, co, height - 1, 1, "s walks out", GOLD_DIM)
+        return ch, co
+    cx = width // 2
+    # The roof: trusses, and the holes in the skylights.
+    for x in range(width):
+        ch[0][x], co[0][x] = "=", CONCRETE
+        r_ = (x // 6) % 2
+        ch[1 + r_][x] = "/" if (x % 6) < 3 else "\\"
+        co[1 + r_][x] = CONCRETE
+    for k in range(4):
+        hx = 6 + k * (width - 12) // 3
+        for y in range(3, height // 2):
+            if (y + k) % 2 == 0 and _mix(hx, y, int(now)) % 3 == 0:
+                ch[y][hx + (y % 2)], co[y][hx + (y % 2)] = ".", MOON_DIM
+    stage = height // 2 + 1
+    # The stage of pallets, the stacks, the DJ.
+    for x in range(cx - 14, cx + 15):
+        ch[stage][x], co[stage][x] = "=", BARK
+        ch[stage + 1][x], co[stage + 1][x] = ("[" if x % 4 == 0 else "]" if x % 4 == 3
+                                              else "="), BARK
+    for side in (-1, 1):
+        sx0 = cx + side * 19 - 2
+        for r in range(5):
+            _text(ch, co, stage - 4 + r, sx0,
+                  "[O]" if r % 2 == 0 or not kick else "[@]",
+                  CONCRETE if not kick else lit)
+    up = kick
+    _text(ch, co, stage - 4, cx - 1, "\\o/" if up else " o ", STAR)
+    _text(ch, co, stage - 3, cx - 1, " | " if up else "/|\\", STAR)
+    _text(ch, co, stage - 2, cx - 4, "[o_o]=[o_o]", lit)
+    # Lasers out of the rig over the stage, through the smoke.
+    for k in range(5):
+        a = math.sin(t * 0.5 + k * 1.3) * 1.1
+        x, y = float(cx), float(stage - 5)
+        for n in range(60):
+            x += math.sin(a) * 1.6
+            y -= math.cos(a) * 0.45
+            xi, yi = int(round(x)), int(round(y))
+            if not (0 <= xi < width and 3 <= yi < height):
+                break
+            if ch[yi][xi] == " ":
+                ch[yi][xi] = "-" if abs(math.sin(a)) > 0.8 else "/" if a > 0 else "\\"
+                co[yi][xi] = NEON[(int(t) + k) % len(NEON)][0]
+    # Smoke, lit by whatever is on.
+    for k in range(width * 2):
+        m = _mix(k, int(now * 2), 3741)
+        x, y = m % width, 3 + (m >> 8) % max(1, height - 6)
+        if ch[y][x] == " " and m % 3 == 0:
+            ch[y][x], co[y][x] = ":", (FLASH if strobe else NEON[int(t) % len(NEON)][1])
+    # The crowd, in three depths.
+    for depth, (y0, gap, art) in enumerate(((stage + 3, 4, None), (stage + 4, 7, None),
+                                            (height - 6, 9, (RAVER_UP, RAVER_DOWN)))):
+        for n, x in enumerate(range(2 + depth, width - 4, gap)):
+            jump = (beat + n * 0.11) % 1.0 < 0.3
+            colour = FLASH if strobe else (lit if (n + depth) % 3 == 0 else CURB)
+            if art is None:
+                if 0 <= y0 - jump < height:
+                    _text(ch, co, y0 - jump, x, "o" if depth == 0 else "(_)", colour)
+            else:
+                for r, line in enumerate(art[0] if jump else art[1]):
+                    if y0 + r < height - 1:
+                        _text(ch, co, y0 + r, x, line, colour)
+    _text(ch, co, height - 1, max(1, cx - 10), "-- the way out (s) --", GOLD_DIM)
+    return ch, co
+
+
 def draw_exchange_front(ch, co, v, walls, ex, world, now):
     """STOCK EXCHANGE over the columns, and the ticker running across the
     front under it - the market going by, green when it went up and red when
@@ -3856,6 +4363,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     if b["temple"] is not None:
         return draw_temple_column(ch, co, v, sx, dist, b, face, u,
                                   r_lo, r_hi, edge, cont, now)
+    if b["warehouse"] is not None:
+        return draw_warehouse_column(ch, co, v, sx, dist, b, face, u,
+                                     r_lo, r_hi, edge, cont, now)
     if b["diner"] is not None:
         return draw_diner_column(ch, co, v, sx, dist, b, face, u,
                                  r_lo, r_hi, edge, cont, now)
@@ -4366,6 +4876,10 @@ def collect_glow(v, now, wet):
     reach = 7.0
     for lx, lz in near_park_lamps(v, 60.0):
         _spill(glow, lx, lz, 6.5, EMBER)
+    for lx, lz in v.ind_lamps:
+        _spill(glow, lx, lz, 7.0, EMBER)          # sodium, on the factory streets
+    for site_ in near_sites(v, 70.0):
+        _spill(glow, (site_[0] + 1.5) * CELL, (site_[1] + 1.0) * CELL, 9.0, BULB_DIM)
     for _, cx_, cz_, (dx_, dz_), kind, g in near_cars(v, now, 70.0, every=True):
         _spill(glow, cx_ + dx_ * 5.0, cz_ + dz_ * 5.0, 2.5, BULB_DIM)
         if kind == "police":
@@ -4409,6 +4923,11 @@ def collect_glow(v, now, wet):
                 if f == b["temple"]["door"]:
                     p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
                     _spill(glow, p[0], p[2], 4.5, BULB_DIM)
+                continue
+            if b["warehouse"] is not None:
+                if f == b["warehouse"]["door"]:
+                    p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
+                    _spill(glow, p[0], p[2], 6.0, warehouse_light(now)[0])
                 continue
             if b["arcade"] is not None:
                 # The pavement in front takes the colour of whatever the
@@ -4870,6 +5389,7 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 rock = not wet_cell and not solid and headland_at(i, j)
                 tarmac = not wet_cell and not solid and car_park_at(i, j)
                 mh = None if solid or wet_cell else manhole_at(i, j)
+                dirt = not solid and not wet_cell and site_at(i, j)
                 hollow = (woods and v.hollow is not None
                           and hollow_at(i, j))
                 lane = None
@@ -4899,6 +5419,17 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
             elif CELL - fz_ < edge and CELL - fz_ < PAVE and wall_s:
                 edge = CELL - fz_
 
+            if dirt:
+                # The building site: churned mud and puddles, no paving.
+                h_ = _mix(int(x * 2.5), int(z * 2.5), 3733) % 9
+                if h_ < 2:
+                    ch[y][sx], co[y][sx] = ("." if h_ else ","), BARK
+                elif h_ == 2:
+                    g_ = glow.get(((int(x / GLOW_CELL + BIG) - BIG) * 65536)
+                                  + (int(z / GLOW_CELL + BIG) - BIG))
+                    if g_ is not None:
+                        ch[y][sx], co[y][sx] = ":", g_      # a puddle, lit
+                continue
             if mh is not None:
                 # The cover: a rim, and the grip pattern cast into it. Before
                 # the snow, because what comes up from under it melts it.
@@ -8699,7 +9230,7 @@ def climbable(i, j, f):
             and not b["tree"] and b["club"] is None
             and b["casino"] is None and b["tower"] is None
             and b["arcade"] is None and b["exchange"] is None
-            and b["temple"] is None):
+            and b["temple"] is None and b["warehouse"] is None):
         return False
     # And only off a roof that is the high point of its corner: climbed from
     # an alley, the first ones put you face to face with the wall of a taller
@@ -10064,6 +10595,18 @@ def power_off(i, j, now):
     return True
 
 
+def factory_hint(x, z):
+    """Near the old factory, the bass coming out of it."""
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    if zone_depth("industrial", ci, cj) < -4:
+        return ""
+    wh = zone_warehouse(*zone_home("industrial", ci, cj))
+    if wh is None:
+        return ""
+    d = math.hypot((wh[0] + 0.5) * CELL - x, (wh[1] + 0.5) * CELL - z)
+    return "  ~ a bass line from the old factory ~" if d < 60.0 else ""
+
+
 def blackout_word(x, z, now):
     """What the HUD says about it, from where you stand."""
     if not night(now)["blackout"]:
@@ -10428,6 +10971,7 @@ def render_street(v, now):
     v.snow = snowfall(now)
     v.cover = snow_cover(now)
     v.dawn = dawn(now)
+    v.ind_lamps = near_ind_lamps(v, 60.0) if v.eye < 10.0 else []
     v.blackout = night(now)["blackout"]
     v.fog = night(now)["fog"] and v.eye < 10.0      # from a roof, you are over it
     v.crown = crown_light(now, wet)
@@ -10463,6 +11007,11 @@ def render_street(v, now):
             draw_diner_cup(ch, co, v, walls, d_, now)
     draw_props(ch, co, v, walls, now, wet)
     draw_manhole_steam(ch, co, v, walls, now)
+    draw_ind_lamps(ch, co, v, walls, v.ind_lamps, now, wet)
+    for site_ in near_sites(v, 160.0):
+        draw_site(ch, co, v, walls, site_, now, wet)
+    for c_ in near_chimneys(v, 260.0 if v.eye < 10.0 else ROOF_REACH):
+        draw_chimney(ch, co, v, walls, c_, now, wet)
     draw_car_park(ch, co, v, walls, now, wet)
     draw_walkers(ch, co, v, walls, now, wet)
     draw_traffic(ch, co, v, walls, now, wet)
@@ -11770,7 +12319,7 @@ def venue_at(x, z):
                 continue
             b = lot(i, j)
             for kind in ("casino", "club", "tower", "cinema", "diner", "arcade",
-                         "temple", "exchange"):
+                         "temple", "exchange", "warehouse"):
                 v = b[kind]
                 if v is None:
                     continue
@@ -13196,6 +13745,9 @@ CHEAT_PLACES = [
     ("j", "claw machine", "claw"),
     ("h", "strength test", "striker"),
     ("x", "a manhole", "manhole"),
+    ("[", "factory rave", "warehouse"),
+    ("9", "the factories", "industrial"),
+    ("]", "building site", "site"),
     ("r", "ramen", "ramen"),
     ("d", "diner", "diner"),
     ("^", "sky deck", "tower"),
@@ -13215,9 +13767,12 @@ CHEAT_PLACES = [
     ("t", "riverbank", "bank"),
 ]
 
+# Placed parts of town, listed after the picked ones.
+CHEAT_ZONES = ["industrial", "site", "suburbs"]
+
 # The panel's groups, by what you would go there for.
 CHEAT_GROUPS = [
-    ("NIGHTLIFE", ["casino", "club", "roofparty", "rave"]),
+    ("NIGHTLIFE", ["casino", "club", "roofparty", "rave", "warehouse"]),
     ("FUN", ["arcade", "cinema", "carnival", "claw", "striker", "manhole"]),
     ("EAT", ["ramen", "diner"]),
     ("VIEWS", ["tower", "lighthousedoor", "grand", "billboard"]),
@@ -13510,6 +14065,67 @@ def _woods_spot(x, z, kind):
             px, pz = (i + 0.5) * CELL, (j - out + 0.5) * CELL
             if can_stand(px, pz):
                 return px, pz, 0.0
+    return None
+
+
+def _factory_spot(x, z, kind):
+    """In the nearest factories: on a street in the middle of them looking
+    along it; across the road from the building site, looking at it; or out
+    front of the old factory with the rave in it."""
+    best = None
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    for ti in range(ci // WOODS_TILE - 1, ci // WOODS_TILE + 2):
+        for tj in range(cj // WOODS_TILE - 1, cj // WOODS_TILE + 2):
+            hi, hj = zone_home("industrial", ti * WOODS_TILE, tj * WOODS_TILE)
+            d = (hi - ci) ** 2 + (hj - cj) ** 2
+            if d * CELL * CELL < CHEAT_SKIP ** 2 and kind == "industrial":
+                continue
+            if best is None or d < best[0]:
+                best = (d, hi, hj)
+    _, hi, hj = best
+    if kind == "warehouse":
+        wh = zone_warehouse(hi, hj)
+        if wh is None:
+            return None
+        i, j, f = wh
+        nx, nz = FACES[f]
+        for back in (8.0, 6.0, 10.0, 4.0):
+            p = face_point(i, j, f, CELL * 0.5, back, 0.0)
+            if can_stand(p[0], p[2]):
+                return p[0], p[2], math.atan2(-nx, -nz)
+        return None
+    if kind == "site":
+        i0, j0, i1, j1 = zone_site(hi, hj)
+        tx, tz = (i0 + 1.5) * CELL, (j0 + 1.0) * CELL
+        for r in range(2, 8):
+            for a in range(16):
+                ang = a * math.tau / 16
+                px, pz = tx + math.sin(ang) * r * CELL, tz + math.cos(ang) * r * CELL
+                pi, pj = int(px / CELL + BIG) - BIG, int(pz / CELL + BIG) - BIG
+                yaw = math.atan2(tx - px, tz - pz)
+                # A road, and nothing between you and it.
+                if (road_at(pi, pj) and can_stand(px, pz) and r >= 3
+                        and probe(px, pz, yaw, r * CELL) > r * CELL - 7.0):
+                    return px, pz, yaw
+        return None
+    for i, j in _rings(hi, hj, 30):
+        if road_at(i, j) and industrial_at(i, j):
+            px, pz = (i + 0.5) * CELL, (j + 0.5) * CELL
+            if can_stand(px, pz):
+                # Facing down the street with the most stacks at the end of
+                # it: in among the sheds the near walls hide the rest.
+                v_ = View(px, pz, 0.0, 10, 10)
+                stacks = list(near_chimneys(v_, 200.0)) + list(
+                    near_chimneys(View(px, pz, math.pi, 10, 10), 200.0))
+
+                def ahead(yaw):
+                    dx, dz = math.sin(yaw), math.cos(yaw)
+                    return sum(1 for c in stacks if 25.0 < (c["x"] - px) * dx
+                               + (c["z"] - pz) * dz < 180.0
+                               and abs((c["x"] - px) * dz - (c["z"] - pz) * dx)
+                               < 0.45 * ((c["x"] - px) * dx + (c["z"] - pz) * dz)
+                               and probe(px, pz, yaw, 30.0) > 20.0)
+                return px, pz, max((k * math.pi / 2 for k in range(4)), key=ahead)
     return None
 
 
@@ -13958,6 +14574,8 @@ def find_place(x, z, kind):
         return _doorway(x, z, 2501, "arcade", ARCADE_ODDS)
     if kind == "temple":
         return _temple_spot(x, z)
+    if kind in ("industrial", "site", "warehouse"):
+        return _factory_spot(x, z, kind)
     if kind == "exchange":
         return _doorway(x, z, 2701, "exchange", EXCHANGE_ODDS)
     if kind == "billboard":
@@ -14020,6 +14638,7 @@ def draw_cheats(ch, co, note):
         + gap + groups["EAT"]
     middle = groups["MONEY"] + [("+", "+$1000"), ("%", "jackpot next")]
     middle += gap + [("", "PARTS OF TOWN")] + [(d["key"], d["name"]) for d in DISTRICTS]
+    middle += [names[kind] for kind in CHEAT_ZONES if kind in names]
     right = groups["AROUND TOWN"] + gap + groups["OUT OF TOWN"] + gap + groups["VIEWS"]
     sky = [("", "WEATHER & SKY"),
            ("w", weather_name()), ("L", "strike now"),
@@ -14028,7 +14647,7 @@ def draw_cheats(ch, co, note):
            ("", ""), ("", "NIGHTS"),
            ("n", "the next one"), ("u", "a strange night"),
            ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
-           ("0", "a blackout"), ("9", "a fog night"),
+           ("&", "a blackout"), ("#", "a fog night"),
            ("", ""), ("`", "close")]
     columns = (left, middle, right, sky)
 
@@ -15525,6 +16144,7 @@ RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
 DINER_HUD = " at the diner, open 24/7, at %d,%d  -  s walks back out  -  q quit "
 CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
+WAREHOUSE_HUD = " at the rave in the old factory  -  s walks back out  -  q quit "
 TEMPLE_HUD = (" in %s  -  g asks for the word of god  -  c the confession booth"
               "  -  s walks out  -  q quit ")
 CONFESS_HUD = " in the confession booth  -  type, enter to confess  -  esc steps out "
@@ -15660,10 +16280,10 @@ def main(stdscr):
                 elif key == ord("/"):
                     skip_to_closing(now)
                     note = "closing time - k for a club"
-                elif key == ord("9"):
+                elif key == ord("#"):
                     note = ("the fog is coming in" if skip_to_fog(now)
                             else "no such night near")
-                elif key == ord("0"):
+                elif key == ord("&"):
                     note = ("the power goes in a few seconds"
                             if skip_to_blackout(now) else "no such night near")
                 elif key == ord("z"):
@@ -16208,6 +16828,9 @@ def main(stdscr):
         elif venue is not None and venue[0] == "exchange":
             ch, co = render_exchange(venue[1], broker, width, height, now)
             hud = EXCHANGE_HUD
+        elif venue is not None and venue[0] == "warehouse":
+            ch, co = render_warehouse(venue[1], width, height, now)
+            hud = WAREHOUSE_HUD
         elif venue is not None and venue[0] == "temple" and booth is not None:
             ch, co = render_confession(width, height, now, booth)
             hud = CONFESS_HUD
@@ -16266,6 +16889,7 @@ def main(stdscr):
                 or ("  ~ a taxi is pulling up ~" if taxi is not None else "")
                 or ("  ~ the fog is in ~" if night(now)["fog"] else "")
                 or blackout_word(cam_x, cam_z, now)
+                or factory_hint(cam_x, cam_z)
                 or landmark_hint(cam_x, cam_z)
                 or rave_hint(v, now)
                 or ("  ~ something over the city ~" if night(now)["alien"]
