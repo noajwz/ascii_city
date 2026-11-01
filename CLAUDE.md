@@ -37,6 +37,15 @@ cell — so the move is cut into steps of `STEP_MAX` and each tested with `can_s
 a frame would carry you clean through the corner of a block. Measured through a pty, running at
 the top pace into the wall ahead of the start stops you at it, nothing crossed.
 
+**Hurrying past a door does not take you in.** At a fast pace every doorway on the pavement was
+a casino, a lift up a sky deck at $15, a cinema ticket — reported as "really annoying". So in
+`main()` a doorway that `venue_at()` offers is refused while you are moving faster than a walk
+(`WALK` or `SIDESTEP` with a little slack) **unless it is the one you were already in last frame**
+(`same_venue()`, by kind and place, since the ramen counter's dict is made fresh every call); the
+lighthouse door the same. Slow to a walk or stop at a door and in you go, as before. Measured
+through a pty along the pavement past a casino door: walking takes you in, hurrying and running do
+not.
+
 `wander()`, behind the spacebar, blends every direction it probes by score instead of picking the
 best one. Picking the winner outright makes the walk twitch, because the winner changes from one
 frame to the next: measured over eighty seconds that was 395 hard snaps, some of them a full
@@ -308,7 +317,9 @@ line, widening as it goes. From a roof you are above it. About 1 ms a frame at 1
 
 Its hash salt is 7 and not 4 for a reason worth keeping: on 4, night 0 was a fog night, and night
 0 is the one the whole test suite runs on — the billboards, the El, the bridges and the district
-histograms all went into the fog and failed at once.
+histograms all went into the fog and failed at once. The fog is its own grey, `FOG` and `FOG_DIM` (248
+and 243, or white on eight colours): in `HAZE`, which is nearly black, it read as specks on the
+night rather than as fog, and it is thicker the deeper in.
 
 ## The blackout
 
@@ -1431,7 +1442,8 @@ side of the next tower.
 is), `reach` (how far a wall ray goes) and `depth` (how many walls deep it keeps casting); at street
 level they are `EYE_Y`, `MAX_VIEW` and four, and nothing about the street changed when every
 `EYE_Y` in the renderer became `v.eye` — the whole suite passed untouched before anything else
-went in. On a roof the eye is seventy-odd units up, rays go `ROOF_REACH`, walls fourteen deep, and
+went in. On a roof the eye is seventy-odd units up, rays go `ROOF_REACH` (520 - at 260 the town stopped short of the
+horizon), walls twenty-two deep, and
 `draw_ground()` runs as far as the view does, because from that height the nearest ground on
 screen is a hundred units away and the street's `GROUND_FAR` cut all of it. What you get is the
 grid falling away under you, rooftops at every height, the river, the haze of the far city on the
