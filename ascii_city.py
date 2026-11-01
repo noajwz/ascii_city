@@ -13755,6 +13755,91 @@ def draw_races(ch, co, rc, x0, x1, y0, y1, now):
 
 RACE_WIDE = 64         # columns the track needs
 RACE_TALL = RACE_FIELD + 5
+# Big, a horse is three rows: the jockey in the silks, the horse, its legs,
+# which change over as it gallops.
+HORSE_BIG = (("    o  ", " _/|__>", " /\\  /\\"),
+             ("    o  ", " _/|__>", "  /\\/\\ "))
+
+
+def race_size(k):
+    """(columns, rows) the races need at scale k."""
+    if k <= 1:
+        return RACE_WIDE, RACE_TALL
+    sy = k - 1
+    return RACE_WIDE * k, 5 * sy + 2 + RACE_FIELD * 5 * sy + 4
+
+
+def draw_races_big(ch, co, rc, x0, x1, y0, y1, now, k):
+    """The races at scale k: RACE n in block letters, a lane five rows deep
+    a horse - its number big, its name, odds and your money beside it, and
+    the horse and jockey big, galloping - the commentator under the track."""
+    sy = k - 1
+    race = rc.race
+    hs = race["horses"]
+    ph = rc.phase(now)
+    dt = now - race["t0"]
+    title = "RACE %d" % race["n"]
+    tw = blocks_width(title, sy)
+    sub = ("BETS CLOSE IN %d" % (int(RACE_BET - dt) + 1) if ph == "bets"
+           else "AND THEY'RE OFF!" if ph == "run" else "RESULT")
+    x = int((x0 + x1 - tw - len(sub) - 4) / 2)
+    _blocks(ch, co, y0, x, title, GOLD, sy, sy)
+    _text(ch, co, y0 + 5 * sy // 2, x + tw + 4, sub,
+          GOLD if ph != "bets" or int(now * 2) % 2 else GOLD_DIM)
+    lane = 5 * sy
+    top = y0 + 5 * sy + 2
+    label = 3 * sy + 2 + 28                       # the big number, then the words
+    ts, te = x0 + label, x1 - 3
+    for x in range(ts - 1, te + 2):
+        ch[top - 1][x], co[top - 1][x] = "=", CURB
+        ch[top + RACE_FIELD * lane][x], co[top + RACE_FIELD * lane][x] = "=", CURB
+    for n, h in enumerate(hs):
+        y = top + n * lane
+        _blocks(ch, co, y, x0, "%d" % (n + 1), h["silk"], sy, sy)
+        mid = y + lane // 2
+        _text(ch, co, mid - 1, x0 + 3 * sy + 2, h["name"][:14], h["silk"])
+        _text(ch, co, mid, x0 + 3 * sy + 2, "%d/1" % h["odds"], GOLD_DIM)
+        mine = race["bets"].get(n, 0)
+        if mine:
+            _text(ch, co, mid, x0 + 3 * sy + 10, "$%d on it" % mine, GOLD)
+        for yy in range(y, y + lane):
+            if yy < top + RACE_FIELD * lane:
+                for x in range(ts, te):
+                    if (x + yy * 3 + int(now * 12) * (ph == "run")) % 9 == 0:
+                        ch[yy][x], co[yy][x] = ".", GRASS
+                ch[yy][te], co[yy][te] = ("#" if (yy + int(now * 4)) % 2 else ":"), STAR
+        f = rc.progress(n, now)
+        if f >= 1.0:
+            _text(ch, co, mid, te + 1, "%d" % (race["order"].index(n) + 1),
+                  GOLD if race["order"][0] == n else GOLD_DIM)
+        art = HORSE_BIG[int(now * 10 + n) % 2 if ph == "run" and f < 1.0 else 0]
+        hx = ts + int(round(f * (te - ts - len(art[1]))))
+        win = ph == "show" and race["order"][0] == n
+        silk = FLASH if win and int(now * 6) % 2 else h["silk"]
+        for r, line in enumerate(art):
+            for j, c in enumerate(line):
+                if c != " ":
+                    _text(ch, co, mid - 1 + r, hx + j, c, silk if c == "o" else BARK)
+    say = ""
+    if ph == "bets":
+        fav = min(range(RACE_FIELD), key=lambda n: hs[n]["odds"])
+        say = "%s is the favourite at %d/1. 1-%d bets, +/- the stake ($%d)" % (
+            hs[fav]["name"].title(), hs[fav]["odds"], RACE_FIELD, rc.stake)
+    elif ph == "run":
+        lead = max(range(RACE_FIELD), key=lambda n: rc.progress(n, now))
+        u = (dt - RACE_BET) / RACE_RUN
+        say = ("%s jumps out in front!" if u < 0.2 else "%s leads the field" if u < 0.6
+               else "%s in front as they come into the straight!" if u < 0.85
+               else "and it's %s at the line!") % hs[lead]["name"].title()
+    else:
+        name, odds, got = rc.last
+        say = "WINNER: %s at %d/1  -  %s" % (name, odds, "you win $%d!" % got if got
+                                             else "better luck next race")
+    yb = top + RACE_FIELD * lane + 2
+    _text(ch, co, yb, int((x0 + x1 - len(say)) / 2), say,
+          GOLD if ph == "show" and rc.last[2] else HUD)
+    if rc.note and y1 > yb + 1:
+        _text(ch, co, yb + 1, int((x0 + x1 - len(rc.note)) / 2), rc.note, GOLD_DIM)
 
 
 # High Flyer, the crash game: a plane takes off and the multiplier climbs
@@ -13879,7 +13964,7 @@ class Flyer:
         return None
 
 
-def draw_flyer(ch, co, fl, x0, x1, y0, y1, now):
+def draw_flyer(ch, co, fl, x0, x1, y0, y1, now, k=1):
     """The board between columns x0 and x1, rows y0 to y1: the round and what
     it is doing, the multiplier in big figures, the plane drawing its curve up
     the graph - and the burst where it went - your bet and what it is worth,
@@ -13889,12 +13974,22 @@ def draw_flyer(ch, co, fl, x0, x1, y0, y1, now):
     m = fl.mult(now)
     w = x1 - x0
     side = 22 if w >= 70 else 0                  # the others, down the right
+    sy = k - 1
     gx0, gx1 = x0 + 6, x1 - side - 2
-    gy0, gy1 = y0 + 2, y1 - 4
-    head = ("HIGH FLYER  -  ROUND %d  -  BETS CLOSE IN %d"
-            % (r["n"], int(fl.off() - now) + 1) if ph == "bets"
-            else "HIGH FLYER  -  ROUND %d" % r["n"])
-    _text(ch, co, y0, x0 + (w - len(head)) // 2, head, GOLD)
+    gy0, gy1 = y0 + (2 if k <= 1 else 5 * sy + 2), y1 - 4
+    if k > 1:
+        # HIGH FLYER in block letters, and the round beside it.
+        sub = ("ROUND %d  -  BETS CLOSE IN %d" % (r["n"], int(fl.off() - now) + 1)
+               if ph == "bets" else "ROUND %d" % r["n"])
+        tw = blocks_width("HIGH FLYER", sy)
+        hx_ = x0 + (w - tw - len(sub) - 4) // 2
+        _blocks(ch, co, y0, hx_, "HIGH FLYER", GOLD, sy, sy)
+        _text(ch, co, y0 + 5 * sy // 2, hx_ + tw + 4, sub, GOLD_DIM)
+    else:
+        head = ("HIGH FLYER  -  ROUND %d  -  BETS CLOSE IN %d"
+                % (r["n"], int(fl.off() - now) + 1) if ph == "bets"
+                else "HIGH FLYER  -  ROUND %d" % r["n"])
+        _text(ch, co, y0, x0 + (w - len(head)) // 2, head, GOLD)
     # The axes.
     for y in range(gy0, gy1 + 1):
         ch[y][gx0 - 1], co[y][gx0 - 1] = "|", CURB
@@ -13915,18 +14010,23 @@ def draw_flyer(ch, co, fl, x0, x1, y0, y1, now):
 
     if ph != "bets":
         steps = max(2, int((gx1 - gx0) * t_now / t_max))
-        for k in range(steps + 1):
-            x, y = at(t_now * k / steps)
+        for n in range(steps + 1):
+            x, y = at(t_now * n / steps)
             if gy0 <= y <= gy1:
                 ch[y][x], co[y][x] = ("*" if ph == "fly" else "."), GOLD_DIM
         x, y = at(t_now)
         y = max(gy0, y)
-        if ph == "fly":
+        if ph == "fly" and k > 1:
+            y = max(gy0 + 1, y)
+            for r_, line in enumerate(FLY_PLANE_BIG):     # the plane, big
+                _text(ch, co, y - 1 + r_, x - 6, line, FLASH)
+            _text(ch, co, y, x - 10, "~~~~", EMBER_HOT if int(now * 10) % 2 else GOLD)
+        elif ph == "fly":
             _text(ch, co, y, x - 2, "=>", FLASH)        # the plane
             _text(ch, co, y, x - 4, "~~", EMBER_HOT if int(now * 10) % 2 else GOLD)
         else:
-            for k in range(14):                        # gone: a burst where it was
-                a = k * math.tau / 14
+            for n in range(14):                        # gone: a burst where it was
+                a = n * math.tau / 14
                 rr = 1.0 + (now - fl.gone()) * 3.0
                 bx = int(round(x + math.cos(a) * rr * 2))
                 by = int(round(y + math.sin(a) * rr))
@@ -13936,7 +14036,14 @@ def draw_flyer(ch, co, fl, x0, x1, y0, y1, now):
         _text(ch, co, gy1, gx0, "__/>", CURB)          # on the runway
     # The figure, big.
     fig = "%.2f" % m
-    if w >= 50 and gy1 - gy0 >= 8:
+    if k > 1 and gy1 - gy0 >= 5 * k + 4:
+        # The figure, very big: what everyone in the room is watching.
+        attr = (ROU_RED if ph in ("gone", "next") else ROU_GREEN if ph == "fly"
+                else GOLD_DIM)
+        fig += "X"
+        fx = (gx0 + gx1 - blocks_width(fig, 2 * k)) // 2
+        _blocks(ch, co, gy0 + 1, fx, fig, attr, 2 * k, k)
+    elif w >= 50 and gy1 - gy0 >= 8:
         fw = sum(4 for _ in fig)
         fx = (gx0 + gx1 - fw) // 2
         attr = (ROU_RED if ph in ("gone", "next") else ROU_GREEN if ph == "fly"
@@ -13945,11 +14052,15 @@ def draw_flyer(ch, co, fl, x0, x1, y0, y1, now):
             if ch[gy0 + 1 + dy][fx + dx] == " ":
                 ch[gy0 + 1 + dy][fx + dx], co[gy0 + 1 + dy][fx + dx] = "#", attr
         _text(ch, co, gy0 + 4, fx + fw, "x", attr)
-    if ph in ("gone", "next"):
+    if ph in ("gone", "next") and k > 1:
+        say = "FLEW AWAY"
+        _blocks(ch, co, gy0 + 5 * k + 3, (gx0 + gx1 - blocks_width(say, sy)) // 2, say,
+                ROU_RED, sy, sy)
+    elif ph in ("gone", "next"):
         say = " FLEW AWAY AT %.2fx " % r["crash"]
         sx_ = (gx0 + gx1 - len(say)) // 2
-        for k in range(len(say)):
-            ch[gy0 + 7][sx_ + k] = " "
+        for n in range(len(say)):
+            ch[gy0 + 7][sx_ + n] = " "
         _text(ch, co, gy0 + 7, sx_, say, ROU_RED)
     # Your bet.
     if r["cashed"] is not None:
@@ -13980,7 +14091,7 @@ def draw_flyer(ch, co, fl, x0, x1, y0, y1, now):
     if side:
         sx = x1 - side + 1
         _text(ch, co, gy0, sx, "AT THE TABLE", GOLD_DIM)
-        for k, (name, target, stake) in enumerate(r["others"]):
+        for n, (name, target, stake) in enumerate(r["others"]):
             if ph == "bets":
                 state, attr = "$%d on" % stake, CURB
             elif target <= m:
@@ -13989,24 +14100,34 @@ def draw_flyer(ch, co, fl, x0, x1, y0, y1, now):
                 state, attr = "riding", HUD
             else:
                 state, attr = "lost", ROU_RED
-            _text(ch, co, gy0 + 2 + k * 2, sx, name[:10], HUD)
-            _text(ch, co, gy0 + 3 + k * 2, sx + 1, state, attr)
+            _text(ch, co, gy0 + 2 + n * 2, sx, name[:10], HUD)
+            _text(ch, co, gy0 + 3 + n * 2, sx + 1, state, attr)
 
 
 FLY_WIDE = 56
 FLY_TALL = 16
+FLY_PLANE_BIG = ("    \\   ", "-=[__]>", "    /   ")
 
 
 PLINKO_SX = 4          # columns between pegs: even, so a half step is a column,
                        # and wide enough for "120" under its bin
 
 
-def plinko_tall(rows):
-    return rows + 4                    # rows the board needs, without its title
+def plinko_tall(rows, k=1):
+    """Rows the board needs, without its title. Big (k > 1) the pegs are k
+    rows apart, and the last win goes under it in block letters."""
+    if k <= 1:
+        return rows + 4
+    return rows * k + 4 + 5 * (k - 1)
 
 
-def plinko_wide(rows):
-    return (rows + 2) * PLINKO_SX + 3
+def plinko_wide(rows, k=1):
+    return (rows + 2) * PLINKO_SX * k + 3
+
+
+def plinko_title(k):
+    """Rows the title takes: a line, or PLINKO in block letters."""
+    return 1 if k <= 1 else 5 * (k - 1) + 1
 
 
 def plinko_colour(k, rows):
@@ -14015,20 +14136,23 @@ def plinko_colour(k, rows):
             else EMBER_HOT if edge >= 0.45 else CURB)
 
 
-def draw_plinko(ch, co, pk, cx, y0, y1, now):
+def draw_plinko(ch, co, pk, cx, y0, y1, now, k=1):
     """The board between rows y0 and y1, its middle at column cx: the slot at
     the top, the pegs in a triangle, the bins along the bottom with what each
     pays under it - lit hotter towards the edges - the balls on their way down,
     and the bet, the rows and the risk, and the last win."""
     height, width = len(ch), len(ch[0])
-    sx = PLINKO_SX
+    sx = PLINKO_SX * k
     rows = pk.rows
     pays = pk.pays
-    title = y1 - y0 + 1 >= plinko_tall(rows) + 1
-    top = y0 + (1 if title else 0)
+    title = y1 - y0 + 1 >= plinko_tall(rows, k) + plinko_title(k)
+    top = y0 + (plinko_title(k) if title else 0)
     peg0 = top + 1
-    bins = peg0 + rows
-    if title:
+    bins = peg0 + rows * k
+    if title and k > 1:
+        _blocks(ch, co, y0, int(cx - blocks_width("PLINKO", k - 1) / 2), "PLINKO",
+                GOLD, k - 1, k - 1)
+    elif title:
         _text(ch, co, y0, int(cx) - 5, "P L I N K O", GOLD)
 
     def col(across):
@@ -14039,23 +14163,23 @@ def draw_plinko(ch, co, pk, cx, y0, y1, now):
         for j in range(-1, r + 2):
             x = col(j - r / 2.0)
             if 0 <= x < width:
-                ch[peg0 + r][x], co[peg0 + r][x] = ".", CURB
+                ch[peg0 + r * k][x], co[peg0 + r * k][x] = ".", CURB
     mid = rows // 2
     fresh = pk.last is not None and now - pk.last[2] < PLINKO_HOLD
-    for k in range(rows + 1):
-        a = k - mid
+    for n in range(rows + 1):
+        a = n - mid
         for side in (-0.5, 0.5):
             x = col(a + side)
             if 0 <= x < width:
                 ch[bins][x], co[bins][x] = "|", GOLD_DIM
-        label = "%gk" % (pays[k] / 1000.0) if pays[k] >= 1000 else "%g" % pays[k]
-        attr = plinko_colour(k, rows)
-        if fresh and pk.last[0] == k and int(now * 8) % 2:
+        label = "%gk" % (pays[n] / 1000.0) if pays[n] >= 1000 else "%g" % pays[n]
+        attr = plinko_colour(n, rows)
+        if fresh and pk.last[0] == n and int(now * 8) % 2:
             attr = FLASH
         _text(ch, co, bins + 1, col(a) - (len(label) - 1) // 2, label, attr)
     for b in pk.balls:
         across, down = Plinko.where(b, now)
-        x, y = col(across), peg0 + int(round(down))
+        x, y = col(across), peg0 + int(round(down * k))
         if Plinko.landed(b, now):
             y = bins
         if 0 <= x < width and 0 <= y < height:
@@ -14065,14 +14189,21 @@ def draw_plinko(ch, co, pk, cx, y0, y1, now):
     elif pk.note:
         say = pk.note
     elif fresh:
-        k, win, _, paid = pk.last
-        say = "x%g  +$%s" % (paid[k], ("%.2f" % win).rstrip("0").rstrip("."))
+        hit, win, _, paid = pk.last
+        say = "x%g  +$%s" % (paid[hit], ("%.2f" % win).rstrip("0").rstrip("."))
     else:
         say = "p drops a ball"
     line = "BET $%d  %d ROWS  %s RISK   %s   $%d" % (
         pk.bet, rows, PLINKO_RISKS[pk.risk], say, int(pk.wallet.money))
     _text(ch, co, bins + 2, int(cx - len(line) / 2), line,
           GOLD if fresh and abs(pk.last[0] - mid) >= rows * 0.4 else GOLD_DIM)
+    if k > 1 and fresh:
+        # The win, big, under the board: what that bin paid and what you got.
+        k_, win, _, paid = pk.last
+        big = "X%g  $%s" % (paid[k_], ("%.2f" % win).rstrip("0").rstrip("."))
+        attr = FLASH if int(now * 8) % 2 else plinko_colour(k_, rows)
+        _blocks(ch, co, bins + 4, int(cx - blocks_width(big, k - 1) / 2), big, attr,
+                k - 1, k - 1)
 
 
 class Slot:
@@ -14772,14 +14903,22 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
             _text(ch, co, min(height - 1, height // 2 + 1), 1,
                   "p bets / cashes out, stake $%d" % flyer.stake, GOLD_DIM)
         else:
-            draw_flyer(ch, co, flyer, int(left) + 1, int(right), y0, y1, now)
+            draw_flyer(ch, co, flyer, int(left) + 1, int(right), y0, y1, now,
+                       k if y1 - y0 + 1 >= FLY_TALL + 5 * k else 1)
         _text(ch, co, floor, max(1, int(cx) - 10), "-- the way out (s) --", GOLD_DIM)
         return ch, co
 
     if races is not None:
         y1 = floor - 2
         y0 = band_top if roomy else top
-        if y1 - y0 + 1 < RACE_TALL or right - left < RACE_WIDE:
+        kr = k
+        while kr > 1 and (race_size(kr)[1] > y1 - y0 + 1
+                          or race_size(kr)[0] > right - left):
+            kr -= 1
+        if kr > 1:
+            y0 += max(0, (y1 - y0 - race_size(kr)[1]) // 2)
+            draw_races_big(ch, co, races, int(left) + 1, int(right), y0, y1, now, kr)
+        elif y1 - y0 + 1 < RACE_TALL or right - left < RACE_WIDE:
             race = races.race
             ph = races.phase(now)
             _text(ch, co, height // 2, 1, "RACE %d: %s" % (race["n"], (
@@ -14796,14 +14935,18 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
     if plinko is not None:
         y1 = floor - 2
         y0 = band_top if roomy else top
-        need = plinko_tall(plinko.rows)
+        kp = k
+        while kp > 1 and (plinko_tall(plinko.rows, kp) + plinko_title(kp) > y1 - top
+                          or plinko_wide(plinko.rows, kp) > right - left):
+            kp -= 1                  # sixteen rows big may not fit: a size down
+        need = plinko_tall(plinko.rows, kp)
         if roomy and y1 - y0 + 1 < need:
             # A big board goes up over the ceiling and the back wall.
             y0 = top + 1
             for y in range(y0, y1 + 1):
                 for x in range(int(left), int(right) + 1):
                     ch[y][x], co[y][x] = " ", 0
-        if y1 - y0 + 1 < need or right - left < plinko_wide(plinko.rows):
+        if y1 - y0 + 1 < need or right - left < plinko_wide(plinko.rows, kp):
             last = plinko.last
             _text(ch, co, height // 2, 1, "PLINKO: " + (
                 "x%g" % last[3][last[0]] if last else "p drops a ball"), GOLD)
@@ -14813,7 +14956,7 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
                   GOLD_DIM)
         else:
             y0 += max(0, (y1 - y0 - need) // 2)            # in the middle
-            draw_plinko(ch, co, plinko, cx, y0, y1, now)
+            draw_plinko(ch, co, plinko, cx, y0, y1, now, kp)
         _text(ch, co, floor, max(1, int(cx) - 10), "-- the way out (s) --", GOLD_DIM)
         return ch, co
 

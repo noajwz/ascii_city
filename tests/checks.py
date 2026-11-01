@@ -5133,6 +5133,50 @@ for w_, h_ in ((300, 88), (333, 101), (450, 132), (521, 160)):
         cdraws += 1
 check("every game in the room draws on every big window", cdraws == 16)
 
+# Plinko, the races and High Flyer, big: each against itself small.
+def cgrid_(w_, h_, t_, **kw_):
+    return "\n".join("".join(r) for r in ac.render_casino_room(
+        csp, w_, h_, t_, cslot, cbj, **kw_)[0])
+
+
+cpk = ac.Plinko(cw_)
+ac._spin_rng.seed(3)
+cpk.drop(0.5)
+ct_ = 0.5
+while cpk.last is None and ct_ < 30.0:
+    ct_ += 0.1
+    cpk.settle(ct_)
+cp_s, cp_b = cgrid_(120, 40, ct_, plinko=cpk), cgrid_(300, 90, ct_, plinko=cpk)
+check("plinko, big: PLINKO and the win in block letters, the pegs twice as far apart",
+      "P L I N K O" in cp_s and "P L I N K O" not in cp_b
+      and cp_b.count("#") > cp_s.count("#") + 150
+      and ".       ." in cp_b and ".       ." not in cp_s)
+cpk16 = ac.Plinko(cw_)
+cpk16.rows = 16
+check("and the biggest board, sixteen rows, fits big on the smallest big window",
+      r"\v/" in cgrid_(300, 88, 1.0, plinko=cpk16))
+crc2 = ac.Races(cw_)
+crc2.update(0.0)
+crt = ac.RACE_BET + ac.RACE_RUN * 0.5
+crc2.update(crt)
+cr_s, cr_b = cgrid_(120, 40, crt, races=crc2), cgrid_(300, 90, crt, races=crc2)
+check("the races, big: RACE n in block letters, a lane five rows deep a horse, the "
+      "horses big",
+      "RACE 1  -  AND THEY'RE OFF!" in cr_s and "AND THEY'RE OFF!" in cr_b
+      and "RACE 1  -" not in cr_b and cr_b.count("_/|__>") == ac.RACE_FIELD
+      and "_/|__>" not in cr_s)
+ac._spin_rng.seed(11)
+cfl2 = ac.Flyer(cw_)
+cfl2.update(0.0)
+cft = cfl2.off() + 0.2
+while cfl2.phase(cft) == "fly":
+    cft += 0.2
+cfl2.update(cft)
+cf_s, cf_b = cgrid_(120, 40, cft, flyer=cfl2), cgrid_(300, 90, cft, flyer=cfl2)
+check("high flyer, big: the name, the figure and FLEW AWAY in block letters",
+      "FLEW AWAY AT" in cf_s and "FLEW AWAY AT" not in cf_b
+      and "HIGH FLYER  -" not in cf_b and cf_b.count("#") > 4 * cf_s.count("#"))
+
 # --- the Pokemon Center -------------------------------------------------------------
 pcs = list(ac.near_centers(x0, z0, 1500.0))
 check("a few Pokemon Centers about town, solid, on a street, out of the parks and "

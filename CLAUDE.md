@@ -1196,8 +1196,21 @@ table's 40): the payline's three symbols big in their own windows with the rows 
 small, the cards with their ranks in block letters and the suit in two corners, the money, the
 win and the outcome in block letters. **Ordinary text stays small** — the paytable, the keys,
 "dealer" — because a terminal cannot draw a letter bigger than its font, and a sentence in block
-letters is four columns a letter. Plinko, the races and High Flyer are not scaled yet. `z` in the
-casino turns the big room off and on (`_casino_big`), for comparing the two on one window. This
+letters is four columns a letter. `z` in the casino turns the big room off and on (`_casino_big`), for comparing the two on one
+window.
+
+**Plinko, the races and High Flyer** scale too, each at the biggest scale that fits it in the
+room (`kp`, `kr` in `render_casino_room()`) - in practice the room's. Plinko (`draw_plinko(...,
+k)`, `plinko_tall(rows, k)`, `plinko_wide(rows, k)`, `plinko_title(k)`) spreads its pegs k times
+both ways, puts PLINKO over it and the last win under it in block letters. The races
+(`draw_races_big()`, `race_size(k)`) give each horse a lane five rows deep: its number in block
+letters in its silks, name and odds beside it, and a three-row horse and jockey (`HORSE_BIG`)
+galloping. High Flyer (`draw_flyer(..., k)`) was already as big as the room - its graph is drawn
+from the space it is given - so only the words grow: HIGH FLYER, the multiplier (very big) and
+FLEW AWAY in block letters, and the plane (`FLY_PLANE_BIG`). **Watch for `k` as a loop
+variable**: `draw_plinko()` and `draw_flyer()` both had `for k in` loops, and once `k` was the
+scale those loops overwrote it - the normal-size frame comparison caught it (balls in the wrong
+row, the big plane at scale 1). They loop over `n` now. This
 is the first screen of the scaling system described near the top of this file - follow that for
 the next ones.
 
