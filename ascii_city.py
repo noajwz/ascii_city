@@ -1973,7 +1973,6 @@ ZONES = {
 }
 QUAD_HI, QUAD_HJ = 6, 5  # the quad's half size, in cells: deep enough to see the
                          # clock from across it, the camera not looking up
-UNI_NAME = "UNIVERSITAS URBIS"
 PLANE_SCALE = 2.3      # an airliner, big enough to make out from the end of the runway
 RUNWAY_DI = 8          # the runway's middle, in cells east of the airport's
 RUNWAY_W = 14.0        # half its width, in units
@@ -1986,15 +1985,23 @@ STRIP_NAMES = ["GOLDEN PALM", "NEON OASIS", "SILVER COMET", "LUCKY SEVENS",
                "DIAMOND DUNES", "STARLIGHT", "THE BIG WHEEL", "CROWN JEWEL",
                "MIDNIGHT SUN", "RED VELVET", "THE HIGH ROLLER", "FORTUNA"]
 _zone_cache = {}
+_home_cache = {}
 
 
 def zone_home(kind, i, j):
-    """Centre (ci, cj) of this kind of zone in the tile this cell is in."""
-    z = ZONES[kind]
+    """Centre (ci, cj) of this kind of zone in the tile this cell is in.
+    Kept per tile: there are only ever a few tiles in view."""
     ti, tj = i // WOODS_TILE, j // WOODS_TILE
-    m = _mix(ti, tj, z["salt"])
-    return (ti * WOODS_TILE + z["off_i"] + (m & 31) - 16,
-            tj * WOODS_TILE + z["off_j"] + ((m >> 5) & 7) - 4)
+    key = (kind, ti, tj)
+    hit = _home_cache.get(key)
+    if hit is None:
+        _evict(_home_cache, 2000)
+        z = ZONES[kind]
+        m = _mix(ti, tj, z["salt"])
+        hit = (ti * WOODS_TILE + z["off_i"] + (m & 31) - 16,
+               tj * WOODS_TILE + z["off_j"] + ((m >> 5) & 7) - 4)
+        _home_cache[key] = hit
+    return hit
 
 
 def zone_depth(kind, i, j):
@@ -2060,8 +2067,9 @@ def library_door(i, j):
     return x, z
 
 
-def read_in_library(stdscr, app, back="back in the reading room"):
-    """Hand the terminal to one of the readers and take it back after.
+def run_program(stdscr, app, back="back in the reading room"):
+    """Hand the terminal to one of the programs in library/ - a reader, or
+    the type chart on the Pokemon Center's PC - and take it back after.
     Returns what to say on the way out."""
     path = os.path.join(LIBRARY_DIR, app)
     if not os.path.isfile(path):
@@ -2645,22 +2653,34 @@ def face_kind(i, j):
     return "yokocho" if yokocho_at(i, j) else None
 
 
+_road_at_cache = {}
+
+
 def road_at(i, j):
     """Is this cell part of a proper street - the kind that gets neon?
 
     No street runs through the woods: the avenue stops at the trees and a gate
-    in the ring trail is what continues it."""
-    if woods_at(i, j) or headland_at(i, j):
-        return False
-    if suburb_at(i, j):
-        return suburb_road(i, j)
-    if strip_at(i, j):
-        return strip_road(i, j)
-    if airport_at(i, j):
-        return False
-    if quad_at(i, j) or (university_at(i, j) and campus_solid(i, j)):
-        return False                 # the streets stop at the quad and its buildings
-    return _is_road(i, XP, 91) or _is_road(j, ZP, 137)
+    in the ring trail is what continues it. Cached like is_open(): it is asked
+    of the same cells over and over every frame, and each placed part of town
+    added another check in front of the answer."""
+    key = i * 1048576 + j
+    hit = _road_at_cache.get(key)
+    if hit is None:
+        _evict(_road_at_cache, 60000)
+        if woods_at(i, j) or headland_at(i, j):
+            hit = False
+        elif suburb_at(i, j):
+            hit = suburb_road(i, j)
+        elif strip_at(i, j):
+            hit = strip_road(i, j)
+        elif airport_at(i, j):
+            hit = False
+        elif quad_at(i, j) or (university_at(i, j) and campus_solid(i, j)):
+            hit = False              # the streets stop at the quad and its buildings
+        else:
+            hit = _is_road(i, XP, 91) or _is_road(j, ZP, 137)
+        _road_at_cache[key] = hit
+    return hit
 
 
 _landmark_cache = {}
@@ -5530,7 +5550,7 @@ def flight_profile(home):
 
 def flight_stage(home, s):
     """What the captain would say, more or less."""
-    s3, s_td, s_end = flight_marks(home)
+    s3, s_td, _ = flight_marks(home)
     if s < FLIGHT_ROTATE * 0.4:
         return "rolling"
     if s < FLIGHT_ROTATE:
@@ -5974,8 +5994,7 @@ def draw_clock(ch, co, v, walls, now):
                 put_cell(ch, co, v, walls, int(round(x0)) + dx, int(round(y0)) + dy,
                          dist - 0.2, g, GOLD if g == "o" else BULB)
         if r >= 2.5:
-            for n, (a, label) in enumerate(((0.0, "12"), (0.5, "3"), (1.0, "6"),
-                                            (1.5, "9"))):
+            for a, label in ((0.0, "12"), (0.5, "3"), (1.0, "6"), (1.5, "9")):
                 ang = a * math.pi
                 lx = int(round(x0 + math.sin(ang) * (r - 1.2) * 2.0)) - len(label) // 2
                 ly = int(round(y0 - math.cos(ang) * (r - 1.2)))
@@ -6857,7 +6876,7 @@ def collect_glow(v, now, wet):
         if kind == "short":
             _spill(glow, *camp_spot(tx0, tx1, tz0, tz1), 5.0, EMBER)
     for c_ in near_carnivals(v, 60.0):
-        (wx, wz), (cx, cz), stalls, _ = carnival_spots(c_)
+        (wx, wz), (cx, cz), _, _ = carnival_spots(c_)
         _spill(glow, wx, wz, 11.0, NEON[int(now * 5.0) % len(NEON)][1])
         _spill(glow, cx, cz, 4.0, GOLD_DIM)
     for i, j, b in near_lots(v, 60.0):
@@ -8835,17 +8854,6 @@ def near_yokocho(v, reach):
                 continue
             if yokocho_at(i, j):
                 yield i, j
-
-
-STACK = [
-    " ___ ",
-    "|OOO|",
-    "|OOO|",
-    "|___|",
-    "|OOO|",
-    "|OOO|",
-    "|___|",
-]
 
 
 COMPASS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
@@ -11196,20 +11204,6 @@ def draw_lobby(ch, co, v, walls, t, now):
     door = face_point(i, j, f, CELL * 0.5, 0.2, 0.0)
     blit_sprite(ch, co, v, walls, ["[|]", "[|]", "[|]"], door[0], door[2],
                 0.0, 2.4, 1.4, BULB)
-
-
-LIFT_CAR = [
-    ".-------------------.",
-    "|                   |",
-    "|                   |",
-    "|                   |",
-    "|                   |",
-    "|                   |",
-    "|                   |",
-    "|                   |",
-    "|                   |",
-    "'-------------------'",
-]
 
 
 def climbable(i, j, f):
@@ -14013,10 +14007,6 @@ def plinko_tall(rows):
 
 def plinko_wide(rows):
     return (rows + 2) * PLINKO_SX + 3
-
-
-PLINKO_TALL = plinko_tall(PLINKO_ROWS)
-PLINKO_WIDE = plinko_wide(PLINKO_ROWS)
 
 
 def plinko_colour(k, rows):
@@ -18298,16 +18288,22 @@ def station_of_block(bi, bj):
     return hit
 
 
-def near_stations(x, z, reach):
-    """Every station within reach of here."""
+def blocks_near(x, z, reach):
+    """(bi, bj) of every city block that reaches within `reach` of here, by
+    its bounding square: the callers check the distance to what is in it."""
     b0, b1 = int((x - reach) // (XP * CELL)), int((x + reach) // (XP * CELL))
     c0, c1 = int((z - reach) // (ZP * CELL)), int((z + reach) // (ZP * CELL))
     for bi in range(b0, b1 + 1):
         for bj in range(c0, c1 + 1):
-            st = station_of_block(bi, bj)
-            if (st is not None
-                    and (st["x"] - x) ** 2 + (st["z"] - z) ** 2 < reach * reach):
-                yield st
+            yield bi, bj
+
+
+def near_stations(x, z, reach):
+    """Every station within reach of here."""
+    for bi, bj in blocks_near(x, z, reach):
+        st = station_of_block(bi, bj)
+        if st is not None and (st["x"] - x) ** 2 + (st["z"] - z) ** 2 < reach * reach:
+            yield st
 
 
 def station_at(x, z):
@@ -18399,16 +18395,13 @@ def center_at(i, j):
 
 def near_centers(x, z, reach):
     """(i, j, face, door x, door z) of every Center within reach."""
-    b0, b1 = int((x - reach) // (XP * CELL)), int((x + reach) // (XP * CELL))
-    c0, c1 = int((z - reach) // (ZP * CELL)), int((z + reach) // (ZP * CELL))
-    for bi in range(b0, b1 + 1):
-        for bj in range(c0, c1 + 1):
-            c = center_of_block(bi, bj)
-            if c is None:
-                continue
-            dx, _, dz = face_point(c[0], c[1], c[2], CELL * 0.5, 1.4, 0.0)
-            if (dx - x) ** 2 + (dz - z) ** 2 < reach * reach:
-                yield c[0], c[1], c[2], dx, dz
+    for bi, bj in blocks_near(x, z, reach):
+        c = center_of_block(bi, bj)
+        if c is None:
+            continue
+        dx, _, dz = face_point(c[0], c[1], c[2], CELL * 0.5, 1.4, 0.0)
+        if (dx - x) ** 2 + (dz - z) ** 2 < reach * reach:
+            yield c[0], c[1], c[2], dx, dz
 
 
 def draw_center_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
@@ -18627,7 +18620,6 @@ def render_platform(width, height, now, metro):
             else "DEPARTING" if phase == "out" else "%d s" % int(q + 1))
     _text(ch, co, by + 4, bx, "NEXT TRAIN  " + wait, GOLD)
     for r, d in enumerate(metro["dests"][:edge - by - 7]):
-        far = math.hypot(d["x"] - st["x"], d["z"] - st["z"])
         line = "%s %-14s %s" % (">" if r == metro["sel"] else " ", d["name"][:14],
                                 d["district"])
         _text(ch, co, by + 6 + r, bx, line, FLASH if r == metro["sel"] else HUD)
@@ -19050,6 +19042,15 @@ def main(stdscr):
     flight = None               # at the gate or in the air: {"phase", ...}
     reading = False             # in the library's reading room
     poke = None                 # in a Pokemon Center: {"door", "heal"}
+
+    def elsewhere():
+        """Somewhere of its own, off the street: down a manhole, in a cab,
+        on the metro or a plane, in the reading room or a Pokemon Center.
+        Not the lift, the roof or the confession booth - the booth is in the
+        temple, and the temple stays the venue you are in. A function rather
+        than a flag, so it is never out of date within a frame."""
+        return (sewer is not None or taxi is not None or metro is not None
+                or flight is not None or reading or poke is not None)
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -19195,8 +19196,7 @@ def main(stdscr):
                     if poke["heal"] is None or now - poke["heal"] > CENTER_HEAL + 1.5:
                         poke["heal"] = now
                 elif key in (ord("c"), ord("C")):
-                    note = read_in_library(stdscr, CENTER_PC,
-                                           "SOMEONE'S PC: logged off")
+                    note = run_program(stdscr, CENTER_PC, "SOMEONE'S PC: logged off")
                     now = note_at = _clock[0] = time.monotonic()
             elif reading and key not in (ord("q"), CHEAT_KEY):
                 book_ = [b_ for b_ in LIBRARY_BOOKS if key in (ord(b_[0]),
@@ -19209,7 +19209,7 @@ def main(stdscr):
                     reading = False
                     note, note_at = "back on the quad", now
                 elif book_:
-                    note = read_in_library(stdscr, book_[0][3])
+                    note = run_program(stdscr, book_[0][3])
                     now = note_at = _clock[0] = time.monotonic()
             elif flight is not None and key not in (ord("q"), CHEAT_KEY):
                 if flight["phase"] == "gate":
@@ -19557,14 +19557,10 @@ def main(stdscr):
             if ((roof_x - hx_) ** 2 + (roof_z - hz_) ** 2 < 1.6 ** 2
                     and (hx_ - roof_x) * ddx + (hz_ - roof_z) * ddz > 0.0):
                 lift = {"up": False, "t0": now, "t": party}
-        if (lift is not None or on_roof is not None or sewer is not None
-                or booth is not None or taxi is not None or metro is not None
-                or flight is not None or reading or poke is not None):
+        if lift is not None or on_roof is not None or booth is not None or elsewhere():
             fwd = side = 0.0            # on the roof you can only look round
             autopilot = False
-            if (lift is not None or sewer is not None or booth is not None or taxi
-                    or metro is not None or flight is not None or reading
-                    or poke is not None):
+            if lift is not None or booth is not None or elsewhere():
                 spin = 0.0
         if flight is not None and flight["phase"] == "air":
             # Looking round eases, the way your head would.
@@ -19623,9 +19619,7 @@ def main(stdscr):
         # this city. Walk back out and the wheel goes away; stand there and it
         # deals you another, because that is what a casino is for.
         was_ = venue
-        venue = (venue_at(cam_x, cam_z)
-                 if street and sewer is None and taxi is None and metro is None
-                 and flight is None and not reading and poke is None else None)
+        venue = venue_at(cam_x, cam_z) if street and not elsewhere() else None
         # Going past faster than a walk, a doorway does not take you in: you
         # were going somewhere else. Slow to a walk or stop at it and it does,
         # and once you are in, you stay in.

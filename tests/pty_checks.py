@@ -61,178 +61,213 @@ def report(name, status, out):
 # steps walk you in.
 IN = [(b"w", .25)] * 12
 
-ok = True
-ok &= report("walk, turn, sidestep", *run(
-    [(b"w",.5),(b"W",.6),(b"a",.5),(b"d",.4),(b"s",.4),(b",",.3),(b".",.3)]))
-ok &= report("tab to skyline and back", *run(
-    [(b"\t",.6),(b"l",.4),(b"L",.4),(b"\t",.6),(b"w",.5)]))
-ok &= report("wander on spacebar", *run([(b" ", 5.0)]))
-ok &= report("turn: taps, then held, then wander and stop", *run(
-    [(b"a", .3), (b"d", .3)] + [(b"\x1bOD", .04)] * 25 + [(b" ", 4.0), (b"w", .3)]))
-ok &= report("panel open, arrows still walk", *run(
-    [(b"`",.6),(b"\x1bOA",.4),(b"\x1bOC",.4),(b"\x1bOB",.4),(b"`",.4),(b"w",.4)]))
-ok &= report("panel keys then esc then play", *run(
-    [(b"`",.5),(b"y",.7),(b"w",.4),(b"L",.6),(b"\x1b",.4),(b"w",.5),(b"a",.4)]))
-ok &= report("TERM=xterm (8 colours)", *run(
-    [(b"`",.5),(b"k",.7),(b"\x1b",.3),(b"w",.4)], term="xterm"))
-ok &= report("20x8 window with panel", *run(
-    [(b"`",.5),(b"c",.7),(b"w",.4)], cols=20, rows=8))
-ok &= report("240x70 window with panel", *run(
-    [(b"`",.5),(b"6",.7),(b"w",.4)], cols=240, rows=70))
-ok &= report("ramen counter, sit and leave", *run(
-    [(b"`", .5), (b"r", 1.0)] + IN + [(b"s", .6), (b"s", .6), (b"w", .4)]))
-ok &= report("casino slot: bet up, pull, bet down", *run(
-    [(b"`", .5), (b"c", 1.0)] + IN + [(b"+", .3), (b"p", 3.0), (b"-", .3), (b"p", 3.0),
-     (b"b", .6), (b"k", 3.0)], cols=100, rows=30))
-ok &= report("sky deck: lift up, look round, lift down", *run(
-    [(b"`", .5), (b"^", 1.0), (b"w", 6.0), (b"d", .5), (b"a", .5), (b"s", 6.0),
-     (b"w", .4)], cols=100, rows=30))
-ok &= report("fire escape: climb, look round, climb down", *run(
-    [(b"`", .5), (b"|", 1.0), (b"w", 1.0), (b"w", 4.0), (b"d", .5), (b"s", 1.0),
-     (b"w", 4.0)], cols=100, rows=30))
-ok &= report("the pictures: go in, watch, walk out", *run(
-    [(b"`", .5), (b"m", 2.5), (b"s", .6), (b"s", .6), (b"w", .4)], cols=100, rows=30))
-ok &= report("a lit alley, then under the el", *run(
-    [(b"`", .5), (b"y", 1.0), (b"w", 2.0), (b"`", .5), (b"=", 1.0), (b"w", 3.0)],
-    cols=100, rows=30))
-ok &= report("a police car coming, then traffic off", *run(
-    [(b"`", .5), (b"<", 1.5), (b"`", .5), (b">", .4), (b">", .4), (b"w", .5)],
-    cols=100, rows=30))
-ok &= report("the diner: sit, coffee, walk out; then a billboard", *run(
-    [(b"`", .5), (b"d", 6.5), (b"s", .8), (b"`", .5), (b"$", 1.0), (b"w", .4)],
-    cols=100, rows=30))
-ok &= report("the claw machine: play, drop, walk out", *run(
-    [(b"`", .5), (b"j", 1.0), (b"p", 1.5), (b"p", 6.0), (b"p", .4), (b"s", .6),
-     (b"s", .6), (b"w", .4)], cols=100, rows=30))
-ok &= report("up the lighthouse: climb, light a show, fire, climb down", *run(
-    [(b"`", .5), (b"i", 1.0), (b"w", 6.0), (b"f", 3.0), (b"f", .5), (b"F", 1.5),
-     (b"d", .4), (b"s", 6.0), (b"w", .4)], cols=100, rows=30))
-ok &= report("the arcade: choose, play, play keys, leave, walk out", *run(
-    [(b"`", .5), (b"g", 2.0), (b"d", .4), (b"p", 1.0), (b"p", .3), (b"\x1bOD", .3),
-     (b"w", .3), (b"s", .3), (b"d", .3), (b"x", .5), (b"a", .3), (b"p", 1.5),
-     (b"x", .4), (b"s", .6), (b"s", .6)], cols=100, rows=30))
-ok &= report("the casino: 777 next pull, pull, walk out into the gold", *run(
-    [(b"`", .5), (b"c", 1.0)] + IN + [(b"`", .5), (b"%", .4), (b"`", .3), (b"p", 3.5),
-     (b"s", .6), (b"s", .6), (b"s", 1.0)], cols=100, rows=30))
-ok &= report("the plinko machine: over to it, bet up, drop three, back, out", *run(
-    [(b"`", .5), (b"c", 1.0)] + IN + [(b"o", .4), (b"+", .2), (b"p", .2), (b"p", .2),
-     (b"p", 3.0), (b"o", .4), (b"s", .6), (b"s", .6)], cols=100, rows=30))
-ok &= report("the races: over to the track, stake up, two bets, watch, back", *run(
-    [(b"`", .5), (b"c", 1.0)] + IN + [(b"r", .4), (b"+", .2), (b"1", .2), (b"4", 3.0),
-     (b"r", .4), (b"s", .6), (b"s", .6)], cols=100, rows=30))
-ok &= report("plinko, bigger and harder: rows up, high risk, drop, rows down", *run(
-    [(b"`", .5), (b"c", 1.0)] + IN + [(b"o", .4), (b"]", .2), (b"]", .2), (b"3", .2),
-     (b"p", 3.5), (b"[", .3), (b"1", .3), (b"p", 2.5), (b"o", .4), (b"s", .6),
-     (b"s", .6)], cols=100, rows=30))
-ok &= report("high flyer: over to it, stake up, bet, auto, watch, cash out, back", *run(
-    [(b"`", .5), (b"c", 1.0)] + IN + [(b"f", .4), (b"+", .2), (b"p", .3), (b"u", .2),
-     (b"u", 9.0), (b"p", .4), (b"f", .4), (b"s", .6), (b"s", .6)], cols=100, rows=30))
-ok &= report("closing time at the club, outside and in", *run(
-    [(b"`", .5), (b"/", .4), (b"k", 4.5)] + IN + [(b"s", .6)], cols=100, rows=30))
-ok &= report("the strength tester: swing, swing again, walk out", *run(
-    [(b"`", .5), (b"h", 1.0), (b"p", 2.5), (b"p", 2.5), (b"s", .6), (b"s", .6)],
-    cols=100, rows=30))
-ok &= report("the roof party: lift up, walk about, back to the lift, down", *run(
-    [(b"`", .5), (b"p", 1.0), (b"w", 6.0), (b"w", .6), (b"a", .5), (b"W", .6),
-     (b"s", .6), (b"s", .6), (b"s", .6), (b"s", .6), (b"s", 6.0)], cols=100, rows=30))
-ok &= report("the stock exchange: buy, more, sell, walk out", *run(
-    [(b"`", .5), (b"e", 1.0), (b"b", .4), (b"+", .3), (b"b", .4), (b"n", .4),
-     (b"l", .4), (b"\x1bOB", .3), (b"\x1bOB", .3), (b"b", .4), (b"\x1bOA", .3),
-     (b"l", .4), (b"\x1bOC", .3), (b"-", .3), (b"s", .6), (b"s", .6)],
-    cols=100, rows=30))
-ok &= report("money: +1000 in the menu, a film, a bowl, walk out", *run(
-    [(b"`", .5), (b"+", .4), (b"m", 2.0), (b"s", .6), (b"s", .6), (b"`", .5),
-     (b"r", .6)] + IN + [(b"s", .1), (b"w", 5.0), (b"s", .6), (b"s", .6)],
-    cols=100, rows=30))
-ok &= report("a manhole: walk on, down, a slice, back up", *run(
-    [(b"`", .5), (b"x", 1.0)] + [(b"w", .25)] * 3
-    + [(b"e", 1.5), (b"p", .5), (b"s", .8), (b"w", .4)], cols=100, rows=30))
-ok &= report("the temple: across the street, in, the word of god twice, out", *run(
-    [(b"`", .5), (b"*", 1.0)] + IN + IN + [(b"g", .3), (b"g", .45), (b"g", .7),
-                                             (b"s", .6),
-     (b"s", .6)], cols=100, rows=30))
-ok &= report("the confession booth: in, type with q and s in it, confess, esc, out",
-             *run([(b"`", .5), (b"*", 1.0)] + IN + IN + [(b"c", 1.6)]
-                  + [(bytes([c_]), .05) for c_ in b"i quit my job and stole"]
-                  + [(b"\x7f", .1), (b"l", .1), (b"\r", 3.0), (b"\x1b", .5), (b"s", .6),
-                     (b"s", .6)], cols=100, rows=30))
-ok &= report("a blackout: to the night, the power going, walking in the dark", *run(
-    [(b"`", .5), (b"&", 8.0), (b"w", 1.0), (b"`", .4), (b"c", 1.5)], cols=100, rows=30))
-ok &= report("a taxi: hail, it pulls up, choose, ride, arrive", *run(
-    [(b"t", 3.6), (b"\x1bOB", .3), (b"s", .3), (b"w", .3), (b"\r", 15.0), (b"w", .5)],
-    cols=100, rows=30))
-ok &= report("a fog night: to it, walk, a taxi through it", *run(
-    [(b"`", .5), (b"#", 1.0), (b"w", 1.0), (b"W", 1.0), (b"t", 3.6), (b"\r", 8.0)],
-    cols=100, rows=30))
-ok &= report("pace: up to very fast, walk, run into a wall, back down", *run(
-    [(b"+", .2)] * 4 + [(b"w", .5), (b"W", .2), (b"W", 1.0)] + [(b"-", .2)] * 3
-    + [(b"w", .5)], cols=100, rows=30))
-ok &= report("the factories: the zone, the site, into the rave and out", *run(
-    [(b"`", .5), (b"9", 1.5), (b"W", 1.0), (b"`", .5), (b"]", 1.5), (b"`", .5),
-     (b"}", 1.5), (b"w", 1.0), (b"`", .5), (b"[", 1.5)] + [(b"w", .25)] * 14
-    + [(b"x", 1.0), (b"s", .6), (b"s", .6)],
-    cols=100, rows=30))
-ok &= report("the suburbs: to them, walk a curving street, a taxi out", *run(
-    [(b"`", .5), (b"0", 1.5), (b"w", 1.0), (b"W", 1.0), (b"a", .5), (b"w", 1.0),
-     (b"t", 3.6), (b"\x1b", .4)], cols=100, rows=30))
-ok &= report("lemonade at 3am: buy three, and the stargazer's telescope", *run(
-    [(b"`", .5), (b";", 1.5), (b"w", .4), (b"p", .4), (b"p", .4), (b"p", 1.0),
-     (b"s", .6), (b"`", .5), (b"?", 1.5), (b"w", .4), (b"x", 10.0), (b"s", .6)],
-    cols=100, rows=30))
-ok &= report("the strip: to it, run up the boulevard, into a hotel's casino", *run(
-    [(b"`", .5), (b":", 1.5), (b"+", .2), (b"W", 1.0), (b"W", 1.0), (b"d", .4),
-     (b"d", .4), (b"w", 1.0), (b"w", 1.0), (b"s", .6)], cols=100, rows=30))
-ok &= report("the airport: the end of the runway, watch one land, turn round", *run(
-    [(b"`", .5), (b"'", 6.0), (b"a", .4), (b"a", .4), (b"a", 3.0), (b"w", 1.0)],
-    cols=100, rows=30))
-ok &= report("the fountain show: to it, and watch the start", *run(
-    [(b"`", .5), (b"(", 14.0), (b"a", .4), (b"d", .4)], cols=100, rows=30))
-ok &= report("the university: the quad, across it, the panel's other page", *run(
-    [(b"`", .5), (b"\t", .4), (b"{", 1.5), (b"w", 1.0), (b"w", 1.0), (b"`", .5),
-     (b"\t", .4), (b"\t", .4), (b"`", .4)], cols=80, rows=24))
-# Walking in is the reading room. w hands the terminal to the Wikipedia
-# reader, which opens on its search prompt: esc out of that, then q back to
-# the room; p the same for PsychonautWiki; x out onto the quad. Not s after:
-# backing up is back through the doors. Up to walk in, not w: inside, w is
-# Wikipedia.
-lib_st, lib_out = run([(b"`", .5), (b'"', 1.5)] + [(b"\x1bOA", .3)] * 8   # up: in
-                      + [(b"w", 2.5), (b"\x1b", 1.5), (b"q", 1.5),
-                         (b"p", 2.5), (b"\x1b", 1.5), (b"q", 1.5),
-                         (b"x", .8)] + [(b"w", .3)] * 4,
-                      cols=100, rows=30)
-lib_txt = ANSI.sub(b"", lib_out).decode("utf-8", "replace")
-ok &= report("the library: the room, both readers, back out on the quad",
-             lib_st, lib_out)
-seen = ("THE READING ROOM" in lib_txt and "wiki_tui" in lib_txt
-        and "psychonaut_tui" in lib_txt
-        and lib_txt.rfind("walk in and read") > lib_txt.rfind("psychonaut_tui"))
-print("%-34s %s" % ("  and both readers came up, and went", "ok" if seen else "FAIL"))
-ok &= seen
-ok &= report("a flight: the gate, a seat, off, doze, land, out", *run(
-    [(b"`", .5), (b".", 1.5)] + [(b"w", .3)] * 6 + [(b"\r", 4.0), (b"\x1bOD", .3),
-     (b"\x1bOC", .3), (b"x", 1.0)] + [(b"", 3.0)] * 9 + [(b"w", .3)],
-    cols=100, rows=30))
-ok &= report("a flight: the gate, and straight back out", *run(
-    [(b"`", .5), (b".", 1.5)] + [(b"w", .3)] * 6 + [(b"x", .8), (b"w", .4)],
-    cols=80, rows=24))
-# Up to walk in, not w; h to heal, c the PC - the type chart, which q quits -
-# then x out, and the street again: its "walk in" hint is back after the PC.
-pc_st, pc_out = run([(b"`", .5), (b",", 1.5)] + [(b"\x1bOA", .25)] * 14
-                    + [(b"h", 4.5), (b"c", 2.5), (b"q", 1.5), (b"x", .8), (b"w", .3)],
-                    cols=100, rows=30)
-ok &= report("the Pokemon Center: in, heal, the PC, q, out", pc_st, pc_out)
-pc_txt = ANSI.sub(b"", pc_out).decode("utf-8", "replace")
-pc_at = max(pc_txt.rfind("Fire"), pc_txt.rfind("Water"))
-seen = ("Nurse Joy" in pc_txt and "hope to see you" in pc_txt and pc_at > 0
-        and pc_txt.rfind("a Pokemon Center: walk in") > pc_at)
-print("%-34s %s" % ("  and she healed, the PC came up", "ok" if seen else "FAIL"))
-ok &= seen
-ok &= report("the metro: down, a ticket, the train, the ride, up", *run(
-    [(b"`", .5), (b"-", 1.5), (b"e", 1.0), (b"s", .5), (b"\r", .5)]
-    + [(b"", 3.0)] * 15 + [(b"x", .5)], cols=100, rows=30))
-ok &= report("the metro: down and straight back up", *run(
-    [(b"`", .5), (b"-", 1.5), (b"e", 1.0), (b"w", .4), (b"x", .8), (b"w", .5)],
-    cols=80, rows=24))
-ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
-print("ALL OK" if ok else "FAILURES")
-sys.exit(0 if ok else 1)
+def cases(run, report):
+    """Every case, in order. Run twice: once to learn what each run() will be
+    asked for, so they can all be played at once, and once with the results,
+    to report on them - see the bottom of the file."""
+    ok = True
+    ok &= report("walk, turn, sidestep", *run(
+        [(b"w",.5),(b"W",.6),(b"a",.5),(b"d",.4),(b"s",.4),(b",",.3),(b".",.3)]))
+    ok &= report("tab to skyline and back", *run(
+        [(b"\t",.6),(b"l",.4),(b"L",.4),(b"\t",.6),(b"w",.5)]))
+    ok &= report("wander on spacebar", *run([(b" ", 5.0)]))
+    ok &= report("turn: taps, then held, then wander and stop", *run(
+        [(b"a", .3), (b"d", .3)] + [(b"\x1bOD", .04)] * 25 + [(b" ", 4.0), (b"w", .3)]))
+    ok &= report("panel open, arrows still walk", *run(
+        [(b"`",.6),(b"\x1bOA",.4),(b"\x1bOC",.4),(b"\x1bOB",.4),(b"`",.4),(b"w",.4)]))
+    ok &= report("panel keys then esc then play", *run(
+        [(b"`",.5),(b"y",.7),(b"w",.4),(b"L",.6),(b"\x1b",.4),(b"w",.5),(b"a",.4)]))
+    ok &= report("TERM=xterm (8 colours)", *run(
+        [(b"`",.5),(b"k",.7),(b"\x1b",.3),(b"w",.4)], term="xterm"))
+    ok &= report("20x8 window with panel", *run(
+        [(b"`",.5),(b"c",.7),(b"w",.4)], cols=20, rows=8))
+    ok &= report("240x70 window with panel", *run(
+        [(b"`",.5),(b"6",.7),(b"w",.4)], cols=240, rows=70))
+    ok &= report("ramen counter, sit and leave", *run(
+        [(b"`", .5), (b"r", 1.0)] + IN + [(b"s", .6), (b"s", .6), (b"w", .4)]))
+    ok &= report("casino slot: bet up, pull, bet down", *run(
+        [(b"`", .5), (b"c", 1.0)] + IN + [(b"+", .3), (b"p", 3.0), (b"-", .3),
+         (b"p", 3.0), (b"b", .6), (b"k", 3.0)], cols=100, rows=30))
+    ok &= report("sky deck: lift up, look round, lift down", *run(
+        [(b"`", .5), (b"^", 1.0), (b"w", 6.0), (b"d", .5), (b"a", .5), (b"s", 6.0),
+         (b"w", .4)], cols=100, rows=30))
+    ok &= report("fire escape: climb, look round, climb down", *run(
+        [(b"`", .5), (b"|", 1.0), (b"w", 1.0), (b"w", 4.0), (b"d", .5), (b"s", 1.0),
+         (b"w", 4.0)], cols=100, rows=30))
+    ok &= report("the pictures: go in, watch, walk out", *run(
+        [(b"`", .5), (b"m", 2.5), (b"s", .6), (b"s", .6), (b"w", .4)],
+        cols=100, rows=30))
+    ok &= report("a lit alley, then under the el", *run(
+        [(b"`", .5), (b"y", 1.0), (b"w", 2.0), (b"`", .5), (b"=", 1.0), (b"w", 3.0)],
+        cols=100, rows=30))
+    ok &= report("a police car coming, then traffic off", *run(
+        [(b"`", .5), (b"<", 1.5), (b"`", .5), (b">", .4), (b">", .4), (b"w", .5)],
+        cols=100, rows=30))
+    ok &= report("the diner: sit, coffee, walk out; then a billboard", *run(
+        [(b"`", .5), (b"d", 6.5), (b"s", .8), (b"`", .5), (b"$", 1.0), (b"w", .4)],
+        cols=100, rows=30))
+    ok &= report("the claw machine: play, drop, walk out", *run(
+        [(b"`", .5), (b"j", 1.0), (b"p", 1.5), (b"p", 6.0), (b"p", .4), (b"s", .6),
+         (b"s", .6), (b"w", .4)], cols=100, rows=30))
+    ok &= report("up the lighthouse: climb, light a show, fire, climb down", *run(
+        [(b"`", .5), (b"i", 1.0), (b"w", 6.0), (b"f", 3.0), (b"f", .5), (b"F", 1.5),
+         (b"d", .4), (b"s", 6.0), (b"w", .4)], cols=100, rows=30))
+    ok &= report("the arcade: choose, play, play keys, leave, walk out", *run(
+        [(b"`", .5), (b"g", 2.0), (b"d", .4), (b"p", 1.0), (b"p", .3), (b"\x1bOD", .3),
+         (b"w", .3), (b"s", .3), (b"d", .3), (b"x", .5), (b"a", .3), (b"p", 1.5),
+         (b"x", .4), (b"s", .6), (b"s", .6)], cols=100, rows=30))
+    ok &= report("the casino: 777 next pull, pull, walk out into the gold", *run(
+        [(b"`", .5), (b"c", 1.0)] + IN + [(b"`", .5), (b"%", .4), (b"`", .3),
+         (b"p", 3.5), (b"s", .6), (b"s", .6), (b"s", 1.0)], cols=100, rows=30))
+    ok &= report("the plinko machine: over to it, bet up, drop three, back, out", *run(
+        [(b"`", .5), (b"c", 1.0)] + IN + [(b"o", .4), (b"+", .2), (b"p", .2),
+         (b"p", .2), (b"p", 3.0), (b"o", .4), (b"s", .6), (b"s", .6)],
+        cols=100, rows=30))
+    ok &= report("the races: over to the track, stake up, two bets, watch, back", *run(
+        [(b"`", .5), (b"c", 1.0)] + IN + [(b"r", .4), (b"+", .2), (b"1", .2),
+         (b"4", 3.0), (b"r", .4), (b"s", .6), (b"s", .6)], cols=100, rows=30))
+    ok &= report("plinko, bigger and harder: rows up, high risk, drop, rows down", *run(
+        [(b"`", .5), (b"c", 1.0)] + IN + [(b"o", .4), (b"]", .2), (b"]", .2),
+         (b"3", .2), (b"p", 3.5), (b"[", .3), (b"1", .3), (b"p", 2.5), (b"o", .4),
+         (b"s", .6), (b"s", .6)], cols=100, rows=30))
+    ok &= report(
+        "high flyer: over to it, stake up, bet, auto, watch, cash out, back", *run(
+            [(b"`", .5), (b"c", 1.0)] + IN + [(b"f", .4), (b"+", .2), (b"p", .3),
+             (b"u", .2), (b"u", 9.0), (b"p", .4), (b"f", .4), (b"s", .6), (b"s", .6)],
+            cols=100, rows=30))
+    ok &= report("closing time at the club, outside and in", *run(
+        [(b"`", .5), (b"/", .4), (b"k", 4.5)] + IN + [(b"s", .6)], cols=100, rows=30))
+    ok &= report("the strength tester: swing, swing again, walk out", *run(
+        [(b"`", .5), (b"h", 1.0), (b"p", 2.5), (b"p", 2.5), (b"s", .6), (b"s", .6)],
+        cols=100, rows=30))
+    ok &= report("the roof party: lift up, walk about, back to the lift, down", *run(
+        [(b"`", .5), (b"p", 1.0), (b"w", 6.0), (b"w", .6), (b"a", .5), (b"W", .6),
+         (b"s", .6), (b"s", .6), (b"s", .6), (b"s", .6), (b"s", 6.0)],
+        cols=100, rows=30))
+    ok &= report("the stock exchange: buy, more, sell, walk out", *run(
+        [(b"`", .5), (b"e", 1.0), (b"b", .4), (b"+", .3), (b"b", .4), (b"n", .4),
+         (b"l", .4), (b"\x1bOB", .3), (b"\x1bOB", .3), (b"b", .4), (b"\x1bOA", .3),
+         (b"l", .4), (b"\x1bOC", .3), (b"-", .3), (b"s", .6), (b"s", .6)],
+        cols=100, rows=30))
+    ok &= report("money: +1000 in the menu, a film, a bowl, walk out", *run(
+        [(b"`", .5), (b"+", .4), (b"m", 2.0), (b"s", .6), (b"s", .6), (b"`", .5),
+         (b"r", .6)] + IN + [(b"s", .1), (b"w", 5.0), (b"s", .6), (b"s", .6)],
+        cols=100, rows=30))
+    ok &= report("a manhole: walk on, down, a slice, back up", *run(
+        [(b"`", .5), (b"x", 1.0)] + [(b"w", .25)] * 3
+        + [(b"e", 1.5), (b"p", .5), (b"s", .8), (b"w", .4)], cols=100, rows=30))
+    ok &= report("the temple: across the street, in, the word of god twice, out", *run(
+        [(b"`", .5), (b"*", 1.0)] + IN + IN + [(b"g", .3), (b"g", .45), (b"g", .7),
+                                                 (b"s", .6),
+         (b"s", .6)], cols=100, rows=30))
+    ok &= report("the confession booth: in, type with q and s in it, confess, esc, out",
+                 *run([(b"`", .5), (b"*", 1.0)] + IN + IN + [(b"c", 1.6)]
+                      + [(bytes([c_]), .05) for c_ in b"i quit my job and stole"]
+                      + [(b"\x7f", .1), (b"l", .1), (b"\r", 3.0), (b"\x1b", .5),
+                         (b"s", .6), (b"s", .6)], cols=100, rows=30))
+    ok &= report("a blackout: to the night, the power going, walking in the dark", *run(
+        [(b"`", .5), (b"&", 8.0), (b"w", 1.0), (b"`", .4), (b"c", 1.5)],
+        cols=100, rows=30))
+    ok &= report("a taxi: hail, it pulls up, choose, ride, arrive", *run(
+        [(b"t", 3.6), (b"\x1bOB", .3), (b"s", .3), (b"w", .3), (b"\r", 15.0),
+         (b"w", .5)], cols=100, rows=30))
+    ok &= report("a fog night: to it, walk, a taxi through it", *run(
+        [(b"`", .5), (b"#", 1.0), (b"w", 1.0), (b"W", 1.0), (b"t", 3.6), (b"\r", 8.0)],
+        cols=100, rows=30))
+    ok &= report("pace: up to very fast, walk, run into a wall, back down", *run(
+        [(b"+", .2)] * 4 + [(b"w", .5), (b"W", .2), (b"W", 1.0)] + [(b"-", .2)] * 3
+        + [(b"w", .5)], cols=100, rows=30))
+    ok &= report("the factories: the zone, the site, into the rave and out", *run(
+        [(b"`", .5), (b"9", 1.5), (b"W", 1.0), (b"`", .5), (b"]", 1.5), (b"`", .5),
+         (b"}", 1.5), (b"w", 1.0), (b"`", .5), (b"[", 1.5)] + [(b"w", .25)] * 14
+        + [(b"x", 1.0), (b"s", .6), (b"s", .6)],
+        cols=100, rows=30))
+    ok &= report("the suburbs: to them, walk a curving street, a taxi out", *run(
+        [(b"`", .5), (b"0", 1.5), (b"w", 1.0), (b"W", 1.0), (b"a", .5), (b"w", 1.0),
+         (b"t", 3.6), (b"\x1b", .4)], cols=100, rows=30))
+    ok &= report("lemonade at 3am: buy three, and the stargazer's telescope", *run(
+        [(b"`", .5), (b";", 1.5), (b"w", .4), (b"p", .4), (b"p", .4), (b"p", 1.0),
+         (b"s", .6), (b"`", .5), (b"?", 1.5), (b"w", .4), (b"x", 10.0), (b"s", .6)],
+        cols=100, rows=30))
+    ok &= report("the strip: to it, run up the boulevard, into a hotel's casino", *run(
+        [(b"`", .5), (b":", 1.5), (b"+", .2), (b"W", 1.0), (b"W", 1.0), (b"d", .4),
+         (b"d", .4), (b"w", 1.0), (b"w", 1.0), (b"s", .6)], cols=100, rows=30))
+    ok &= report("the airport: the end of the runway, watch one land, turn round", *run(
+        [(b"`", .5), (b"'", 6.0), (b"a", .4), (b"a", .4), (b"a", 3.0), (b"w", 1.0)],
+        cols=100, rows=30))
+    ok &= report("the fountain show: to it, and watch the start", *run(
+        [(b"`", .5), (b"(", 14.0), (b"a", .4), (b"d", .4)], cols=100, rows=30))
+    ok &= report("the university: the quad, across it, the panel's other page", *run(
+        [(b"`", .5), (b"\t", .4), (b"{", 1.5), (b"w", 1.0), (b"w", 1.0), (b"`", .5),
+         (b"\t", .4), (b"\t", .4), (b"`", .4)], cols=80, rows=24))
+    # Walking in is the reading room. w hands the terminal to the Wikipedia
+    # reader, which opens on its search prompt: esc out of that, then q back to
+    # the room; p the same for PsychonautWiki; x out onto the quad. Not s after:
+    # backing up is back through the doors. Up to walk in, not w: inside, w is
+    # Wikipedia.
+    lib_st, lib_out = run([(b"`", .5), (b'"', 1.5)] + [(b"\x1bOA", .3)] * 8   # up: in
+                          + [(b"w", 2.5), (b"\x1b", 1.5), (b"q", 1.5),
+                             (b"p", 2.5), (b"\x1b", 1.5), (b"q", 1.5),
+                             (b"x", .8)] + [(b"w", .3)] * 4,
+                          cols=100, rows=30)
+    lib_txt = ANSI.sub(b"", lib_out).decode("utf-8", "replace")
+    ok &= report("the library: the room, both readers, back out on the quad",
+                 lib_st, lib_out)
+    seen = ("THE READING ROOM" in lib_txt and "wiki_tui" in lib_txt
+            and "psychonaut_tui" in lib_txt
+            and lib_txt.rfind("walk in and read") > lib_txt.rfind("psychonaut_tui"))
+    print("%-34s %s" % ("  and both readers came up, and went",
+                        "ok" if seen else "FAIL"))
+    ok &= seen
+    ok &= report("a flight: the gate, a seat, off, doze, land, out", *run(
+        [(b"`", .5), (b".", 1.5)] + [(b"w", .3)] * 6 + [(b"\r", 4.0), (b"\x1bOD", .3),
+         (b"\x1bOC", .3), (b"x", 1.0)] + [(b"", 3.0)] * 9 + [(b"w", .3)],
+        cols=100, rows=30))
+    ok &= report("a flight: the gate, and straight back out", *run(
+        [(b"`", .5), (b".", 1.5)] + [(b"w", .3)] * 6 + [(b"x", .8), (b"w", .4)],
+        cols=80, rows=24))
+    # Up to walk in, not w; h to heal, c the PC - the type chart, which q quits -
+    # then x out, and the street again: its "walk in" hint is back after the PC.
+    pc_st, pc_out = run([(b"`", .5), (b",", 1.5)] + [(b"\x1bOA", .25)] * 14
+                        + [(b"h", 4.5), (b"c", 2.5), (b"q", 1.5), (b"x", 1.2),
+                           (b"w", .6)], cols=100, rows=30)
+    ok &= report("the Pokemon Center: in, heal, the PC, q, out", pc_st, pc_out)
+    pc_txt = ANSI.sub(b"", pc_out).decode("utf-8", "replace")
+    pc_at = max(pc_txt.rfind("Fire"), pc_txt.rfind("Water"))
+    seen = ("Nurse Joy" in pc_txt and "hope to see you" in pc_txt and pc_at > 0
+            and pc_txt.rfind("a Pokemon Center: walk in") > pc_at)
+    print("%-34s %s" % ("  and she healed, the PC came up", "ok" if seen else "FAIL"))
+    ok &= seen
+    ok &= report("the metro: down, a ticket, the train, the ride, up", *run(
+        [(b"`", .5), (b"-", 1.5), (b"e", 1.0), (b"s", .5), (b"\r", .5)]
+        + [(b"", 3.0)] * 15 + [(b"x", .5)], cols=100, rows=30))
+    ok &= report("the metro: down and straight back up", *run(
+        [(b"`", .5), (b"-", 1.5), (b"e", 1.0), (b"w", .4), (b"x", .8), (b"w", .5)],
+        cols=80, rows=24))
+    ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)],
+                                     cols=100, rows=30))
+    return ok
+
+
+# Each case is its own process that mostly waits - 51 of them, 630 seconds
+# of waiting one after another. So: a dry pass, quietly, to collect what each
+# run() is asked for; all of them played PTY_JOBS at a time; then the real
+# pass, handed the results in the same order, reporting as it goes.
+# PTY_JOBS=1 plays them one at a time, as it used to.
+if __name__ == "__main__":
+    import contextlib
+    import io
+    import warnings
+    from concurrent.futures import ThreadPoolExecutor
+
+    # The child execs straight away, so forking with threads about is safe.
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+    asked = []
+    with contextlib.redirect_stdout(io.StringIO()):
+        cases(lambda keys, **kw: asked.append((keys, kw)) or (0, b""),
+              lambda *a: True)
+    with ThreadPoolExecutor(max(1, int(os.environ.get("PTY_JOBS", "6")))) as pool:
+        played = iter(list(pool.map(lambda a: run(a[0], **a[1]), asked)))
+    ok = cases(lambda keys, **kw: next(played), report)
+    print("ALL OK" if ok else "FAILURES")
+    sys.exit(0 if ok else 1)
