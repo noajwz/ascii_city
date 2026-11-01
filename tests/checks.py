@@ -5263,6 +5263,24 @@ check("inside: Nurse Joy at the counter, the machine, the PC; she heals them, th
       and "ding" in ptx2 and ptx2.count("o o") >= 1
       and "We hope to see you again!" in ptx3
       and all("".join(r) for r in ac.render_center(40, 12, 10.0, pst, "x")[0]))
+pc_st = {"door": (0.0, 0.0), "heal": 10.0 - ac.CENTER_HEAL * 0.5, "nx": 0.0, "nz": 1.0}
+pc_s = "\n".join("".join(r) for r in ac.render_center(213, 57, 10.0, pc_st, "")[0])
+pc_b = "\n".join("".join(r) for r in ac.render_center(300, 90, 10.0, pc_st, "")[0])
+check("the Center, big: POKEMON CENTER across the wall and PC in block letters, Nurse "
+      "Joy and the machine twice over, the balls lighting big; small, just as it was",
+      "@(^_^)@" in pc_s and "@@((^^__^^))@@" in pc_b and "@(^_^)@" not in pc_b
+      and "|  PC  |" in pc_s and "|  PC  |" not in pc_b
+      and pc_b.count("oo") >= 6 and "ding" in pc_b and pc_b.count("#") > 100)
+ac._big_screens[0] = False
+pc_z = "\n".join("".join(r) for r in ac.render_center(300, 90, 10.0, pc_st, "")[0])
+ac._big_screens[0] = True
+check("and z gives the small Center back", "@(^_^)@" in pc_z)
+pc_n = 0
+for w_, h_ in ((300, 88), (333, 101), (450, 132), (900, 88), (300, 300)):
+    for heal_ in (None, 9.8, 8.5, 6.4, 2.0):
+        ac.render_center(w_, h_, 10.0, dict(pc_st, heal=heal_), "a note")
+        pc_n += 1
+check("every moment of it draws on every big window", pc_n == 25)
 check("and the PC has the type chart on it, carried in library/",
       os.path.isfile(os.path.join(ac.LIBRARY_DIR, ac.CENTER_PC)))
 
