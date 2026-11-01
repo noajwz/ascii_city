@@ -75,6 +75,7 @@ BODY = 1.15            # how close to a wall you can get
 NEAR_Z = 0.6
 MAX_VIEW = 130.0       # how far a wall ray is followed
 GROUND_FAR = 80.0
+HALF_GROUND = 12000     # cells: from a 200x60 window, high up, half-resolution ground
 PLANE = 0.9            # half-width of the camera plane: about 84 degrees across
 FLOOR_H = 2.4          # world height of one storey
 BAY_W = 1.6            # world width of one window bay
@@ -5584,6 +5585,44 @@ def place_below(x, z):
     return district(i, j)["name"]
 
 
+_cabin_cache = {}
+
+
+def cabin_wall(w, h):
+    """(row, column, glyph, colour) of every cell of the cabin round the
+    window, for a window this size - the same every frame, and at 300 by 90
+    a hypot for every one of 27,000 cells, every frame, was a twentieth of
+    the plane's time."""
+    hit = _cabin_cache.get((w, h))
+    if hit is not None:
+        return hit
+    cells = []
+    x0, x1 = max(2, int(w * 0.10)), min(w - 3, int(w * 0.90))
+    y0, y1 = 1, h - 3
+    r = max(2, (y1 - y0) // 5)
+    for y in range(h):
+        for x in range(w):
+            cy = min(y - y0, y1 - y)
+            cx = min(x - x0, x1 - x) / 2.0
+            inside = cy >= 0 and cx >= 0
+            if inside and cy < r and cx < r:
+                inside = math.hypot(r - cx, r - cy) <= r
+            if inside:
+                continue
+            near = (cy >= -1 and cx >= -0.5
+                    and (cy < 0 or cx < 0 or math.hypot(r - cx, r - cy) <= r + 1.0))
+            if near:
+                cells.append((y, x, "|" if abs(cx) < 0.6 and cy > r else
+                              "-" if abs(cy) < 1 and cx > r else "#", CURB))
+            else:
+                cells.append((y, x, "." if (x * 3 + y * 7) % 23 == 0 else " ",
+                              CONCRETE))
+    if len(_cabin_cache) > 8:
+        _cabin_cache.clear()
+    _cabin_cache[(w, h)] = cells
+    return cells
+
+
 def draw_window(ch, co, v, now, look, alt):
     """The cabin round the window: the wall, the window's rounded frame, and
     out of it the right wing - in the world, so it stays put as you look
@@ -5630,27 +5669,10 @@ def draw_window(ch, co, v, now, look, alt):
             ch[sy][sx], co[sy][sx] = "@", ROU_GREEN
             if now % 1.3 < 0.12 and sx + 1 < w:
                 ch[sy][sx + 1], co[sy][sx + 1] = "*", FLASH  # the strobe
-    # The cabin wall, and the window cut out of it, its corners rounded.
-    x0, x1 = max(2, int(w * 0.10)), min(w - 3, int(w * 0.90))
-    y0, y1 = 1, h - 3
-    r = max(2, (y1 - y0) // 5)
-    for y in range(h):
-        for x in range(w):
-            cy = min(y - y0, y1 - y)
-            cx = min(x - x0, x1 - x) / 2.0
-            inside = cy >= 0 and cx >= 0
-            if inside and cy < r and cx < r:
-                inside = math.hypot(r - cx, r - cy) <= r
-            if inside:
-                continue
-            near = (cy >= -1 and cx >= -0.5
-                    and (cy < 0 or cx < 0 or math.hypot(r - cx, r - cy) <= r + 1.0))
-            if near:
-                ch[y][x], co[y][x] = ("|" if abs(cx) < 0.6 and cy > r else
-                                      "-" if abs(cy) < 1 and cx > r else "#"), CURB
-            else:
-                ch[y][x] = "." if (x * 3 + y * 7) % 23 == 0 else " "
-                co[y][x] = CONCRETE
+    # The cabin wall, and the window cut out of it, its corners rounded:
+    # worked out once for the size of the window, then laid over each frame.
+    for y, x, glyph, attr in cabin_wall(w, h):
+        ch[y][x], co[y][x] = glyph, attr
     if alt > 2.0:
         # The seatbelt sign, over the window.
         for k, c in enumerate("[ |=| ]"):         # spaces and all
@@ -7312,6 +7334,66 @@ def draw_manhole_steam(ch, co, v, walls, now):
                               y + dh * age, mh[1] + drift * 0.5 + da * v.plz, g, tone)
 
 
+_ground_cache = {}
+
+
+def ground_cell(i, j):
+    """Everything the ground pass wants to know about one cell, worked out
+    once and kept: all of it is a function of where the cell is, nothing of
+    when. From a roof or the plane every ground point is a different cell,
+    so these twenty-odd questions were asked again for nearly every point of
+    every frame - half the frame up there. The hollow comes back as the
+    cell's own, and the caller adds whether there is a rave in it tonight."""
+    key = i * 1048576 + j
+    hit = _ground_cache.get(key)
+    if hit is not None:
+        return hit
+    _evict(_ground_cache, 60000)
+    solid = not is_open(i, j)
+    # Which neighbours are walls, asked once per cell rather than once per
+    # point: on open ground - the riverbank, a fairground - the points
+    # outnumber the cells fifty to one.
+    wall_w = not is_open(i - 1, j)
+    wall_e = not is_open(i + 1, j)
+    wall_n = not is_open(i, j - 1)
+    wall_s = not is_open(i, j + 1)
+    wet_cell = water_at(i, j)
+    deck = wet_cell and deck_at(i, j)
+    pier = wet_cell and (pier_at(i, j) or fair_pier_at(i, j))
+    woods = not wet_cell and woods_at(i, j)
+    sub = not wet_cell and (suburb_at(i, j) or quad_at(i, j))
+    quad = sub and quad_at(i, j)
+    green = (not wet_cell and (woods or district(i, j)["park"] or sub)
+             and not road_at(i, j))
+    trail = woods and trail_at(i, j)
+    fair = not wet_cell and not solid and not road_at(i, j) and fair_at(i, j)
+    rock = not wet_cell and not solid and headland_at(i, j)
+    tarmac = not wet_cell and not solid and car_park_at(i, j)
+    mh = None if solid or wet_cell else manhole_at(i, j)
+    apt = None if solid or wet_cell or not airport_at(i, j) else runway(i, j)
+    plot_ = None if solid or wet_cell else plot_at(i, j)
+    dirt = plot_ is not None
+    weeds = dirt and plot_["kind"] == "empty"
+    hollow = woods and hollow_at(i, j)
+    lane = None
+    if not solid and not woods and not sub:
+        # Only the wider streets are marked, and never through a junction -
+        # which is also how it works outside.
+        along_x = road_span(i, XP, 91)
+        along_z = road_span(j, ZP, 137)
+        if along_x and along_z:
+            lane = None
+        elif along_x and along_x[1] >= 3:
+            lane = (0, (along_x[0] + along_x[1] * 0.5) * CELL)
+        elif along_z and along_z[1] >= 3:
+            lane = (1, (along_z[0] + along_z[1] * 0.5) * CELL)
+    hit = (solid, wall_w, wall_e, wall_n, wall_s, wet_cell, deck, pier, woods, sub,
+           quad, green, trail, fair, rock, tarmac, mh, apt, plot_, dirt, weeds,
+           hollow, lane)
+    _ground_cache[key] = hit
+    return hit
+
+
 def draw_ground(ch, co, v, walls, glow, wet, now):
     """Road, pavement and kerb.
 
@@ -7330,6 +7412,18 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
     # ever needs - at seventy units up the nearest is a hundred away - so the
     # ground goes as far as the view does.
     far = GROUND_FAR if v.eye < 10.0 else v.reach
+    # High up on a big window, the ground is worked out at half resolution
+    # and each point it skips copies its neighbour: from a roof or the plane
+    # every point is a long way off, the ground was over half of the frame,
+    # and at 300 by 90 that frame was half as long again as the time there
+    # is for one. On the street and on smaller windows, every point.
+    half = v.eye >= 10.0 and v.width * v.height >= HALF_GROUND
+    done = set()                    # the rows worked out in full this frame
+    # Which cells of each row are ground, worked out or copied. Only those
+    # are copied from, and only into a cell nothing else has drawn in: from
+    # up there the buildings stand in the same rows as the ground, and a
+    # copy that took their cells doubled every roof.
+    marks = {}
 
     for y in range(v.horizon + 1, v.height):
         d = v.eye * v.fy / (y - v.horizon)
@@ -7342,6 +7436,14 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
         li = lj = None
         solid = False
         x0 = y0 = 0.0
+        copy_row = half and (y - v.horizon) % 2 == 0 and y - 1 in done
+        if half and not copy_row:
+            done.add(y)
+        up_c, up_o = ch[y - 1], co[y - 1]
+        row_c, row_o = ch[y], co[y]
+        if half:
+            up_m = marks.get(y - 1)
+            mark = marks[y] = bytearray(width)
 
         for sx in range(width):
             x, z = wx, wz
@@ -7349,55 +7451,32 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
             wz += stepz
             if y <= wall_base[sx]:
                 continue
+            if half and row_c[sx] == " ":
+                if copy_row and up_m is not None and up_m[sx]:
+                    row_c[sx], row_o[sx] = up_c[sx], up_o[sx]       # the row above's
+                    mark[sx] = 1
+                    if (y - 1, sx) in v.water:
+                        v.water.add((y, sx))
+                    continue
+                if sx & 1 and mark[sx - 1]:
+                    row_c[sx], row_o[sx] = row_c[sx - 1], row_o[sx - 1]  # its left
+                    mark[sx] = 1
+                    if (y, sx - 1) in v.water:
+                        v.water.add((y, sx))
+                    continue
             i = int(x * inv + BIG) - BIG
             j = int(z * inv + BIG) - BIG
             if i != li or j != lj:
                 li, lj = i, j
-                solid = not is_open(i, j)
                 x0, y0 = i * CELL, j * CELL
-                # Which neighbours are walls, asked once per cell rather than
-                # once per point: on open ground - the riverbank, a fairground
-                # - the points outnumber the cells fifty to one, and this was
-                # most of the frame.
-                wall_w = not is_open(i - 1, j)
-                wall_e = not is_open(i + 1, j)
-                wall_n = not is_open(i, j - 1)
-                wall_s = not is_open(i, j + 1)
-                # Only the wider streets are marked, and never through a
-                # junction - which is also how it works outside.
-                wet_cell = water_at(i, j)
-                deck = wet_cell and deck_at(i, j)
-                pier = wet_cell and (pier_at(i, j) or fair_pier_at(i, j))
-                woods = not wet_cell and woods_at(i, j)
-                sub = not wet_cell and (suburb_at(i, j) or quad_at(i, j))
-                quad = sub and quad_at(i, j)
-                green = (not wet_cell and (woods or district(i, j)["park"] or sub)
-                         and not road_at(i, j))
-                trail = woods and trail_at(i, j)
-                fair = (not wet_cell and not solid and not road_at(i, j)
-                        and fair_at(i, j))
-                rock = not wet_cell and not solid and headland_at(i, j)
-                tarmac = not wet_cell and not solid and car_park_at(i, j)
-                mh = None if solid or wet_cell else manhole_at(i, j)
-                apt = (None if solid or wet_cell or not airport_at(i, j)
-                       else runway(i, j))
-                plot_ = None if solid or wet_cell else plot_at(i, j)
-                dirt = plot_ is not None
-                weeds = dirt and plot_["kind"] == "empty"
-                hollow = (woods and v.hollow is not None
-                          and hollow_at(i, j))
-                lane = None
-                if not solid and not woods and not sub:
-                    along_x = road_span(i, XP, 91)
-                    along_z = road_span(j, ZP, 137)
-                    if along_x and along_z:
-                        lane = None
-                    elif along_x and along_x[1] >= 3:
-                        lane = (0, (along_x[0] + along_x[1] * 0.5) * CELL)
-                    elif along_z and along_z[1] >= 3:
-                        lane = (1, (along_z[0] + along_z[1] * 0.5) * CELL)
+                (solid, wall_w, wall_e, wall_n, wall_s, wet_cell, deck, pier, woods,
+                 sub, quad, green, trail, fair, rock, tarmac, mh, apt, plot_, dirt,
+                 weeds, hollow, lane) = ground_cell(i, j)
+                hollow = hollow and v.hollow is not None
             if solid:
                 continue
+            if half:
+                mark[sx] = 1
 
             # How far this point is from the nearest wall decides whether it is
             # pavement, the kerb line, or road.

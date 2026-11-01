@@ -2350,6 +2350,23 @@ kerb test used to ask `is_open()` of the four neighbours per point and that alon
 bank; it is asked once per cell now. If it ever slips again, the levers in order are the per-point
 `_mix()` texture hashes in `draw_ground()`, `near_lots()` reach, `RAIN_REACH` and `MAX_VIEW`.
 
+**High up on a big window** is the other worst case. Zoomed out to 300x90 (27,000 cells, nine
+times 100x30) a roof and the plane took 50 ms a frame, the ground over half of it and the walls
+most of the rest. From up there every ground point is a different cell, so `draw_ground()`'s
+twenty-odd questions per cell were asked per point. Three things fixed it:
+`ground_cell()` keeps every cell's answers (all of them a function of where, none of when - the
+hollow comes back as the cell's own and the caller adds tonight's rave), which sped up the street
+a little too and changed nothing on screen; **half-resolution ground** when `v.eye >= 10` and
+the window is at least `HALF_GROUND` cells (200x60): every other row and column worked out, the
+rest copied from the row above or the cell to the left - but only into cells nothing else drew
+in, and only from cells the ground pass itself drew (`marks`), or every roof came out doubled,
+because up there the buildings stand in the same rows as the ground; and `cabin_wall()`, the
+plane's window frame worked out once per window size instead of a hypot per cell per frame.
+Result at 300x90: the roof 50 -> 25 ms, the plane 50 -> 29 (median over a whole flight; 90% of
+frames under 33). The street and every window under 200x60 are frame for frame as before. The
+levers left, if it slips: the walls at `depth = 22` up high (about a third of the frame now), and
+the terminal's own drawing, which none of these numbers include.
+
 **Anything keyed on where the river is must be cheap, because `road_at()` and `is_open()` ask it
 for every cell.** The promenade, the fairground, the headland and the moat all went in keyed on
 `river_span()`, which was nine sines, uncached, and a street walk went from 4.5 to 6.2 ms a frame
