@@ -559,6 +559,12 @@ HEADLAND = dict(WOODS, name="the headland", park=False)
 # The factories: low sheds in rust, a ridge of saw-tooth roofs, a few lit
 # windows high up for the night shift, roller doors, bare bulbs over them and
 # somebody on a break outside.
+# The airport: a glass terminal, hangars, a control tower, all lit cold.
+AIRPORT = dict(key="", name="the airport", weight=0, scale=1.0, lo=12.0, hi=34.0,
+               dens=(0.7, 0.9), flat=0.0, hung=0.0, smoke=0.2, bulb=0.0,
+               neon=None, lantern=0.0, park=False,
+               glyphs="#=", band=None, mullion=True, ground="#", gap=2,
+               pal="cold", roof="=", whole_floors=False, cjk=False)
 # The Strip: towers of light, every one a hotel and a casino. Their signs are
 # the pylons out at the kerb, so nothing hangs on the walls.
 STRIP = dict(key="", name="the strip", weight=0, scale=2.0, lo=28.0, hi=56.0,
@@ -589,6 +595,8 @@ def district(i, j):
         return SUBURBS
     if strip_at(i, j):
         return STRIP
+    if airport_at(i, j):
+        return AIRPORT
     if headland_at(i, j):
         return HEADLAND
     return DISTRICTS[district_at(i, j)]
@@ -1561,7 +1569,8 @@ def tunnel_run(i, j):
     hit = None
     span = road_span(i, XP, 91)
     if (span is not None and not woods_at(i, j) and not el_at(i) and not grand_at(i)
-            and not hwy_at(i) and not suburb_at(i, j) and not strip_at(i, j)):
+            and not hwy_at(i) and not suburb_at(i, j) and not strip_at(i, j)
+            and not airport_at(i, j)):
         a = span[0]
         b = j // ZP
         lng = None
@@ -1940,7 +1949,16 @@ ZONES = {
     "industrial": dict(salt=3701, off_i=240, off_j=118, half_i=28, half_j=16),
     "suburbs": dict(salt=3801, off_i=240, off_j=370, half_i=40, half_j=24),
     "strip": dict(salt=3901, off_i=20, off_j=240, half_i=7, half_j=61),
+    # On the strip's own hash, so it is always the same distance off its side.
+    "airport": dict(salt=3901, off_i=70, off_j=240, half_i=29, half_j=59),
 }
+PLANE_SCALE = 1.7      # an airliner against the city's five-unit cells
+RUNWAY_DI = 8          # the runway's middle, in cells east of the airport's
+RUNWAY_W = 14.0        # half its width, in units
+RUNWAY_HALF = 52       # half its length, in cells
+TAXIWAY_DX = -34.0     # the taxiway, in units from the runway's middle
+APT_CYCLE = 60.0       # one landing and one take-off, every this many seconds
+AIRPORT_NAME = "ASCII CITY INTERNATIONAL"
 STRIP_HALF = 60        # the boulevard's half length, in cells
 STRIP_NAMES = ["GOLDEN PALM", "NEON OASIS", "SILVER COMET", "LUCKY SEVENS",
                "DIAMOND DUNES", "STARLIGHT", "THE BIG WHEEL", "CROWN JEWEL",
@@ -1983,6 +2001,44 @@ def suburb_at(i, j):
 
 def strip_home(i, j):
     return zone_home("strip", i, j)
+
+
+def airport_at(i, j):
+    return zone_depth("airport", i, j) > 0.0
+
+
+def airport_part(i, j):
+    """What stands on this airport cell, if anything: the terminal down the
+    west side, the hangars beyond it, the control tower."""
+    ci, cj = zone_home("airport", i, j)
+    if ci - 25 <= i <= ci - 23:
+        if abs(j - cj) <= 30:
+            return "terminal"
+        if cj - 50 <= j <= cj - 38:
+            return "hangar"
+    if (i, j) == (ci - 19, cj + 38):
+        return "tower"
+    return None
+
+
+def approach_cap(i, j):
+    """Under the approach to the runway, the town is kept low - the way it is
+    round any airport - rising with the glide slope the further out it is, so
+    from the end of the runway you can watch them come in over the roofs."""
+    ci, cj = zone_home("airport", i, j)
+    out = j - (cj + RUNWAY_HALF + 3)            # from inside the wavy fence on
+    if out < 0 or out > 110 or abs(i - (ci + RUNWAY_DI)) > 15:
+        return None
+    out = max(0, out - 4)
+    return 4.5 + out * CELL * 0.07
+
+
+def runway(i, j):
+    """(x of the runway's middle, z of its north end, z of its south end) for
+    the airport this cell is in."""
+    ci, cj = zone_home("airport", i, j)
+    return ((ci + RUNWAY_DI) * CELL, (cj + RUNWAY_HALF) * CELL,
+            (cj - RUNWAY_HALF) * CELL)
 
 
 def strip_at(i, j):
@@ -2429,8 +2485,8 @@ def face_kind(i, j):
     yokocho is lit but is not a street and should not look like one."""
     if road_at(i, j):
         return "road"
-    if suburb_at(i, j):
-        return "road"            # a front lawn: the house faces the street
+    if suburb_at(i, j) or airport_at(i, j):
+        return "road"            # a front lawn, or the apron: a front all the same
     return "yokocho" if yokocho_at(i, j) else None
 
 
@@ -2445,6 +2501,8 @@ def road_at(i, j):
         return suburb_road(i, j)
     if strip_at(i, j):
         return strip_road(i, j)
+    if airport_at(i, j):
+        return False
     return _is_road(i, XP, 91) or _is_road(j, ZP, 137)
 
 
@@ -2544,6 +2602,8 @@ def is_open(i, j):
             hit = not (suburb_house(i, j) or suburb_tree(i, j))
         elif strip_at(i, j):
             hit = strip_road(i, j)              # the rest is hotel
+        elif airport_at(i, j):
+            hit = airport_part(i, j) is None    # tarmac, but for the buildings
         elif woods_at(i, j):
             # Trails, the hollow, and otherwise trees thick enough that the
             # open cells do not join up: off a trail you get a few cells in and
@@ -2800,6 +2860,9 @@ def lot(i, j):
         cap = seafront_cap(i, j)
         if cap is not None:
             b["height"] = min(b["height"], cap)
+        cap = approach_cap(i, j)
+        if cap is not None:
+            b["height"] = min(b["height"], cap)
         b["faces"] = [make_face(rng, b["height"], d,
                                 face_kind(i + FACES[f][0], j + FACES[f][1]))
                       for f in range(4)]
@@ -2818,6 +2881,12 @@ def lot(i, j):
                 b["warehouse"] = {"door": wh[2], "u": CELL * 0.5, "i": i, "j": j,
                                   "height": 11.0, "seed": _mix(i, j, 3721) % 9973}
         b["strip"] = None
+        b["airport"] = None
+        if d is AIRPORT:
+            part = airport_part(i, j)
+            b["airport"] = part
+            b["height"] = {"terminal": 13.0, "hangar": 15.0,
+                           "tower": 34.0}.get(part, 13.0)
         if d is STRIP:
             side, seg = strip_hotel(i, j)
             m = _mix(side, seg, 3903)
@@ -2837,7 +2906,7 @@ def lot(i, j):
                                "sign_tone": b["strip"]["tone"], "phase": 1.0,
                                "i": i, "j": j, "height": b["height"], "strip": True}
         if (d["park"] or b["warehouse"] is not None or d is SUBURBS
-                or d is STRIP):
+                or d is STRIP or d is AIRPORT):
             pass
         elif _mix(i, j, 909) % CLUB_ODDS == 0:
             b["height"] = rng.uniform(7.5, 12.0)      # squat, windowless
@@ -4964,6 +5033,202 @@ def draw_strip_traffic(ch, co, v, walls, now, wet):
 LIMO = [" .------------. ", "/_|__|__|__|__|_\\", "'o------------o'"]
 
 
+def draw_airport_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
+                        cont, now):
+    """One column of an airport building. The terminal is glass, lit cold,
+    a mullion every bay; a hangar is ribbed metal with its great door lit;
+    the control tower a plain shaft with the cab at the top all window."""
+    scale = v.fy / dist
+    part = b["airport"]
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    glass, frame = NEON[2][0], CONCRETE
+    if edge:
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx], co[y][sx] = "|", CURB
+        return roof, None, foot, None, ()
+    prev_roof, prev_awn, prev_foot = cont[:3]
+    facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "=", ROOF)
+    frac = u / BAY_W - int(u / BAY_W)
+    for y in range(max(r_lo, roof + 1), min(r_hi, foot - 1) + 1):
+        h = v.eye + (v.horizon - y) / scale
+        if part == "tower":
+            if h > b["height"] - 4.0:
+                ch[y][sx], co[y][sx] = ("#" if h < b["height"] - 0.6 else "="), glass
+            elif int(h) % 6 == 0:
+                ch[y][sx], co[y][sx] = "-", CURB
+        elif part == "hangar":
+            if h < 9.0 and 0.4 < u < CELL - 0.4:
+                ch[y][sx], co[y][sx] = ("#" if h < 8.6 else "="), BULB
+            elif int(u * 3) % 2 == 0:
+                ch[y][sx], co[y][sx] = "|", frame
+        else:
+            if frac < 0.1:
+                ch[y][sx], co[y][sx] = "|", frame
+            elif int(h / 3.2) != int((h + 0.4) / 3.2):
+                ch[y][sx], co[y][sx] = "-", frame
+            else:
+                ch[y][sx] = "#"
+                co[y][sx] = glass if (int(u * 2) + int(h)) % 4 else NEON[2][1]
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, None, foot, None, ()
+
+
+def plane_states(ci, cj, now):
+    """Where the moving planes are this instant, as (x, y, z, hx, hz, lights):
+    one coming in to land - down the glide slope from the north, touching
+    down, braking, turning off for the gate - and, half a cycle on, one
+    lining up, rolling, rotating and climbing away south. A function of
+    time, like everything else that moves."""
+    rx = (ci + RUNWAY_DI) * CELL
+    zn = (cj + RUNWAY_HALF) * CELL
+    zs = (cj - RUNWAY_HALF) * CELL
+    out = []
+    t = now % APT_CYCLE
+    # The landing.
+    if t < 14.0:
+        u = t / 14.0
+        out.append((rx, 70.0 * (1.0 - u) ** 1.3 + 1.2,
+                    zn + 520.0 * (1.0 - u) - 30.0 * u, 0.0, -1.0, True))
+    elif t < 26.0:
+        k = t - 14.0
+        z = zn - 30.0 - (37.0 * k - 1.35 * k * k)
+        out.append((rx, 1.2, z, 0.0, -1.0, True))
+    elif t < 38.0:
+        k = (t - 26.0) / 12.0
+        z0 = zn - 30.0 - (37.0 * 12.0 - 1.35 * 144.0)
+        gx, gz = (ci - 22) * CELL + 16.0, cj * CELL + 30.0
+        x = rx + (gx - rx) * k
+        z = z0 + (gz - z0) * k
+        n = math.hypot(gx - rx, gz - z0) or 1.0
+        out.append((x, 1.2, z, (gx - rx) / n, (gz - z0) / n, False))
+    # The take-off, half a cycle on.
+    t2 = (now + APT_CYCLE * 0.5) % APT_CYCLE
+    if t2 < 4.0:
+        out.append((rx, 1.2, zn - 12.0, 0.0, -1.0, True))
+    elif t2 < 16.0:
+        k = t2 - 4.0
+        out.append((rx, 1.2, zn - 12.0 - 1.9 * k * k, 0.0, -1.0, True))
+    elif t2 < 34.0:
+        k = t2 - 16.0
+        z = zn - 12.0 - 1.9 * 144.0 - 46.0 * k
+        out.append((rx, 1.2 + 2.6 * k + 0.08 * k * k, z, 0.0, -1.0, True))
+    return out
+
+
+def draw_plane(ch, co, v, walls, x, y, z, hx, hz, lights, now, wet):
+    """An airliner in world points: the fuselage with its windows lit, the
+    wings and engines, the fin and tailplane; red on the left wingtip, green
+    on the right, the strobe on the tail, the beacon on top - and with its
+    landing lights on, two white lights blazing at the nose."""
+    px, pz = -hz, hx                                  # its right
+    sc = PLANE_SCALE
+
+    def at(t, side, h):
+        return (x + (hx * t + px * side) * sc, y + h * sc,
+                z + (hz * t + pz * side) * sc)
+    for k in range(-30, 31):
+        t = k * 0.3
+        put_point(ch, co, v, walls, *at(t, 0.0, -0.3), "_", STAR)
+        put_point(ch, co, v, walls, *at(t, 0.0, 0.9), "-", STAR)
+        if k % 2 == 0 and abs(t) < 7.5:
+            put_point(ch, co, v, walls, *at(t, 0.0, 0.3), "o", GOLD)
+    for k in range(-16, 17):
+        side = k * 0.55
+        put_point(ch, co, v, walls, *at(-0.6 - abs(side) * 0.2, side, -0.1), "-", CURB)
+    for side in (-4.0, 4.0):
+        put_point(ch, co, v, walls, *at(0.4, side, -0.7), "O", CONCRETE)
+    for h in range(1, 6):
+        put_point(ch, co, v, walls, *at(-8.6, 0.0, h * 0.7), "|", STAR)
+    for k in range(-5, 6):
+        put_point(ch, co, v, walls, *at(-8.8, k * 0.55, 0.3), "-", CURB)
+    put_lit(ch, co, v, walls, *at(-1.0, -9.0, -0.1), "o", ROU_RED, max(wet, 0.3), now)
+    put_lit(ch, co, v, walls, *at(-1.0, 9.0, -0.1), "o", ROU_GREEN, max(wet, 0.3), now)
+    if int(now * 1.5) % 2:
+        put_lit(ch, co, v, walls, *at(-9.4, 0.0, 3.6), "*", FLASH, max(wet, 0.3), now)
+        put_point(ch, co, v, walls, *at(0.0, 0.0, 1.0), "o", ROU_RED)
+    if lights:
+        for side in (-0.6, 0.6):
+            put_lit(ch, co, v, walls, *at(9.6, side, -0.3), "@", FLASH, max(wet, 0.4),
+                    now)
+
+
+def near_airport(v, reach):
+    """The airport in reach, as its home (ci, cj), or None."""
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    hi, hj = zone_home("airport", ci, cj)
+    if abs((hi * CELL) - v.x) > reach + 150.0 or abs((hj * CELL) - v.z) > reach + 300.0:
+        return None
+    return hi, hj
+
+
+def draw_airport(ch, co, v, walls, home, now, wet):
+    """Everything at the airport that is not a wall: the runway's lights -
+    white down both edges, green across the end planes land at and red across
+    the other, the approach lights out beyond it with a strobe running in
+    towards the runway - the tower's beacon turning, the name on the
+    terminal, the planes at their gates with the jet bridges out to them,
+    and the two that are moving."""
+    ci, cj = home
+    rx = (ci + RUNWAY_DI) * CELL
+    zn, zs = (cj + RUNWAY_HALF) * CELL, (cj - RUNWAY_HALF) * CELL
+    z = zs
+    while z <= zn:
+        if abs(z - v.z) < 360.0:
+            for side in (-RUNWAY_W, RUNWAY_W):
+                put_lit(ch, co, v, walls, rx + side, 0.25, z, "o", STAR,
+                        max(wet, 0.3), now)
+        z += 12.0
+    for k in range(-5, 6):
+        for z_, light in ((zn, ROU_GREEN), (zs, ROU_RED)):
+            put_lit(ch, co, v, walls, rx + k * 2.6, 0.25, z_, "o", light,
+                    max(wet, 0.3), now)
+    run = int(now * 14) % 10
+    for k in range(1, 10):
+        za = zn + k * 9.0
+        lit = (9 - k) == run
+        put_lit(ch, co, v, walls, rx, 0.6, za, "*" if lit else "o",
+                FLASH if lit else BULB_DIM, max(wet, 0.3), now)
+    # The tower's beacon, green and white turning.
+    tx, tz = (ci - 19 + 0.5) * CELL, (cj + 38 + 0.5) * CELL
+    put_lit(ch, co, v, walls, tx, 35.5, tz, "*",
+            ROU_GREEN if int(now * 2) % 2 else FLASH, max(wet, 0.3), now)
+    # The name over the terminal's front.
+    pr = v.project((ci - 22) * CELL, 14.5, cj * CELL)
+    if pr is not None and pr[2] < 160.0:
+        word = AIRPORT_NAME if pr[2] < 90.0 else "AIRPORT"
+        for k, c in enumerate(word):
+            put_cell(ch, co, v, walls, int(round(pr[0])) - len(word) // 2 + k,
+                     int(round(pr[1])), pr[2] - 0.2, c, NEON[2][0])
+    # The planes at the gates, nose in, and the bridges out to them.
+    fx = (ci - 22) * CELL
+    for g in (-18, -6, 6, 18):
+        gz = (cj + g) * CELL
+        if abs(gz - v.z) > 300.0:
+            continue
+        for k in range(8):
+            put_point(ch, co, v, walls, fx + 1.0 + k * 0.9, 3.4, gz + 2.0, "=", CURB)
+        draw_plane(ch, co, v, walls, fx + 16.0, 1.2, gz, -1.0, 0.0, False, now + g, wet)
+    for x, y, z_, hx, hz, lights in plane_states(ci, cj, now):
+        if (x - v.x) ** 2 + (z_ - v.z) ** 2 < 700.0 ** 2:
+            draw_plane(ch, co, v, walls, x, y, z_, hx, hz, lights, now, wet)
+
+
+def airport_hint(x, z, now):
+    """What you hear near the airport."""
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    hi, hj = zone_home("airport", ci, cj)
+    if abs(hi * CELL - x) > 400.0 or abs(hj * CELL - z) > 600.0:
+        return ""
+    t = now % APT_CYCLE
+    t2 = (now + APT_CYCLE * 0.5) % APT_CYCLE
+    if t < 14.0:
+        return "  ~ a plane coming in to land ~"
+    if 4.0 < t2 < 22.0:
+        return "  ~ the roar of a jet taking off ~"
+    return ""
+
+
 def draw_exchange_front(ch, co, v, walls, ex, world, now):
     """STOCK EXCHANGE over the columns, and the ticker running across the
     front under it - the market going by, green when it went up and red when
@@ -5223,6 +5488,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     if b.get("strip") is not None:
         return draw_strip_column(ch, co, v, sx, dist, b, face, u,
                                  r_lo, r_hi, edge, cont, now)
+    if b.get("airport") is not None:
+        return draw_airport_column(ch, co, v, sx, dist, b, face, u,
+                                   r_lo, r_hi, edge, cont, now)
     if b["diner"] is not None:
         return draw_diner_column(ch, co, v, sx, dist, b, face, u,
                                  r_lo, r_hi, edge, cont, now)
@@ -6254,6 +6522,8 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 rock = not wet_cell and not solid and headland_at(i, j)
                 tarmac = not wet_cell and not solid and car_park_at(i, j)
                 mh = None if solid or wet_cell else manhole_at(i, j)
+                apt = (None if solid or wet_cell or not airport_at(i, j)
+                       else runway(i, j))
                 plot_ = None if solid or wet_cell else plot_at(i, j)
                 dirt = plot_ is not None
                 weeds = dirt and plot_["kind"] == "empty"
@@ -6286,6 +6556,23 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
             elif CELL - fz_ < edge and CELL - fz_ < PAVE and wall_s:
                 edge = CELL - fz_
 
+            if apt is not None:
+                # Tarmac: the runway's edge lines, the dashes down its middle
+                # and the piano keys at each end; the taxiway's yellow line.
+                rx_, zn_, zs_ = apt
+                dx_ = x - rx_
+                on_rw = abs(dx_) < RUNWAY_W and zs_ <= z <= zn_
+                if on_rw and abs(abs(dx_) - RUNWAY_W + 0.4) < 0.35:
+                    ch[y][sx], co[y][sx] = "=", STAR
+                elif on_rw and abs(dx_) < 0.3 and (z % 12.0) < 6.0:
+                    ch[y][sx], co[y][sx] = "|", STAR
+                elif on_rw and min(z - zs_, zn_ - z) < 9.0 and (dx_ * 1.4) % 3.0 < 1.4:
+                    ch[y][sx], co[y][sx] = "#", STAR
+                elif abs(dx_ - TAXIWAY_DX) < 0.3:
+                    ch[y][sx], co[y][sx] = ":", GOLD
+                elif _mix(int(x * 2.0), int(z * 2.0), 3911) % 11 == 0:
+                    ch[y][sx], co[y][sx] = ".", CONCRETE
+                continue
             if dirt:
                 # The building site: churned mud and puddles, no paving; an
                 # empty plot, weeds coming up through it.
@@ -9622,7 +9909,7 @@ def el_runs(x, z):
     i = int(x / CELL + BIG) - BIG
     j = int(z / CELL + BIG) - BIG
     return (not woods_at(i, j) and not headland_at(i, j) and not suburb_at(i, j)
-            and not strip_at(i, j))
+            and not strip_at(i, j) and not airport_at(i, j))
 
 
 def near_els(v, reach):
@@ -11896,6 +12183,9 @@ def render_street(v, now):
         draw_empty_lot(ch, co, v, walls, p_, now, wet)
     for c_ in near_chimneys(v, 260.0 if v.eye < 10.0 else ROOF_REACH):
         draw_chimney(ch, co, v, walls, c_, now, wet)
+    apt_ = near_airport(v, 500.0)
+    if apt_ is not None:
+        draw_airport(ch, co, v, walls, apt_, now, wet)
     if v.eye < 10.0:
         draw_strip_median(ch, co, v, walls, now, wet)
         draw_strip_traffic(ch, co, v, walls, now, wet)
@@ -14649,6 +14939,7 @@ CHEAT_PLACES = [
     ("}", "empty lot", "plot"),
     ("0", "the suburbs", "suburbs"),
     (":", "the strip", "strip"),
+    ("'", "the airport", "airport"),
     (";", "lemonade, 3am", "lemonade"),
     ("?", "the stargazer", "telescope"),
     ("r", "ramen", "ramen"),
@@ -14671,7 +14962,7 @@ CHEAT_PLACES = [
 ]
 
 # Placed parts of town, listed after the picked ones.
-CHEAT_ZONES = ["industrial", "site", "plot", "suburbs", "strip"]
+CHEAT_ZONES = ["industrial", "site", "plot", "suburbs", "strip", "airport"]
 
 # The panel's groups, by what you would go there for.
 CHEAT_GROUPS = [
@@ -14991,6 +15282,27 @@ def _suburb_spot(x, z):
                 # Along the street, the way it runs furthest before it bends.
                 return px, pz, max((k * math.pi / 2 for k in range(4)),
                                    key=lambda a: probe(px, pz, a, 60.0))
+    return None
+
+
+def _airport_spot(x, z):
+    """At the end of the nearest runway, looking up the approach."""
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    homes = sorted((zone_home("airport", ti * WOODS_TILE, tj * WOODS_TILE)
+                    for ti in range(ci // WOODS_TILE - 1, ci // WOODS_TILE + 2)
+                    for tj in range(cj // WOODS_TILE - 1, cj // WOODS_TILE + 2)),
+                   key=lambda h: (h[0] - ci) ** 2 + (h[1] - cj) ** 2)
+    for hi, hj in homes:
+        # At the end of the runway, just off its edge, looking up the
+        # approach: the next one comes in straight at you over the approach
+        # lights and goes over your head. From the side, a hundred units
+        # off, it was a few characters at the horizon.
+        px = (hi + RUNWAY_DI) * CELL + RUNWAY_W + 6.0
+        pz = (hj + RUNWAY_HALF) * CELL - 2.0
+        if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+            continue
+        if can_stand(px, pz):
+            return px, pz, -0.12
     return None
 
 
@@ -15555,6 +15867,8 @@ def find_place(x, z, kind):
         return _suburb_spot(x, z)
     if kind == "strip":
         return _strip_spot(x, z)
+    if kind == "airport":
+        return _airport_spot(x, z)
     if kind in ("lemonade", "telescope"):
         return _egg_spot(x, z, kind)
     if kind == "exchange":
@@ -17897,6 +18211,7 @@ def main(stdscr):
                 or blackout_word(cam_x, cam_z, now)
                 or factory_hint(cam_x, cam_z)
                 or suburb_hint(cam_x, cam_z, now)
+                or airport_hint(cam_x, cam_z, now)
                 or landmark_hint(cam_x, cam_z)
                 or rave_hint(v, now)
                 or ("  ~ something over the city ~" if night(now)["alien"]

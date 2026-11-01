@@ -946,6 +946,39 @@ from below, and **fountains**: a pool with a row of jets rising and falling in a
 now and then, headlights coming and tail lights going, never through you. `:` in the menu stands
 you at one end in the middle of the boulevard, looking up it.
 
+## The airport
+
+Beside every Strip, on the Strip's own hash so it is always the same distance off its side
+(`ZONES["airport"]`, salt shared with the strip's): open tarmac (`is_open()` yes, `road_at()` no,
+so no walkers or traffic), with a glass **terminal** down the west side, **hangars** beyond it and
+a **control tower** (`airport_part()`, built by `lot()` and drawn by `draw_airport_column()`:
+glass lit cold with a mullion every bay; ribbed metal with the great door lit; a shaft with the
+cab at the top all window). `AIRPORT_NAME` goes up over the terminal's front. The ground pass
+paints the **runway** (`runway()`, `RUNWAY_W` either side of the middle, `RUNWAY_HALF` cells each
+way): edge lines, dashes down the middle, piano keys at both ends, and the taxiway's yellow line.
+`draw_airport()` lights it — white down the edges, green across the end they land at and red
+across the other, the approach lights out beyond it with a strobe running in towards the runway
+— turns the tower's beacon, and parks four airliners nose-in at the gates with the jet bridges
+out to them.
+
+**Planes on a timetable** (`plane_states()`, a function of time on `APT_CYCLE`): one comes in
+from the north down the glide slope, landing lights blazing, touches down, brakes and turns off
+for the gates; half a cycle on, another lines up, rolls, rotates and climbs away south.
+`draw_plane()` is world points at `PLANE_SCALE`: fuselage with its windows lit, wings, engines,
+fin and tailplane, red and green on the wingtips, the strobe and the beacon, the landing lights
+at the nose. The HUD hears them.
+
+**Where to watch from was the work.** Side on, a hundred units off, a landing was a few
+characters at the horizon, and from sixty it was off either edge of the view. So `'` in the menu
+stands you at the end of the runway, off its edge, looking up the approach — where plane
+spotters stand — and the next one comes in straight at you and over your head. That only works
+because **the town under the approach is kept low** (`approach_cap()`, applied in `lot()`, the
+way `seafront_cap()` keeps the carnival's sky clear): rising with the glide slope from inside the
+fence on, a corridor either side of the centre line. Before it the city's financial district
+stood forty units off the end of the runway and hid the plane until it was overhead; the cap
+had to start a few rows inside the airport's edge, because the edge wanders and left one row of
+towers standing. Far out you see the landing lights, which is all you would.
+
 ## People walking
 
 The streets used to be empty but for smokers and queues. `near_walkers()` puts a **lane down each
