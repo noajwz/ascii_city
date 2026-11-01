@@ -5101,6 +5101,18 @@ check("ivy up the walls",
       sum(row.count("&") + row.count("%") for row in utext.splitlines())
       > 15)
 
+lsp = ac.find_place(x0, z0, "library")
+ldx, ldz = ac.library_door(int(lsp[0] // ac.CELL), int(lsp[1] // ac.CELL))
+check("the library's door, onto the quad: the menu stands you in front of it",
+      ac.venue_at(ldx, ldz)[0] == "library" and ac.venue_at(*lsp[:2]) is None
+      and ac.can_stand(*lsp[:2]) and ac.can_stand(ldx + 3.0, ldz)
+      and ac.venue_at(ldx + 3.0, ldz) is None and "library" in ac.clock_hint(*lsp[:2]))
+lapp = ac.LIBRARY_APP
+ac.LIBRARY_APP = "/nonexistent/wiki_tui.py"
+check("and with no reader beside it, the library is shut, nothing breaks",
+      "shut" in ac.read_in_library(None))
+ac.LIBRARY_APP = lapp
+
 # --- the metro ------------------------------------------------------------------------
 msts = list(ac.near_stations(x0, z0, 700.0))
 check("metro stations about town, on the pavement, out of the placed parts",
