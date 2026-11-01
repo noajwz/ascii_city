@@ -2358,12 +2358,27 @@ none of when - the hollow comes back as the cell's own and the caller adds tonig
 `cabin_wall()` works out the plane's window frame once per window size instead of a hypot per
 cell per frame. Both change nothing on screen - checked at 300x90 against the code before them,
 character for character. Result at 300x90: the roof 50 -> 33 ms, the plane 50 -> 34 (median of
-a flight); about 30 frames a second up there.
+a flight). Then the see-through fix below took both to 21 ms.
+
+**Up high, things showed through buildings** - rain, smoke, people, the far city's lights, the
+ground's specks in a dark tower's front - and it had been so all along. Two causes in
+`draw_walls()`: it kept only the *nearest* facade per column for `hidden()`, so anything behind a
+tall building rising over a nearer low one was drawn through it; and it kept the *first hit*,
+which from a roof is often off the bottom of the screen or the building you stand on - skipped -
+leaving the column with no wall at all, so `hidden()` hid nothing in it and `draw_ground()`
+painted over every building in it. Now every facade drawn in a column is kept, as (distance, top
+row, bottom row) runs in `walls[4]` - nearest first, each further one only above the last, so
+they never overlap and one answers - and `hidden()` asks all of them; and `wall_d` / `wall_top` /
+`wall_base` are the nearest facade actually drawn. On the street a few cells a view changed (a
+chimney or a sign that had been drawn through a building in front); from a roof or the plane a
+few hundred, the far city's lights no longer showing through the dark buildings before them.
+It also made the high views faster - the ground no longer painted over those columns - roof and
+plane at 300x90 both 21 ms.
 
 **Do not draw the ground at half resolution to buy more.** It was tried: every other row and
 column worked out and the rest copied from a neighbour. It was faster (roof 28, plane 32), and
 the owner tried it and said no - the flight looked blurry; and copying into cells nothing had
-drawn in put ground texture where a building's top should have been blank, which read as fog
+drawn in put ground texture where a building's front should have been dark, which read as fog
 particles on the roofs and as see-through buildings from the plane. What is left of the frame up
 there is the per-point texture hashes (`_mix()` in `draw_ground()` and the Strip's lit windows),
 which are the look itself, and the walls at `depth = 22`. Ask before trading any of it.

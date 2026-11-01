@@ -3486,10 +3486,15 @@ def neon_attr(s, i, now):
 
 
 def hidden(walls, sx, sy, dist):
-    """Is this cell behind a facade? A facade is a vertical plane, so one
-    distance and one row range per column is all the depth anyone needs."""
-    wd = walls[0][sx]
-    return wd is not None and wd < dist and walls[1][sx] <= sy <= walls[2][sx]
+    """Is this cell behind a facade? A facade is a vertical plane, so each
+    one is a distance and a run of rows in its column - and every facade
+    drawn in the column counts, not only the nearest: up on a roof a low
+    building near you and a tall one behind it are both in most columns,
+    and rain, smoke and people beyond the tall one showed through it."""
+    for wd, lo, hi in walls[4][sx]:
+        if lo <= sy <= hi:
+            return wd < dist        # the runs never overlap: one answers
+    return False
 
 
 def facade_line(ch, co, sx, row, prev_row, r_lo, r_hi, glyph, attr):
@@ -6561,12 +6566,15 @@ def draw_walls(ch, co, v, now):
     # and they are not the same the moment a tall building stands behind a
     # short one - which is most of a city.
     sky_top = [v.height] * width
+    # Every facade drawn in a column, as (distance, top row, bottom row): what
+    # hidden() asks. Nearest first, each further one only above the last.
+    runs = [[] for _ in range(width)]
     seen = {}          # (cell, face) -> what the column to the left left off at
 
     for sx in range(width):
         rdx, rdz = v.ray(sx)
         cover = None
-        for n, (dist, i, j, f, u) in enumerate(cast(v, rdx, rdz, v.depth)):
+        for dist, i, j, f, u in cast(v, rdx, rdz, v.depth):
             if v.skip and (i, j) in v.skip:
                 continue                 # the building you are standing on
             b = lot(i, j)
@@ -6607,14 +6615,20 @@ def draw_walls(ch, co, v, now):
                 tunnel_lining(ch, co, v, sx, dist, r_lo, r_hi, j, _mix(i, j, 2209))
             cover = r_lo if cover is None else min(cover, r_lo)
             sky_top[sx] = cover
-            if not n:
+            runs[sx].append((dist, r_lo, r_hi))
+            if wall_d[sx] is None:
+                # The nearest facade drawn in the column - which on a roof is
+                # often not the first hit, the first being the building under
+                # you, skipped. Taking the first hit left these columns with
+                # no wall at all, and the ground was drawn over every building
+                # in them.
                 wall_d[sx] = dist
                 wall_top[sx] = r_lo
                 wall_base[sx] = r_hi
             if cover <= 0:
                 break
 
-    return (wall_d, wall_top, wall_base, sky_top)
+    return (wall_d, wall_top, wall_base, sky_top, runs)
 
 
 # ---------------------------------------------------------------------------
