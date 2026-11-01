@@ -38,7 +38,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   with a rave going
   on, a temple with stained glass and a rose window, where a terminal on the altar
   gives you the word of God the way TempleOS did and a priest in the confession
-  booth hears what you type, an industrial zone of sheds and smoking chimneys with a building site and a rave in
+  booth hears what you type, suburbs with curving streets, white picket fences, lawns and porch lights,
+  an industrial zone of sheds and smoking chimneys with a building site and a rave in
   the old factory, taxis you can hail on any street and ride across town, fog nights when the neon goes soft and the far end of the street is gone, a blackout
   one night in a while, when the power goes block by block and comes
   back in a wave, manholes in the streets, some of them steaming, with somebody living down one
