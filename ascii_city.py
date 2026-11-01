@@ -2032,6 +2032,47 @@ def suburb_tree(i, j):
     return suburb_rank(i, j) == 3 and _mix(i, j, 3817) % 5 == 0
 
 
+_egg_cache = {}
+
+
+def suburb_eggs(ci, cj):
+    """The suburbs' two secrets, in the one round (ci, cj): a lemonade stand
+    on a front lawn by the road, kept by a kid who should be in bed; and an
+    old man with a telescope on the lawn between two houses. Each (i, j, f),
+    f the way to the road."""
+    hit = _egg_cache.get((ci, cj))
+    if hit is None:
+        hit = {}
+        for i, j in _rings(ci + 5, cj + 4, 14):
+            if (suburb_rank(i, j) == 1 and zone_depth("suburbs", i, j) > 5.0
+                    and suburb_at(i, j)):
+                fs = [f for f in _toward_road(i, j) if not _house_behind(i, j, f)]
+                if fs:
+                    hit["lemonade"] = (i, j, fs[0])
+                    break
+        for i, j in _rings(ci - 9, cj - 2, 14):
+            if (suburb_rank(i, j) == 2 and not suburb_house(i, j)
+                    and not suburb_tree(i, j) and zone_depth("suburbs", i, j) > 5.0):
+                fs = [f for f in range(4)
+                      if suburb_rank(i + FACES[f][0], j + FACES[f][1]) == 1]
+                if fs:
+                    hit["telescope"] = (i, j, fs[0])
+                    break
+        _egg_cache[(ci, cj)] = hit
+    return hit
+
+
+def egg_points(kind, egg):
+    """(where the thing stands, where you stand to use it), as (x, z) each."""
+    i, j, f = egg
+    nx, nz = FACES[f]
+    cx, cz = (i + 0.5) * CELL, (j + 0.5) * CELL
+    if kind == "lemonade":
+        # The stand at the front of its lawn; you, on the road in front of it.
+        return ((cx + nx * 1.6, cz + nz * 1.6), (cx + nx * 3.4, cz + nz * 3.4))
+    return ((cx, cz), (cx + nx * 1.6, cz + nz * 1.6))   # him, and beside him
+
+
 _site_cache = {}
 
 
@@ -4336,8 +4377,30 @@ def draw_suburb(ch, co, v, walls, cells, now, wet):
     on, the blue of the television in one window in three, a car on the drive
     in front of one house in four, a letterbox by the gate."""
     white = STAR
+    eggs = {}
+    if cells:
+        eggs = suburb_eggs(*zone_home("suburbs", cells[0][0], cells[0][1]))
+        lem = eggs.get("lemonade")
+        if lem is not None:
+            (sx_, sz_), _ = egg_points("lemonade", lem)
+            blit_sprite(ch, co, v, walls, ["LEMONADE 1$"], sx_, sz_, 1.55, 1.9, 1.9,
+                        GOLD)
+            blit_sprite(ch, co, v, walls, ["(o.o)"], sx_, sz_, 1.05, 1.5, 0.7, STAR)
+            blit_sprite(ch, co, v, walls, ["_[]_u_u_", "|      |", "|      |"],
+                        sx_, sz_, 0.0, 1.05, 1.6, BARK)
+        tel = eggs.get("telescope")
+        if tel is not None:
+            (tx_, tz_), _ = egg_points("telescope", tel)
+            blit_sprite(ch, co, v, walls, ["  _ ", " (_)", " /|\\", " / \\"],
+                        tx_, tz_, 0.0, 1.8, 0.8, CURB)
+            pl = math.hypot(v.plx, v.plz) or 1.0
+            blit_sprite(ch, co, v, walls, ["   _O", "  // ", " /\\  ", "/  \\ "],
+                        tx_ + v.plx / pl * 0.9, tz_ + v.plz / pl * 0.9, 0.0, 1.9, 0.9,
+                        CONCRETE)
     for i, j, r in cells:
         if r == 1:
+            if eggs.get("lemonade") is not None and eggs["lemonade"][:2] == (i, j):
+                continue                        # the stand is where the fence was
             for f in _toward_road(i, j):
                 nx, nz = FACES[f]
                 house = _house_behind(i, j, f)
@@ -4380,6 +4443,191 @@ def face_point_open(i, j, f, u, inset):
     ex, ez = cx + nx * (CELL * 0.5 - inset), cz + nz * (CELL * 0.5 - inset)
     ax, az = -nz, nx
     return ex + ax * (u - CELL * 0.5), 0.0, ez + az * (u - CELL * 0.5)
+
+
+KID_LINES = ["Lemonade? It's only a dollar.",
+             "It's three in the morning. I know.",
+             "My mom says I can stay up till the sun comes back.",
+             "I've been here since Tuesday.",
+             "We ran out of lemons a while ago.",
+             "Everybody on this street buys one. Eventually.",
+             "Don't look at the house. Look at the lemonade.",
+             "The dog doesn't bark at me any more."]
+KID_THANKS = ["Thank you! Drink it all.", "Two? You must be thirsty. Or lonely.",
+              "That's three. Nobody's ever had three.", "You can stop now.",
+              "You live here now. Welcome home."]
+
+
+def render_lemonade(width, height, now, glasses, since_buy):
+    """At the stand: a kid's head over a home-made sign, the jug and the
+    paper cups, the porch light on behind and the house dark around it, the
+    fence either side - and what the kid says, which gets stranger."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    if since_buy < 4.0 and glasses:
+        say = KID_THANKS[min(glasses, len(KID_THANKS)) - 1]
+        if since_buy > 2.0:
+            say = "You drink it. It tastes like lemonade. Mostly."
+    else:
+        say = KID_LINES[int(now / 5.0) % len(KID_LINES)]
+    if width < 40 or height < 16:
+        _text(ch, co, 1, 1, "~ a lemonade stand, 3am ~", GOLD)
+        _text(ch, co, height // 2, 1, say[:width - 2], STAR)
+        _text(ch, co, height - 1, 1, "p: $1 a glass  s: away", GOLD_DIM)
+        return ch, co
+    cx = width // 2
+    # The house behind, dark, its porch light on.
+    for x in range(4, width - 4):
+        ch[2][x], co[2][x] = "^" if x % 2 else "-", CONCRETE
+    for y in range(3, height - 8):
+        for x in (4, width - 5):
+            ch[y][x], co[y][x] = "|", CONCRETE
+    _text(ch, co, 4, width - 14, "(o)", BULB)
+    _text(ch, co, 5, width - 14, " | ", CONCRETE)
+    for k in range(3):
+        _text(ch, co, 6 + k, 10, "[  ]" if k else "____", CONCRETE)
+    # The fence, either side.
+    fy = height - 6
+    for x in list(range(0, cx - 16)) + list(range(cx + 17, width)):
+        ch[fy][x] = "^" if x % 2 else "|"
+        ch[fy + 1][x] = "|" if x % 2 else "-"
+        co[fy][x] = co[fy + 1][x] = STAR
+    # The kid.
+    blink = int(now * 1.3) % 7 == 0
+    eyes = "- -" if blink else "o o"
+    ky = height - 15
+    for r, line in enumerate(("  ,---.  ", " ( " + eyes + " ) ", "  \\ ~ /  ",
+                              " __| |__ ", "/       \\")):
+        _text(ch, co, ky + r, cx - 4, line, STAR)
+    # The sign, hand-lettered: the letters do not quite sit on one line.
+    sign = "LEMONADE  $1"
+    for k, c_ in enumerate(sign):
+        _text(ch, co, ky - 2 - (k in (2, 7)), cx - len(sign) + k * 2, c_,
+              GOLD if k % 3 else ROU_RED)
+    # The stand: the table, the jug, the cups.
+    ty = ky + 5
+    _text(ch, co, ty, cx - 14, "_" * 29, BARK)
+    _text(ch, co, ty - 2, cx - 10, " _ ", GOLD_DIM)
+    _text(ch, co, ty - 1, cx - 10, "[_]", GOLD)
+    for k in range(4 - min(glasses, 4)):
+        _text(ch, co, ty - 1, cx + 5 + k * 3, "u", STAR)
+    for y in range(ty + 1, height - 3):
+        _text(ch, co, y, cx - 14, "|", BARK)
+        _text(ch, co, y, cx + 14, "|", BARK)
+    _text(ch, co, ty + 2, cx - 9, "~ fresh ~ cold ~", BARK)
+    for x in range(width):
+        ch[height - 3][x] = ","
+        co[height - 3][x] = GRASS
+    _text(ch, co, ky - 5, max(1, cx - len(say) // 2), say, STAR)
+    _text(ch, co, height - 1, max(1, cx - 18),
+          "-- p buys a glass ($1)  -  s walks away --", GOLD_DIM)
+    return ch, co
+
+
+STARGAZER = ["Clear night. Take a look.", "Go on, put your eye to it.",
+             "Forty years I've been looking. Still something new.",
+             "Keep watching. It does something, now and then."]
+SCOPE_LOOP = 24.0
+
+
+def render_telescope(width, height, now, since, nt):
+    """Through the old man's telescope: the round field of view, stars in it,
+    and the moon close up - craters, and the side the sun is not on dark -
+    in tonight's phase. Then it does something, on a loop: comes into focus;
+    a lander comes down on it, somebody gets out, plants a flag and waves; a
+    cow goes over it; and the moon winks. On the strange night, something
+    else crosses it."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    t = (now - since) % SCOPE_LOOP
+    say = STARGAZER[int((now - since) / 6.0) % len(STARGAZER)]
+    if width < 40 or height < 16:
+        _text(ch, co, 1, 1, "~ through the telescope ~", MOON)
+        _text(ch, co, height // 2, 1, "the moon, close up", MOON_DIM)
+        _text(ch, co, height - 1, 1, "s steps back", GOLD_DIM)
+        return ch, co
+    cx, cy = width / 2.0, (height - 3) / 2.0
+    R = min(cy - 1.0, width / 4.0 - 1.0)          # in rows; columns are twice
+
+    def inside(x, y):
+        return ((x - cx) / 2.0) ** 2 + (y - cy) ** 2 < R * R
+
+    # The field: black, a rim, and the stars in it.
+    for y in range(height - 2):
+        for x in range(width):
+            d = math.sqrt(((x - cx) / 2.0) ** 2 + (y - cy) ** 2)
+            if R - 0.6 < d < R + 0.4:
+                ch[y][x], co[y][x] = "o", CONCRETE
+            elif d < R and _mix(x, y, 3841) % 23 == 0:
+                ch[y][x], co[y][x] = ".", STAR_DIM if _mix(x, y, 3843) % 3 else STAR
+    # The moon.
+    drift = 0.6 * math.sin(now * 0.3)
+    mx, my = cx + drift * 2.0, cy + 0.5
+    mr = R * 0.5
+    lit = 1.0 - abs(nt["phase"] - 0.5) * 2.0     # 1 full, 0 new
+    waxing = nt["phase"] < 0.5
+    focus = min(1.0, t / 1.5)
+    for y in range(int(my - mr) - 1, int(my + mr) + 2):
+        for x in range(int(mx - mr * 2) - 2, int(mx + mr * 2) + 3):
+            u, w_ = (x - mx) / (2.0 * mr), (y - my) / mr
+            if u * u + w_ * w_ > 1.0 or not inside(x, y) or not 0 <= y < height:
+                continue
+            side = u if waxing else -u
+            sun = side > 1.0 - 2.0 * lit
+            m = _mix(x - int(mx), y - int(my), 3845)
+            if focus < 1.0 and m % 3:
+                ch[y][x], co[y][x] = ".", MOON_DIM if sun else HAZE
+            elif sun:
+                ch[y][x] = "O" if m % 17 == 0 else "o" if m % 7 == 0 else "#"
+                co[y][x] = MOON_DIM if ch[y][x] != "#" else MOON
+            else:
+                ch[y][x], co[y][x] = ":", HAZE           # earthshine
+    top = int(round(my - mr))
+
+    def put(x, y, s_, attr):
+        for k, c_ in enumerate(s_):
+            xx = int(round(x)) + k
+            if 0 <= y < height and 0 <= xx < width and inside(xx, y):
+                ch[y][xx], co[y][xx] = c_, attr
+
+    if nt.get("alien") and 13.0 <= t < 19.0:     # the strange night: not a cow
+        q = (t - 13.0) / 6.0
+        sx_ = cx - R * 1.8 + q * R * 3.6
+        put(sx_, int(my) - 1, "<=O=>", FLASH if int(now * 6) % 2 else NEON[2][0])
+        for k in range(1, 4):
+            put(sx_ + 2, int(my) - 1 + k, ":", NEON[2][1])
+    elif 6.0 <= t < 13.0:                        # a lander, and somebody in it
+        lx, ly = mx - mr * 0.6, top
+        if t < 8.5:
+            dy = int((8.5 - t) * 2.2)
+            put(lx, ly - 1 - dy, "/T\\", STAR)
+            put(lx + 1, ly - dy, "*", EMBER_HOT if int(now * 10) % 2 else GOLD)
+        else:
+            put(lx, ly - 1, "/T\\", STAR)
+            step = min(4.0, (t - 8.5) * 3.0)
+            if t > 10.0:
+                put(lx + 7, ly - 2, "|>", ROU_RED)
+                put(lx + 7, ly - 1, "|", STAR)
+            wave = t > 10.5 and int(now * 4) % 2
+            put(lx + 3 + step, ly - 1, "\\o/" if wave else " o ", STAR)
+    elif 13.0 <= t < 19.0:                       # the cow, over it
+        q = (t - 13.0) / 6.0
+        kx = cx - R * 1.7 + q * R * 3.4
+        ky = int(round(my - mr - 2 - math.sin(q * math.pi) * (R - mr - 2)))
+        put(kx, ky - 1, "(__)", STAR)
+        put(kx, ky, "(oo)", STAR)
+        put(kx, ky + 1, "/\\/\\", STAR)
+        if 0.4 < q < 0.6:
+            put(kx + 5, ky - 1, "moo!", GOLD)
+    elif t >= 19.0:                              # and it winks at you
+        ex = mr * 0.9
+        put(mx - ex - 1, int(my - mr * 0.25), "(O)", MOON)
+        right = "(-)" if 21.0 < t < 21.7 else "(O)"
+        put(mx + ex - 1, int(my - mr * 0.25), right, MOON)
+        put(mx - 3, int(my + mr * 0.35), "\\___/", MOON)
+    _text(ch, co, height - 2, max(1, int(cx) - len(say) // 2), '"' + say + '"', HUD)
+    _text(ch, co, height - 1, max(1, int(cx) - 10), "-- s steps back --", GOLD_DIM)
+    return ch, co
 
 
 def render_warehouse(wh, width, height, now):
@@ -12683,6 +12931,13 @@ def venue_at(x, z):
     room drawn around you."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
+    if zone_depth("suburbs", ci, cj) > -2.0:
+        hh = zone_home("suburbs", ci, cj)
+        for kind, egg in suburb_eggs(*hh).items():
+            _, (ux, uz) = egg_points(kind, egg)
+            if (ux - x) ** 2 + (uz - z) ** 2 < CASINO_REACH ** 2:
+                return kind, {"i": egg[0], "j": egg[1], "f": egg[2],
+                              "seed": _mix(egg[0], egg[1], 3831)}
     c = carnival_over(ci)
     if c is not None:                           # the claw machine, on the fair
         bx, bz = claw_spot(c)
@@ -14128,6 +14383,8 @@ CHEAT_PLACES = [
     ("]", "building site", "site"),
     ("}", "empty lot", "plot"),
     ("0", "the suburbs", "suburbs"),
+    (";", "lemonade, 3am", "lemonade"),
+    ("?", "the stargazer", "telescope"),
     ("r", "ramen", "ramen"),
     ("d", "diner", "diner"),
     ("^", "sky deck", "tower"),
@@ -14468,6 +14725,30 @@ def _suburb_spot(x, z):
                 # Along the street, the way it runs furthest before it bends.
                 return px, pz, max((k * math.pi / 2 for k in range(4)),
                                    key=lambda a: probe(px, pz, a, 60.0))
+    return None
+
+
+def _egg_spot(x, z, kind):
+    """A few steps from the nearest suburb's lemonade stand or stargazer,
+    looking at it."""
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    homes = sorted((zone_home("suburbs", ti * WOODS_TILE, tj * WOODS_TILE)
+                    for ti in range(ci // WOODS_TILE - 1, ci // WOODS_TILE + 2)
+                    for tj in range(cj // WOODS_TILE - 1, cj // WOODS_TILE + 2)),
+                   key=lambda h: (h[0] - ci) ** 2 + (h[1] - cj) ** 2)
+    for hi, hj in homes:
+        egg = suburb_eggs(hi, hj).get(kind)
+        if egg is None:
+            continue
+        (tx, tz), (ux, uz) = egg_points(kind, egg)
+        if (tx - x) ** 2 + (tz - z) ** 2 < CHEAT_SKIP ** 2:
+            continue
+        dx, dz = ux - tx, uz - tz
+        n = math.hypot(dx, dz) or 1.0
+        for back in (3.0, 2.6, 3.4):
+            px, pz = ux + dx / n * back, uz + dz / n * back
+            if can_stand(px, pz):
+                return px, pz, math.atan2(tx - px, tz - pz)
     return None
 
 
@@ -14989,6 +15270,8 @@ def find_place(x, z, kind):
         return _factory_spot(x, z, kind)
     if kind == "suburbs":
         return _suburb_spot(x, z)
+    if kind in ("lemonade", "telescope"):
+        return _egg_spot(x, z, kind)
     if kind == "exchange":
         return _doorway(x, z, 2701, "exchange", EXCHANGE_ODDS)
     if kind == "billboard":
@@ -15061,6 +15344,7 @@ def draw_cheats(ch, co, note):
            ("n", "the next one"), ("u", "a strange night"),
            ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
            ("&", "a blackout"), ("#", "a fog night"),
+           names["lemonade"], names["telescope"],
            ("", ""), ("`", "close")]
     columns = (left, middle, right, sky)
 
@@ -16558,6 +16842,8 @@ LIFT_HUD = " in the lift, going %s "
 DINER_HUD = " at the diner, open 24/7, at %d,%d  -  s walks back out  -  q quit "
 CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
 WAREHOUSE_HUD = " at the rave in the old factory  -  s walks back out  -  q quit "
+LEMONADE_HUD = " at a lemonade stand, 3am  -  p buys a glass ($1)  -  s walks away "
+TELESCOPE_HUD = " looking through the old man's telescope  -  s steps back "
 TEMPLE_HUD = (" in %s  -  g asks for the word of god  -  c the confession booth"
               "  -  s walks out  -  q quit ")
 CONFESS_HUD = " in the confession booth  -  type, enter to confess  -  esc steps out "
@@ -16615,6 +16901,8 @@ def main(stdscr):
     at_races = False
     flyer = Flyer(wallet)       # and High Flyer, f
     at_flyer = False
+    lemon = {"glasses": 0, "at": -1e9}   # the kid's best customer
+    scope_at = None             # when you put your eye to the telescope
     # The temple's terminal: the verses so far, when the last word was asked
     # for (to the nanosecond - it is what picks the next) and when.
     oracle = {"said": [], "last_ns": time.perf_counter_ns(), "at": -1e9, "sung": None}
@@ -16805,6 +17093,15 @@ def main(stdscr):
                 sky_v = fwd = side = spin = 0.0
             elif key == ord(" ") and not at_arcade:
                 autopilot = not autopilot
+            elif (venue is not None and venue[0] == "lemonade"
+                  and key in (ord("p"), ord("P"))):
+                if lemon["glasses"] >= len(KID_THANKS):
+                    note, note_at = "the kid just looks at you", now
+                elif wallet.take(1):
+                    lemon["glasses"] += 1
+                    lemon["at"] = now
+                else:
+                    note, note_at = "the kid wants a dollar", now
             elif at_temple and key in (ord("c"), ord("C")):
                 booth = {"t0": now, "text": "", "said": [
                     ("priest", "Bless you. Tell me what is on your mind.", now + 1.4)]}
@@ -17132,6 +17429,8 @@ def main(stdscr):
                        else False)
         at_arcade = venue is not None and venue[0] == "arcade"
         at_temple = venue is not None and venue[0] == "temple"
+        if venue is None or venue[0] != "telescope":
+            scope_at = None             # step back and it starts again
         if not at_temple:
             booth = None                # out of the temple is out of the booth
         if not at_arcade:
@@ -17241,6 +17540,15 @@ def main(stdscr):
         elif venue is not None and venue[0] == "exchange":
             ch, co = render_exchange(venue[1], broker, width, height, now)
             hud = EXCHANGE_HUD
+        elif venue is not None and venue[0] == "lemonade":
+            ch, co = render_lemonade(width, height, now, lemon["glasses"],
+                                     now - lemon["at"])
+            hud = LEMONADE_HUD
+        elif venue is not None and venue[0] == "telescope":
+            if scope_at is None:
+                scope_at = now
+            ch, co = render_telescope(width, height, now, scope_at, night(now))
+            hud = TELESCOPE_HUD
         elif venue is not None and venue[0] == "warehouse":
             ch, co = render_warehouse(venue[1], width, height, now)
             hud = WAREHOUSE_HUD
