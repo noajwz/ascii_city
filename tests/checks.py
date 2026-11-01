@@ -1890,6 +1890,11 @@ def fingerprint(n):
         spot = ac.find_place(sx, sz, "@%d" % n)
         if spot is None:
             continue
+        si_ = int(spot[0] / ac.CELL + ac.BIG) - ac.BIG
+        sj_ = int(spot[1] / ac.CELL + ac.BIG) - ac.BIG
+        if (ac.woods_depth(si_, sj_) > -30
+                or any(ac.zone_depth(k_, si_, sj_) > -30 for k_ in ac.ZONES)):
+            continue                # it would be measuring the woods, not the district
         for yaw in (spot[2], spot[2] + 1.57):
             v = ac.View(spot[0], spot[1], yaw, 90, 24)
             grid, colour, _ = ac.render_street(v, 400.0)

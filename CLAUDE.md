@@ -744,7 +744,7 @@ is a long walk. `o` in the menu takes you to a gate.
 
 **It is placed, not picked.** `WOODS` is a district row that is not in `DISTRICTS`: `district()`
 returns it for any cell `woods_at()` says yes to, so `lot()` builds a tree there with no changes of
-its own, and the HUD says *the woods*. The trees are taller than a park's and the leaf tone is
+its own, and the HUD says *the woods*. The trees are much taller than a park's — `WOODS` builds 18 to 30, a park 5 to 10 — and `draw_tree_column()` starts their canopy half way up and draws the trunks under it as whole columns a bay apart, with undergrowth at their feet, so in among them you see the wood and not only the leaves; a park's clump stays low and bushy to the ground. The leaf tone is
 scaled down to the dark end of the palette — by multiplying the *same* random draw, so nothing else
 about the city moves.
 
