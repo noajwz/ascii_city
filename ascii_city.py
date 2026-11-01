@@ -332,6 +332,8 @@ TOWER_ODDS = 9         # of the buildings tall enough, one in this many
 TOWER_MIN = 34.0       # how tall, in world units, a building must be to have one
 TOWER_TOP = 72.0       # and how tall it is made: over everything else in town
 ROOF_REACH = 520.0     # how far you can see from up there: at 260 the town
+WALL_REACH_HIGH = 170.0  # up high, every building out to here is drawn - and
+                         # none past it: the ground and the lights go on to ROOF_REACH
                        # stopped well short of the horizon
 # The top floors of a sky-deck tower are a weather beacon, the old way:
 #   steady blue, clear view; flashing blue, clouds due;
@@ -3338,10 +3340,11 @@ class View:
         return self.horizon + (y + self.eye) * self.fy / perp
 
 
-def cast(v, rdx, rdz, limit=4):
-    """March a ray through the grid, collecting the walls it meets, nearest
-    first. It keeps going past the first one because a taller building behind a
-    short one still shows over its roof."""
+def cast(v, rdx, rdz, limit=4, reach=None):
+    """March a ray through the grid, handing over the walls it meets, nearest
+    first, up to `limit` of them. It keeps going past the first one because a
+    taller building behind a short one still shows over its roof. One at a
+    time, so a caller that has seen enough can stop it early."""
     cx = v.x / CELL
     cz = v.z / CELL
     i = int(cx + BIG) - BIG
@@ -3366,8 +3369,8 @@ def cast(v, rdx, rdz, limit=4):
         dt_z = next_z = 1e30
         step_j = 0
 
-    hits = []
-    max_cells = v.reach / CELL
+    found = 0
+    max_cells = (v.reach if reach is None else reach) / CELL
     while True:
         if next_x < next_z:
             t = next_x
@@ -3380,7 +3383,7 @@ def cast(v, rdx, rdz, limit=4):
             j += step_j
             f = 2 if step_j > 0 else 3
         if t > max_cells:
-            return hits
+            return
         if not is_open(i, j):
             dist = t * CELL
             plane, u0, axis = face_origin(i, j, f)
@@ -3388,9 +3391,10 @@ def cast(v, rdx, rdz, limit=4):
                 u = v.z + rdz * dist - u0
             else:
                 u = v.x + rdx * dist - u0
-            hits.append((max(dist, 0.35), i, j, f, u))
-            if len(hits) >= limit:
-                return hits
+            yield max(dist, 0.35), i, j, f, u
+            found += 1
+            if found >= limit:
+                return
 
 
 # ---------------------------------------------------------------------------
@@ -6571,13 +6575,26 @@ def draw_walls(ch, co, v, now):
     runs = [[] for _ in range(width)]
     seen = {}          # (cell, face) -> what the column to the left left off at
 
+    # On the street the first v.depth walls a ray meets are the ones there
+    # are to draw. Up high a ray meets a wall in every cell of every block it
+    # passes over, most of them hidden, and counting those, v.depth ran out
+    # two or three blocks off: the buildings beyond were drawn only where a
+    # ray happened to run down a street, which changed as the plane flew, so
+    # they blinked in and out. Up there every building out to WALL_REACH_HIGH
+    # is drawn, however many - a distance holds still where a count did not
+    # - and the ground, the street lights and the far lights go on past it.
+    high = v.eye >= 10.0
     for sx in range(width):
         rdx, rdz = v.ray(sx)
         cover = None
-        for dist, i, j, f, u in cast(v, rdx, rdz, v.depth):
+        for dist, i, j, f, u in (cast(v, rdx, rdz, 1 << 30, WALL_REACH_HIGH)
+                                 if high else cast(v, rdx, rdz, v.depth)):
             if v.skip and (i, j) in v.skip:
                 continue                 # the building you are standing on
             b = lot(i, j)
+            if cover is not None and (v.horizon - (b["height"] - v.eye) * v.fy / dist
+                                      >= cover):
+                continue                 # its roof is under what is drawn already
             top, base = wall_span(v, dist, b["height"])
             r_lo = max(0, top)
             r_hi = min(v.height - 1, base)
@@ -7407,15 +7424,16 @@ def ground_cell(i, j):
     return hit
 
 
-def far_lights(ch, co, walls, y, d, far, bearings):
+def far_lights(ch, co, walls, y, d, k, bearings):
     """One row of the city past where it is drawn, seen from up high: a
     carpet of lights - mostly the haze's dots, now and then a warmer one -
     thicker towards the horizon, where each row holds more of the city.
-    By the bearing of each column and how far the row is, the way the
-    distant skyline over the horizon is done, so it holds still as you fly
-    rather than flickering; at that distance nothing should move much."""
-    k = int(math.log(d) * 16.0)
-    dens = int(120 + 230 * (1.0 - far / d))      # in a thousand
+    By the bearing of each column and the row's place under the horizon
+    (k), the way the distant skyline over the horizon is done, so it holds
+    still as you fly and only slides when you turn. It was keyed on the
+    row's distance first, which changes as the plane climbs or comes down,
+    and then the whole carpet reshuffled itself every frame."""
+    dens = max(120, 350 - 12 * k)                # in a thousand
     row_c, row_o = ch[y], co[y]
     for sx, bearing in enumerate(bearings):
         if row_c[sx] != " " or hidden(walls, sx, y, d):
@@ -7504,7 +7522,7 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                     bearings = [int((v.yaw + math.atan((2.0 * sx / (width - 1) - 1.0)
                                                        * PLANE)) * 200.0)
                                 for sx in range(width)]
-                far_lights(ch, co, walls, y, d, far, bearings)
+                far_lights(ch, co, walls, y, d, y - v.horizon, bearings)
             continue
         wx = v.x + rdx0 * d
         wz = v.z + rdz0 * d

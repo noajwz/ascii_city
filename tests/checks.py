@@ -5368,6 +5368,24 @@ check("on a roof every column that draws a building keeps it",
           and (not hwl_[4][x_] or hwl_[0][x_] == hwl_[4][x_][0][0])
           for x_ in range(300)) and sum(1 for r in hwl_[4] if len(r) > 1) > 100)
 
+# Flying level, the buildings slide by: they do not blink. When up high the
+# first 22 walls a ray met were the ones drawn, and a ray through a city block
+# meets one every cell - so which buildings got drawn changed as the plane
+# moved, and from one frame to the next whole buildings went and came back.
+bp_home = ac.zone_home("airport", int(fsp[0] // ac.CELL), int(fsp[1] // ac.CELL))
+bp_cover = []
+for k_ in range(12):
+    bx_, bz_, by_, ba_ = ac.flight_pose(bp_home, ac.flight_s(35.0 + k_ / 30.0, bp_home))
+    bv_ = ac.View(bx_, bz_, by_ + math.pi / 2, 300, 90, eye=ba_ + ac.FLIGHT_EYE,
+                  reach=ac.ROOF_REACH)
+    bw_ = ac.draw_walls([[" "] * 300 for _ in range(90)],
+                        [[0] * 300 for _ in range(90)], bv_, 600.0)
+    bp_cover.append(sum(hi_ - lo_ + 1 for col_ in bw_[4] for _, lo_, hi_ in col_))
+bp_jump = max(abs(bp_cover[k_] - bp_cover[k_ - 1]) / bp_cover[k_ - 1]
+              for k_ in range(1, len(bp_cover)))
+check("in the plane the buildings slide by, they do not blink in and out",
+      bp_jump < 0.02, "%.1f%% the most that changed in a frame" % (bp_jump * 100))
+
 # --- the autopilot and the turn keys -------------------------------------------------
 def walk_auto(x, z, secs):
     """The autopilot as the main loop runs it, minus the drawing."""
