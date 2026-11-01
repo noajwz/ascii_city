@@ -5066,6 +5066,69 @@ check("and there it is: jets over the water", show_.count("|") > quiet_.count("|
                                                                     quiet_.count("|")))
 ac._fountain_shift[0] = 0.0
 
+# --- a flight ---------------------------------------------------------------------
+fsp = ac.find_place(x0, z0, "flight")
+fgx, fgz = ac.gate_door(int(fsp[0] // ac.CELL), int(fsp[1] // ac.CELL))
+fhome = ac.zone_home("airport", int(fsp[0] // ac.CELL), int(fsp[1] // ac.CELL))
+check("the terminal's doors take you to the gate; the menu stands you before them",
+      ac.venue_at(fgx, fgz)[0] == "gate" and ac.venue_at(*fsp[:2]) is None
+      and ac.can_stand(*fsp[:2]) and ac.can_stand(fgx + 3.0, fgz)
+      and ac.venue_at(fgx + 3.0, fgz) is None and ac.gate_near(*fsp[:2]))
+ftx = "\n".join("".join(r) for r in ac.render_gate(100, 30, 0.0, {"home": fhome})[0])
+check("at the gate: the departures board, the flight, the fare",
+      "DEPARTURES" in ftx and ac.FLIGHT_NO in ftx and "$%d" % ac.FLIGHT_FARE in ftx)
+flen = ac.flight_length(fhome)
+fposes, fprev, fjump, fclose, fover = [], None, False, [], set()
+t_ = 0.0
+while t_ <= flen:
+    fs_ = ac.flight_s(t_, fhome)
+    px_, pz_, py_, pa_ = ac.flight_pose(fhome, fs_)
+    if fprev is not None:
+        dturn = abs(ac._wrap(py_ - fprev[2]))
+        fjump |= math.hypot(px_ - fprev[0], pz_ - fprev[1]) > ac.FLIGHT_VMAX * 0.5 + 1
+        fjump |= dturn > 0.3
+    fprev = (px_, pz_, py_)
+    fover.add(ac.place_below(px_, pz_))
+    pi_, pj_ = int(px_ // ac.CELL), int(pz_ // ac.CELL)
+    if pa_ > 0.5:
+        fclose += [(round(t_), round(pa_)) for a_ in range(pi_ - 2, pi_ + 3)
+                   for b_ in range(pj_ - 2, pj_ + 3) if not ac.is_open(a_, b_)
+                   and ac.lot(a_, b_)["height"] > pa_ - 2.0]
+    fposes.append((t_, pa_, fs_))
+    t_ += 0.5
+fend = ac.flight_pose(fhome, ac.flight_s(flen, fhome))
+frx, fzn, fzs = ac.runway(*fhome)
+check("the flight: a minute or two, unbroken, up to cruise and back down",
+      60.0 < flen < 130.0 and not fjump
+      and max(a_ for _, a_, _ in fposes) > ac.FLIGHT_LOW)
+check("and over no roof it does not clear - the town is kept low off both ends",
+      not fclose and ac.approach_cap(fhome[0] + ac.RUNWAY_DI,
+                                     fhome[1] - ac.RUNWAY_HALF - 20) is not None,
+      str(fclose[:5]))
+fsi, fsj = ac.strip_home(*fhome)
+fsx, fsz = (fsi + 0.5) * ac.CELL, (fsj + 0.5) * ac.CELL
+fseen = [(t_, a_) for t_, a_, s_ in fposes if a_ > 30.0 and abs(ac._wrap(
+    math.atan2(fsx - ac.flight_pose(fhome, s_)[0], fsz - ac.flight_pose(fhome, s_)[1])
+    - ac.flight_pose(fhome, s_)[2] - math.pi / 2)) < 0.4
+    and math.hypot(fsx - ac.flight_pose(fhome, s_)[0],
+                   fsz - ac.flight_pose(fhome, s_)[1]) < 250.0]
+check("the Strip out of the window, near and low enough to see its lights; and "
+      "down on the runway at the end, stopped",
+      # Low for the lights: it keeps 18 over the hotels, and cruised at 130.
+      fseen and min(a_ for _, a_ in fseen) < 110.0 and fend[3] == 0.0
+      and abs(fend[0] - frx) < 1.0
+      and fzs < fend[1] < fzn
+      and ac.flight_s(flen, fhome) == ac.flight_s(flen + 5.0, fhome))
+fl_ = {"phase": "air", "home": fhome, "t0": 0.0, "look": 0.0, "want": 0.0}
+fch = ac.render_flight(100, 30, 40.0, fl_)[0]
+ftx = "\n".join("".join(r) for r in fch)
+check("out of the window: the frame round it, the seatbelt sign, the wingtip light",
+      "[ |=| ]".replace(" ", "") in ftx.replace(" ", "") and "@" in ftx
+      and all(r[0] in " ." for r in fch))
+check("and dozing off wakes you on the approach",
+      ac.flight_stage(fhome, ac.flight_marks(fhome)[0] + 10.0) == "on approach"
+      and ac.flight_time_at(ac.flight_marks(fhome)[0], fhome) < flen)
+
 # --- the autopilot and the turn keys -------------------------------------------------
 def walk_auto(x, z, secs):
     """The autopilot as the main loop runs it, minus the drawing."""
