@@ -5347,32 +5347,6 @@ check("and dozing off wakes you on the approach",
       ac.flight_stage(fhome, ac.flight_marks(fhome)[0] + 10.0) == "on approach"
       and ac.flight_time_at(ac.flight_marks(fhome)[0], fhome) < flen)
 
-# --- high up on a big window: the ground at half resolution ---------------------------
-hg_lim = ac.HALF_GROUND
-hgv = lambda: ac.View(x0, z0, 0.7, 300, 90, eye=90.0, reach=ac.ROOF_REACH)
-ac.HALF_GROUND = 10 ** 9
-hg_full = ac.render_street(hgv(), 600.0)[0]
-ac.HALF_GROUND = hg_lim
-hg_half = ac.render_street(hgv(), 600.0)[0]
-hg_diff = sum(1 for y_ in range(90) for x_ in range(300)
-              if hg_full[y_][x_] != hg_half[y_][x_])
-hg_street = ac.render_street(ac.View(x0, z0, 0.7, 300, 90), 600.0)[0]
-ac.HALF_GROUND = 10 ** 9
-hg_street_full = ac.render_street(ac.View(x0, z0, 0.7, 300, 90), 600.0)[0]
-ac.HALF_GROUND = hg_lim
-# The buildings are not doubled: copies go only into cells nothing else drew
-# in. The first try copied whatever was above, and every roof came out with
-# its walls twice as thick; a few more repeats than at full resolution is the
-# ground's own kerbs and fences lining up.
-hg_rows_f = ["".join(r) for r in hg_full]
-hg_rows_h = ["".join(r) for r in hg_half]
-check("high up on a big window the ground is half resolution and looks nearly the "
-      "same, the buildings untouched; on the street, every point as before",
-      0 < hg_diff < 300 * 90 // 10 and hg_street == hg_street_full
-      and all(sum(r.count(p_) for r in hg_rows_h)
-              <= sum(r.count(p_) for r in hg_rows_f) + 40
-              for p_ in ("||||", "^^^^", "====")), "%d cells differ" % hg_diff)
-
 # --- the autopilot and the turn keys -------------------------------------------------
 def walk_auto(x, z, secs):
     """The autopilot as the main loop runs it, minus the drawing."""
@@ -5440,7 +5414,13 @@ check("the library down its west side, solid, every window lit", all(
     for j in range(uhj - ac.QUAD_HJ, uhj + ac.QUAD_HJ + 1)))
 usp = ac.find_place(x0, z0, "university")
 uv = ac.View(usp[0], usp[1], usp[2], 100, 30)
+# The face shows the real time, and at twelve o'clock both hands stand over
+# the 12, as on any clock - so the time is set to twenty past three here, or
+# this fails once a day at noon and again at midnight.
+real_lt_ = ac.time.localtime
+ac.time.localtime = lambda *a_: ac.time.struct_time((2026, 11, 2, 15, 20, 0, 0, 306, 0))
 utext = "\n".join("".join(r) for r in ac.render_street(uv, 600.0)[0])
+ac.time.localtime = real_lt_
 check("the menu stands you across the quad from the clock, and you can read it",
       usp is not None and ac.quad_at(int(usp[0] / ac.CELL + ac.BIG) - ac.BIG,
                                      int(usp[1] / ac.CELL + ac.BIG) - ac.BIG)

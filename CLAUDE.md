@@ -2351,21 +2351,22 @@ bank; it is asked once per cell now. If it ever slips again, the levers in order
 `_mix()` texture hashes in `draw_ground()`, `near_lots()` reach, `RAIN_REACH` and `MAX_VIEW`.
 
 **High up on a big window** is the other worst case. Zoomed out to 300x90 (27,000 cells, nine
-times 100x30) a roof and the plane took 50 ms a frame, the ground over half of it and the walls
-most of the rest. From up there every ground point is a different cell, so `draw_ground()`'s
-twenty-odd questions per cell were asked per point. Three things fixed it:
-`ground_cell()` keeps every cell's answers (all of them a function of where, none of when - the
-hollow comes back as the cell's own and the caller adds tonight's rave), which sped up the street
-a little too and changed nothing on screen; **half-resolution ground** when `v.eye >= 10` and
-the window is at least `HALF_GROUND` cells (200x60): every other row and column worked out, the
-rest copied from the row above or the cell to the left - but only into cells nothing else drew
-in, and only from cells the ground pass itself drew (`marks`), or every roof came out doubled,
-because up there the buildings stand in the same rows as the ground; and `cabin_wall()`, the
-plane's window frame worked out once per window size instead of a hypot per cell per frame.
-Result at 300x90: the roof 50 -> 25 ms, the plane 50 -> 29 (median over a whole flight; 90% of
-frames under 33). The street and every window under 200x60 are frame for frame as before. The
-levers left, if it slips: the walls at `depth = 22` up high (about a third of the frame now), and
-the terminal's own drawing, which none of these numbers include.
+times 100x30) a roof and the plane took 50 ms a frame, the ground over half of it. From up there
+every ground point is a different cell, so `draw_ground()`'s twenty-odd questions per cell were
+asked per point. `ground_cell()` keeps every cell's answers (all of them a function of where,
+none of when - the hollow comes back as the cell's own and the caller adds tonight's rave), and
+`cabin_wall()` works out the plane's window frame once per window size instead of a hypot per
+cell per frame. Both change nothing on screen - checked at 300x90 against the code before them,
+character for character. Result at 300x90: the roof 50 -> 33 ms, the plane 50 -> 34 (median of
+a flight); about 30 frames a second up there.
+
+**Do not draw the ground at half resolution to buy more.** It was tried: every other row and
+column worked out and the rest copied from a neighbour. It was faster (roof 28, plane 32), and
+the owner tried it and said no - the flight looked blurry; and copying into cells nothing had
+drawn in put ground texture where a building's top should have been blank, which read as fog
+particles on the roofs and as see-through buildings from the plane. What is left of the frame up
+there is the per-point texture hashes (`_mix()` in `draw_ground()` and the Strip's lit windows),
+which are the look itself, and the walls at `depth = 22`. Ask before trading any of it.
 
 **Anything keyed on where the river is must be cheap, because `road_at()` and `is_open()` ask it
 for every cell.** The promenade, the fairground, the headland and the moat all went in keyed on
