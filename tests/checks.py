@@ -147,7 +147,7 @@ blind = []
 for _, name, kind in ac.CHEAT_PLACES:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
                 "diner", "billboard", "highway", "arcade", "claw", "roofparty",
-                "exchange"):
+                "exchange", "metro"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -5100,6 +5100,47 @@ check("the menu stands you across the quad from the clock, and you can read it",
 check("ivy up the walls",
       sum(row.count("&") + row.count("%") for row in utext.splitlines())
       > 15)
+
+# --- the metro ------------------------------------------------------------------------
+msts = list(ac.near_stations(x0, z0, 700.0))
+check("metro stations about town, on the pavement, out of the placed parts",
+      len(msts) > 10 and all(
+          ac.can_stand(m_["x"], m_["z"]) and not ac.is_open(m_["i"], m_["j"])
+          and not any(ac.zone_depth(k_, m_["i"], m_["j"]) > -2 for k_ in ac.ZONES)
+          for m_ in msts))
+mst = msts[0]
+check("standing at the stairs finds the station, a step away does not",
+      ac.station_at(mst["x"], mst["z"]) is mst
+      and ac.station_at(mst["x"] + 6.0, mst["z"] + 6.0) is not mst)
+mds = ac.metro_dests(mst)
+check("the trains go to other stations, a handful, several parts of town",
+      3 <= len(mds) <= 8 and len({d_["district"] for d_ in mds}) >= 3
+      and all(d_["name"] != mst["name"] and d_["block"] != mst["block"] for d_ in mds))
+mseed = mst["block"][0] * 31 + mst["block"][1]
+mph = [ac.train_phase(t_ * 0.5, mseed)[0] for t_ in range(int(ac.METRO_EVERY * 2))]
+check("a train comes in, stands, goes, and another one comes",
+      {"in", "dwell", "out", "gone"} <= set(mph))
+mm = {"phase": "platform", "here": mst, "sel": 1, "waiting": False, "dests": mds}
+mtx = "\n".join("".join(r) for r in ac.render_platform(100, 30, 0.0, mm)[0])
+check("the platform: the station's name, the board, where you can go",
+      mst["name"] in mtx and "NEXT TRAIN" in mtx and mds[1]["name"] in mtx
+      and "$%d" % ac.METRO_FARE in mtx)
+mm.update(phase="ride", t0=0.0, dur=10.0)
+mtx = "\n".join("".join(r) for r in ac.render_ride(100, 30, 4.0, mm)[0])
+mtx2 = "\n".join("".join(r) for r in ac.render_ride(100, 30, 9.5, mm)[0])
+check("the ride: the line map, the next stop, then this is it",
+      "Next stop: " + mds[1]["name"] in mtx and "@" in mtx
+      and "This is " + mds[1]["name"] in mtx2)
+check("and small terminals get it plainly", all(
+    mst["name"] in "\n".join("".join(r) for r in f_(30, 10, 0.0, dict(
+        mm, phase="platform") if f_ is ac.render_platform else mm)[0])
+    or "metro" in "\n".join("".join(r) for r in f_(30, 10, 0.0, mm)[0])
+    for f_ in (ac.render_platform, ac.render_ride)))
+msp = ac.find_place(x0, z0, "metro")
+mv = ac.View(msp[0], msp[1], msp[2], 100, 30)
+mtx = "\n".join("".join(r) for r in ac.render_street(mv, 600.0)[0])
+check("the menu stands you in front of an entrance, its M lit and its name up",
+      "M" in mtx and "(M) " in mtx)
 
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
