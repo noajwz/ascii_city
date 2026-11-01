@@ -5560,7 +5560,7 @@ def draw_quad(ch, co, v, walls, now, wet):
                 0.0, 1.6, 2.6, CURB)
     for k, side in enumerate((-0.6, 0.6)):
         put_point(ch, co, v, walls, bx + side, 0.9, bz - 0.3, "#",
-                  CROWN_BLUE if _mix(k, int(now * 4), 4019) % 5 else STAR)
+                  CROWN_BLUE if _mix(k, int(now * 4), 4019) % 5 else BULB)
     lib_x = (hi - QUAD_HI - 1 + 1) * CELL + 0.6
     for k in range(-2, 3):
         blit_sprite(ch, co, v, walls, ["o-|-o"], lib_x + 0.6, mz + k * 2.2, 0.0, 0.8,
@@ -12558,6 +12558,8 @@ def render_street(v, now):
     draw_props(ch, co, v, walls, now, wet)
     draw_manhole_steam(ch, co, v, walls, now)
     draw_ind_lamps(ch, co, v, walls, v.ind_lamps, now, wet)
+    if v.eye < 10.0:
+        draw_station_entrances(ch, co, v, walls, now, wet)
     if v.suburb:
         draw_suburb(ch, co, v, walls, v.suburb, now, wet)
     for site_ in near_sites(v, 160.0):
@@ -15328,6 +15330,7 @@ CHEAT_PLACES = [
     ("'", "the airport", "airport"),
     ("(", "fountain show", "fountain"),
     ("{", "the university", "university"),
+    ("-", "a metro station", "metro"),
     (";", "lemonade, 3am", "lemonade"),
     ("?", "the stargazer", "telescope"),
     ("r", "ramen", "ramen"),
@@ -16293,6 +16296,16 @@ def find_place(x, z, kind):
         return _fountain_spot(x, z)
     if kind == "university":
         return _university_spot(x, z)
+    if kind == "metro":
+        for st in sorted(near_stations(x, z, 900.0),
+                         key=lambda s_: (s_["x"] - x) ** 2 + (s_["z"] - z) ** 2):
+            if (st["x"] - x) ** 2 + (st["z"] - z) ** 2 < CHEAT_SKIP ** 2:
+                continue
+            nx, nz = FACES[st["f"]]
+            px, pz = st["x"] + nx * 4.5, st["z"] + nz * 4.5
+            if can_stand(px, pz):
+                return px, pz, math.atan2(-nx, -nz)
+        return None
     if kind in ("lemonade", "telescope"):
         return _egg_spot(x, z, kind)
     if kind == "exchange":
@@ -17652,6 +17665,319 @@ def draw_taxi_menu(ch, co, dests, sel, money):
               FLASH if k == sel else (HUD if fare <= money else CONCRETE))
 
 
+# --- the metro --------------------------------------------------------------
+METRO_ODDS = 10        # one city block in this many has a station
+METRO_FARE = 3
+METRO_EVERY = 25.0     # a train every this many seconds
+METRO_IN = 3.0         # coming in out of the tunnel
+METRO_DWELL = 7.0      # standing with its doors open
+METRO_OUT = 3.0        # and away
+STATION_WORDS = {"downtown": ["CENTRAL", "CITY HALL", "BROADWAY", "TIMES SQ"],
+                 "residential": ["ELM ST", "PARK AVE", "MAPLE ROW", "GREEN LN"],
+                 "old town": ["OLD GATE", "MARKET HALL", "CATHEDRAL", "CLOCK ST"],
+                 "chinatown": ["CHINATOWN", "PAGODA ST", "JADE GATE", "LANTERN SQ"],
+                 "market": ["MARKET", "FISH ROW", "SPICE ST", "THE EXCHANGE"],
+                 "financial": ["WALL ST", "BANK", "TOWER HILL", "MINT ST"],
+                 "docks": ["THE DOCKS", "QUAYSIDE", "CRANE ST", "PIER ROAD"],
+                 "park": ["PARKSIDE", "THE GREEN", "FOUNTAIN SQ", "ROSE GDN"]}
+_station_cache = {}
+
+
+def station_of_block(bi, bj):
+    """The metro station in this city block, if it has one: its entrance on
+    the pavement in front of a building with a street front, and its name.
+    Not in the woods, the parks or the placed parts of town - you take the
+    metro to get to those, not from them."""
+    key = (bi, bj)
+    if key in _station_cache:
+        return _station_cache[key]
+    hit = None
+    if _mix(bi, bj, 4101) % METRO_ODDS == 0:
+        for i in range(bi * XP, bi * XP + XP):
+            for j in range(bj * ZP, bj * ZP + ZP):
+                if is_open(i, j) or woods_at(i, j) or any(
+                        zone_depth(k_, i, j) > -2 for k_ in ZONES):
+                    continue
+                d = DISTRICTS[district_at(i, j)]
+                if d["park"]:
+                    continue
+                f = _road_face(i, j, _mix(i, j, 4103) % 4)
+                if f is None:
+                    continue
+                x, _, z = face_point(i, j, f, CELL * 0.5, 1.2, 0.0)
+                if not can_stand(x, z):
+                    continue                    # a pier, a tree in the way
+                words = STATION_WORDS.get(d["name"], ["CENTRAL"])
+                hit = {"x": x, "z": z, "i": i, "j": j, "f": f, "district": d["name"],
+                       "name": words[_mix(bi, bj, 4105) % len(words)], "block": key}
+                break
+            if hit:
+                break
+    _evict(_station_cache, 6000)
+    _station_cache[key] = hit
+    return hit
+
+
+def near_stations(x, z, reach):
+    """Every station within reach of here."""
+    b0, b1 = int((x - reach) // (XP * CELL)), int((x + reach) // (XP * CELL))
+    c0, c1 = int((z - reach) // (ZP * CELL)), int((z + reach) // (ZP * CELL))
+    for bi in range(b0, b1 + 1):
+        for bj in range(c0, c1 + 1):
+            st = station_of_block(bi, bj)
+            if (st is not None
+                    and (st["x"] - x) ** 2 + (st["z"] - z) ** 2 < reach * reach):
+                yield st
+
+
+def station_at(x, z):
+    """The station whose stairs you are standing at, or None."""
+    for st in near_stations(x, z, 30.0):
+        if (st["x"] - x) ** 2 + (st["z"] - z) ** 2 < 2.4 ** 2:
+            return st
+    return None
+
+
+def metro_dests(here):
+    """Where the trains from here go: the nearest stations in each other
+    part of town, a handful, nearest first, and how far."""
+    best = {}
+    for st in near_stations(here["x"], here["z"], 2600.0):
+        if st["block"] == here["block"] or st["name"] == here["name"]:
+            continue
+        d = math.hypot(st["x"] - here["x"], st["z"] - here["z"])
+        k = (st["district"], st["name"])
+        if d > 120.0 and (k not in best or d < best[k][0]):
+            best[k] = (d, st)
+    out = sorted(best.values(), key=lambda p: p[0])
+    seen, picked = set(), []
+    for d, st in out:                       # one a part of town first
+        if st["district"] not in seen:
+            seen.add(st["district"])
+            picked.append(st)
+    for d, st in out:
+        if len(picked) >= 8:
+            break
+        if st not in picked:
+            picked.append(st)
+    return picked[:8]
+
+
+def train_phase(now, seed):
+    """Where this station's train is: ("in", 0..1) coming in, ("dwell", t)
+    doors open, ("out", 0..1) leaving, or ("gone", seconds to the next)."""
+    t = (now + seed % 17) % METRO_EVERY
+    if t < METRO_IN:
+        return "in", t / METRO_IN
+    t -= METRO_IN
+    if t < METRO_DWELL:
+        return "dwell", t
+    t -= METRO_DWELL
+    if t < METRO_OUT:
+        return "out", t / METRO_OUT
+    return "gone", METRO_EVERY - METRO_IN - METRO_DWELL - METRO_OUT - (t - METRO_OUT)
+
+
+def draw_station_entrances(ch, co, v, walls, now, wet):
+    """At the kerb: the post with the M on it, red and white, lit; the railings
+    round the stairs; the light coming up out of them; and the station's
+    name, near enough to read."""
+    for st in near_stations(v.x, v.z, 90.0):
+        rx, rz = st["x"] - v.x, st["z"] - v.z
+        if rx * v.dx + rz * v.dz < -CELL:
+            continue
+        i, j, f = st["i"], st["j"], st["f"]
+        px, _, pz = face_point(i, j, f, CELL * 0.5 + 1.9, 1.5, 0.0)
+        for h in (0.5, 1.3, 2.1, 2.9):
+            put_point(ch, co, v, walls, px, h, pz, "|", CONCRETE)
+        put_lit(ch, co, v, walls, px, 3.6, pz, "M", ROU_RED, max(wet, 0.4), now)
+        for u_ in (CELL * 0.5 - 1.2, CELL * 0.5 + 1.2):
+            for out in (0.5, 0.9, 1.3, 1.7):
+                x_, _, z_ = face_point(i, j, f, u_, out, 0.0)
+                put_point(ch, co, v, walls, x_, 0.9, z_, "=", CURB)
+        for k in range(5):
+            x_, _, z_ = face_point(i, j, f, CELL * 0.5 - 1.0 + k * 0.5, 0.45, 0.0)
+            put_point(ch, co, v, walls, x_, 0.9, z_, "=", CURB)
+            put_point(ch, co, v, walls, x_, 0.1, z_, "#", BULB_DIM)
+        pr = v.project(px, 4.4, pz)
+        if pr is not None and pr[2] < 45.0:
+            word = "(M) " + st["name"]
+            for k, c in enumerate(word):
+                put_cell(ch, co, v, walls, int(round(pr[0])) - len(word) // 2 + k,
+                         int(round(pr[1])), pr[2] - 0.2, c,
+                         ROU_RED if k < 3 else BULB)
+
+
+def render_platform(width, height, now, metro):
+    """On the platform: the tiles, the station's name on the wall in white on
+    a blue band, the board with the next train and where you can go from
+    here, people waiting at the yellow line, the tracks - and the train,
+    coming in out of the tunnel with its lights on, standing with its doors
+    open, and going."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    st = metro["here"]
+    phase, q = train_phase(now, st["block"][0] * 31 + st["block"][1])
+    if width < 50 or height < 18:
+        _text(ch, co, 1, 1, "(M) " + st["name"], ROU_RED)
+        _text(ch, co, 3, 1, "next train " + ("now" if phase == "dwell" else "soon"),
+              STAR)
+        for r, d in enumerate(metro["dests"][:height - 6]):
+            mark = ">" if r == metro["sel"] else " "
+            _text(ch, co, 5 + r, 1, mark + d["name"][:width - 3],
+                  FLASH if r == metro["sel"] else HUD)
+        return ch, co
+    edge = height - 7
+    # The tiled wall.
+    for y in range(1, edge):
+        for x in range(width):
+            if (x + (y % 2) * 2) % 4 == 0:
+                ch[y][x], co[y][x] = ".", CONCRETE
+    for x in range(width):
+        ch[0][x], co[0][x] = "=", CURB
+    # The name, on its blue band.
+    band = "   " + st["name"] + "   "
+    by = 3
+    for x in range(4, width - 4):
+        ch[by][x], co[by][x] = "-", CROWN_BLUE
+        ch[by + 1][x], co[by + 1][x] = " ", 0
+        ch[by + 2][x], co[by + 2][x] = "-", CROWN_BLUE
+    _text(ch, co, by + 1, max(4, width // 2 - len(band) // 2), band, STAR)
+    _text(ch, co, by + 1, max(2, width // 2 - len(band) // 2 - 4), "(M)", ROU_RED)
+    # The board: when the next one comes, and where you can go.
+    bx = 4
+    board_h = min(len(metro["dests"]), edge - by - 7) + 4
+    for y in range(by + 3, by + 3 + board_h):          # the board, black
+        for x in range(bx - 2, min(width - 2, bx + 44)):
+            edge_ = y in (by + 3, by + 2 + board_h) or x in (bx - 2, bx + 43)
+            ch[y][x], co[y][x] = ("+" if edge_ else " "), (CURB if edge_ else 0)
+    wait = ("DUE" if phase == "in" else "BOARDING" if phase == "dwell"
+            else "DEPARTING" if phase == "out" else "%d s" % int(q + 1))
+    _text(ch, co, by + 4, bx, "NEXT TRAIN  " + wait, GOLD)
+    for r, d in enumerate(metro["dests"][:edge - by - 7]):
+        far = math.hypot(d["x"] - st["x"], d["z"] - st["z"])
+        line = "%s %-14s %s" % (">" if r == metro["sel"] else " ", d["name"][:14],
+                                d["district"])
+        _text(ch, co, by + 6 + r, bx, line, FLASH if r == metro["sel"] else HUD)
+    if metro.get("waiting"):
+        _text(ch, co, by + 5, bx + 48,
+              "ticket to " + metro["dests"][metro["sel"]]["name"], GOLD)
+        _text(ch, co, by + 6, bx + 48, "wait for the doors", GOLD_DIM)
+    # The platform's edge, the people at it, the tracks.
+    for x in range(width):
+        ch[edge][x], co[edge][x] = "=", GOLD
+        ch[edge + 3][x], co[edge + 3][x] = "_", CONCRETE
+        ch[edge + 4][x], co[edge + 4][x] = "|" if x % 3 == 0 else "_", BARK
+    for k in range(5):
+        px = 8 + k * (width - 16) // 4
+        if phase == "dwell" and q > 2.0:
+            continue                               # on the train by now
+        for r, line in enumerate((" o ", "/|\\", "/ \\")):
+            _text(ch, co, edge - 3 + r, px, line, CURB)
+    # The train.
+    if phase != "gone":
+        length = width + 10
+        if phase == "in":
+            x0 = int((1.0 - q) ** 2 * (width + 4)) - 4
+        elif phase == "out":
+            x0 = -int(q * q * (length + 4)) - 4
+        else:
+            x0 = -4
+        for k in range(length):
+            x = x0 + k
+            if not 0 <= x < width:
+                continue
+            car = k % 22
+            for r in range(edge + 1, edge + 4):
+                if r == edge + 1:
+                    ch[r][x], co[r][x] = "_", STAR
+                elif car in (0, 21):
+                    ch[r][x], co[r][x] = "|", CONCRETE
+                elif car in (9, 10, 11, 12) and phase == "dwell" and r == edge + 2:
+                    ch[r][x], co[r][x] = " ", 0              # the doors, open
+                elif r == edge + 2:
+                    ch[r][x] = "o" if car % 3 else "#"
+                    co[r][x] = BULB
+                else:
+                    ch[r][x], co[r][x] = "=", CURB
+        if phase == "in" and 0 <= x0 < width:
+            _text(ch, co, edge + 2, x0, "@", FLASH)
+    _text(ch, co, height - 1, max(1, width // 2 - 30),
+          "-- ws choose  -  enter: $%d, the next train  -  x up the stairs --"
+          % METRO_FARE,
+          GOLD_DIM)
+    return ch, co
+
+
+def render_ride(width, height, now, metro):
+    """In the carriage: the seats and the poles, the windows black with the
+    tunnel's lights going by, the line map along the top with you on it, and
+    the announcement."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    t = now - metro["t0"]
+    u = min(1.0, t / metro["dur"])
+    dest = metro["dests"][metro["sel"]]
+    if u < 0.85:
+        say = "Next stop: " + dest["name"]
+    else:
+        say = "This is " + dest["name"] + "."
+    if width < 40 or height < 14:
+        _text(ch, co, 1, 1, "~ on the metro ~", ROU_RED)
+        _text(ch, co, 3, 1, say[:width - 2], STAR)
+        return ch, co
+    # The line map.
+    here, there = metro["here"]["name"], dest["name"]
+    _text(ch, co, 1, 4, here, HUD)
+    _text(ch, co, 1, width - 4 - len(there), there, HUD)
+    for x in range(4, width - 4):
+        ch[2][x], co[2][x] = "-", ROU_RED
+    stops = 4
+    for k in range(stops + 1):
+        ch[2][4 + k * (width - 9) // stops] = "o"
+    me = 4 + int(u * (width - 9))
+    ch[2][me], co[2][me] = "@", FLASH
+    # The windows, the tunnel going by.
+    wy0, wy1 = 4, height // 2 + 1
+    for x in range(width):
+        for y in (wy0 - 1, wy1 + 1):
+            ch[y][x], co[y][x] = "=", CURB
+    slow = 1.0 - max(0.0, (u - 0.8) / 0.2) - max(0.0, (0.15 - u) / 0.15)
+    shift = int(now * 90.0 * max(0.05, slow))
+    mid = (wy0 + wy1) // 2
+    for x in range(width):
+        for y in range(wy0, wy1 + 1):
+            if (x + shift) % 29 == 0 and y in (mid - 2, mid + 2):
+                for k in range(max(1, int(9 * slow))):
+                    if 0 <= x - k < width:
+                        ch[y][x - k], co[y][x - k] = "-", BULB    # a light, streaking
+            elif (x * 7 + y * 3 + shift) % 61 == 0:
+                ch[y][x], co[y][x] = ".", CONCRETE                 # the tunnel wall
+    for x in range(width):
+        if x % 24 in (0, 1, 2, 3):
+            for y in range(wy0, wy1 + 1):
+                ch[y][x], co[y][x] = "#" if x % 24 in (0, 3) else " ", CURB
+    if u > 0.85:
+        # The platform, sliding in at the end.
+        for x in range(width):
+            ch[wy1][x], co[wy1][x] = "=", GOLD
+            if (x + shift) % 4 == 0:
+                ch[wy1 - 1][x], co[wy1 - 1][x] = ".", CONCRETE
+    # The carriage: poles, seats, the others.
+    for x in range(14, width, 24):
+        for y in range(wy1 + 2, height - 3):
+            ch[y][x], co[y][x] = "|", STAR
+    for x in range(width):
+        ch[height - 4][x], co[height - 4][x] = "_", BARK
+        ch[height - 3][x], co[height - 3][x] = "=", BARK
+    for k in range(4):
+        sx = 10 + k * (width - 20) // 3
+        _text(ch, co, height - 6, sx, " o ", CURB)
+        _text(ch, co, height - 5, sx, "/|\\", CURB)
+    _text(ch, co, height - 1, max(1, width // 2 - len(say) // 2), say, STAR)
+    return ch, co
+
+
 TURNED = {
     "cinema": ["the usher holds out a hand.", "$%d a seat." % FEES["cinema"]],
     "club": ["the bouncer doesn't move.", "twenty at the door. not tonight."],
@@ -17864,6 +18190,7 @@ SKYLINE_HUD = " x=%-6d %s  tab view  arrows/hl walk  HL run  space wander  ` che
 STREET_HUD = (" %d,%d %s, %s%s  ws walk  ad turn  ,. step  +- pace  t taxi  tab view"
               "  ` cheats ")
 TAXI_HUD = " in a taxi  -  %s "
+METRO_HUD = " the metro  -  %s "
 ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
                 " blackjack  o plinko  r races  f high flyer  -  s walks out"
                 "  -  q quit ")
@@ -17945,6 +18272,7 @@ def main(stdscr):
     oracle = {"said": [], "last_ns": time.perf_counter_ns(), "at": -1e9, "sung": None}
     booth = None                # in the confession booth: {"t0", "text", "said"}
     taxi = None                 # hailed, choosing, or riding: {"phase", ...}
+    metro = None                # on a platform or riding: {"phase", ...}
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -18054,6 +18382,7 @@ def main(stdscr):
                             sewer = None
                             booth = None
                             taxi = None
+                            metro = None
                             ledger["jumps"] += 1
                             street = True
                             note = "-> " + name
@@ -18072,6 +18401,25 @@ def main(stdscr):
                                 note = "-> the woods rave (starting)"
                                 note_at = now
                         break
+            elif metro is not None and key not in (ord("q"), CHEAT_KEY):
+                if metro["phase"] == "platform":
+                    n_ = len(metro["dests"])
+                    if key in (27, ord("x"), ord("X")):
+                        metro = None                # back up the stairs
+                        note, note_at = "back up in the street", now
+                    elif n_ and key in (curses.KEY_UP, ord("w"), ord("W")):
+                        metro["sel"] = (metro["sel"] - 1) % n_
+                        metro["waiting"] = False
+                    elif n_ and key in (curses.KEY_DOWN, ord("s"), ord("S")):
+                        metro["sel"] = (metro["sel"] + 1) % n_
+                        metro["waiting"] = False
+                    elif n_ and key in (10, 13, curses.KEY_ENTER):
+                        if metro["waiting"]:
+                            pass
+                        elif wallet.take(METRO_FARE):
+                            metro["waiting"] = True
+                        else:
+                            note, note_at = "the barrier wants $%d" % METRO_FARE, now
             elif taxi is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (27, ord("x"), ord("X")) and taxi["phase"] != "ride":
                     taxi = None                 # wave it off, or get back out
@@ -18267,6 +18615,14 @@ def main(stdscr):
                 else:
                     note, note_at = "no cabs down here - stand in a street", now
             elif (street and on_roof is None and key in (ord("e"), ord("E"))
+                  and station_at(cam_x, cam_z) is not None
+                  and manhole_under(cam_x, cam_z) is None):
+                here_ = station_at(cam_x, cam_z)
+                metro = {"phase": "platform", "here": here_, "sel": 0, "waiting": False,
+                         "dests": metro_dests(here_)}
+                fwd = side = spin = 0.0
+                autopilot = False
+            elif (street and on_roof is None and key in (ord("e"), ord("E"))
                   and manhole_under(cam_x, cam_z) is not None):
                 sewer = {"t0": now, "taken": 0}  # lift the cover, down the ladder
                 fwd = side = spin = 0.0
@@ -18360,11 +18716,28 @@ def main(stdscr):
                     and (hx_ - roof_x) * ddx + (hz_ - roof_z) * ddz > 0.0):
                 lift = {"up": False, "t0": now, "t": party}
         if (lift is not None or on_roof is not None or sewer is not None
-                or booth is not None or taxi is not None):
+                or booth is not None or taxi is not None or metro is not None):
             fwd = side = 0.0            # on the roof you can only look round
             autopilot = False
-            if lift is not None or sewer is not None or booth is not None or taxi:
+            if (lift is not None or sewer is not None or booth is not None or taxi
+                    or metro is not None):
                 spin = 0.0
+        if metro is not None and metro["phase"] == "platform" and metro["waiting"]:
+            st_ = metro["here"]
+            ph_, q_ = train_phase(now, st_["block"][0] * 31 + st_["block"][1])
+            if ph_ == "dwell" and q_ < METRO_DWELL - 1.0:
+                d_ = metro["dests"][metro["sel"]]
+                far_ = math.hypot(d_["x"] - st_["x"], d_["z"] - st_["z"])
+                metro = dict(metro, phase="ride", t0=now,
+                             dur=min(14.0, max(6.0, 4.0 + far_ / 200.0)))
+        if (metro is not None and metro["phase"] == "ride"
+                and now - metro["t0"] >= metro["dur"]):
+            d_ = metro["dests"][metro["sel"]]
+            nx_, nz_ = FACES[d_["f"]]
+            cam_x, cam_z = d_["x"] + nx_ * 1.6, d_["z"] + nz_ * 1.6
+            yaw = math.atan2(nx_, nz_)              # up the stairs, facing the street
+            note, note_at = "-> up the stairs at %s" % d_["name"], now
+            metro = None
         if (taxi is not None and taxi["phase"] == "hail"
                 and now - taxi["t0"] >= TAXI_ARRIVE):
             # It has pulled up, and you are in: where to?
@@ -18398,7 +18771,8 @@ def main(stdscr):
         # deals you another, because that is what a casino is for.
         was_ = venue
         venue = (venue_at(cam_x, cam_z)
-                 if street and sewer is None and taxi is None else None)
+                 if street and sewer is None and taxi is None and metro is None
+                 else None)
         # Going past faster than a walk, a doorway does not take you in: you
         # were going somewhere else. Slow to a walk or stop at it and it does,
         # and once you are in, you stay in.
@@ -18618,6 +18992,13 @@ def main(stdscr):
                 seated = (venue[1]["seed"], now)    # sat down just now
             ch, co = render_ramen(venue[1], width, height, now, seated[1])
             hud = RAMEN_HUD % (cam_x, cam_z)
+        elif street and metro is not None:
+            if metro["phase"] == "platform":
+                ch, co = render_platform(width, height, now, metro)
+                hud = METRO_HUD % ("on the platform at " + metro["here"]["name"])
+            else:
+                ch, co = render_ride(width, height, now, metro)
+                hud = METRO_HUD % "on the train"
         elif street and taxi is not None and taxi["phase"] != "hail":
             if taxi["phase"] == "ride":
                 u_ = min(1.0, (now - taxi["t0"]) / taxi["dur"])
@@ -18662,6 +19043,8 @@ def main(stdscr):
                     else "")
                 or ("  ~ the hum of the highway ~" if hwy_near(cam_x, cam_z)
                     else "")
+                or ("  ~ the metro: e goes down the stairs ~"
+                    if station_at(cam_x, cam_z) else "")
                 or ("  ~ a manhole: e lifts the cover ~"
                     if manhole_under(cam_x, cam_z) else "")
                 or ("  ~ a manhole: stand on it, e lifts the cover ~"

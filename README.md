@@ -44,7 +44,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   suburbs with curving streets, white picket fences, lawns and porch lights (and a
   lemonade stand open at 3am, and an old man with a telescope),
   an industrial zone of sheds and smoking chimneys with a building site and a rave in
-  the old factory, taxis you can hail on any street and ride across town, fog nights when the neon goes soft and the far end of the street is gone, a blackout
+  the old factory, taxis you can hail on any street and ride across town, a metro, its lit M at the kerb, a
+  platform and a train to anywhere for $3, fog nights when the neon goes soft and the far end of the street is gone, a blackout
   one night in a while, when the power goes block by block and comes
   back in a wave, manholes in the streets, some of them steaming, with somebody living down one
   of them, steaming ramen shops down the lit lanes, a neon bowl over the door, where you can sit
@@ -105,7 +106,7 @@ the city is infinite, identical every time you walk back to it, and held in no m
 ```
   w s        walk            a d     turn        , .   sidestep
   W S        run             + -     pace: normal, brisk, fast, very fast
-  t          hail a taxi     e       lift a manhole cover
+  t          hail a taxi     e       lift a manhole cover, or take the metro
   tab        switch view     space   wander on its own
   `          cheat menu      q       quit
 ```

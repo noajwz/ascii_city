@@ -188,6 +188,12 @@ ok &= report("the fountain show: to it, and watch the start", *run(
 ok &= report("the university: the quad, across it, the panel's other page", *run(
     [(b"`", .5), (b"\t", .4), (b"{", 1.5), (b"w", 1.0), (b"w", 1.0), (b"`", .5),
      (b"\t", .4), (b"\t", .4), (b"`", .4)], cols=80, rows=24))
+ok &= report("the metro: down, a ticket, the train, the ride, up", *run(
+    [(b"`", .5), (b"-", 1.5), (b"e", 1.0), (b"s", .5), (b"\r", .5)]
+    + [(b"", 3.0)] * 15 + [(b"x", .5)], cols=100, rows=30))
+ok &= report("the metro: down and straight back up", *run(
+    [(b"`", .5), (b"-", 1.5), (b"e", 1.0), (b"w", .4), (b"x", .8), (b"w", .5)],
+    cols=80, rows=24))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
