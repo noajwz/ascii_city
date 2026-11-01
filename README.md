@@ -38,7 +38,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   with a rave going
   on, a temple with stained glass and a rose window, where a terminal on the altar
   gives you the word of God the way TempleOS did and a priest in the confession
-  booth hears what you type, a Strip of casino-hotels in towers of light with palms and dancing fountains down
+  booth hears what you type, a university quarter of ivied brick round a quad, its clock tower showing the real
+  time, a Strip of casino-hotels in towers of light with palms and dancing fountains down
   the median, a fountain show on a lake in front of one of them and an airport beside it where airliners land over your head and take off,
   suburbs with curving streets, white picket fences, lawns and porch lights (and a
   lemonade stand open at 3am, and an old man with a telescope),

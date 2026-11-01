@@ -185,6 +185,9 @@ ok &= report("the airport: the end of the runway, watch one land, turn round", *
     cols=100, rows=30))
 ok &= report("the fountain show: to it, and watch the start", *run(
     [(b"`", .5), (b"(", 14.0), (b"a", .4), (b"d", .4)], cols=100, rows=30))
+ok &= report("the university: the quad, across it, the panel's other page", *run(
+    [(b"`", .5), (b"\t", .4), (b"{", 1.5), (b"w", 1.0), (b"w", 1.0), (b"`", .5),
+     (b"\t", .4), (b"\t", .4), (b"`", .4)], cols=80, rows=24))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

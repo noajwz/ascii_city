@@ -5066,6 +5066,41 @@ check("and there it is: jets over the water", show_.count("|") > quiet_.count("|
                                                                     quiet_.count("|")))
 ac._fountain_shift[0] = 0.0
 
+# --- the university -----------------------------------------------------------------
+uh = [ac.zone_home("university", ti * ac.WOODS_TILE, tj * ac.WOODS_TILE)
+      for ti in range(-2, 3) for tj in range(-2, 3)]
+check("a university in every tile, clear of the woods, the river and the rest", all(
+    ac.district(*h_) is ac.UNIVERSITY for h_ in uh) and not any(
+    ac.woods_at(h_[0] + di, h_[1] + dj) or ac.water_at(h_[0] + di, h_[1] + dj)
+    or any(ac.zone_depth(k_, h_[0] + di, h_[1] + dj) > 0
+           for k_ in ac.ZONES if k_ != "university")
+    for h_ in uh for di in range(-22, 23, 3) for dj in range(-15, 16, 3)))
+uhi, uhj = uh[12]
+check("a quad in the middle: open lawn, no road through it", all(
+    ac.is_open(i, j) and not ac.road_at(i, j) and ac.quad_at(i, j)
+    for i in range(uhi - ac.QUAD_HI, uhi + ac.QUAD_HI + 1)
+    for j in range(uhj - ac.QUAD_HJ, uhj + ac.QUAD_HJ + 1)))
+ti_, tj_ = ac.clock_tower(uhi, uhj)
+check("the clock tower on its north side, over everything round it",
+      not ac.is_open(ti_, tj_) and ac.lot(ti_, tj_)["campus"] == "tower"
+      and all(ac.lot(ti_ + a, tj_ + b)["height"] < ac.lot(ti_, tj_)["height"]
+              for a, b in ((2, 1), (-2, 1), (1, 2), (-1, 2))
+              if not ac.is_open(ti_ + a, tj_ + b)))
+check("the library down its west side, solid, every window lit", all(
+    not ac.is_open(uhi - ac.QUAD_HI - 1, j)
+    and ac.lot(uhi - ac.QUAD_HI - 1, j)["campus"] == "library"
+    for j in range(uhj - ac.QUAD_HJ, uhj + ac.QUAD_HJ + 1)))
+usp = ac.find_place(x0, z0, "university")
+uv = ac.View(usp[0], usp[1], usp[2], 100, 30)
+utext = "\n".join("".join(r) for r in ac.render_street(uv, 600.0)[0])
+check("the menu stands you across the quad from the clock, and you can read it",
+      usp is not None and ac.quad_at(int(usp[0] / ac.CELL + ac.BIG) - ac.BIG,
+                                     int(usp[1] / ac.CELL + ac.BIG) - ac.BIG)
+      and "12" in utext and "@" in utext and utext.count("o") > 20)
+check("ivy up the walls",
+      sum(row.count("&") + row.count("%") for row in utext.splitlines())
+      > 15)
+
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
 cl2 = ac.Claw(0, [], w_)
