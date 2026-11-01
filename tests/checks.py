@@ -4894,6 +4894,48 @@ check("and nobody walking about out here", not any(
                  int(w_[1] / ac.CELL + ac.BIG) - ac.BIG)
     for w_ in ac.near_walkers(sv2, 300.0)))
 
+# --- the suburbs' secrets -------------------------------------------------------------
+eggs_ = ac.suburb_eggs(shi, shj)
+check("the suburbs have a lemonade stand and a stargazer",
+      set(eggs_) == {"lemonade", "telescope"} and all(
+          ac.suburb_at(e_[0], e_[1]) and ac.is_open(e_[0], e_[1])
+          for e_ in eggs_.values()))
+for kind_ in ("lemonade", "telescope"):
+    esp = ac.find_place(x0, z0, kind_)
+    step_ = 0.0
+    while step_ < 6.0 and ac.venue_at(esp[0] + math.sin(esp[2]) * step_,
+                                      esp[1] + math.cos(esp[2]) * step_) is None:
+        step_ += 0.25
+    got_ = ac.venue_at(esp[0] + math.sin(esp[2]) * step_,
+                       esp[1] + math.cos(esp[2]) * step_)
+    check("the menu stands you a few steps from the %s, and you walk up to it" % kind_,
+          ac.venue_at(esp[0], esp[1]) is None and got_ is not None and got_[0] == kind_,
+          "%.2f" % step_)
+lem0 = "\n".join("".join(r) for r in ac.render_lemonade(100, 30, 300.0, 0, 1e9)[0])
+lem2 = "\n".join("".join(r) for r in ac.render_lemonade(100, 30, 300.0, 2, 1.0)[0])
+lem5 = "\n".join("".join(r) for r in ac.render_lemonade(100, 30, 300.0, 5, 1.0)[0])
+check("a kid at a lemonade stand, saying things",
+      "$ 1" in lem0 and "( o o )" in lem0.replace("( - - )", "( o o )")
+      and any(l_ in lem0 for l_ in ac.KID_LINES))
+check("and stranger the more you buy",
+      ac.KID_THANKS[1] in lem2 and ac.KID_THANKS[-1] in lem5)
+nt_ = dict(ac.night(300.0), phase=0.4, alien=False)
+scope_ = {t_: "\n".join("".join(r) for r in ac.render_telescope(
+    100, 30, 100.0 + t_, 100.0, nt_)[0]) for t_ in (4.0, 9.5, 11.5, 15.5, 21.3)}
+check("through the telescope: the moon close up, in its phase",
+      "#" in scope_[4.0] and ":" in scope_[4.0] and "s steps back" in scope_[4.0])
+check("then a lander, a flag, a cow, and a wink",
+      "/T\\" in scope_[9.5] and "|>" in scope_[11.5] and "(oo)" in scope_[15.5]
+      and "(-)" in scope_[21.3])
+alien_ = "\n".join("".join(r) for r in ac.render_telescope(
+    100, 30, 115.5, 100.0, dict(nt_, alien=True))[0])
+check("and on the strange night, something else",
+      "<=O=>" in alien_ and "(oo)" not in alien_)
+for w_, h_ in ((20, 8), (39, 15), (240, 70)):
+    ac.render_lemonade(w_, h_, 1.0, 3, 1.0)
+    ac.render_telescope(w_, h_, 110.0, 100.0, nt_)
+check("and any size of window is fine", True)
+
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
 cl2 = ac.Claw(0, [], w_)

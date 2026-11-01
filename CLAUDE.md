@@ -903,6 +903,24 @@ through `collect_glow()`) and the blue flicker of the television in one window i
 then the HUD hears a dog. `0` in the menu stands you on a street in the middle, facing the way
 it runs furthest before it bends.
 
+**And two things you would not expect** (`suburb_eggs()`, one of each per suburb, found once).
+**A lemonade stand at 3am** on a front lawn by the road, where the fence would be: a kid behind a
+home-made sign, LEMONADE $1. Walk up from the road (`egg_points()`: where it stands, and where
+you stand to be served, which is what `venue_at()` checks) and `render_lemonade()` is the close-up
+— the house dark behind with its porch light on, the fence either side, the kid blinking over
+the jug and the cups, and what the kid says (`KID_LINES`, unsettling). `p` buys a glass for a
+dollar out of the wallet, and the thanks get stranger (`KID_THANKS`) until, at five, you live
+here now; after that the kid just looks at you. `lemon` in `main()` counts them for the session.
+
+**The stargazer**: an old man on a lawn between two houses with a telescope on a tripod. Walk
+up beside him and `render_telescope()` is the eyepiece: a round field, its columns twice its rows,
+stars in it, and the moon close up — craters, and the side the sun is not on in earthshine, in
+the night's real phase — and then, on a `SCOPE_LOOP` from when you put your eye to it
+(`scope_at`), it does something: comes into focus, a lander comes down on it and somebody gets
+out, plants a flag and waves, a cow goes over it, and it winks. On the strange night a saucer
+crosses it instead of the cow. Step back and it starts again. `;` and `?` in the menu, under
+NIGHTS where there was room.
+
 ## People walking
 
 The streets used to be empty but for smokers and queues. `near_walkers()` puts a **lane down each

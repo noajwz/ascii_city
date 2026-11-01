@@ -173,6 +173,10 @@ ok &= report("the factories: the zone, the site, into the rave and out", *run(
 ok &= report("the suburbs: to them, walk a curving street, a taxi out", *run(
     [(b"`", .5), (b"0", 1.5), (b"w", 1.0), (b"W", 1.0), (b"a", .5), (b"w", 1.0),
      (b"t", 3.6), (b"\x1b", .4)], cols=100, rows=30))
+ok &= report("lemonade at 3am: buy three, and the stargazer's telescope", *run(
+    [(b"`", .5), (b";", 1.5), (b"w", .4), (b"p", .4), (b"p", .4), (b"p", 1.0),
+     (b"s", .6), (b"`", .5), (b"?", 1.5), (b"w", .4), (b"x", 10.0), (b"s", .6)],
+    cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
