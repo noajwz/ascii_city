@@ -995,6 +995,33 @@ stood forty units off the end of the runway and hid the plane until it was overh
 had to start a few rows inside the airport's edge, because the edge wanders and left one row of
 towers standing. Far out you see the landing lights, which is all you would.
 
+## The university
+
+Another placed zone, in each tile between the factories and the next Strip. Old brick halls
+(`UNIVERSITY`, the red palette, pitched roofs) drawn by `draw_campus_column()`: tall windows with
+arched heads, warm light in about half of them, and ivy up one bay in three, thick at the foot
+and thinning upwards. In the middle **the quad** (`quad_at()`, `QUAD_HI` by `QUAD_HJ`): open lawn,
+`road_at()` no — the city's streets stop at it — mown like the suburbs' lawns, with paths
+corner to corner and across it (`quad_path()`, in the ground pass), old lamps where they cross,
+a bench with two students on it and their laptops glowing (`draw_quad()`). **The library** runs
+down its west side, every window lit, LIBRARY over the door and bikes against the railings in
+front; **the clock tower** stands in the middle of its north side (`clock_tower()`), over
+everything round it. Both are `campus_solid()`: buildings whatever the street grid says, because
+the grid ran a street through the library and left three of its seven cells open.
+
+`draw_clock()` is the face, on whichever sides of the tower look at you: in screen space, lit
+cream, ringed in gold, 12 / 3 / 6 / 9, and the hands at **the real time where you are**
+(`time.localtime()`, the one thing in the city on your clock rather than its own). Its size has a
+floor, for the signs' reason: true to scale it was two rows across the quad. And where it sits was
+measured: at 42 the face was off the top of the screen from the far side of a seven-cell quad (the
+camera's vertical focal length is bigger than it looks — 27.5 at 30 rows), so the tower is 30 and
+the quad eleven cells deep. On the hour the HUD has it striking (`clock_hint()`). `{` in the menu
+stands you at the south end of the quad looking at it.
+
+**The menu has a fifth column** now, CAMPUS & METRO (`CHEAT_MORE`): drawn when the window is wide
+enough for five, and on an 80-column one Tab inside the panel flips the fourth column to it and
+back (`_panel_page`). Every key works whichever page is showing.
+
 ## People walking
 
 The streets used to be empty but for smokers and queues. `near_walkers()` puts a **lane down each

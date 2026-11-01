@@ -559,6 +559,13 @@ HEADLAND = dict(WOODS, name="the headland", park=False)
 # The factories: low sheds in rust, a ridge of saw-tooth roofs, a few lit
 # windows high up for the night shift, roller doors, bare bulbs over them and
 # somebody on a break outside.
+# The university: old brick, three to five storeys, warm windows, a pitched
+# roof, and ivy up the walls.
+UNIVERSITY = dict(key="", name="the university", weight=0, scale=0.5, lo=9.0, hi=16.0,
+                  dens=(0.4, 0.7), flat=0.0, hung=0.0, smoke=0.1, bulb=0.3,
+                  neon=None, lantern=0.0, park=False,
+                  glyphs="o#", band=None, mullion=False, ground="n", gap=3,
+                  pal="red", roof="^", whole_floors=False, cjk=False)
 # The airport: a glass terminal, hangars, a control tower, all lit cold.
 AIRPORT = dict(key="", name="the airport", weight=0, scale=1.0, lo=12.0, hi=34.0,
                dens=(0.7, 0.9), flat=0.0, hung=0.0, smoke=0.2, bulb=0.0,
@@ -597,6 +604,8 @@ def district(i, j):
         return STRIP
     if airport_at(i, j):
         return AIRPORT
+    if university_at(i, j):
+        return UNIVERSITY
     if headland_at(i, j):
         return HEADLAND
     return DISTRICTS[district_at(i, j)]
@@ -1539,6 +1548,7 @@ def car_park_at(i, j):
     if hit is None:
         _evict(_car_park_cache, 40000)
         hit = (car_park_block(i // XP, j // ZP)
+               and not any(zone_depth(k_, i, j) > -1.0 for k_ in ZONES)
                and not _is_road(i, XP, 91) and not _is_road(j, ZP, 137)
                and not woods_at(i, j) and not water_at(i, j)
                and not (near_river(i, j) and (fair_at(i, j) or prom_at(i, j)
@@ -1570,7 +1580,7 @@ def tunnel_run(i, j):
     span = road_span(i, XP, 91)
     if (span is not None and not woods_at(i, j) and not el_at(i) and not grand_at(i)
             and not hwy_at(i) and not suburb_at(i, j) and not strip_at(i, j)
-            and not airport_at(i, j)):
+            and not airport_at(i, j) and not university_at(i, j)):
         a = span[0]
         b = j // ZP
         lng = None
@@ -1951,7 +1961,11 @@ ZONES = {
     "strip": dict(salt=3901, off_i=20, off_j=240, half_i=7, half_j=61),
     # On the strip's own hash, so it is always the same distance off its side.
     "airport": dict(salt=3901, off_i=70, off_j=240, half_i=29, half_j=59),
+    "university": dict(salt=4001, off_i=420, off_j=118, half_i=22, half_j=15),
 }
+QUAD_HI, QUAD_HJ = 6, 5  # the quad's half size, in cells: deep enough to see the
+                         # clock from across it, the camera not looking up
+UNI_NAME = "UNIVERSITAS URBIS"
 PLANE_SCALE = 2.3      # an airliner, big enough to make out from the end of the runway
 RUNWAY_DI = 8          # the runway's middle, in cells east of the airport's
 RUNWAY_W = 14.0        # half its width, in units
@@ -2001,6 +2015,31 @@ def suburb_at(i, j):
 
 def strip_home(i, j):
     return zone_home("strip", i, j)
+
+
+def university_at(i, j):
+    return zone_depth("university", i, j) > 0.0
+
+
+def quad_at(i, j):
+    """The quad: open lawn in the middle of the university, paths across it."""
+    ci, cj = zone_home("university", i, j)
+    return abs(i - ci) <= QUAD_HI and abs(j - cj) <= QUAD_HJ and university_at(i, j)
+
+
+def campus_solid(i, j):
+    """The library down the west side of the quad and the clock tower on the
+    north side are buildings whatever the street grid says."""
+    ci, cj = zone_home("university", i, j)
+    return ((i, j) == (ci, cj + QUAD_HJ + 1)
+            or (i == ci - QUAD_HI - 1 and abs(j - cj) <= QUAD_HJ))
+
+
+def clock_tower(i, j):
+    """(i, j) of the clock tower of the university this cell is in: on the
+    north side of the quad, in the middle."""
+    ci, cj = zone_home("university", i, j)
+    return ci, cj + QUAD_HJ + 1
 
 
 def airport_at(i, j):
@@ -2515,8 +2554,8 @@ def face_kind(i, j):
     yokocho is lit but is not a street and should not look like one."""
     if road_at(i, j):
         return "road"
-    if suburb_at(i, j) or airport_at(i, j):
-        return "road"            # a front lawn, or the apron: a front all the same
+    if suburb_at(i, j) or airport_at(i, j) or quad_at(i, j):
+        return "road"            # a lawn, the apron, the quad: a front all the same
     return "yokocho" if yokocho_at(i, j) else None
 
 
@@ -2533,6 +2572,8 @@ def road_at(i, j):
         return strip_road(i, j)
     if airport_at(i, j):
         return False
+    if quad_at(i, j) or (university_at(i, j) and campus_solid(i, j)):
+        return False                 # the streets stop at the quad and its buildings
     return _is_road(i, XP, 91) or _is_road(j, ZP, 137)
 
 
@@ -2634,6 +2675,10 @@ def is_open(i, j):
             hit = strip_road(i, j)              # the rest is hotel
         elif airport_at(i, j):
             hit = airport_part(i, j) is None    # tarmac, but for the buildings
+        elif quad_at(i, j):
+            hit = True                          # the quad's lawn
+        elif university_at(i, j) and campus_solid(i, j):
+            hit = False                         # the library, the clock tower
         elif woods_at(i, j):
             # Trails, the hollow, and otherwise trees thick enough that the
             # open cells do not join up: off a trail you get a few cells in and
@@ -2912,6 +2957,19 @@ def lot(i, j):
                                   "height": 11.0, "seed": _mix(i, j, 3721) % 9973}
         b["strip"] = None
         b["airport"] = None
+        b["campus"] = None
+        if d is UNIVERSITY:
+            ci_, cj_ = zone_home("university", i, j)
+            if (i, j) == clock_tower(i, j):
+                # Over everything round it, but not so tall the face is off
+                # the top of the screen from across the quad: at 42 it was.
+                b["height"] = 30.0
+                b["campus"] = "tower"
+            elif i == ci_ - QUAD_HI - 1 and abs(j - cj_) <= QUAD_HJ:
+                b["height"] = 14.0
+                b["campus"] = "library"
+            else:
+                b["campus"] = "hall"
         if d is AIRPORT:
             part = airport_part(i, j)
             b["airport"] = part
@@ -2936,7 +2994,7 @@ def lot(i, j):
                                "sign_tone": b["strip"]["tone"], "phase": 1.0,
                                "i": i, "j": j, "height": b["height"], "strip": True}
         if (d["park"] or b["warehouse"] is not None or d is SUBURBS
-                or d is STRIP or d is AIRPORT):
+                or d is STRIP or d is AIRPORT or d is UNIVERSITY):
             pass
         elif _mix(i, j, 909) % CLUB_ODDS == 0:
             b["height"] = rng.uniform(7.5, 12.0)      # squat, windowless
@@ -5367,6 +5425,169 @@ def airport_hint(x, z, now):
     return ""
 
 
+def quad_path(x, z):
+    """The paths across the quad: corner to corner both ways, and a cross."""
+    ci, cj = zone_home("university", int(x / CELL + BIG) - BIG,
+                       int(z / CELL + BIG) - BIG)
+    dx = x - (ci + 0.5) * CELL
+    dz = z - (cj + 0.5) * CELL
+    hw, hd = (QUAD_HI + 0.5) * CELL, (QUAD_HJ + 0.5) * CELL
+    diag = abs(dz * hw - dx * hd) < 0.6 * hw or abs(dz * hw + dx * hd) < 0.6 * hw
+    return diag or abs(dx) < 0.6 or abs(dz) < 0.6
+
+
+def draw_campus_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
+                       cont, now):
+    """One column of the university: old brick, tall windows with arched
+    heads, warm light in some - in all of them, at the library - and ivy up
+    the walls, thick at the foot and thinning upwards. The clock tower is a
+    plain shaft, louvres near the top, its spire over the roof."""
+    scale = v.fy / dist
+    kind = b["campus"]
+    brick = tone_colour("red", 0.3 + 0.4 * b["tone"])
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    if edge:
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx], co[y][sx] = "|", brick
+        return roof, None, foot, None, ()
+    prev_roof, prev_awn, prev_foot = cont[:3]
+    facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "^", ROOF)
+    frac = u / BAY_W - int(u / BAY_W)
+    bay = int(u / BAY_W)
+    ivy_bay = _mix(bay + face * 13, b["seed"] % 97, 4011) % 3 == 0
+    for y in range(max(r_lo, roof + 1), min(r_hi, foot - 1) + 1):
+        h = v.eye + (v.horizon - y) / scale
+        floor = int(h / FLOOR_H)
+        in_floor = h - floor * FLOOR_H
+        if kind == "tower":
+            if b["height"] - 8.0 < h < b["height"] - 1.0 and 0.3 < frac < 0.7:
+                ch[y][sx], co[y][sx] = "=", CONCRETE              # the louvres
+            elif (y + sx) % 5 == 0:
+                ch[y][sx], co[y][sx] = ".", brick
+            continue
+        window = 0.3 < frac < 0.7 and 0.5 < in_floor < 1.9 and h > 1.0
+        ivy = ivy_bay and h < 2.0 + 6.0 * (_mix(sx, 0, 4013) % 100) / 100.0
+        if ivy and _mix(sx, y, 4015) % 3:
+            ch[y][sx], co[y][sx] = "&%"[_mix(sx, y, 4017) % 2], GRASS
+        elif window:
+            lit = kind == "library" or _mix(bay * 7 + face, floor, b["seed"]) % 10 < 5
+            head = in_floor > 1.6
+            ch[y][sx] = "n" if head else ("#" if lit else ".")
+            co[y][sx] = (GOLD if lit else GOLD_DIM) if not head else brick
+        elif (y + sx * 3) % 7 == 0:
+            ch[y][sx], co[y][sx] = ".", brick
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, None, foot, None, ()
+
+
+def draw_clock(ch, co, v, walls, now):
+    """The clock tower's face - each side of it - in screen space, lit cream,
+    with the hour marks and the hands at the time it really is where you
+    are; and the spire over it. Big enough to read from across the quad."""
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    if zone_depth("university", ci, cj) < -60:
+        return
+    ti, tj = clock_tower(ci, cj)
+    b = lot(ti, tj)
+    if b.get("campus") != "tower":
+        return
+    cx, cz = (ti + 0.5) * CELL, (tj + 0.5) * CELL
+    top = b["height"]
+    for k in range(9):                                # the spire
+        put_point(ch, co, v, walls, cx, top + 0.6 + k * 0.9, cz, "^" if k < 8 else "+",
+                  ROOF if k < 8 else GOLD)
+    lt = time.localtime()
+    hour, minute = lt.tm_hour % 12, lt.tm_min + lt.tm_sec / 60.0
+    for f in range(4):
+        nx, nz = FACES[f]
+        fx, fz = cx + nx * (CELL * 0.5 + 0.05), cz + nz * (CELL * 0.5 + 0.05)
+        if (fx - v.x) * nx + (fz - v.z) * nz >= 0:
+            continue                                  # its back is to you
+        pr = v.project(fx, top - 5.0, fz)
+        if pr is None or pr[2] > 260.0:
+            continue
+        x0, y0, dist = pr
+        # In rows. Readable from across the quad whatever its true size -
+        # unreadable is worse than the wrong size, as with the signs.
+        r = max(2.6 if dist < 140.0 else 1.2, min(9.0, 2.2 * v.fy / dist))
+        rows = int(r) + 1
+        for dy in range(-rows, rows + 1):
+            for dx in range(-int(r * 2) - 1, int(r * 2) + 2):
+                d = math.hypot(dx / 2.0, dy)
+                if d > r + 0.4:
+                    continue
+                g = "o" if d > r - 0.6 else " "
+                put_cell(ch, co, v, walls, int(round(x0)) + dx, int(round(y0)) + dy,
+                         dist - 0.2, g, GOLD if g == "o" else BULB)
+        if r >= 2.5:
+            for n, (a, label) in enumerate(((0.0, "12"), (0.5, "3"), (1.0, "6"),
+                                            (1.5, "9"))):
+                ang = a * math.pi
+                lx = int(round(x0 + math.sin(ang) * (r - 1.2) * 2.0)) - len(label) // 2
+                ly = int(round(y0 - math.cos(ang) * (r - 1.2)))
+                for k, c in enumerate(label):
+                    put_cell(ch, co, v, walls, lx + k, ly, dist - 0.3, c, GOLD_DIM)
+        for ang, length, g in ((math.tau * (hour + minute / 60.0) / 12.0, 0.5, "#"),
+                               (math.tau * minute / 60.0, 0.85, "*")):
+            steps = max(2, int(r * length * 2))
+            for k in range(steps + 1):
+                q = k / float(steps) * r * length
+                put_cell(ch, co, v, walls, int(round(x0 + math.sin(ang) * q * 2.0)),
+                         int(round(y0 - math.cos(ang) * q)), dist - 0.4, g, GOLD)
+        put_cell(ch, co, v, walls, int(round(x0)), int(round(y0)), dist - 0.5, "@",
+                 GOLD)
+
+
+def draw_quad(ch, co, v, walls, now, wet):
+    """On the quad: old lamps where the paths cross, a bench with two
+    students on it and their laptops glowing, and bikes against the railings
+    in front of the library - and the library's name over its door."""
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    if zone_depth("university", ci, cj) < -30:
+        return
+    hi, hj = zone_home("university", ci, cj)
+    mx, mz = (hi + 0.5) * CELL, (hj + 0.5) * CELL
+    hw, hd = QUAD_HI * CELL, QUAD_HJ * CELL
+    for lx, lz in ((mx, mz + hd), (mx, mz - hd), (mx - hw, mz), (mx + hw, mz),
+                   (mx + hw * 0.5, mz + hd * 0.5), (mx - hw * 0.5, mz - hd * 0.5),
+                   (mx - hw * 0.5, mz + hd * 0.5), (mx + hw * 0.5, mz - hd * 0.5)):
+        for h in (0.5, 1.5, 2.5):
+            put_point(ch, co, v, walls, lx, h, lz, "|", CONCRETE)
+        put_lit(ch, co, v, walls, lx, 3.3, lz, "O", BULB, max(wet, 0.3), now)
+    bx, bz = mx + 3.5, mz + 2.0
+    blit_sprite(ch, co, v, walls, ["  o   o  ", " /|\\ /|\\ ", "|=======|"], bx, bz,
+                0.0, 1.6, 2.6, CURB)
+    for k, side in enumerate((-0.6, 0.6)):
+        put_point(ch, co, v, walls, bx + side, 0.9, bz - 0.3, "#",
+                  CROWN_BLUE if _mix(k, int(now * 4), 4019) % 5 else STAR)
+    lib_x = (hi - QUAD_HI - 1 + 1) * CELL + 0.6
+    for k in range(-2, 3):
+        blit_sprite(ch, co, v, walls, ["o-|-o"], lib_x + 0.6, mz + k * 2.2, 0.0, 0.8,
+                    1.4, CURB)
+    pr = v.project(lib_x, 9.0, mz)
+    if pr is not None and pr[2] < 80.0:
+        for k, c in enumerate("LIBRARY"):
+            put_cell(ch, co, v, walls, int(round(pr[0])) - 3 + k, int(round(pr[1])),
+                     pr[2] - 0.2, c, GOLD)
+
+
+def clock_hint(x, z):
+    """Near the university, on the hour, the clock strikes it."""
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    if zone_depth("university", ci, cj) < -20:
+        return ""
+    lt = time.localtime()
+    if lt.tm_min == 0 and lt.tm_sec < 20:
+        n = lt.tm_hour % 12 or 12
+        return "  ~ the clock strikes %s ~" % ["one", "two", "three", "four", "five",
+                                               "six", "seven", "eight", "nine", "ten",
+                                               "eleven", "twelve"][n - 1]
+    if university_at(ci, cj):
+        return "  ~ the university, late ~"
+    return ""
+
+
 def draw_exchange_front(ch, co, v, walls, ex, world, now):
     """STOCK EXCHANGE over the columns, and the ticker running across the
     front under it - the market going by, green when it went up and red when
@@ -5645,6 +5866,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     if b.get("airport") is not None:
         return draw_airport_column(ch, co, v, sx, dist, b, face, u,
                                    r_lo, r_hi, edge, cont, now)
+    if b.get("campus") is not None:
+        return draw_campus_column(ch, co, v, sx, dist, b, face, u,
+                                  r_lo, r_hi, edge, cont, now)
     if b["diner"] is not None:
         return draw_diner_column(ch, co, v, sx, dist, b, face, u,
                                  r_lo, r_hi, edge, cont, now)
@@ -6667,7 +6891,8 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 deck = wet_cell and deck_at(i, j)
                 pier = wet_cell and (pier_at(i, j) or fair_pier_at(i, j))
                 woods = not wet_cell and woods_at(i, j)
-                sub = not wet_cell and suburb_at(i, j)
+                sub = not wet_cell and (suburb_at(i, j) or quad_at(i, j))
+                quad = sub and quad_at(i, j)
                 green = (not wet_cell and (woods or district(i, j)["park"] or sub)
                          and not road_at(i, j))
                 trail = woods and trail_at(i, j)
@@ -6842,6 +7067,10 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 if h % 6:
                     continue
                 glyph, attr = ("^" if h % 5 == 0 else "."), CONCRETE
+            elif quad and quad_path(x, z):
+                path_ = int(x * 2 + z * 2) % 2
+                ch[y][sx], co[y][sx] = (".", CURB) if path_ else (" ", 0)
+                continue
             elif green:
                 h = _mix(int(x * 3.0), int(z * 3.0), 23)
                 if h % (2 if sub else 3):
@@ -10063,7 +10292,7 @@ def el_runs(x, z):
     i = int(x / CELL + BIG) - BIG
     j = int(z / CELL + BIG) - BIG
     return (not woods_at(i, j) and not headland_at(i, j) and not suburb_at(i, j)
-            and not strip_at(i, j) and not airport_at(i, j))
+            and not strip_at(i, j) and not airport_at(i, j) and not quad_at(i, j))
 
 
 def near_els(v, reach):
@@ -12340,6 +12569,8 @@ def render_street(v, now):
     apt_ = near_airport(v, 500.0)
     if apt_ is not None:
         draw_airport(ch, co, v, walls, apt_, now, wet)
+    draw_quad(ch, co, v, walls, now, wet)
+    draw_clock(ch, co, v, walls, now)
     if v.eye < 10.0:
         draw_strip_median(ch, co, v, walls, now, wet)
         draw_fountains(ch, co, v, walls, now)
@@ -15096,6 +15327,7 @@ CHEAT_PLACES = [
     (":", "the strip", "strip"),
     ("'", "the airport", "airport"),
     ("(", "fountain show", "fountain"),
+    ("{", "the university", "university"),
     (";", "lemonade, 3am", "lemonade"),
     ("?", "the stargazer", "telescope"),
     ("r", "ramen", "ramen"),
@@ -15438,6 +15670,23 @@ def _suburb_spot(x, z):
                 # Along the street, the way it runs furthest before it bends.
                 return px, pz, max((k * math.pi / 2 for k in range(4)),
                                    key=lambda a: probe(px, pz, a, 60.0))
+    return None
+
+
+def _university_spot(x, z):
+    """At the south end of the nearest quad, looking across it at the clock
+    tower."""
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    homes = sorted((zone_home("university", ti * WOODS_TILE, tj * WOODS_TILE)
+                    for ti in range(ci // WOODS_TILE - 1, ci // WOODS_TILE + 2)
+                    for tj in range(cj // WOODS_TILE - 1, cj // WOODS_TILE + 2)),
+                   key=lambda h: (h[0] - ci) ** 2 + (h[1] - cj) ** 2)
+    for hi, hj in homes:
+        px, pz = (hi + 0.5) * CELL + 1.5, (hj - QUAD_HJ + 0.2) * CELL
+        if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+            continue
+        if can_stand(px, pz):
+            return px, pz, 0.0
     return None
 
 
@@ -16042,6 +16291,8 @@ def find_place(x, z, kind):
         return _airport_spot(x, z)
     if kind == "fountain":
         return _fountain_spot(x, z)
+    if kind == "university":
+        return _university_spot(x, z)
     if kind in ("lemonade", "telescope"):
         return _egg_spot(x, z, kind)
     if kind == "exchange":
@@ -16089,6 +16340,10 @@ def find_place(x, z, kind):
     return None
 
 
+CHEAT_MORE = ["university", "metro"]     # the fifth column
+_panel_page = [0]       # which page an 80-column panel is showing
+
+
 def draw_cheats(ch, co, note):
     """The panel, drawn over the live frame rather than instead of it, so that
     what you change to the weather happens in front of you.
@@ -16118,11 +16373,16 @@ def draw_cheats(ch, co, note):
            ("&", "a blackout"), ("#", "a fog night"),
            names["lemonade"], names["telescope"], names["fountain"],
            ("`", "close")]
-    columns = (left, middle, right, sky)
-
+    more = [("", "CAMPUS & METRO")] + [names[k] for k in CHEAT_MORE if k in names]
     col = 18
+    if width >= col * 5 + 7:
+        columns = (left, middle, right, sky, more)     # room for all five
+    elif _panel_page[0]:
+        columns = (left, middle, right, more + [("", ""), ("\t", "back")])
+    else:
+        columns = (left, middle, right, sky)
     rows = max(len(c) for c in columns)
-    w, h = col * 4 + 3, rows + (3 if note else 2)
+    w, h = col * len(columns) + 3, rows + (3 if note else 2)
     if width < w + 4 or height < h + 2:
         return                          # no room; the city is more use
     x0, y0 = 2, 1
@@ -16138,13 +16398,18 @@ def draw_cheats(ch, co, note):
         cx = x0 + 2 + n * col
         for r, (k, label) in enumerate(column):
             y = y0 + 1 + r
-            if k:
+            if k == "\t":
+                _text(ch, co, y, cx, ("tab " + label)[:col - 1], GOLD_DIM)
+            elif k:
                 _text(ch, co, y, cx, k, GOLD)
                 _text(ch, co, y, cx + 2, label[:col - 3], HUD)
             elif label:
                 _text(ch, co, y, cx, label[:col - 1], GOLD)
     if note:
         _text(ch, co, y0 + h - 2, x0 + 2, note[:w - 4], FLASH)
+    if len(columns) == 4:
+        _text(ch, co, y0 + h - 1, x0 + w - 13,
+              "[tab]back" if _panel_page[0] else "[tab]more", GOLD_DIM)
 
 
 def _beam(ch, co, x0, y0, ang, y1, attr):
@@ -17722,6 +17987,8 @@ def main(stdscr):
                 # the whole reason it is drawn over the view.
                 if key in (CHEAT_KEY, 27):
                     cheats, note = False, ""
+                elif key == ord("\t"):
+                    _panel_page[0] = 1 - _panel_page[0]    # the other page
                 elif key == ord("q"):
                     return
                 elif key == ord("w"):
@@ -18386,6 +18653,7 @@ def main(stdscr):
                 or suburb_hint(cam_x, cam_z, now)
                 or airport_hint(cam_x, cam_z, now)
                 or fountain_hint(cam_x, cam_z, now)
+                or clock_hint(cam_x, cam_z)
                 or landmark_hint(cam_x, cam_z)
                 or rave_hint(v, now)
                 or ("  ~ something over the city ~" if night(now)["alien"]
