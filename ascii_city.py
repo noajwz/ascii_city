@@ -323,7 +323,8 @@ CASINO_AGAIN = 1.6     # seconds before it deals you another one
 TOWER_ODDS = 9         # of the buildings tall enough, one in this many
 TOWER_MIN = 34.0       # how tall, in world units, a building must be to have one
 TOWER_TOP = 72.0       # and how tall it is made: over everything else in town
-ROOF_REACH = 260.0     # how far you can see from up there
+ROOF_REACH = 520.0     # how far you can see from up there: at 260 the town
+                       # stopped well short of the horizon
 # The top floors of a sky-deck tower are a weather beacon, the old way:
 #   steady blue, clear view; flashing blue, clouds due;
 #   steady red, rain ahead; flashing red, snow instead -
@@ -610,6 +611,7 @@ GOLD = GOLD_DIM = ROU_RED = ROU_BLACK = ROU_GREEN = LANE = 0
 GRASS = BARK = ROOF = 0
 STAR_DIM = STAR_WARM = STAR_COLD = MOON = MOON_DIM = BAND = 0
 BEAM = BEAM_DIM = CROWN_BLUE = CROWN_RED = 0
+FOG = FOG_DIM = 0
 
 
 def init_colors():
@@ -618,7 +620,7 @@ def init_colors():
     global GOLD, GOLD_DIM, ROU_RED, ROU_BLACK, ROU_GREEN, LANE, GRASS, BARK
     global FIREFLY, EYES, SNOW
     global ROOF, STAR_DIM, STAR_WARM, STAR_COLD, MOON, MOON_DIM, BAND
-    global BEAM, BEAM_DIM, CROWN_BLUE, CROWN_RED
+    global BEAM, BEAM_DIM, CROWN_BLUE, CROWN_RED, FOG, FOG_DIM
 
     curses.start_color()
     try:
@@ -653,7 +655,7 @@ def init_colors():
                   "roof": 252, "star_dim": 244, "star_warm": 223,
                   "star_cold": 153, "moon": 231, "moon_dim": 250,
                   "band": 60, "firefly": 118, "eyes": 190, "snow": 255,
-                  "crown_blue": 33}
+                  "crown_blue": 33, "fog": 248, "fog_dim": 243}
         attrs = {}
     else:
         # 8-colour fallback: bold = the "bright" version of a colour.
@@ -690,7 +692,8 @@ def init_colors():
                   "star_cold": curses.COLOR_CYAN, "moon": curses.COLOR_WHITE,
                   "moon_dim": curses.COLOR_WHITE, "band": curses.COLOR_BLUE,
                   "firefly": curses.COLOR_GREEN, "eyes": curses.COLOR_YELLOW,
-                  "snow": curses.COLOR_WHITE, "crown_blue": curses.COLOR_BLUE}
+                  "snow": curses.COLOR_WHITE, "crown_blue": curses.COLOR_BLUE,
+                  "fog": curses.COLOR_WHITE, "fog_dim": curses.COLOR_WHITE}
         attrs = {"near": curses.A_BOLD}
 
     pair = 1
@@ -731,6 +734,8 @@ def init_colors():
     BULB = made["bulb"] | curses.A_BOLD
     BULB_DIM = made["bulb_dim"]
     CROWN_BLUE = made["crown_blue"] | curses.A_BOLD
+    FOG = made["fog"]
+    FOG_DIM = made["fog_dim"]
     CROWN_RED = made["rou_red"]
     # The cinemas' searchlights: the lamp colours, under their own names, so
     # nothing that counts stars or the moon ever counts a beam.
@@ -2616,7 +2621,7 @@ class View:
         self.reach = reach      # how far a wall ray is followed
         # and how many walls deep: from the street the fourth wall back is
         # hidden behind the first three; from a roof you see over all of them.
-        self.depth = 4 if eye < 10.0 else 14
+        self.depth = 4 if eye < 10.0 else 22
         self.yaw = yaw
         self.width = width
         self.height = height
@@ -10003,9 +10008,9 @@ def draw_fog(ch, co, v, walls, now):
                     # Above the nearest roof: something further, or the sky.
                     d = far * 1.2 if wd[x] is not None and y > wtop[x] - 40 else None
             h = _mix(x, y + drift // 3, 3601) % 1000 / 1000.0
-            if d is None:                        # the sky
-                if c == " " and h < 0.05:
-                    ch[y][x], co[y][x] = ".", HAZE
+            if d is None:                        # the sky: a grey glow of it
+                if c == " " and h < 0.18:
+                    ch[y][x], co[y][x] = (":" if h < 0.03 else "."), FOG_DIM
                 continue
             f = (d - near) / (far - near)
             if f <= 0.0:
@@ -10016,9 +10021,14 @@ def draw_fog(ch, co, v, walls, now):
                 ch[y][x] = "o" if f < 0.5 else "*" if f < 0.85 else "."
                 continue
             if h < f:
-                ch[y][x], co[y][x] = (".", HAZE) if h < f * 0.16 else (" ", 0)
+                # Taken: the fog itself, grey, a little thicker the deeper in.
+                g = h < 0.12 + 0.3 * min(1.0, f)
+                ch[y][x] = (":" if h < 0.06 * f else ".") if g else " "
+                co[y][x] = (FOG if f > 0.7 else FOG_DIM) if g else 0
             elif c != " " and f > 0.3:
-                co[y][x] = HAZE                   # going grey on the way out
+                co[y][x] = FOG_DIM                # going grey on the way out
+            elif c == " " and h > 0.97 - 0.1 * f:
+                ch[y][x], co[y][x] = ".", FOG_DIM
     for y, x, attr, f in blooms[:400]:
         r = 1 + int(f * 2.5)                     # further off, a bigger blur
         for dy in (-1, 0, 1):
@@ -11724,6 +11734,16 @@ def ramen_door(i, j, f):
     """Where you stand to be at the counter: just out from the middle of it."""
     p = face_point(i, j, f, CELL * 0.5, 1.4, 0.0)
     return p[0], p[2]
+
+
+def same_venue(a, b):
+    """Is this the venue you were already in last frame? By what it is and
+    where - the ramen counter's dict is made fresh every call, so not by
+    identity."""
+    if a is None or b is None or a[0] != b[0]:
+        return False
+    keys = ("i", "j", "seed", "door", "u", "col")
+    return all(a[1].get(k) == b[1].get(k) for k in keys)
 
 
 def venue_at(x, z):
@@ -15591,6 +15611,7 @@ def main(stdscr):
     note_at = -1e9              # when, so the HUD can show it after the panel closes
     autopilot = False
     pace = PACES[0][1]          # how fast you walk: + and - in the street
+    venue = None                # the doorway you are standing in, if any
     frame_time = 1.0 / FPS
 
     while True:
@@ -16006,8 +16027,15 @@ def main(stdscr):
         # Walking into a casino doorway is the one way into a building in
         # this city. Walk back out and the wheel goes away; stand there and it
         # deals you another, because that is what a casino is for.
+        was_ = venue
         venue = (venue_at(cam_x, cam_z)
                  if street and sewer is None and taxi is None else None)
+        # Going past faster than a walk, a doorway does not take you in: you
+        # were going somewhere else. Slow to a walk or stop at it and it does,
+        # and once you are in, you stay in.
+        hurry_ = abs(fwd) > WALK * 1.05 or abs(side) > SIDESTEP * 1.05
+        if venue is not None and hurry_ and not same_venue(venue, was_):
+            venue = None
         # The sky deck: walking into the lobby is stepping into the lift.
         if lift is not None:
             venue = None
@@ -16048,7 +16076,8 @@ def main(stdscr):
             else:
                 note, note_at = "the lift is $%d" % fee, now
             venue = None
-        elif street and fwd > 0.0 and lighthouse_door(cam_x, cam_z) is not None:
+        elif (street and 0.0 < fwd <= WALK * 1.05
+              and lighthouse_door(cam_x, cam_z) is not None):
             # In at the lighthouse's door is on to its stair.
             lift = {"up": True, "t0": now, "t": lighthouse_door(cam_x, cam_z)}
             venue = None

@@ -4678,6 +4678,53 @@ ac._night_skip = keep_skip
 ac.STAR = keep_star
 check("and no stars through it", not any(sky_co[y][x] == 914 for y in range(lv.horizon)
                                           for x in range(100)))
+keep_fog = (ac.FOG, ac.FOG_DIM)
+ac.FOG, ac.FOG_DIM = 915, 916
+ac.skip_to_fog(300.0)
+grey_ch, grey_co = ac.render_street(lv, 300.0)[:2]
+ac._night_skip = keep_skip
+ac.FOG, ac.FOG_DIM = keep_fog
+grey_ = sum(1 for y in range(30) for x in range(100) if grey_co[y][x] in (915, 916))
+check("and the fog is grey, not black", grey_ > 200, "%d grey cells" % grey_)
+
+# Hurrying past a door does not take you in; standing in it or walking in does.
+cas2 = ac.venue_at(*ac.find_place(x0, z0, "inside")[:2])
+check("the venue you are already in is the same one next frame",
+      cas2 is not None
+      and ac.same_venue(cas2, ac.venue_at(*ac.find_place(x0, z0, "inside")[:2]))
+      and not ac.same_venue(cas2, None) and not ac.same_venue(cas2, ("club", cas2[1])))
+shop2 = ac.find_place(x0, z0, "ramen")
+st_ = 0.0
+while st_ < 3.0 and ac.venue_at(shop2[0] + math.sin(shop2[2]) * st_,
+                                shop2[1] + math.cos(shop2[2]) * st_) is None:
+    st_ += 0.25
+r1 = ac.venue_at(shop2[0] + math.sin(shop2[2]) * st_,
+                 shop2[1] + math.cos(shop2[2]) * st_)
+r2 = ac.venue_at(shop2[0] + math.sin(shop2[2]) * (st_ + 0.1),
+                 shop2[1] + math.cos(shop2[2]) * (st_ + 0.1))
+check("even the ramen counter, whose dict is new every call", r1 is not r2
+      and ac.same_venue(r1, r2))
+
+# From the top of a tower you see further than you used to.
+tsp2 = ac.find_place(x0, z0, "tower")
+ci2 = int(tsp2[0] / ac.CELL + ac.BIG) - ac.BIG
+cj2 = int(tsp2[1] / ac.CELL + ac.BIG) - ac.BIG
+tw2 = next(ac.lot(a_, b_)["tower"] for a_ in range(ci2 - 3, ci2 + 4)
+           for b_ in range(cj2 - 3, cj2 + 4)
+           if not ac.is_open(a_, b_) and ac.lot(a_, b_)["tower"])
+def horizon_fill(reach, depth):
+    keep_r = ac.ROOF_REACH
+    ac.ROOF_REACH = reach
+    hv = ac.roof_view(tw2, 2.2, 100, 30)
+    hv.depth, hv.roof = depth, tw2
+    hch = ac.render_street(hv, 300.0)[0]
+    ac.ROOF_REACH = keep_r
+    return sum(1 for y in range(hv.horizon - 3, hv.horizon + 3) for x in range(100)
+               if hch[y][x] not in " .:")
+check("from a roof the city reaches further towards the horizon",
+      ac.ROOF_REACH >= 500
+      and horizon_fill(ac.ROOF_REACH, 22) > horizon_fill(260.0, 14),
+      "%d against %d" % (horizon_fill(ac.ROOF_REACH, 22), horizon_fill(260.0, 14)))
 
 # --- pace -----------------------------------------------------------------------
 check("paces from a walk to very fast, in order",
