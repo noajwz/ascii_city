@@ -559,6 +559,13 @@ HEADLAND = dict(WOODS, name="the headland", park=False)
 # The factories: low sheds in rust, a ridge of saw-tooth roofs, a few lit
 # windows high up for the night shift, roller doors, bare bulbs over them and
 # somebody on a break outside.
+# The suburbs: one storey or two, warm windows, a pitched roof, nothing lit
+# but the porch and the television.
+SUBURBS = dict(key="", name="the suburbs", weight=0, scale=0.3, lo=4.5, hi=6.8,
+               dens=(0.25, 0.55), flat=0.0, hung=0.0, smoke=0.03, bulb=0.0,
+               neon=None, lantern=0.0, park=False,
+               glyphs="o#", band=None, mullion=False, ground="n", gap=2,
+               pal="warm", roof="^", whole_floors=False, cjk=False)
 INDUSTRIAL = dict(key="", name="the factories", weight=0, scale=0.4, lo=5.5, hi=9.5,
                   dens=(0.03, 0.12), flat=0.0, hung=0.0, smoke=0.35, bulb=0.7,
                   neon=None, lantern=0.0, park=False,
@@ -571,6 +578,8 @@ def district(i, j):
         return WOODS
     if industrial_at(i, j):
         return INDUSTRIAL
+    if suburb_at(i, j):
+        return SUBURBS
     if headland_at(i, j):
         return HEADLAND
     return DISTRICTS[district_at(i, j)]
@@ -1543,7 +1552,7 @@ def tunnel_run(i, j):
     hit = None
     span = road_span(i, XP, 91)
     if (span is not None and not woods_at(i, j) and not el_at(i) and not grand_at(i)
-            and not hwy_at(i)):
+            and not hwy_at(i) and not suburb_at(i, j)):
         a = span[0]
         b = j // ZP
         lng = None
@@ -1954,6 +1963,75 @@ def industrial_at(i, j):
     return zone_depth("industrial", i, j) > 0.0
 
 
+def suburb_at(i, j):
+    return zone_depth("suburbs", i, j) > 0.0
+
+
+_sub_road_cache = {}
+
+
+def suburb_road(i, j):
+    """The suburbs' own streets, which curve: a ring road just inside the
+    edge - following it, wobble and all - three streets winding along x and
+    three across, two cells wide; and where the city's grid meets the edge,
+    its street carries on in to the ring, so you can always drive in."""
+    key = i * 1048576 + j
+    hit = _sub_road_cache.get(key)
+    if hit is None:
+        _evict(_sub_road_cache, 60000)
+        depth = zone_depth("suburbs", i, j)
+        if depth <= 0.0:
+            hit = False
+        elif depth < 2.2:
+            hit = _is_road(i, XP, 91) or _is_road(j, ZP, 137)     # the way in
+        elif depth < 3.8:
+            hit = True                                           # the ring
+        else:
+            ci, cj = zone_home("suburbs", i, j)
+            di, dj = i - ci, j - cj
+            hit = False
+            for n, off in enumerate((-11, 1, 13)):
+                m = _mix(ci, n, 3811)
+                f = (off + 3.5 * math.sin(di / 11.0 + (m & 7))
+                     + 1.3 * math.sin(di / 5.0 + ((m >> 3) & 7)))
+                if abs(dj - f) < 1.0:
+                    hit = True
+                    break
+            if not hit:
+                for n, off in enumerate((-20, 0, 21)):
+                    m = _mix(cj, n, 3813)
+                    f = (off + 4.0 * math.sin(dj / 8.0 + (m & 7))
+                         + 1.5 * math.sin(dj / 3.5 + ((m >> 3) & 7)))
+                    if abs(di - f) < 1.0:
+                        hit = True
+                        break
+        _sub_road_cache[key] = hit
+    return hit
+
+
+def suburb_rank(i, j):
+    """How far from the road a suburban cell is: 0 the road, 1 the front
+    lawn along it, 2 where the houses stand, 3 the back gardens."""
+    if suburb_road(i, j):
+        return 0
+    if any(suburb_road(i + a, j + b) for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+        return 1
+    if any(suburb_road(i + a, j + b) for a, b in ((2, 0), (-2, 0), (0, 2), (0, -2),
+                                                   (1, 1), (1, -1), (-1, 1), (-1, -1))):
+        return 2
+    return 3
+
+
+def suburb_house(i, j):
+    """A house: back from the road behind its lawn, every other cell, so each
+    stands on its own."""
+    return suburb_rank(i, j) == 2 and (i + j) % 2 == 0
+
+
+def suburb_tree(i, j):
+    return suburb_rank(i, j) == 3 and _mix(i, j, 3817) % 5 == 0
+
+
 _site_cache = {}
 
 
@@ -2272,6 +2350,8 @@ def face_kind(i, j):
     yokocho is lit but is not a street and should not look like one."""
     if road_at(i, j):
         return "road"
+    if suburb_at(i, j):
+        return "road"            # a front lawn: the house faces the street
     return "yokocho" if yokocho_at(i, j) else None
 
 
@@ -2282,6 +2362,8 @@ def road_at(i, j):
     in the ring trail is what continues it."""
     if woods_at(i, j) or headland_at(i, j):
         return False
+    if suburb_at(i, j):
+        return suburb_road(i, j)
     return _is_road(i, XP, 91) or _is_road(j, ZP, 137)
 
 
@@ -2377,6 +2459,8 @@ def is_open(i, j):
         elif (fair_at(i, j) or headland_at(i, j) or prom_at(i, j)
               or car_park_at(i, j) or site_at(i, j)):
             hit = True          # fairground, headland, promenade, a building site
+        elif suburb_at(i, j):
+            hit = not (suburb_house(i, j) or suburb_tree(i, j))
         elif woods_at(i, j):
             # Trails, the hollow, and otherwise trees thick enough that the
             # open cells do not join up: off a trail you get a few cells in and
@@ -2625,7 +2709,7 @@ def lot(i, j):
             "block": _mix(i // 3, j // 3, 97),
             "ij": (i, j),
             "district": d,
-            "tree": d["park"],
+            "tree": d["park"] or (d is SUBURBS and suburb_tree(i, j)),
         }
         # What is in front of a face decides what goes on it, and asking is
         # safe: face_kind() is a pure function of coordinates and never calls
@@ -2650,7 +2734,7 @@ def lot(i, j):
                 b["height"] = 11.0
                 b["warehouse"] = {"door": wh[2], "u": CELL * 0.5, "i": i, "j": j,
                                   "height": 11.0, "seed": _mix(i, j, 3721) % 9973}
-        if d["park"] or b["warehouse"] is not None:
+        if d["park"] or b["warehouse"] is not None or d is SUBURBS:
             pass
         elif _mix(i, j, 909) % CLUB_ODDS == 0:
             b["height"] = rng.uniform(7.5, 12.0)      # squat, windowless
@@ -2836,6 +2920,7 @@ class View:
         self.dawn = 0.0         # how far into the morning, 0..1
         self.blackout = False   # is tonight the night the power goes
         self.ind_lamps = []     # the factory streets' sodium lamps in view
+        self.suburb = []        # the lawns and houses near enough to draw
         self.fog = False        # and is it a fog night
         self.cover = 0.0        # and how much is lying
         self.flash = 0.0        # how bright the lightning is this instant
@@ -4199,6 +4284,104 @@ def draw_empty_lot(ch, co, v, walls, p_, now, wet):
                      int(round(pr[1])), pr[2] - 0.1, c_, ROU_RED)
 
 
+def near_suburb(v, reach):
+    """The suburban cells in front of you, as (i, j, rank): the lawns the
+    fences go along and the houses with their porches."""
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    if zone_depth("suburbs", ci, cj) < -reach / CELL:
+        return []
+    out = []
+    n = int(reach / CELL) + 1
+    for i in range(ci - n, ci + n + 1):
+        for j in range(cj - n, cj + n + 1):
+            rx, rz = (i + 0.5) * CELL - v.x, (j + 0.5) * CELL - v.z
+            if rx * v.dx + rz * v.dz < -CELL or not suburb_at(i, j):
+                continue
+            r = suburb_rank(i, j)
+            if r == 1 or (r == 2 and suburb_house(i, j)):
+                out.append((i, j, r))
+    return out
+
+
+def _toward_road(i, j):
+    """The directions from a front lawn to the road beside it."""
+    return [f for f in range(4) if suburb_road(i + FACES[f][0], j + FACES[f][1])]
+
+
+def _house_behind(i, j, f):
+    """The house behind this lawn, from the road on side f, if there is one."""
+    nx, nz = FACES[f]
+    return suburb_house(i - nx, j - nz)
+
+
+def porches(cells):
+    """(x, z, house i, j, face) of each house's porch light, on the side of
+    the house that looks over its lawn to the road."""
+    out = []
+    for i, j, r in cells:
+        if r != 2:
+            continue
+        for f in range(4):
+            nx, nz = FACES[f]
+            if suburb_rank(i + nx, j + nz) == 1:
+                x, _, z = face_point(i, j, f, CELL * 0.5 + 1.0, 0.3, 0.0)
+                out.append((x, z, i, j, f))
+                break
+    return out
+
+
+def draw_suburb(ch, co, v, walls, cells, now, wet):
+    """The suburbs, close to: a white picket fence along every front lawn
+    where it meets the road, a gate in it up to each house, the porch light
+    on, the blue of the television in one window in three, a car on the drive
+    in front of one house in four, a letterbox by the gate."""
+    white = STAR
+    for i, j, r in cells:
+        if r == 1:
+            for f in _toward_road(i, j):
+                nx, nz = FACES[f]
+                house = _house_behind(i, j, f)
+                car = house and _mix(i - nx, j - nz, 3821) % 4 == 0
+                gap = 1.3 if car else 0.6           # a drive, or a garden gate
+                for k in range(11):
+                    u = k * 0.5
+                    if house and abs(u - CELL * 0.5) < gap:
+                        continue
+                    x, _, z = face_point_open(i, j, f, u, 0.35)
+                    put_point(ch, co, v, walls, x, 0.35, z, "|", white)
+                    put_point(ch, co, v, walls, x, 0.75, z, "|" if k % 2 else "^",
+                              white)
+                    put_point(ch, co, v, walls, x, 0.55, z, "-", CURB)
+                if house:
+                    x, _, z = face_point_open(i, j, f, CELL * 0.5 + gap + 0.4, 0.5)
+                    put_point(ch, co, v, walls, x, 0.6, z, "|", CONCRETE)
+                    put_point(ch, co, v, walls, x, 1.0, z, "#", ROU_RED)   # letters
+                if car:
+                    x, _, z = face_point_open(i, j, f, CELL * 0.5, 2.0)
+                    blit_sprite(ch, co, v, walls, CAR, x, z, 0.0, 1.35, 1.9,
+                                NEON[_mix(i, j, 3823) % len(NEON)][1])
+        else:
+            m = _mix(i, j, 3825)
+            for x, z, hi, hj, f in porches([(i, j, 2)]):
+                put_lit(ch, co, v, walls, x, 2.3, z, "o", BULB, max(wet, 0.3), now)
+                if m % 3 == 0:
+                    # The television: through the window, flickering blue.
+                    tx, _, tz = face_point(i, j, f, 1.2, 0.05, 0.0)
+                    flick = _mix(i, int(now * 6), 3827) % 4
+                    put_point(ch, co, v, walls, tx, 1.4, tz, "#",
+                              CROWN_BLUE if flick else (STAR if flick == 0 else HAZE))
+
+
+def face_point_open(i, j, f, u, inset):
+    """A point on the edge of open cell (i, j) facing direction f, u along
+    that edge, inset into the cell - where a fence goes."""
+    nx, nz = FACES[f]
+    cx, cz = (i + 0.5) * CELL, (j + 0.5) * CELL
+    ex, ez = cx + nx * (CELL * 0.5 - inset), cz + nz * (CELL * 0.5 - inset)
+    ax, az = -nz, nx
+    return ex + ax * (u - CELL * 0.5), 0.0, ez + az * (u - CELL * 0.5)
+
+
 def render_warehouse(wh, width, height, now):
     """Inside the old factory: the roof trusses and the broken skylights with
     the night coming through, a stage of pallets at the far end with the DJ on
@@ -5047,6 +5230,8 @@ def collect_glow(v, now, wet):
         _spill(glow, lx, lz, 6.5, EMBER)
     for lx, lz in v.ind_lamps:
         _spill(glow, lx, lz, 7.0, EMBER)          # sodium, on the factory streets
+    for lx, lz, _, _, _ in porches(v.suburb):
+        _spill(glow, lx, lz, 3.5, BULB_DIM)       # and the porches
     for site_ in near_sites(v, 70.0):
         _spill(glow, (site_[0] + 1.5) * CELL, (site_[1] + 1.0) * CELL, 9.0, BULB_DIM)
     for p_ in near_plots(v, 70.0):
@@ -5555,7 +5740,8 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 deck = wet_cell and deck_at(i, j)
                 pier = wet_cell and (pier_at(i, j) or fair_pier_at(i, j))
                 woods = not wet_cell and woods_at(i, j)
-                green = (not wet_cell and (woods or district(i, j)["park"])
+                sub = not wet_cell and suburb_at(i, j)
+                green = (not wet_cell and (woods or district(i, j)["park"] or sub)
                          and not road_at(i, j))
                 trail = woods and trail_at(i, j)
                 fair = (not wet_cell and not solid and not road_at(i, j)
@@ -5569,7 +5755,7 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 hollow = (woods and v.hollow is not None
                           and hollow_at(i, j))
                 lane = None
-                if not solid and not woods:
+                if not solid and not woods and not sub:
                     along_x = road_span(i, XP, 91)
                     along_z = road_span(j, ZP, 137)
                     if along_x and along_z:
@@ -5712,8 +5898,8 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 glyph, attr = ("^" if h % 5 == 0 else "."), CONCRETE
             elif green:
                 h = _mix(int(x * 3.0), int(z * 3.0), 23)
-                if h % 3:
-                    continue
+                if h % (2 if sub else 3):
+                    continue                    # a lawn is mown closer than a park
                 glyph, attr = ('"' if h % 7 == 0 else ","), GRASS
             elif edge < PAVE - 0.3:
                 if _mix(int(x * 3.0), int(z * 3.0), 11) & 3:
@@ -8599,7 +8785,7 @@ def near_cars(v, now, reach=CAR_REACH, every=False):
                         continue
                     i = int(x / CELL + BIG) - BIG
                     j = int(z / CELL + BIG) - BIG
-                    if not road_at(i, j) or not dry_at(x, z):
+                    if not road_at(i, j) or not dry_at(x, z) or suburb_at(i, j):
                         continue                  # the river, the woods
                     kind = ("police" if (g >> 6) % POLICE_ODDS == 0 else
                             "bus" if axis == 0 and (g >> 11) % BUS_ODDS == 0
@@ -8874,7 +9060,7 @@ def near_walkers(v, now):
                         continue
                     i = int(x / CELL + BIG) - BIG
                     j = int(z / CELL + BIG) - BIG
-                    if not road_at(i, j) or not dry_at(x, z):
+                    if not road_at(i, j) or not dry_at(x, z) or suburb_at(i, j):
                         continue
                     phase = (along / 0.8) % 2.0
                     yield (rx * rx + rz * rz, x, z, phase, g,
@@ -8930,7 +9116,7 @@ def el_runs(x, z):
     """The line stops at the woods and at the headland, where the avenue does."""
     i = int(x / CELL + BIG) - BIG
     j = int(z / CELL + BIG) - BIG
-    return not woods_at(i, j) and not headland_at(i, j)
+    return not woods_at(i, j) and not headland_at(i, j) and not suburb_at(i, j)
 
 
 def near_els(v, reach):
@@ -10774,6 +10960,14 @@ def power_off(i, j, now):
     return True
 
 
+def suburb_hint(x, z, now):
+    """Out in the suburbs, now and then, a dog."""
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    if not suburb_at(ci, cj):
+        return ""
+    return "  ~ a dog barks somewhere ~" if int(now / 7.0) % 4 == 0 else ""
+
+
 def factory_hint(x, z):
     """Near the old factory, the bass coming out of it."""
     ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
@@ -11151,6 +11345,7 @@ def render_street(v, now):
     v.cover = snow_cover(now)
     v.dawn = dawn(now)
     v.ind_lamps = near_ind_lamps(v, 60.0) if v.eye < 10.0 else []
+    v.suburb = near_suburb(v, 48.0) if v.eye < 10.0 else []
     v.blackout = night(now)["blackout"]
     v.fog = night(now)["fog"] and v.eye < 10.0      # from a roof, you are over it
     v.crown = crown_light(now, wet)
@@ -11187,6 +11382,8 @@ def render_street(v, now):
     draw_props(ch, co, v, walls, now, wet)
     draw_manhole_steam(ch, co, v, walls, now)
     draw_ind_lamps(ch, co, v, walls, v.ind_lamps, now, wet)
+    if v.suburb:
+        draw_suburb(ch, co, v, walls, v.suburb, now, wet)
     for site_ in near_sites(v, 160.0):
         draw_site(ch, co, v, walls, site_, now, wet)
     for p_ in near_plots(v, 110.0):
@@ -13930,6 +14127,7 @@ CHEAT_PLACES = [
     ("9", "the factories", "industrial"),
     ("]", "building site", "site"),
     ("}", "empty lot", "plot"),
+    ("0", "the suburbs", "suburbs"),
     ("r", "ramen", "ramen"),
     ("d", "diner", "diner"),
     ("^", "sky deck", "tower"),
@@ -14247,6 +14445,29 @@ def _woods_spot(x, z, kind):
             px, pz = (i + 0.5) * CELL, (j - out + 0.5) * CELL
             if can_stand(px, pz):
                 return px, pz, 0.0
+    return None
+
+
+def _suburb_spot(x, z):
+    """On a street in the nearest suburbs, looking along it."""
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    best = None
+    for ti in range(ci // WOODS_TILE - 1, ci // WOODS_TILE + 2):
+        for tj in range(cj // WOODS_TILE - 1, cj // WOODS_TILE + 2):
+            hi, hj = zone_home("suburbs", ti * WOODS_TILE, tj * WOODS_TILE)
+            d = (hi - ci) ** 2 + (hj - cj) ** 2
+            if d * CELL * CELL < CHEAT_SKIP ** 2:
+                continue
+            if best is None or d < best[0]:
+                best = (d, hi, hj)
+    _, hi, hj = best
+    for i, j in _rings(hi, hj, 30):
+        if suburb_road(i, j) and zone_depth("suburbs", i, j) > 5.0:
+            px, pz = (i + 0.5) * CELL, (j + 0.5) * CELL
+            if can_stand(px, pz):
+                # Along the street, the way it runs furthest before it bends.
+                return px, pz, max((k * math.pi / 2 for k in range(4)),
+                                   key=lambda a: probe(px, pz, a, 60.0))
     return None
 
 
@@ -14766,6 +14987,8 @@ def find_place(x, z, kind):
         return _temple_spot(x, z)
     if kind in ("industrial", "site", "warehouse", "plot"):
         return _factory_spot(x, z, kind)
+    if kind == "suburbs":
+        return _suburb_spot(x, z)
     if kind == "exchange":
         return _doorway(x, z, 2701, "exchange", EXCHANGE_ODDS)
     if kind == "billboard":
@@ -17080,6 +17303,7 @@ def main(stdscr):
                 or ("  ~ the fog is in ~" if night(now)["fog"] else "")
                 or blackout_word(cam_x, cam_z, now)
                 or factory_hint(cam_x, cam_z)
+                or suburb_hint(cam_x, cam_z, now)
                 or landmark_hint(cam_x, cam_z)
                 or rave_hint(v, now)
                 or ("  ~ something over the city ~" if night(now)["alien"]

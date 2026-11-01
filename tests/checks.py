@@ -1793,8 +1793,9 @@ for n, d in enumerate(ac.DISTRICTS):
     found_faces = 0
     for i in range(-400, 400, 3):
         for j in range(-400, 400, 3):
-            if ac.district_at(i, j) != n or ac.is_open(i, j) or ac.woods_at(i, j):
-                continue                # the woods are placed, not picked
+            if (ac.district_at(i, j) != n or ac.is_open(i, j) or ac.woods_at(i, j)
+                    or any(ac.zone_depth(k_, i, j) > 0 for k_ in ac.ZONES)):
+                continue                # the woods and the zones are placed
             b = ac.lot(i, j)
             # A club is a squat bunker and a casino a low slab whatever part
             # of town they are in, and the diner a low box with a cup on it;
@@ -4832,6 +4833,66 @@ lamps_ = ac.near_ind_lamps(fv, 60.0)
 check("sodium lamps down the factory streets, at the kerb", len(lamps_) > 4
       and all(ac.road_at(int(lx / ac.CELL + ac.BIG) - ac.BIG,
                          int(lz / ac.CELL + ac.BIG) - ac.BIG) for lx, lz in lamps_))
+
+# --- the suburbs --------------------------------------------------------------------
+sh_ = [ac.zone_home("suburbs", ti * ac.WOODS_TILE, tj * ac.WOODS_TILE)
+       for ti in range(-2, 3) for tj in range(-2, 3)]
+check("there are suburbs in every tile, clear of woods, river and factories",
+      all(ac.suburb_at(*h_) and ac.district(*h_) is ac.SUBURBS for h_ in sh_)
+      and not any(ac.woods_at(h_[0] + di, h_[1] + dj)
+                  or ac.water_at(h_[0] + di, h_[1] + dj)
+                  or ac.industrial_at(h_[0] + di, h_[1] + dj)
+                  for h_ in sh_ for di in range(-44, 45, 4) for dj in range(-26, 27, 4)
+                  if ac.suburb_at(h_[0] + di, h_[1] + dj)))
+shi, shj = sh_[12]
+cells_ = [(i, j) for i in range(shi - 44, shi + 45) for j in range(shj - 26, shj + 27)
+          if ac.suburb_at(i, j)]
+roads_ = [c_ for c_ in cells_ if ac.road_at(*c_)]
+houses_ = [c_ for c_ in cells_ if ac.suburb_house(*c_)]
+check("streets, houses and lawns in it", 0.1 < len(roads_) / float(len(cells_)) < 0.5
+      and len(houses_) > 60,
+      "%d road of %d cells, %d houses" % (len(roads_), len(cells_), len(houses_)))
+grid_ = [(i, j) for i, j in cells_ if ac.zone_depth("suburbs", i, j) > 4.0
+         and (ac._is_road(i, ac.XP, 91) or ac._is_road(j, ac.ZP, 137))]
+kept_ = sum(1 for c_ in grid_ if ac.road_at(*c_))
+check("and the streets are its own: the city's grid is gone in there",
+      kept_ < len(grid_) * 0.45, "%d of %d grid cells still road" % (kept_, len(grid_)))
+check("every house stands on its own, behind a lawn", all(
+    ac.suburb_rank(i, j) == 2
+    and not any(ac.suburb_house(i + a, j + b)
+                for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+    for i, j in houses_))
+# You can drive in: from the city's street outside, on road, to the middle.
+seen_r, todo_r = set(), []
+for i, j in roads_:
+    if ac.zone_depth("suburbs", i, j) < 1.0:
+        todo_r.append((i, j))
+        seen_r.add((i, j))
+while todo_r:
+    i, j = todo_r.pop()
+    for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        n_ = (i + a, j + b)
+        if n_ not in seen_r and ac.suburb_at(*n_) and ac.road_at(*n_):
+            seen_r.add(n_)
+            todo_r.append(n_)
+check("and every street joins up with the way in", len(seen_r) >= len(roads_) * 0.95,
+      "%d of %d" % (len(seen_r), len(roads_)))
+ssp2 = ac.find_place(x0, z0, "suburbs")
+sv2 = ac.View(ssp2[0], ssp2[1], ssp2[2], 100, 30)
+keep_w = ac.STAR
+ac.STAR = 917
+sch, sco = ac.render_street(sv2, 300.0)[:2]
+ac.STAR = keep_w
+pick_ = sum(1 for y in range(30) for x in range(100)
+            if sco[y][x] == 917 and sch[y][x] in "|^")
+check("the menu stands you on a suburban street: white picket fences", pick_ > 20,
+      "%d fence cells" % pick_)
+check("porch lights on the houses", len(ac.porches(sv2.suburb)) > 3,
+      "%d" % len(ac.porches(sv2.suburb)))
+check("and nobody walking about out here", not any(
+    ac.suburb_at(int(w_[0] / ac.CELL + ac.BIG) - ac.BIG,
+                 int(w_[1] / ac.CELL + ac.BIG) - ac.BIG)
+    for w_ in ac.near_walkers(sv2, 300.0)))
 
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
