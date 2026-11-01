@@ -2107,6 +2107,10 @@ def approach_cap(i, j):
     from the end of the runway you can watch them come in over the roofs."""
     ci, cj = zone_home("airport", i, j)
     out = j - (cj + RUNWAY_HALF + 3)            # from inside the wavy fence on
+    if out < 0:
+        # And the same off the south end, under the climb-out: a flight takes
+        # off that way, and at first it is only just over the roofs.
+        out = (cj - RUNWAY_HALF - 3) - j
     if out < 0 or out > 110 or abs(i - (ci + RUNWAY_DI)) > 15:
         return None
     out = max(0, out - 4)
@@ -3015,6 +3019,8 @@ def lot(i, j):
         if d is AIRPORT:
             part = airport_part(i, j)
             b["airport"] = part
+            b["gate"] = (part == "terminal"
+                         and (i, j) == gate_cell(*zone_home("airport", i, j)))
             b["height"] = {"terminal": 13.0, "hangar": 15.0,
                            "tower": 34.0}.get(part, 13.0)
         if d is STRIP:
@@ -5278,6 +5284,10 @@ def draw_airport_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
                 ch[y][sx], co[y][sx] = ("#" if h < 8.6 else "="), BULB
             elif int(u * 3) % 2 == 0:
                 ch[y][sx], co[y][sx] = "|", frame
+        elif b.get("gate") and face == 1 and abs(u - CELL * 0.5) < 1.2 and h < 3.0:
+            side_ = abs(u - CELL * 0.5) > 0.9 or h > 2.7
+            ch[y][sx] = "|" if side_ else ("#" if (y + sx) % 2 else ":")
+            co[y][sx] = CURB if side_ else BULB          # the doors to the gates
         else:
             if frac < 0.1:
                 ch[y][sx], co[y][sx] = "|", frame
@@ -5288,6 +5298,354 @@ def draw_airport_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
                 co[y][sx] = glass if (int(u * 2) + int(h)) % 4 else NEON[2][1]
     facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
     return roof, None, foot, None, ()
+
+
+# --- a flight: a window seat, once round the town -------------------------
+FLIGHT_FARE = 60
+FLIGHT_NO = "AC 101"
+FLIGHT_CRUISE = 130.0  # over every roof in the city: the landmarks are 84
+FLIGHT_R = 220.0       # the radius of each half of the loop: the runway is 290
+                       # units east of the Strip, so the leg back north passes 150
+                       # west of it, near enough for its lights from up there
+FLIGHT_VMAX = 70.0     # units a second, at cruise
+FLIGHT_ACC = 6.0       # down the runway
+FLIGHT_BRAKE = 8.0     # and after touching down
+FLIGHT_ROTATE = 380.0  # how far down the runway it leaves the ground
+FLIGHT_GLIDE = 0.144   # the slope down: over the 84-unit landmarks where the
+                       # approach_cap() corridor runs out, and onto the runway
+FLIGHT_EYE = 3.0       # the window above the wheels
+FLIGHT_SKY = 0.16      # how far down the window the horizon sits, up there
+FLIGHT_LOW = 55.0      # as low as it goes between take-off and landing...
+FLIGHT_CLEAR = 18.0    # ...and how far over the roofs it keeps
+_flight_profiles = {}
+WING_BEHIND = 2.0      # the seat is a few rows ahead of the wing root
+
+
+def gate_cell(ci, cj):
+    """The terminal cell with the doors to the gates: the middle of its front."""
+    return ci - 23, cj
+
+
+def gate_near(x, z):
+    i, j = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    if zone_depth("airport", i, j) < -2.0:
+        return False
+    gx, gz = gate_door(i, j)
+    return (gx - x) ** 2 + (gz - z) ** 2 < 12.0 ** 2
+
+
+def gate_door(i, j):
+    """Where you stand to walk through the terminal's doors."""
+    gi, gj = gate_cell(*zone_home("airport", i, j))
+    x, _, z = face_point(gi, gj, 1, CELL * 0.5, 1.4, 0.0)
+    return x, z
+
+
+def flight_legs(home):
+    """The route, as legs: lined up at the north end of the runway, down it
+    and climbing out south; a half circle west; north past the airport and the
+    Strip; a half circle east onto the approach; down the glide slope from the
+    north - over the low town under it - and onto the runway. Every turn is
+    to the right, the side you sit, so the Strip is out of your window most
+    of the way round."""
+    ci, cj = home
+    rx, zn, zs = runway(ci, cj)
+    z0 = zn - 12.0
+    z1 = zs - 150.0                       # the end of the climb-out
+    z_td = zn - 30.0                      # where the wheels go down
+    z2 = z_td + FLIGHT_CRUISE / FLIGHT_GLIDE + 100.0
+    r = FLIGHT_R
+    return [("line", rx, z0, rx, z1),
+            ("arc", rx - r, z1, 0.0, -1.0),   # centre, then which way round
+            ("line", rx - 2 * r, z1, rx - 2 * r, z2),
+            ("arc", rx - r, z2, 1.0, 1.0),
+            ("line", rx, z2, rx, z_td - 400.0)], z_td
+
+
+def _leg_len(leg):
+    if leg[0] == "line":
+        return math.hypot(leg[3] - leg[1], leg[4] - leg[2])
+    return math.pi * FLIGHT_R
+
+
+def flight_marks(home):
+    """Distances along the route: the start of the last leg, touching down,
+    and stopping."""
+    legs, z_td = flight_legs(home)
+    s3 = sum(_leg_len(g) for g in legs[:4])
+    s_td = s3 + (legs[4][2] - z_td)
+    return s3, s_td, s_td + FLIGHT_VMAX ** 2 / (2.0 * FLIGHT_BRAKE)
+
+
+def flight_s(t, home):
+    """How far along the route at t seconds since the brakes came off."""
+    _, s_td, _ = flight_marks(home)
+    t1 = FLIGHT_VMAX / FLIGHT_ACC
+    s1 = 0.5 * FLIGHT_ACC * t1 * t1
+    if t < t1:
+        return 0.5 * FLIGHT_ACC * t * t
+    t_td = t1 + (s_td - s1) / FLIGHT_VMAX
+    if t < t_td:
+        return s1 + FLIGHT_VMAX * (t - t1)
+    k = min(t - t_td, FLIGHT_VMAX / FLIGHT_BRAKE)
+    return s_td + FLIGHT_VMAX * k - 0.5 * FLIGHT_BRAKE * k * k
+
+
+def flight_time_at(s, home):
+    """The other way about: when it gets to s (before touching down)."""
+    t1 = FLIGHT_VMAX / FLIGHT_ACC
+    s1 = 0.5 * FLIGHT_ACC * t1 * t1
+    if s < s1:
+        return math.sqrt(2.0 * s / FLIGHT_ACC)
+    return t1 + (s - s1) / FLIGHT_VMAX
+
+
+def flight_length(home):
+    """Seconds from the brakes off to stopped on the runway."""
+    _, s_td, _ = flight_marks(home)
+    return flight_time_at(s_td, home) + FLIGHT_VMAX / FLIGHT_BRAKE
+
+
+def flight_pose(home, s, shape_only=False):
+    """(x, z, heading yaw, height of the wheels) at s along the route.
+    shape_only leaves the height out: it is what the height is worked out
+    from."""
+    legs, _ = flight_legs(home)
+    s3, s_td, _ = flight_marks(home)
+    left = s
+    for g in legs:
+        n = _leg_len(g)
+        if left <= n or g is legs[-1]:
+            break
+        left -= n
+    if g[0] == "line":
+        u = min(1.0, left / max(1e-6, n)) if g is not legs[-1] else left / n
+        x = g[1] + (g[3] - g[1]) * u
+        z = g[2] + (g[4] - g[2]) * u
+        yaw = math.atan2(g[3] - g[1], g[4] - g[2])
+    else:
+        phi = left / FLIGHT_R
+        cx, cz, sx_, sz_ = g[1], g[2], g[3], g[4]
+        if sz_ < 0:       # down the west side: from heading south to north
+            x, z = cx + FLIGHT_R * math.cos(phi), cz - FLIGHT_R * math.sin(phi)
+            yaw = math.atan2(-math.sin(phi), -math.cos(phi))
+        else:             # round the north end: from north to south
+            x, z = cx - FLIGHT_R * math.cos(phi), cz + FLIGHT_R * math.sin(phi)
+            yaw = math.atan2(math.sin(phi), math.cos(phi))
+    if shape_only:
+        return x, z, yaw, 0.0
+    if s < FLIGHT_ROTATE:
+        alt = 0.0
+    else:
+        # Away steeply, easing off only as it comes up to cruise.
+        u = min(1.0, (s - FLIGHT_ROTATE) / 1000.0)
+        alt = FLIGHT_CRUISE * (1.0 - (1.0 - u) ** 2.4)
+        prof = flight_profile(home)
+        k = min(len(prof) - 2, int(s / 10.0))
+        f_ = min(1.0, s / 10.0 - k)
+        alt = min(alt, prof[k] + (prof[k + 1] - prof[k]) * f_)
+    if s >= s3:
+        alt = min(alt, max(0.0, (s_td - s) * FLIGHT_GLIDE))
+    return x, z, yaw, alt
+
+
+def flight_profile(home):
+    """How high it needs to be along the route, every ten units: over the
+    tallest roof within 300 units either way plus FLIGHT_CLEAR, never under
+    FLIGHT_LOW, smoothed - so it climbs before a tower and not at it, and
+    comes down over the low town, where you can see out.
+
+    The camera does not tilt, so from up at 130 anything nearer than about
+    two hundred units is under the bottom of the window: the Strip, flown
+    past at that height, was its car park. Low over it, it is its lights."""
+    hit = _flight_profiles.get(home)
+    if hit is not None:
+        return hit
+    _, s_td, _ = flight_marks(home)
+    need = []
+    for k in range(int(s_td / 10.0) + 2):
+        x, z, _, _ = flight_pose(home, k * 10.0, shape_only=True)
+        i, j = int(x // CELL), int(z // CELL)
+        top = 0.0
+        for a in range(i - 3, i + 4):
+            for b in range(j - 3, j + 4):
+                if not is_open(a, b):
+                    top = max(top, lot(a, b)["height"])
+        need.append(max(FLIGHT_LOW, top + FLIGHT_CLEAR))
+    env = [max(need[max(0, k - 30):k + 31]) for k in range(len(need))]
+    smooth = [sum(env[max(0, k - 7):k + 8]) / len(env[max(0, k - 7):k + 8])
+              for k in range(len(env))]
+    _evict(_flight_profiles, 8)
+    _flight_profiles[home] = smooth
+    return smooth
+
+
+def flight_stage(home, s):
+    """What the captain would say, more or less."""
+    s3, s_td, s_end = flight_marks(home)
+    if s < FLIGHT_ROTATE * 0.4:
+        return "rolling"
+    if s < FLIGHT_ROTATE:
+        return "taking off"
+    if s < FLIGHT_ROTATE + 900.0:
+        return "climbing out"
+    if s < s3:
+        return "cruising"
+    if s < s_td - 300.0:
+        return "on approach"
+    if s < s_td + 40.0:
+        return "landing"
+    return "taxiing in"
+
+
+def place_below(x, z):
+    """What you are flying over, in words."""
+    i, j = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    if water_at(i, j):
+        return "the water"
+    if strip_at(i, j):
+        return "the Strip"
+    if airport_at(i, j):
+        return "the airport"
+    if suburb_at(i, j):
+        return "the suburbs"
+    if university_at(i, j):
+        return "the university"
+    if woods_at(i, j):
+        return "the woods"
+    return district(i, j)["name"]
+
+
+def draw_window(ch, co, v, now, look, alt):
+    """The cabin round the window: the wall, the window's rounded frame, and
+    out of it the right wing - in the world, so it stays put as you look
+    round - with its green light and its white strobe."""
+    h, w = len(ch), len(ch[0])
+    # The wing first, under the frame: row by row from the root out to the
+    # tip, filled from the leading edge to the trailing, so it reads as one
+    # surface going away from you.
+    hx, hz = math.sin(v.yaw - math.pi / 2 - look), math.cos(v.yaw - math.pi / 2 - look)
+    rx_, rz_ = hz, -hx                              # the right, out of the window
+    base = v.eye - 1.8
+    rows = {}
+    for k in range(240):
+        span = 2.2 + k * 0.075                    # out from the fuselage
+        sweep = WING_BEHIND + span * 0.45         # swept back, from behind you
+        chord = max(0.8, 5.0 - span * 0.17)
+        ends = []
+        for back in (sweep, sweep + chord):
+            pr = v.project(v.x + rx_ * span - hx * back, base + span * 0.04,
+                           v.z + rz_ * span - hz * back)
+            if pr is None:
+                break
+            ends.append(pr)
+        if len(ends) < 2:
+            continue
+        sy = int(round((ends[0][1] + ends[1][1]) / 2.0))
+        a_, b_ = sorted((ends[0][0], ends[1][0]))
+        lo, hi = rows.get(sy, (a_, b_))
+        rows[sy] = (min(lo, a_), max(hi, b_))
+    for sy, (a_, b_) in rows.items():
+        if not 0 <= sy < h:
+            continue
+        for sx in range(max(0, int(round(a_))), min(w - 1, int(round(b_))) + 1):
+            edge_ = sx in (int(round(a_)), int(round(b_)))
+            ch[sy][sx] = "#" if edge_ else "="
+            co[sy][sx] = CURB if edge_ else CONCRETE
+    tip_ = WING_BEHIND + 20.2 * 0.45 + 0.8
+    tip = (v.x + rx_ * 20.2 - hx * tip_, base + 20.2 * 0.04,
+           v.z + rz_ * 20.2 - hz * tip_)
+    pr = v.project(*tip)
+    if pr is not None:
+        sx, sy = int(round(pr[0])), int(round(pr[1]))
+        if 0 <= sx < w and 0 <= sy < h:
+            ch[sy][sx], co[sy][sx] = "@", ROU_GREEN
+            if now % 1.3 < 0.12 and sx + 1 < w:
+                ch[sy][sx + 1], co[sy][sx + 1] = "*", FLASH  # the strobe
+    # The cabin wall, and the window cut out of it, its corners rounded.
+    x0, x1 = max(2, int(w * 0.10)), min(w - 3, int(w * 0.90))
+    y0, y1 = 1, h - 3
+    r = max(2, (y1 - y0) // 5)
+    for y in range(h):
+        for x in range(w):
+            cy = min(y - y0, y1 - y)
+            cx = min(x - x0, x1 - x) / 2.0
+            inside = cy >= 0 and cx >= 0
+            if inside and cy < r and cx < r:
+                inside = math.hypot(r - cx, r - cy) <= r
+            if inside:
+                continue
+            near = (cy >= -1 and cx >= -0.5
+                    and (cy < 0 or cx < 0 or math.hypot(r - cx, r - cy) <= r + 1.0))
+            if near:
+                ch[y][x], co[y][x] = ("|" if abs(cx) < 0.6 and cy > r else
+                                      "-" if abs(cy) < 1 and cx > r else "#"), CURB
+            else:
+                ch[y][x] = "." if (x * 3 + y * 7) % 23 == 0 else " "
+                co[y][x] = CONCRETE
+    if alt > 2.0:
+        # The seatbelt sign, over the window.
+        for k, c in enumerate("[ |=| ]"):         # spaces and all
+            if 0 <= w // 2 - 3 + k < w:
+                ch[0][w // 2 - 3 + k], co[0][w // 2 - 3 + k] = c, GOLD_DIM
+
+
+def render_flight(width, height, now, flight):
+    """Out of the window: the city going by under you, sideways, as the
+    plane rolls, climbs, turns round over the Strip and comes back down."""
+    home = flight["home"]
+    s = flight_s(now - flight["t0"], home)
+    x, z, heading, alt = flight_pose(home, s)
+    yaw = heading + math.pi / 2 + flight["look"]
+    v = View(x, z, yaw, width, height, eye=alt + FLIGHT_EYE,
+             reach=ROOF_REACH if alt > 8.0 else MAX_VIEW)
+    # Looking down out of the window, the way a raycaster looks down: the
+    # horizon goes up the screen as the plane climbs. The camera cannot tilt,
+    # and with the horizon where it is on the street everything within two
+    # hundred units of you was under the bottom of the window.
+    up = min(1.0, alt / 60.0)
+    v.horizon = max(2, int(round(v.horizon - up * (v.horizon - height * FLIGHT_SKY))))
+    ch, co, wet = render_street(v, now)
+    draw_window(ch, co, v, now, flight["look"], alt)
+    return ch, co, v, alt, s
+
+
+def render_gate(width, height, now, flight):
+    """At the gate: the departures board, the jet at the window, the desk."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    board = [("DEPARTURES", "", GOLD),
+             ("", "", 0),
+             (FLIGHT_NO + "  ASCII CITY BY NIGHT", "BOARDING", ROU_GREEN),
+             ("AC 404  NOT FOUND", "CANCELLED", ROU_RED),
+             ("AC 777  JACKPOT", "DELAYED", GOLD_DIM),
+             ("AC 200  OK", "GATE 2", HUD),
+             ("AC 418  TEAPOT", "ON TIME", HUD)]
+    bx = max(1, width // 2 - 22)
+    for r, (a, b, attr) in enumerate(board):
+        if 2 + r >= height - 2:
+            break
+        _text(ch, co, 2 + r, bx, a, attr if not b else HUD)
+        _text(ch, co, 2 + r, bx + 44 - len(b), b, attr)
+    # The window onto the apron, and the jet at it, lit.
+    wy = 2 + len(board) + 2
+    if height - wy > 7 and width > 50:
+        for x in range(4, width - 4):
+            ch[wy][x], co[wy][x] = "=", CURB
+            ch[height - 4][x], co[height - 4][x] = "=", CURB
+        jet = ["            __|__          ",
+               "  ---------(_____)---------",
+               " [o o o o o o o o o o o o o]>",
+               "       ()      ()          "]
+        for r, line in enumerate(jet):
+            y = wy + 1 + r + max(0, (height - 5 - wy - len(jet)) // 2)
+            if y < height - 4:
+                _text(ch, co, y, max(5, width // 2 - 15), line,
+                      STAR if r == 2 else CONCRETE)
+    _text(ch, co, height - 2, max(1, width // 2 - 32),
+          "-- enter: $%d, a window seat, once round the town  -  x back out --"
+          % FLIGHT_FARE, GOLD_DIM)
+    return ch, co
 
 
 def plane_states(ci, cj, now):
@@ -14009,6 +14367,10 @@ def venue_at(x, z):
             if (ux - x) ** 2 + (uz - z) ** 2 < CASINO_REACH ** 2:
                 return kind, {"i": egg[0], "j": egg[1], "f": egg[2],
                               "seed": _mix(egg[0], egg[1], 3831)}
+    if zone_depth("airport", ci, cj) > -2.0:
+        gx, gz = gate_door(ci, cj)
+        if (gx - x) ** 2 + (gz - z) ** 2 < CASINO_REACH ** 2:
+            return "gate", {"home": zone_home("airport", ci, cj)}
     if zone_depth("university", ci, cj) > -2.0:
         lx, lz = library_door(ci, cj)
         if (lx - x) ** 2 + (lz - z) ** 2 < CASINO_REACH ** 2:
@@ -15464,6 +15826,7 @@ CHEAT_PLACES = [
     ("{", "the university", "university"),
     ("-", "a metro station", "metro"),
     ('"', "the library", "library"),
+    (".", "a flight", "flight"),
     (";", "lemonade, 3am", "lemonade"),
     ("?", "the stargazer", "telescope"),
     ("r", "ramen", "ramen"),
@@ -16429,6 +16792,12 @@ def find_place(x, z, kind):
         return _fountain_spot(x, z)
     if kind == "university":
         return _university_spot(x, z)
+    if kind == "flight":
+        sp = find_place(x, z, "airport")
+        if sp is None:
+            return None
+        gx, gz = gate_door(int(sp[0] / CELL + BIG) - BIG, int(sp[1] / CELL + BIG) - BIG)
+        return gx + 5.0, gz, -math.pi / 2              # facing the doors
     if kind == "library":
         sp = _university_spot(x, z)
         if sp is None:
@@ -16493,7 +16862,7 @@ def find_place(x, z, kind):
     return None
 
 
-CHEAT_MORE = ["university", "library", "metro"]     # the fifth column
+CHEAT_MORE = ["university", "library", "metro", "flight"]     # the fifth column
 _panel_page = [0]       # which page an 80-column panel is showing
 
 
@@ -18331,6 +18700,7 @@ STREET_HUD = (" %d,%d %s, %s%s  ws walk  ad turn  ,. step  +- pace  t taxi  tab 
               "  ` cheats ")
 TAXI_HUD = " in a taxi  -  %s "
 METRO_HUD = " the metro  -  %s "
+FLIGHT_HUD = " " + FLIGHT_NO + "  -  %s  -  %s "
 ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
                 " blackjack  o plinko  r races  f high flyer  -  s walks out"
                 "  -  q quit ")
@@ -18414,6 +18784,7 @@ def main(stdscr):
     booth = None                # in the confession booth: {"t0", "text", "said"}
     taxi = None                 # hailed, choosing, or riding: {"phase", ...}
     metro = None                # on a platform or riding: {"phase", ...}
+    flight = None               # at the gate or in the air: {"phase", ...}
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -18525,6 +18896,7 @@ def main(stdscr):
                             booth = None
                             taxi = None
                             metro = None
+                            flight = None
                             ledger["jumps"] += 1
                             street = True
                             note = "-> " + name
@@ -18543,6 +18915,30 @@ def main(stdscr):
                                 note = "-> the woods rave (starting)"
                                 note_at = now
                         break
+            elif flight is not None and key not in (ord("q"), CHEAT_KEY):
+                if flight["phase"] == "gate":
+                    if key in (27, ord("x"), ord("X")):
+                        gx_, gz_ = gate_door(*flight["home"])
+                        cam_x, cam_z, yaw = gx_ + 3.0, gz_, math.pi / 2
+                        flight = None
+                        note, note_at = "back out on the apron", now
+                    elif key in (10, 13, curses.KEY_ENTER):
+                        if wallet.take(FLIGHT_FARE):
+                            flight = dict(flight, phase="air", t0=now, look=0.0,
+                                          want=0.0)
+                        else:
+                            note, note_at = ("the desk wants $%d" % FLIGHT_FARE), now
+                else:
+                    if key in (curses.KEY_LEFT, ord("a")):
+                        flight["want"] = max(-1.2, flight["want"] - 0.3)
+                    elif key in (curses.KEY_RIGHT, ord("d")):
+                        flight["want"] = min(1.2, flight["want"] + 0.3)
+                    elif key in (27, ord("x"), ord("X")):
+                        # Doze off, and wake as they come in to land.
+                        s3_ = flight_marks(flight["home"])[0]
+                        if flight_s(now - flight["t0"], flight["home"]) < s3_:
+                            flight["t0"] = now - flight_time_at(s3_, flight["home"])
+                            note, note_at = "you doze off...", now
             elif metro is not None and key not in (ord("q"), CHEAT_KEY):
                 if metro["phase"] == "platform":
                     n_ = len(metro["dests"])
@@ -18866,12 +19262,22 @@ def main(stdscr):
                     and (hx_ - roof_x) * ddx + (hz_ - roof_z) * ddz > 0.0):
                 lift = {"up": False, "t0": now, "t": party}
         if (lift is not None or on_roof is not None or sewer is not None
-                or booth is not None or taxi is not None or metro is not None):
+                or booth is not None or taxi is not None or metro is not None
+                or flight is not None):
             fwd = side = 0.0            # on the roof you can only look round
             autopilot = False
             if (lift is not None or sewer is not None or booth is not None or taxi
-                    or metro is not None):
+                    or metro is not None or flight is not None):
                 spin = 0.0
+        if flight is not None and flight["phase"] == "air":
+            # Looking round eases, the way your head would.
+            flight["look"] += ((flight["want"] - flight["look"])
+                               * min(1.0, frame_time * 4))
+            if now - flight["t0"] >= flight_length(flight["home"]) + 2.0:
+                gx_, gz_ = gate_door(*flight["home"])
+                cam_x, cam_z, yaw = gx_ + 3.0, gz_, math.pi / 2
+                note, note_at = "welcome to ASCII City", now
+                flight = None
         if metro is not None and metro["phase"] == "platform" and metro["waiting"]:
             st_ = metro["here"]
             ph_, q_ = train_phase(now, st_["block"][0] * 31 + st_["block"][1])
@@ -18922,12 +19328,17 @@ def main(stdscr):
         was_ = venue
         venue = (venue_at(cam_x, cam_z)
                  if street and sewer is None and taxi is None and metro is None
-                 else None)
+                 and flight is None else None)
         # Going past faster than a walk, a doorway does not take you in: you
         # were going somewhere else. Slow to a walk or stop at it and it does,
         # and once you are in, you stay in.
         hurry_ = abs(fwd) > WALK * 1.05 or abs(side) > SIDESTEP * 1.05
         if venue is not None and hurry_ and not same_venue(venue, was_):
+            venue = None
+        if venue is not None and venue[0] == "gate":
+            flight = {"phase": "gate", "home": venue[1]["home"]}
+            fwd = side = spin = 0.0
+            autopilot = False
             venue = None
         if venue is not None and venue[0] == "library":
             note, note_at = read_in_library(stdscr), time.monotonic()
@@ -19151,6 +19562,18 @@ def main(stdscr):
                 seated = (venue[1]["seed"], now)    # sat down just now
             ch, co = render_ramen(venue[1], width, height, now, seated[1])
             hud = RAMEN_HUD % (cam_x, cam_z)
+        elif street and flight is not None:
+            if flight["phase"] == "gate":
+                ch, co = render_gate(width, height, now, flight)
+                hud = FLIGHT_HUD % ("at the gate", "enter boards, x goes back out")
+            else:
+                ch, co, v, alt_, s_ = render_flight(width, height, now, flight)
+                fx_, fz_, _, _ = flight_pose(flight["home"], s_)
+                hud = FLIGHT_HUD % (
+                    "%s over %s, %s ft" % (flight_stage(flight["home"], s_),
+                                           place_below(fx_, fz_),
+                                           format(int(alt_ * 25), ",")),
+                    "arrows look round, x dozes off")
         elif street and metro is not None:
             if metro["phase"] == "platform":
                 ch, co = render_platform(width, height, now, metro)
@@ -19202,6 +19625,8 @@ def main(stdscr):
                     else "")
                 or ("  ~ the hum of the highway ~" if hwy_near(cam_x, cam_z)
                     else "")
+                or ("  ~ the terminal: walk in for a flight ~"
+                    if gate_near(cam_x, cam_z) else "")
                 or ("  ~ the metro: e goes down the stairs ~"
                     if station_at(cam_x, cam_z) else "")
                 or ("  ~ a manhole: e lifts the cover ~"

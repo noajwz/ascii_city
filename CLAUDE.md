@@ -1011,6 +1011,40 @@ stood forty units off the end of the runway and hid the plane until it was overh
 had to start a few rows inside the airport's edge, because the edge wanders and left one row of
 towers standing. Far out you see the landing lights, which is all you would.
 
+
+**A flight.** The terminal has doors in the middle of its front (`gate_cell()`, `gate_door()`,
+the `gate` lot flag, drawn lit in `draw_airport_column()`); walking through them is a venue
+(`gate`) that opens the gate screen (`render_gate()`: a departures board — AC 101 boarding, AC 404
+NOT FOUND cancelled — and the jet at the window). Enter pays `FLIGHT_FARE`, and then it is a
+window seat on the right, once round the town, about 80 s:
+
+- **The route** (`flight_legs()`, `flight_pose(home, s)` by distance `s`, `flight_s(t)` by time
+  — accelerate, cruise, brake): lined up at the north end, down the runway and away south; a
+  half circle west; north past the Strip; a half circle east onto the approach; down the glide
+  slope from the north onto the runway. Every turn is to the right, the side you sit on, so the
+  Strip is in your window both ways past it. `FLIGHT_R` is set from the airport–Strip spacing so
+  the leg north passes 150 units west of the Strip, near enough for its lights.
+- **The height** is a profile, not a cruise level (`flight_profile()`, cached per airport, 0.2 s
+  once): over the tallest roof within 300 units either way plus `FLIGHT_CLEAR`, never under
+  `FLIGHT_LOW`, smoothed by a max then a mean so it climbs before a tower and not at it. A flat
+  130 cleared everything and showed nothing: **the camera cannot tilt**, so from that high
+  everything within two hundred units was under the bottom of the window, and the Strip, flown
+  past, was its car park. The take-off climbs steeply and eases off at the top, and
+  `approach_cap()` now keeps the town low off the **south** end of every runway too, under the
+  climb-out, where at first it is only just over the roofs. The check walks the whole route and
+  asserts no roof within two cells comes within 2 units of the wheels.
+- **The view** is `render_street()` from the plane with the horizon raised as it climbs
+  (`FLIGHT_SKY`): that is how a raycaster looks down, and it is what puts the town under you in
+  the window rather than off the bottom of it. `draw_window()` draws the right wing in world
+  points (so it stays put as you look round) — filled row by row from the root to the tip, the
+  seat `WING_BEHIND` ahead of the root so its leading edge runs diagonally rather than straight
+  up — with its green light and strobe, then the cabin wall and the window's rounded frame, and
+  the seatbelt sign. The HUD has what the captain would say (`flight_stage()`), what you are over
+  (`place_below()`), and the height in feet. Arrows lean you to look forward or back; `x` dozes
+  off and wakes you on the approach. Landed and stopped, you come out of the terminal's doors.
+  Frame time over a whole flight at 30 fps: a median of 21 ms.
+- `.` in the menu stands you in front of the terminal's doors.
+
 ## The university
 
 Another placed zone, in each tile between the factories and the next Strip. Old brick halls

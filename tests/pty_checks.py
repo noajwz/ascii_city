@@ -204,6 +204,13 @@ if os.path.isfile(os.path.join(os.path.dirname(APP), "..", "TUI", "wiki_tui.py")
             and lib_txt.rfind("walk in and read") > lib_txt.find("Wikipedia"))
     print("%-34s %s" % ("  and the reader came up, and went", "ok" if seen else "FAIL"))
     ok &= seen
+ok &= report("a flight: the gate, a seat, off, doze, land, out", *run(
+    [(b"`", .5), (b".", 1.5)] + [(b"w", .3)] * 6 + [(b"\r", 4.0), (b"\x1bOD", .3),
+     (b"\x1bOC", .3), (b"x", 1.0)] + [(b"", 3.0)] * 9 + [(b"w", .3)],
+    cols=100, rows=30))
+ok &= report("a flight: the gate, and straight back out", *run(
+    [(b"`", .5), (b".", 1.5)] + [(b"w", .3)] * 6 + [(b"x", .8), (b"w", .4)],
+    cols=80, rows=24))
 ok &= report("the metro: down, a ticket, the train, the ride, up", *run(
     [(b"`", .5), (b"-", 1.5), (b"e", 1.0), (b"s", .5), (b"\r", .5)]
     + [(b"", 3.0)] * 15 + [(b"x", .5)], cols=100, rows=30))
