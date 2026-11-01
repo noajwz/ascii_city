@@ -921,6 +921,31 @@ out, plants a flag and waves, a cow goes over it, and it winks. On the strange n
 crosses it instead of the cow. Step back and it starts again. `;` and `?` in the menu, under
 NIGHTS where there was room.
 
+## The Strip
+
+The third placed zone in `ZONES`, at the edge of every tile clear of the woods, and a different
+shape from the others: not a wandering rectangle but a boulevard. `strip_at()` is twelve cells
+across and `STRIP_HALF` either way along z; the middle four are the boulevard (`strip_road()`,
+which keeps the city's cross streets through it, so the hotels come in blocks and you can get
+in and out), and the four either side are hotel — `is_open()` says no to all of it but the road,
+and the avenues that run into it stop at the hotels. `district()` gives `STRIP`; `lot()` makes
+every hotel cell part of one hotel per side per block (`strip_hotel()`), the same height (28 to
+56) and name (`STRIP_NAMES`, made up) right through it, and gives the cell at the middle of its
+frontage a casino — door on the boulevard, so **every hotel is a casino you walk into**, the
+whole room and all six games. The doors faced away from the road at first: `FACES[0]` is -x, not
++x, and that is worth remembering.
+
+`draw_strip_column()` is the façade: every window gold, a band of bulbs chasing round every
+fourth floor in the hotel's own colour, neon trim up every bay, the crown lit solid. Nothing
+hangs on the walls (`flat`, `hung` 0): each hotel's sign is a **pylon at the kerb**
+(`strip_signs()`, `draw_strip_sign()`), the name in the big font in the hotel's colour within 55
+units and on a lit board further off, bulbs chasing round it, flashing now and then — screen
+space, for the marquee's reason. Down the median `draw_strip_median()` alternates **palms**, lit
+from below, and **fountains**: a pool with a row of jets rising and falling in a wave. And
+`draw_strip_traffic()` cruises two lanes each way, a car in most slots and a stretch limousine
+now and then, headlights coming and tail lights going, never through you. `:` in the menu stands
+you at one end in the middle of the boulevard, looking up it.
+
 ## People walking
 
 The streets used to be empty but for smokers and queues. `near_walkers()` puts a **lane down each
