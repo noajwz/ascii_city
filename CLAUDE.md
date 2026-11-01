@@ -2375,6 +2375,22 @@ few hundred, the far city's lights no longer showing through the dark buildings 
 It also made the high views faster - the ground no longer painted over those columns - roof and
 plane at 300x90 both 21 ms.
 
+**From up high the city past the nearest streets was dark** - a black band under the horizon and
+a black blob over the middle of the plane's window, its edge sliding along the roofs - and it had
+been so before; showing things through buildings had only hidden it. Two parts:
+- **Past what is drawn** (`v.reach`), the ground had nothing at all. `far_lights()` fills those
+  rows with a carpet of the haze's dots and the odd warm light, thicker towards the horizon, by
+  each column's bearing and the row's distance - the way the skyline over the horizon is done -
+  so it holds still as you fly. Done in screen terms on purpose: at that range nothing should
+  move, and anything worked out from world cells per point flickers.
+- **Inside it**, at night the streets were black past the 60 units the street's own lights
+  reach. `draw_far_lamps()` puts a street light every `FAR_LAMP_STEP` (15) along both kerbs of
+  every avenue and cross street out to `v.reach`, sodium orange and the odd white one - as world
+  points, so they move with the city as the plane flies, and through `put_cell()`, so a building
+  in front hides them. Only on `road_at()` cells (not the woods, the suburbs, the Strip, the
+  airport), off on a blackout block, and only up high (`v.eye >= 10`): the street is frame for
+  frame unchanged. About 5 ms at 300x90: the roof and the plane are 26 ms a frame with it.
+
 **Do not draw the ground at half resolution to buy more.** It was tried: every other row and
 column worked out and the rest copied from a neighbour. It was faster (roof 28, plane 32), and
 the owner tried it and said no - the flight looked blurry; and copying into cells nothing had
