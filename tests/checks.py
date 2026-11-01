@@ -5067,6 +5067,44 @@ check("and there it is: jets over the water", show_.count("|") > quiet_.count("|
                                                                     quiet_.count("|")))
 ac._fountain_shift[0] = 0.0
 
+# --- the Pokemon Center -------------------------------------------------------------
+pcs = list(ac.near_centers(x0, z0, 1500.0))
+check("a few Pokemon Centers about town, solid, on a street, out of the parks and "
+      "the placed parts",
+      3 <= len(pcs) <= 40 and all(
+          not ac.is_open(i_, j_) and ac.lot(i_, j_)["center"] == f_
+          and ac.lot(i_, j_)["height"] == ac.CENTER_H
+          and ac.road_at(i_ + ac.FACES[f_][0], j_ + ac.FACES[f_][1])
+          and not ac.DISTRICTS[ac.district_at(i_, j_)]["park"]
+          and not any(ac.zone_depth(k_, i_, j_) > -2 for k_ in ac.ZONES)
+          for i_, j_, f_, _, _ in pcs), str(len(pcs)))
+psp = ac.find_place(x0, z0, "center")
+pcd = min(pcs, key=lambda c_: (c_[3] - psp[0]) ** 2 + (c_[4] - psp[1]) ** 2)
+check("its doors take you in; the menu stands you across the street from them",
+      ac.venue_at(pcd[3], pcd[4])[0] == "center" and ac.venue_at(*psp[:2]) is None
+      and ac.can_stand(*psp[:2]) and math.hypot(psp[0] - pcd[3], psp[1] - pcd[4]) > 5.0)
+pv = ac.View(psp[0], psp[1], psp[2], 100, 30)
+ptx = "\n".join("".join(r) for r in ac.render_street(pv, 600.0)[0])
+# Rain can run through a letter or two of it, so allow for a streak.
+pname = max(sum(a_ == b_ for a_, b_ in zip(row[k_:k_ + 14], "POKEMON CENTER"))
+            for row in ptx.splitlines() for k_ in range(len(row) - 13))
+check("and from there: the name on the red band and the ball over the doors",
+      pname >= 12 and ("(==o==)" in ptx or "==o==" in ptx), str(pname))
+pst = {"door": (0.0, 0.0), "heal": None, "nx": 0.0, "nz": 1.0}
+ptx = "\n".join("".join(r) for r in ac.render_center(100, 30, 10.0, pst, "")[0])
+pst["heal"] = 10.0 - ac.CENTER_HEAL * 0.5
+ptx2 = "\n".join("".join(r) for r in ac.render_center(100, 30, 10.0, pst, "")[0])
+pst["heal"] = 10.0 - ac.CENTER_HEAL - 2.0
+ptx3 = "\n".join("".join(r) for r in ac.render_center(100, 30, 10.0, pst, "")[0])
+check("inside: Nurse Joy at the counter, the machine, the PC; she heals them, the "
+      "balls light up, and she hopes to see you again",
+      "@(^_^)@" in ptx and "PC" in ptx and "Welcome to the Pokemon Center!" in ptx
+      and "ding" in ptx2 and ptx2.count("o o") >= 1
+      and "We hope to see you again!" in ptx3
+      and all("".join(r) for r in ac.render_center(40, 12, 10.0, pst, "x")[0]))
+check("and the PC has the type chart on it, carried in library/",
+      os.path.isfile(os.path.join(ac.LIBRARY_DIR, ac.CENTER_PC)))
+
 # --- a flight ---------------------------------------------------------------------
 fsp = ac.find_place(x0, z0, "flight")
 fgx, fgz = ac.gate_door(int(fsp[0] // ac.CELL), int(fsp[1] // ac.CELL))

@@ -2048,6 +2048,7 @@ def campus_solid(i, j):
 # as they are, in the whole terminal, the city waiting for you to come out;
 # nothing of theirs is imported.
 LIBRARY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "library")
+CENTER_PC = "pokemon_types_tui.py"    # what is on the Pokemon Center's PC
 LIBRARY_BOOKS = [("w", "Wikipedia", "the encyclopaedia", "wiki_tui.py"),
                  ("p", "PsychonautWiki", "the restricted section", "psychonaut_tui.py")]
 
@@ -2059,7 +2060,7 @@ def library_door(i, j):
     return x, z
 
 
-def read_in_library(stdscr, app):
+def read_in_library(stdscr, app, back="back in the reading room"):
     """Hand the terminal to one of the readers and take it back after.
     Returns what to say on the way out."""
     path = os.path.join(LIBRARY_DIR, app)
@@ -2077,7 +2078,7 @@ def read_in_library(stdscr, app):
     stdscr.nodelay(True)
     stdscr.keypad(True)
     stdscr.clear()
-    return "back in the reading room"
+    return back
 
 
 def render_reading_room(width, height, now, note):
@@ -3182,6 +3183,13 @@ def lot(i, j):
                 words, tone = ADS[_mix(i, j, 2409) % len(ADS)]
                 b["billboard"] = {"face": face, "words": words, "tone": tone,
                                   "i": i, "j": j, "height": b["height"]}
+        b["center"] = center_at(i, j)
+        if b["center"] is not None:
+            b["height"] = CENTER_H
+            b["club"] = b["casino"] = b["cinema"] = b["diner"] = None
+            b["arcade"] = b["billboard"] = b["tower"] = b["exchange"] = None
+            b["temple"] = b["warehouse"] = None
+            b["tree"] = False
         lm = landmark_at(i, j)
         if lm is not None:
             # The landmark, over whatever else this cell was going to be.
@@ -6316,6 +6324,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
                                    r_lo, r_hi, edge, cont, now)
     if b.get("campus") is not None:
         return draw_campus_column(ch, co, v, sx, dist, b, face, u,
+                                  r_lo, r_hi, edge, cont, now)
+    if b.get("center") is not None:
+        return draw_center_column(ch, co, v, sx, dist, b, face, u,
                                   r_lo, r_hi, edge, cont, now)
     if b["diner"] is not None:
         return draw_diner_column(ch, co, v, sx, dist, b, face, u,
@@ -13008,6 +13019,7 @@ def render_street(v, now):
     draw_ind_lamps(ch, co, v, walls, v.ind_lamps, now, wet)
     if v.eye < 10.0:
         draw_station_entrances(ch, co, v, walls, now, wet)
+    draw_center_signs(ch, co, v, walls, now, wet)
     if v.suburb:
         draw_suburb(ch, co, v, walls, v.suburb, now, wet)
     for site_ in near_sites(v, 160.0):
@@ -14407,6 +14419,9 @@ def venue_at(x, z):
             if (ux - x) ** 2 + (uz - z) ** 2 < CASINO_REACH ** 2:
                 return kind, {"i": egg[0], "j": egg[1], "f": egg[2],
                               "seed": _mix(egg[0], egg[1], 3831)}
+    for _, _, _, dx, dz in near_centers(x, z, 6.0):
+        if (dx - x) ** 2 + (dz - z) ** 2 < CASINO_REACH ** 2:
+            return "center", {"door": (dx, dz)}
     if zone_depth("airport", ci, cj) > -2.0:
         gx, gz = gate_door(ci, cj)
         if (gx - x) ** 2 + (gz - z) ** 2 < CASINO_REACH ** 2:
@@ -15867,6 +15882,7 @@ CHEAT_PLACES = [
     ("-", "a metro station", "metro"),
     ('"', "the library", "library"),
     (".", "a flight", "flight"),
+    (",", "pokemon center", "center"),
     (";", "lemonade, 3am", "lemonade"),
     ("?", "the stargazer", "telescope"),
     ("r", "ramen", "ramen"),
@@ -16832,6 +16848,20 @@ def find_place(x, z, kind):
         return _fountain_spot(x, z)
     if kind == "university":
         return _university_spot(x, z)
+    if kind == "center":
+        for _, _, f, dx, dz in sorted(
+                near_centers(x, z, 1500.0),
+                key=lambda c_: (c_[3] - x) ** 2 + (c_[4] - z) ** 2):
+            if (dx - x) ** 2 + (dz - z) ** 2 < CHEAT_SKIP ** 2:
+                continue
+            nx, nz = FACES[f]
+            # Back across the street, as far as it goes, to see the ball on
+            # the roof: from the doors it is over the top of the screen.
+            back = probe(dx, dz, math.atan2(nx, nz), 22.0) - 1.5
+            if back < 6.0:
+                continue
+            return dx + nx * back, dz + nz * back, math.atan2(-nx, -nz)
+        return None
     if kind == "flight":
         sp = find_place(x, z, "airport")
         if sp is None:
@@ -16902,7 +16932,8 @@ def find_place(x, z, kind):
     return None
 
 
-CHEAT_MORE = ["university", "library", "metro", "flight"]     # the fifth column
+# The fifth column.
+CHEAT_MORE = ["university", "library", "metro", "flight", "center"]
 _panel_page = [0]       # which page an 80-column panel is showing
 
 
@@ -16935,7 +16966,7 @@ def draw_cheats(ch, co, note):
            ("&", "a blackout"), ("#", "a fog night"),
            names["lemonade"], names["telescope"], names["fountain"],
            ("`", "close")]
-    more = [("", "CAMPUS & METRO")] + [names[k] for k in CHEAT_MORE if k in names]
+    more = [("", "AND THE REST")] + [names[k] for k in CHEAT_MORE if k in names]
     col = 18
     if width >= col * 5 + 7:
         columns = (left, middle, right, sky, more)     # room for all five
@@ -18327,6 +18358,198 @@ def train_phase(now, seed):
     return "gone", METRO_EVERY - METRO_IN - METRO_DWELL - METRO_OUT - (t - METRO_OUT)
 
 
+# --- the Pokemon Center ------------------------------------------------------
+CENTER_ODDS = 140      # one city block in this many has one: a few in town
+CENTER_H = 8.0         # two storeys, a red roof, wider than it is tall
+_center_cache = {}
+
+
+def center_of_block(bi, bj):
+    """The Pokemon Center in this city block, if it has one: (i, j, door
+    face) of a building with a street front, out of the parks, the woods and
+    the placed parts of town. Like the stations, a hash of the block - and
+    never asking lot(), since lot() asks this."""
+    key = (bi, bj)
+    if key in _center_cache:
+        return _center_cache[key]
+    hit = None
+    if _mix(bi, bj, 4401) % CENTER_ODDS == 0:
+        for i in range(bi * XP + 1, bi * XP + XP):
+            for j in range(bj * ZP + 1, bj * ZP + ZP):
+                if (is_open(i, j) or woods_at(i, j) or landmark_at(i, j) is not None
+                        or any(zone_depth(k_, i, j) > -2 for k_ in ZONES)
+                        or DISTRICTS[district_at(i, j)]["park"]):
+                    continue
+                f = _road_face(i, j, _mix(i, j, 4403) % 4)
+                if f is not None:
+                    hit = (i, j, f)
+                    break
+            if hit:
+                break
+    _evict(_center_cache, 6000)
+    _center_cache[key] = hit
+    return hit
+
+
+def center_at(i, j):
+    """The door face, if this cell is a Pokemon Center."""
+    c = center_of_block(i // XP, j // ZP)
+    return c[2] if c is not None and c[:2] == (i, j) else None
+
+
+def near_centers(x, z, reach):
+    """(i, j, face, door x, door z) of every Center within reach."""
+    b0, b1 = int((x - reach) // (XP * CELL)), int((x + reach) // (XP * CELL))
+    c0, c1 = int((z - reach) // (ZP * CELL)), int((z + reach) // (ZP * CELL))
+    for bi in range(b0, b1 + 1):
+        for bj in range(c0, c1 + 1):
+            c = center_of_block(bi, bj)
+            if c is None:
+                continue
+            dx, _, dz = face_point(c[0], c[1], c[2], CELL * 0.5, 1.4, 0.0)
+            if (dx - x) ** 2 + (dz - z) ** 2 < reach * reach:
+                yield c[0], c[1], c[2], dx, dz
+
+
+def draw_center_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
+                       cont, now):
+    """One column of a Pokemon Center: white walls, the red roof band all
+    the way round, windows lit, and on the front the sliding glass doors."""
+    scale = v.fy / dist
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    if edge:
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx], co[y][sx] = "|", CONCRETE
+        return roof, None, foot, None, ()
+    prev_roof, prev_awn, prev_foot = cont[:3]
+    facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "=", ROU_RED)
+    door = face == b["center"] and abs(u - CELL * 0.5) < 1.3
+    for y in range(max(r_lo, roof + 1), min(r_hi, foot - 1) + 1):
+        h = v.eye + (v.horizon - y) / scale
+        if h > b["height"] - 2.2:
+            ch[y][sx], co[y][sx] = "#", ROU_RED                  # the roof band
+        elif door and h < 3.0:
+            side_ = abs(u - CELL * 0.5) > 1.0 or h > 2.7
+            ch[y][sx] = "|" if side_ else ("#" if (y + sx) % 2 else ":")
+            co[y][sx] = CONCRETE if side_ else BULB              # the glass doors
+        elif 1.2 < h < 4.6 and int(u * 1.6) % 3 and not door:
+            ch[y][sx], co[y][sx] = "#", GOLD                     # windows, lit
+        else:
+            ch[y][sx], co[y][sx] = (".", CONCRETE) if (y + sx) % 3 == 0 else (" ", 0)
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, None, foot, None, ()
+
+
+CENTER_BALL = (" ,---. ", "(==o==)", " `---' ")
+
+
+def draw_center_signs(ch, co, v, walls, now, wet):
+    """Over the doors, under the roof band: the ball, lit, red over white;
+    and the name on the band, near enough to read. The ball was on the roof
+    first, and from across a street that is over the top of the screen."""
+    for i, j, f, dx, dz in near_centers(v.x, v.z, 120.0):
+        x, _, z = face_point(i, j, f, CELL * 0.5, 0.2, 0.0)
+        pr = v.project(x, 4.4, z)
+        if pr is None:
+            continue
+        cx, cy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+        for r, line in enumerate(CENTER_BALL):
+            for k, c in enumerate(line):
+                if c != " ":
+                    put_cell(ch, co, v, walls, cx - 3 + k, cy - 1 + r, dist - 0.2, c,
+                             ROU_RED if r == 0 or (r == 1 and c == "=") else
+                             (FLASH if c == "o" else BULB))
+        if dist < 60.0:
+            pr = v.project(x, CENTER_H - 1.1, z)
+            if pr is not None:
+                word = "POKEMON CENTER"
+                for k, c in enumerate(word):
+                    put_cell(ch, co, v, walls, int(round(pr[0])) - len(word) // 2 + k,
+                             int(round(pr[1])), pr[2] - 0.2, c, BULB)
+
+
+JOY = ("   _+_   ",
+       " @(^_^)@ ",
+       "  /|=|\\  ",
+       "  /   \\  ")
+CENTER_SAYS = ["Welcome to the Pokemon Center!",
+               "We restore your tired Pokemon to full health.",
+               "Would you like to rest your Pokemon?"]
+CENTER_DONE = ["Thank you for waiting.",
+               "We've restored your Pokemon to full health.",
+               "We hope to see you again!"]
+CENTER_HEAL = 3.4      # seconds of the machine going
+CENTER_CHIME = "~ ding  ding  da-da-ding ~"
+
+
+def render_center(width, height, now, poke, note):
+    """Inside: the tiled floor, the counter, Nurse Joy behind it and the
+    healing machine beside her - six balls lighting up one by one when she
+    takes them - and the PC in the corner."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    # The back wall, its red stripe, the floor tiles.
+    for x in range(width):
+        ch[1][x], co[1][x] = "=", ROU_RED
+    for y in range(height // 2 + 2, height - 2):
+        for x in range(width):
+            if (x // 4 + y) % 2 == 0 and x % 4 == 0:
+                ch[y][x], co[y][x] = "+", CONCRETE
+    mid = width // 2
+    top = max(2, height // 2 - 7)
+    t = None if poke["heal"] is None else now - poke["heal"]
+    # The speech, over her head.
+    says = CENTER_SAYS if t is None or t < 0 else (
+        ["Okay, I'll take your Pokemon for a few seconds."] if t < CENTER_HEAL
+        else CENTER_DONE)
+    for r, line in enumerate(says):
+        _text(ch, co, top + r, max(1, mid - len(line) // 2), line, STAR)
+    # Nurse Joy, the counter.
+    jy = top + len(says) + 1
+    bow = t is not None and CENTER_HEAL <= t < CENTER_HEAL + 1.5
+    for r, line in enumerate(JOY):
+        if bow and r == 1:
+            line = " @(-_-)@ "                       # the bow at the end
+        for k, c in enumerate(line):
+            if c != " " and 0 <= jy + r < height:
+                ch[jy + r][mid - 4 + k] = c
+                co[jy + r][mid - 4 + k] = (ROU_RED if c == "+" else
+                                           FLASH if c == "@" else STAR)
+    cy = jy + len(JOY)
+    for x in range(max(0, mid - 20), min(width, mid + 21)):
+        if cy < height:
+            ch[cy][x], co[cy][x] = "=", ROU_RED
+            if cy + 1 < height:
+                ch[cy + 1][x], co[cy + 1][x] = "|" if x % 6 == 0 else " ", CONCRETE
+    # The healing machine, to her right: six balls, lit one by one.
+    hx = mid + 12
+    lit = 0 if t is None or t < 0 else min(6, int(t / (CENTER_HEAL * 0.6 / 6)) + 1)
+    flash = t is not None and CENTER_HEAL * 0.6 <= t < CENTER_HEAL and int(t * 6) % 2
+    _text(ch, co, jy, hx, "+-------+", CONCRETE)
+    for r in range(2):
+        for k in range(3):
+            n = r * 3 + k
+            on = n < lit
+            _text(ch, co, jy + 1 + r, hx + 1 + k * 2, "o" if on else ".",
+                  (STAR if flash else ROU_RED) if on else CONCRETE)
+        _text(ch, co, jy + 1 + r, hx, "|", CONCRETE)
+        _text(ch, co, jy + 1 + r, hx + 8, "|", CONCRETE)
+    _text(ch, co, jy + 3, hx, "+-------+", CONCRETE)
+    if t is not None and 0 <= t < CENTER_HEAL:
+        _text(ch, co, jy - 1, hx + 4 - len(CENTER_CHIME) // 2, CENTER_CHIME, GOLD)
+    # The PC, in the corner.
+    px = max(1, mid - 34)
+    for r, line in enumerate((" ______ ", "|  PC  |", "|______|", "  _||_  ")):
+        _text(ch, co, jy + r, px, line, CROWN_BLUE if r == 1 else CONCRETE)
+    menu = "h  ask Nurse Joy to heal your Pokemon     c  use the PC     x  leave"
+    _text(ch, co, height - 2, max(1, mid - len(menu) // 2), menu[:width - 2], GOLD_DIM)
+    if note:
+        _text(ch, co, height - 1, max(1, mid - len(note) // 2), note[:width - 2],
+              GOLD_DIM)
+    return ch, co
+
+
 def draw_station_entrances(ch, co, v, walls, now, wet):
     """At the kerb: the post with the M on it, red and white, lit; the railings
     round the stairs; the light coming up out of them; and the station's
@@ -18826,6 +19049,7 @@ def main(stdscr):
     metro = None                # on a platform or riding: {"phase", ...}
     flight = None               # at the gate or in the air: {"phase", ...}
     reading = False             # in the library's reading room
+    poke = None                 # in a Pokemon Center: {"door", "heal"}
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -18939,6 +19163,7 @@ def main(stdscr):
                             metro = None
                             flight = None
                             reading = False
+                            poke = None
                             ledger["jumps"] += 1
                             street = True
                             note = "-> " + name
@@ -18957,6 +19182,22 @@ def main(stdscr):
                                 note = "-> the woods rave (starting)"
                                 note_at = now
                         break
+            elif poke is not None and key not in (ord("q"), CHEAT_KEY):
+                if key in (27, ord("x"), ord("X")):
+                    # Back out the way you came in, a few steps clear of the
+                    # doors, facing the street.
+                    cam_x = poke["door"][0] - poke["nx"] * 3.0
+                    cam_z = poke["door"][1] - poke["nz"] * 3.0
+                    yaw = math.atan2(-poke["nx"], -poke["nz"])
+                    poke = None
+                    note, note_at = "the doors slide shut behind you", now
+                elif key in (ord("h"), ord("H")):
+                    if poke["heal"] is None or now - poke["heal"] > CENTER_HEAL + 1.5:
+                        poke["heal"] = now
+                elif key in (ord("c"), ord("C")):
+                    note = read_in_library(stdscr, CENTER_PC,
+                                           "SOMEONE'S PC: logged off")
+                    now = note_at = _clock[0] = time.monotonic()
             elif reading and key not in (ord("q"), CHEAT_KEY):
                 book_ = [b_ for b_ in LIBRARY_BOOKS if key in (ord(b_[0]),
                                                               ord(b_[0].upper()))]
@@ -19318,11 +19559,12 @@ def main(stdscr):
                 lift = {"up": False, "t0": now, "t": party}
         if (lift is not None or on_roof is not None or sewer is not None
                 or booth is not None or taxi is not None or metro is not None
-                or flight is not None or reading):
+                or flight is not None or reading or poke is not None):
             fwd = side = 0.0            # on the roof you can only look round
             autopilot = False
             if (lift is not None or sewer is not None or booth is not None or taxi
-                    or metro is not None or flight is not None or reading):
+                    or metro is not None or flight is not None or reading
+                    or poke is not None):
                 spin = 0.0
         if flight is not None and flight["phase"] == "air":
             # Looking round eases, the way your head would.
@@ -19383,7 +19625,7 @@ def main(stdscr):
         was_ = venue
         venue = (venue_at(cam_x, cam_z)
                  if street and sewer is None and taxi is None and metro is None
-                 and flight is None and not reading else None)
+                 and flight is None and not reading and poke is None else None)
         # Going past faster than a walk, a doorway does not take you in: you
         # were going somewhere else. Slow to a walk or stop at it and it does,
         # and once you are in, you stay in.
@@ -19392,6 +19634,12 @@ def main(stdscr):
             venue = None
         if venue is not None and venue[0] == "gate":
             flight = {"phase": "gate", "home": venue[1]["home"]}
+            fwd = side = spin = 0.0
+            autopilot = False
+            venue = None
+        if venue is not None and venue[0] == "center":
+            poke = {"door": venue[1]["door"], "heal": None, "nx": math.sin(yaw),
+                    "nz": math.cos(yaw)}
             fwd = side = spin = 0.0
             autopilot = False
             venue = None
@@ -19613,6 +19861,10 @@ def main(stdscr):
                 seated = (venue[1]["seed"], now)    # sat down just now
             ch, co = render_ramen(venue[1], width, height, now, seated[1])
             hud = RAMEN_HUD % (cam_x, cam_z)
+        elif street and poke is not None:
+            ch, co = render_center(width, height, now, poke,
+                                   note if now - note_at < 4.0 else "")
+            hud = " the Pokemon Center  -  h heal, c the PC, x leave "
         elif street and reading:
             ch, co = render_reading_room(width, height, now,
                                          note if now - note_at < 4.0 else "")
@@ -19680,6 +19932,8 @@ def main(stdscr):
                     else "")
                 or ("  ~ the hum of the highway ~" if hwy_near(cam_x, cam_z)
                     else "")
+                or ("  ~ a Pokemon Center: walk in ~"
+                    if any(True for _ in near_centers(cam_x, cam_z, 10.0)) else "")
                 or ("  ~ the terminal: walk in for a flight ~"
                     if gate_near(cam_x, cam_z) else "")
                 or ("  ~ the metro: e goes down the stairs ~"
