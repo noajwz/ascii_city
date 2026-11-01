@@ -4735,6 +4735,83 @@ check("and a fast frame is cut into steps no longer than a cell can be tunnelled
       ac.STEP_MAX < ac.CELL * 0.5 and fastest_ / ac.STEP_MAX < 12,
       "%.1f units a frame at the top" % fastest_)
 
+# --- the factories ---------------------------------------------------------------
+fh_ = [ac.zone_home("industrial", ti * ac.WOODS_TILE, tj * ac.WOODS_TILE)
+       for ti in range(-2, 3) for tj in range(-2, 3)]
+check("there are factories in every tile, clear of the woods and the river",
+      all(ac.industrial_at(*h_) and not ac.woods_at(*h_) and not ac.water_at(*h_)
+          and ac.district(*h_) is ac.INDUSTRIAL for h_ in fh_)
+      and not any(ac.woods_at(h_[0] + di, h_[1] + dj)
+                  or ac.river_at(h_[0] + di, h_[1] + dj)
+                  for h_ in fh_ for di in range(-32, 33, 4) for dj in range(-20, 21, 4)
+                  if ac.industrial_at(h_[0] + di, h_[1] + dj)))
+hi_, hj_ = fh_[12]
+sheds_ = [ac.lot(i, j)["height"] for i in range(hi_ - 20, hi_ + 20)
+          for j in range(hj_ - 10, hj_ + 10)
+          if not ac.is_open(i, j) and all(
+              ac.lot(i, j)[k_] is None for k_ in ("warehouse", "casino", "club",
+                                                 "cinema", "temple", "arcade", "diner",
+                                                 "tower", "exchange"))]
+check("low sheds, so the stacks stand over them",
+      sheds_ and max(sheds_) <= ac.INDUSTRIAL["hi"] + 1e-9, "%.1f" % max(sheds_))
+stacks_ = [ac.chimney_at(i, j) for i in range(hi_ - 28, hi_ + 29)
+           for j in range(hj_ - 16, hj_ + 17)]
+stacks_ = [c_ for c_ in stacks_ if c_ is not None]
+check("and chimneys, some", 5 < len(stacks_) < 300 and all(
+    c_["top"] > c_["base"] + 20 for c_ in stacks_), "%d" % len(stacks_))
+fsp = ac.find_place(x0, z0, "industrial")
+fv = ac.View(fsp[0], fsp[1], fsp[2], 100, 30)
+seen_ = [0]
+real_ch = ac.draw_chimney
+def count_ch(ch_, co_, v_, walls_, c_, now_, wet_):
+    before = sum(r.count("|") + r.count("#") for r in ch_)
+    real_ch(ch_, co_, v_, walls_, c_, now_, wet_)
+    seen_[0] += sum(r.count("|") + r.count("#") for r in ch_) - before
+ac.draw_chimney = count_ch
+ac.render_street(fv, 300.0)
+ac.draw_chimney = real_ch
+check("the menu stands you on a factory street looking at stacks",
+      ac.industrial_at(int(fsp[0] / ac.CELL + ac.BIG) - ac.BIG,
+                       int(fsp[1] / ac.CELL + ac.BIG) - ac.BIG) and seen_[0] > 30,
+      "%d chimney cells" % seen_[0])
+site_ = ac.zone_site(hi_, hj_)
+check("the building site is open ground, not road, in the factories",
+      all(ac.is_open(i, j) and ac.site_at(i, j) and not ac.road_at(i, j)
+          for i in range(site_[0], site_[2] + 1)
+          for j in range(site_[1], site_[3] + 1)))
+ssp = ac.find_place(x0, z0, "site")
+sv = ac.View(ssp[0], ssp[1], ssp[2], 100, 30)
+stext = "\n".join("".join(r) for r in ac.render_street(sv, 300.0)[0])
+check("and from across the road you see it, the hoarding and all", ssp is not None
+      and list(ac.near_sites(sv, 160.0)) and "OUT" in stext, str(ssp))
+wh_ = ac.zone_warehouse(hi_, hj_)
+wlot = ac.lot(wh_[0], wh_[1])
+check("the old factory stands by it with a street front", wlot["warehouse"] is not None
+      and ac.road_at(wh_[0] + ac.FACES[wh_[2]][0], wh_[1] + ac.FACES[wh_[2]][1]))
+wsp = ac.find_place(x0, z0, "warehouse")
+check("the menu stands you outside it",
+      wsp is not None and ac.venue_at(wsp[0], wsp[1]) is None
+      and "old factory" in ac.factory_hint(wsp[0], wsp[1]))
+st_ = 0.0
+while st_ < 12.0 and ac.venue_at(wsp[0] + math.sin(wsp[2]) * st_,
+                                 wsp[1] + math.cos(wsp[2]) * st_) is None:
+    st_ += 0.25
+win_ = ac.venue_at(wsp[0] + math.sin(wsp[2]) * st_, wsp[1] + math.cos(wsp[2]) * st_)
+check("and walk in, and it is a rave", win_ is not None and win_[0] == "warehouse")
+frames_ = ["\n".join("".join(r) for r in
+                     ac.render_warehouse(win_[1], 100, 30, 300.0 + k * 0.1)[0])
+           for k in range(8)]
+check("inside: the stage, the DJ, the crowd, the way out", all(
+    "[O]" in f_ and "[o_o]" in f_ and "the way out" in f_ for f_ in frames_)
+      and len(set(frames_)) > 4)
+for w_, h_ in ((20, 8), (40, 16), (240, 70)):
+    ac.render_warehouse(win_[1], w_, h_, 300.0)
+check("and any size of window is fine", True)
+lamps_ = ac.near_ind_lamps(fv, 60.0)
+check("sodium lamps down the factory streets, at the kerb", len(lamps_) > 4
+      and all(ac.road_at(int(lx / ac.CELL + ac.BIG) - ac.BIG,
+                         int(lz / ac.CELL + ac.BIG) - ac.BIG) for lx, lz in lamps_))
+
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
 cl2 = ac.Claw(0, [], w_)
