@@ -19,6 +19,43 @@ Ruff is the linter, run with defaults (`ruff check . && ruff format .`) — ther
 pyproject/ruff.toml, and ruff is not installed on the machine this was written on. Keep lines under
 89 characters; that is the one rule the code has actually been held to.
 
+## Big windows: one scaling system
+
+**This is the system for every screen that gets bigger on a big window, not just the casino.**
+The owner plays zoomed out on a MacBook (3024x1964), and there the screens that are fixed
+drawings - the casino's games, the interiors - were tiny islands in the middle. The casino was the
+first to scale (see The casino, big); more are to follow, and they all work the same way:
+
+- **One threshold, in characters, for everything.** The scale is `min(width // 150,
+  height // 44)`, capped at 3 (`casino_scale()`, `CASINO_W`, `CASINO_H`, `CASINO_MAX`): 2 from a
+  300x88 window up, 3 from 450x132. The game never sees the zoom level or the screen - only the
+  terminal's columns and rows - so where the switch lands depends on the screen, the window, the
+  font and its size. **On the owner's MacBook, full screen, in Fixedsys Excelsior, it switches at
+  exactly 5x zoomed out, and they want it kept there.** Do not change `CASINO_W` / `CASINO_H`
+  without asking; there, the 300 columns are what decide it, the rows are already past 88.
+- **Every screen uses that same scale.** No screen gets thresholds of its own, or two screens
+  would switch at different zooms. When the second screen is scaled, rename `casino_scale()` to a
+  general name and have both call it; likewise `_casino_big` (the `z` switch) becomes one switch
+  for every big screen, and `z` keeps working wherever a scaled screen is.
+- **At scale 1 nothing changes.** A screen on an ordinary window - 1920x1080 and the like -
+  stays exactly what it was. Prove it: render it from the old code and the new at several sizes
+  below the threshold, with each colour given its own number, and compare frame for frame (as was
+  done for the casino at 60x20 to 299x87).
+- **How a screen scales:** shapes worked out from maths (the wheel, pegs, a track, a graph) grow
+  by raising their caps and spacing - redrawn, never stretched. Fixed ASCII drawings get a second,
+  bigger version (`draw_slot_big()`, `draw_blackjack_big()`), with a size helper (`slot_size(k)`,
+  `table_size(k)`) the layout uses in place of the old fixed numbers. Numbers, titles and short
+  words go in block letters with `_blocks()` (`BIG_FONT` plus `CASINO_FONT`), each dot `sx`
+  columns by `sy` rows; `sx = sy = k - 1` for lettering has kept things in proportion so far.
+  **Ordinary text stays small** - a terminal cannot draw a letter bigger than its font, and a
+  sentence in block letters is four columns a letter. Keep cells about twice as wide as tall
+  (sx = 2 * sy for something meant to look square).
+- **Tests for each scaled screen:** the scale at a few sizes either side of the threshold; the big
+  version has its block letters and big drawings and the small one does not; nothing big overlaps
+  its neighbours (the wheel's rim got into the slot machine once); every mode of the screen draws
+  without error at several big sizes, odd ones too; `z` gives the small screen back on a big
+  window; and a pty case played in a 300x90 window.
+
 
 An endless procedural city with **two renderers** over one screen loop. Both `render_skyline()` and
 `render_street()` fill the same `(ch, co)` pair of character/colour grids, so the blit loop, the HUD
@@ -1160,7 +1197,9 @@ small, the cards with their ranks in block letters and the suit in two corners, 
 win and the outcome in block letters. **Ordinary text stays small** — the paytable, the keys,
 "dealer" — because a terminal cannot draw a letter bigger than its font, and a sentence in block
 letters is four columns a letter. Plinko, the races and High Flyer are not scaled yet. `z` in the
-casino turns the big room off and on (`_casino_big`), for comparing the two on one window.
+casino turns the big room off and on (`_casino_big`), for comparing the two on one window. This
+is the first screen of the scaling system described near the top of this file - follow that for
+the next ones.
 
 ## People walking
 
