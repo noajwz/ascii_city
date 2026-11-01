@@ -4936,6 +4936,44 @@ for w_, h_ in ((20, 8), (39, 15), (240, 70)):
     ac.render_telescope(w_, h_, 110.0, 100.0, nt_)
 check("and any size of window is fine", True)
 
+# --- the Strip ---------------------------------------------------------------------
+sth = [ac.strip_home(ti * ac.WOODS_TILE, tj * ac.WOODS_TILE)
+       for ti in range(-2, 3) for tj in range(-2, 3)]
+check("a Strip in every tile, clear of the woods, the river and the other zones",
+      all(ac.district(*h_) is ac.STRIP for h_ in sth) and not any(
+          ac.woods_at(h_[0] + di, h_[1] + dj) or ac.water_at(h_[0] + di, h_[1] + dj)
+          or ac.industrial_at(h_[0] + di, h_[1] + dj)
+          or ac.suburb_at(h_[0] + di, h_[1] + dj)
+          for h_ in sth for di in range(-6, 6) for dj in range(-60, 61, 3)))
+shi2, shj2 = sth[12]
+check("the boulevard runs its whole length, four lanes wide",
+      all(ac.road_at(i, j) and ac.is_open(i, j) for i in range(shi2 - 2, shi2 + 2)
+          for j in range(shj2 - 60, shj2 + 61)))
+hotels_ = [ac.lot(i, j)
+           for i in list(range(shi2 - 6, shi2 - 2)) + list(range(shi2 + 2, shi2 + 6))
+           for j in range(shj2 - 60, shj2 + 61) if not ac.is_open(i, j)]
+check("towers either side, tall, every one of them a hotel",
+      hotels_ and all(h_["strip"] is not None and h_["height"] >= 28 for h_ in hotels_))
+doors2 = [h_["casino"] for h_ in hotels_ if h_["casino"] is not None]
+check("and every hotel a casino, its door on the boulevard", len(doors2) >= 16 and all(
+    ac.strip_road(c_["i"] + ac.FACES[c_["door"]][0], c_["j"] + ac.FACES[c_["door"]][1])
+    for c_ in doors2), "%d" % len(doors2))
+c2 = doors2[0]
+pd2 = ac.face_point(c2["i"], c2["j"], c2["door"], c2["u"], 1.4, 0.0)
+check("which you walk into", ac.venue_at(pd2[0], pd2[2])[0] == "casino")
+ssp3 = ac.find_place(x0, z0, "strip")
+sv3 = ac.View(ssp3[0], ssp3[1], ssp3[2], 100, 30)
+signs3 = ac.strip_signs(sv3, 200.0)
+s3 = "\n".join("".join(r) for r in ac.render_street(sv3, 300.0)[0])
+check("the menu stands you at one end, and up it the hotels' signs",
+      len(signs3) >= 6 and any(w_ in s3 for _, _, st_ in signs3
+                               for w_ in st_["name"].split() if len(w_) > 3))
+lit3 = sum(row.count("#") for row in s3.splitlines())
+check("a wall of light", lit3 > 600, "%d lit cells" % lit3)
+check("and no El or tunnel through it", not ac.el_runs(shi2 * ac.CELL, shj2 * ac.CELL)
+      and not any(ac.tunnel_at(i, j) for i in range(shi2 - 6, shi2 + 6)
+                  for j in range(shj2 - 60, shj2 + 61)))
+
 # --- one wallet for the whole city --------------------------------------------
 w_ = ac.Wallet()
 cl2 = ac.Claw(0, [], w_)

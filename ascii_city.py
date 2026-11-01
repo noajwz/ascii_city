@@ -559,6 +559,13 @@ HEADLAND = dict(WOODS, name="the headland", park=False)
 # The factories: low sheds in rust, a ridge of saw-tooth roofs, a few lit
 # windows high up for the night shift, roller doors, bare bulbs over them and
 # somebody on a break outside.
+# The Strip: towers of light, every one a hotel and a casino. Their signs are
+# the pylons out at the kerb, so nothing hangs on the walls.
+STRIP = dict(key="", name="the strip", weight=0, scale=2.0, lo=28.0, hi=56.0,
+             dens=(0.65, 0.9), flat=0.0, hung=0.0, smoke=0.3, bulb=0.0,
+             neon=None, lantern=0.0, park=False,
+             glyphs="08@*", band="=", mullion=False, ground="#", gap=3,
+             pal="near", roof="=", whole_floors=False, cjk=False)
 # The suburbs: one storey or two, warm windows, a pitched roof, nothing lit
 # but the porch and the television.
 SUBURBS = dict(key="", name="the suburbs", weight=0, scale=0.3, lo=4.5, hi=6.8,
@@ -580,6 +587,8 @@ def district(i, j):
         return INDUSTRIAL
     if suburb_at(i, j):
         return SUBURBS
+    if strip_at(i, j):
+        return STRIP
     if headland_at(i, j):
         return HEADLAND
     return DISTRICTS[district_at(i, j)]
@@ -1552,7 +1561,7 @@ def tunnel_run(i, j):
     hit = None
     span = road_span(i, XP, 91)
     if (span is not None and not woods_at(i, j) and not el_at(i) and not grand_at(i)
-            and not hwy_at(i) and not suburb_at(i, j)):
+            and not hwy_at(i) and not suburb_at(i, j) and not strip_at(i, j)):
         a = span[0]
         b = j // ZP
         lng = None
@@ -1930,7 +1939,12 @@ def woods_at(i, j):
 ZONES = {
     "industrial": dict(salt=3701, off_i=240, off_j=118, half_i=28, half_j=16),
     "suburbs": dict(salt=3801, off_i=240, off_j=370, half_i=40, half_j=24),
+    "strip": dict(salt=3901, off_i=20, off_j=240, half_i=7, half_j=61),
 }
+STRIP_HALF = 60        # the boulevard's half length, in cells
+STRIP_NAMES = ["GOLDEN PALM", "NEON OASIS", "SILVER COMET", "LUCKY SEVENS",
+               "DIAMOND DUNES", "STARLIGHT", "THE BIG WHEEL", "CROWN JEWEL",
+               "MIDNIGHT SUN", "RED VELVET", "THE HIGH ROLLER", "FORTUNA"]
 _zone_cache = {}
 
 
@@ -1965,6 +1979,30 @@ def industrial_at(i, j):
 
 def suburb_at(i, j):
     return zone_depth("suburbs", i, j) > 0.0
+
+
+def strip_home(i, j):
+    return zone_home("strip", i, j)
+
+
+def strip_at(i, j):
+    """On the Strip: the boulevard, four cells wide, and four cells of
+    hotel either side of it, for STRIP_HALF cells either way."""
+    ci, cj = strip_home(i, j)
+    return ci - 6 <= i <= ci + 5 and abs(j - cj) <= STRIP_HALF
+
+
+def strip_road(i, j):
+    """The boulevard itself, or one of the city's cross streets through."""
+    ci, _ = strip_home(i, j)
+    return ci - 2 <= i <= ci + 1 or _is_road(j, ZP, 137)
+
+
+def strip_hotel(i, j):
+    """(side, segment) of the hotel this Strip cell is part of: one hotel
+    between each pair of cross streets, each side."""
+    ci, cj = strip_home(i, j)
+    return (-1 if i < ci else 1), j // ZP
 
 
 _sub_road_cache = {}
@@ -2405,6 +2443,8 @@ def road_at(i, j):
         return False
     if suburb_at(i, j):
         return suburb_road(i, j)
+    if strip_at(i, j):
+        return strip_road(i, j)
     return _is_road(i, XP, 91) or _is_road(j, ZP, 137)
 
 
@@ -2502,6 +2542,8 @@ def is_open(i, j):
             hit = True          # fairground, headland, promenade, a building site
         elif suburb_at(i, j):
             hit = not (suburb_house(i, j) or suburb_tree(i, j))
+        elif strip_at(i, j):
+            hit = strip_road(i, j)              # the rest is hotel
         elif woods_at(i, j):
             # Trails, the hollow, and otherwise trees thick enough that the
             # open cells do not join up: off a trail you get a few cells in and
@@ -2775,7 +2817,27 @@ def lot(i, j):
                 b["height"] = 11.0
                 b["warehouse"] = {"door": wh[2], "u": CELL * 0.5, "i": i, "j": j,
                                   "height": 11.0, "seed": _mix(i, j, 3721) % 9973}
-        if d["park"] or b["warehouse"] is not None or d is SUBURBS:
+        b["strip"] = None
+        if d is STRIP:
+            side, seg = strip_hotel(i, j)
+            m = _mix(side, seg, 3903)
+            b["height"] = 28.0 + m % 28
+            name = STRIP_NAMES[(m >> 5) % len(STRIP_NAMES)]
+            b["strip"] = {"name": name, "tone": ((m >> 9) % 97) / 97.0,
+                          "side": side, "seg": seg, "seed": m % 9973}
+            # Its door: the cell at the middle of its frontage, onto the
+            # boulevard - and it is a casino, the whole way in.
+            ci_, _ = strip_home(i, j)
+            front = ci_ - 3 if side < 0 else ci_ + 2
+            mid = seg * ZP + ZP // 2
+            if i == front and j == mid and not _is_road(j, ZP, 137):
+                b["casino"] = {"door": 1 if side < 0 else 0, "u": CELL * 0.5,
+                               "name": name.split()[-1][:10],
+                               "tone": b["strip"]["tone"],
+                               "sign_tone": b["strip"]["tone"], "phase": 1.0,
+                               "i": i, "j": j, "height": b["height"], "strip": True}
+        if (d["park"] or b["warehouse"] is not None or d is SUBURBS
+                or d is STRIP):
             pass
         elif _mix(i, j, 909) % CLUB_ODDS == 0:
             b["height"] = rng.uniform(7.5, 12.0)      # squat, windowless
@@ -4710,6 +4772,198 @@ def render_warehouse(wh, width, height, now):
     return ch, co
 
 
+def draw_strip_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
+                      cont, now):
+    """One column of a hotel on the Strip: every window lit gold, a band of
+    bulbs chasing round it every few floors in the hotel's own colour, neon
+    up every bay, and the crown at the top lit solid."""
+    scale = v.fy / dist
+    st = b["strip"]
+    n = len(NEON)
+    lit, dark = NEON[int(st["tone"] * n) % n]
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    if edge:
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx], co[y][sx] = "|", lit
+        return roof, None, foot, None, ()
+    prev_roof, prev_awn, prev_foot = cont[:3]
+    facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "=", FLASH if v.flash else lit)
+    frac = u / BAY_W - int(u / BAY_W)
+    bay = int(u / BAY_W)
+    narrow = BAY_W * v.fx / dist <= 2.0
+    for y in range(max(r_lo, roof + 1), min(r_hi, foot - 1) + 1):
+        h = v.eye + (v.horizon - y) / scale
+        floor = int(h / FLOOR_H)
+        if b["height"] - h < 2.5:
+            ch[y][sx], co[y][sx] = "#", lit                       # the crown
+        elif floor % 4 == 3 and h - floor * FLOOR_H < 0.7:
+            on = chase(u + floor * 0.7, now)                      # a bulb band
+            ch[y][sx], co[y][sx] = ("o" if on else "."), (lit if on else dark)
+        elif not narrow and frac < 0.12:
+            ch[y][sx], co[y][sx] = "|", dark                      # the neon trim
+        elif h < FLOOR_H:
+            ch[y][sx], co[y][sx] = ("#" if (bay + int(now * 2)) % 3 else "="), GOLD
+        elif _mix(bay * 7 + face, floor, st["seed"]) % 9:
+            ch[y][sx], co[y][sx] = "#", GOLD if (bay + floor) % 5 else BULB
+        else:
+            ch[y][sx], co[y][sx] = ".", GOLD_DIM
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, None, foot, None, ()
+
+
+def strip_signs(v, reach):
+    """Each hotel's pylon sign in front of you: (x, z, hotel), at the kerb of
+    the boulevard in front of the middle of its frontage."""
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    hi, hj = strip_home(ci, cj)
+    if (abs(ci - hi) * CELL > reach + 40
+            or abs(cj - hj) * CELL > STRIP_HALF * CELL + reach):
+        return []
+    out = []
+    for seg in range((hj - STRIP_HALF) // ZP, (hj + STRIP_HALF) // ZP + 1):
+        for side in (-1, 1):
+            j = seg * ZP + ZP // 2
+            if abs(j - hj) > STRIP_HALF:
+                continue
+            i = hi - 3 if side < 0 else hi + 2
+            b = lot(i, j)
+            if b.get("strip") is None:
+                continue
+            x = (hi - 2 + 0.25 if side < 0 else hi + 2 - 0.25) * CELL
+            z = (j + 0.5) * CELL + 3.5
+            rx, rz = x - v.x, z - v.z
+            if rx * rx + rz * rz < reach * reach and rx * v.dx + rz * v.dz > -CELL:
+                out.append((x, z, b["strip"]))
+    return out
+
+
+def draw_strip_sign(ch, co, v, walls, x, z, st, now):
+    """A pylon at the kerb, and on it the hotel's name in the big font, in its
+    own colour, ringed with bulbs chasing round - or, further off, in
+    ordinary letters on a lit board. Screen space, for the marquee's reason."""
+    for h in range(0, 12):
+        put_point(ch, co, v, walls, x, h * 1.0, z, "|", CONCRETE)
+    pr = v.project(x, 15.0, z)
+    if pr is None:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    n = len(NEON)
+    lit = NEON[int(st["tone"] * n) % n][0]
+    name = st["name"]
+    big = dist < 55.0 and big_width(name) + 4 < v.width
+    w = (big_width(name) if big else len(name)) + 4
+    hgt = 6 if big else 1
+    x0, y0 = sx - w // 2, sy - hgt // 2 - 1
+    for k in range(w):
+        for y in (y0, y0 + hgt + 1):
+            on = chase(k * 0.6 + (y - y0), now)
+            put_cell(ch, co, v, walls, x0 + k, y, dist, "o" if on else ".",
+                     GOLD if on else GOLD_DIM)
+    for r in range(1, hgt + 1):
+        for x_ in (x0, x0 + w - 1):
+            on = chase(r * 0.6 + x_ - x0, now)
+            put_cell(ch, co, v, walls, x_, y0 + r, dist, "o" if on else ".",
+                     GOLD if on else GOLD_DIM)
+        for x_ in range(x0 + 1, x0 + w - 1):
+            put_cell(ch, co, v, walls, x_, y0 + r, dist, " ", GOLD_DIM)
+    flash = int(now * 1.5 + st["seed"]) % 6 == 0
+    if big:
+        lx = sx - big_width(name) // 2
+        for dx, dy, _ in big_cells(name):
+            put_cell(ch, co, v, walls, lx + dx, y0 + 1 + dy, dist, "#",
+                     FLASH if flash else lit)
+    else:
+        for k, c in enumerate(name.center(w - 2)):
+            put_cell(ch, co, v, walls, x0 + 1 + k, y0 + 1, dist, c,
+                     FLASH if flash else lit)
+
+
+def draw_strip_median(ch, co, v, walls, now, wet):
+    """Down the middle of the boulevard: palms, lit from below, and between
+    them pools whose fountains dance - rows of jets going up and down in
+    waves, white and cyan."""
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    hi, hj = strip_home(ci, cj)
+    mx = hi * CELL
+    if abs(mx - v.x) > 160.0:
+        return
+    z0 = (hj - STRIP_HALF) * CELL
+    z1 = (hj + STRIP_HALF + 1) * CELL
+    k0 = max(int((v.z - 140.0 - z0) // 15.0), 0)
+    k1 = min(int((v.z + 140.0 - z0) // 15.0) + 1, int((z1 - z0) // 15.0))
+    beat = now * 1.2
+    for k in range(k0, k1 + 1):
+        z = z0 + k * 15.0
+        rz = z - v.z
+        if (mx - v.x) * v.dx + rz * v.dz < -CELL:
+            continue
+        if _is_road(int(z / CELL + BIG) - BIG, ZP, 137):
+            continue                                 # a cross street, not a palm
+        if k % 2 == 0:
+            # A palm: the trunk leaning a little, the fronds, the uplight.
+            lean = 0.3 * math.sin(k * 1.7)
+            for h in range(7):
+                put_point(ch, co, v, walls, mx + lean * h / 7.0, h * 0.9, z, "|", BARK)
+            top = 6.4
+            for a, b_, g in ((-1.2, -0.5, "/"), (1.2, -0.5, "\\"), (-0.6, 0.2, "\\"),
+                             (0.6, 0.2, "/"), (0.0, 0.5, "|")):
+                for t in (0.3, 0.6, 1.0):
+                    put_point(ch, co, v, walls, mx + lean + a * t, top + b_ * t, z, g,
+                              GRASS)
+            put_lit(ch, co, v, walls, mx, 0.2, z, "*", EMBER, max(wet, 0.3), now)
+        else:
+            # The fountain: a pool, and jets dancing in a wave along it.
+            for t in range(-6, 7):
+                put_point(ch, co, v, walls, mx, 0.3, z + t * 0.5, "=", CURB)
+            for t in range(-5, 6, 2):
+                jet = 1.0 + 4.5 * abs(math.sin(beat + t * 0.35 + k))
+                hh = 0.5
+                while hh < jet:
+                    put_point(ch, co, v, walls, mx, hh, z + t * 0.5,
+                              "|" if hh < jet - 0.6 else "'", NEON[2][0]
+                              if int(hh * 2 + now * 4) % 3 else STAR)
+                    hh += 0.6
+                put_point(ch, co, v, walls, mx, jet, z + t * 0.5, "*", FLASH)
+
+
+def draw_strip_traffic(ch, co, v, walls, now, wet):
+    """Up and down the boulevard, cruising: two lanes each way, a car every
+    so often, now and then a stretch limousine, headlights coming and tail
+    lights going."""
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    hi, hj = strip_home(ci, cj)
+    if abs(hi * CELL - v.x) > 120.0:
+        return
+    z0, z1 = (hj - STRIP_HALF) * CELL, (hj + STRIP_HALF + 1) * CELL
+    for lane, (off, d) in enumerate(((-7.0, 1), (-3.2, 1), (3.2, -1), (7.0, -1))):
+        x = hi * CELL + off
+        speed = 9.0 + lane * 1.3
+        for k in range(14):
+            m = _mix(lane, k, 3907)
+            if m % 3 == 0:
+                continue
+            along = (k * 46.0 + now * speed * d + (m >> 4) % 30) % (z1 - z0)
+            z = z0 + along
+            rz = z - v.z
+            if (rz * rz + (x - v.x) ** 2 > 110.0 ** 2
+                    or (x - v.x) * v.dx + rz * v.dz < 2.0):
+                continue
+            if abs(x - v.x) < 1.5 and abs(rz) < 5.0:
+                continue                              # not through you
+            limo = m % 11 == 0
+            colour = NEON[(m >> 3) % len(NEON)][1]
+            blit_sprite(ch, co, v, walls, (LIMO if limo else CAR), x, z, 0.0, 1.35,
+                        4.0 if limo else 1.9, STAR if limo else colour)
+            coming = (rz * d) < 0
+            for side in (-0.6, 0.6):
+                put_lit(ch, co, v, walls, x + side, 0.6, z - d * (2.0 if limo else 1.0),
+                        "o", FLASH if coming else ROU_RED, max(wet, 0.4), now)
+
+
+LIMO = [" .------------. ", "/_|__|__|__|__|_\\", "'o------------o'"]
+
+
 def draw_exchange_front(ch, co, v, walls, ex, world, now):
     """STOCK EXCHANGE over the columns, and the ticker running across the
     front under it - the market going by, green when it went up and red when
@@ -4966,6 +5220,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     if b["warehouse"] is not None:
         return draw_warehouse_column(ch, co, v, sx, dist, b, face, u,
                                      r_lo, r_hi, edge, cont, now)
+    if b.get("strip") is not None:
+        return draw_strip_column(ch, co, v, sx, dist, b, face, u,
+                                 r_lo, r_hi, edge, cont, now)
     if b["diner"] is not None:
         return draw_diner_column(ch, co, v, sx, dist, b, face, u,
                                  r_lo, r_hi, edge, cont, now)
@@ -9364,7 +9621,8 @@ def el_runs(x, z):
     """The line stops at the woods and at the headland, where the avenue does."""
     i = int(x / CELL + BIG) - BIG
     j = int(z / CELL + BIG) - BIG
-    return not woods_at(i, j) and not headland_at(i, j) and not suburb_at(i, j)
+    return (not woods_at(i, j) and not headland_at(i, j) and not suburb_at(i, j)
+            and not strip_at(i, j))
 
 
 def near_els(v, reach):
@@ -11638,6 +11896,13 @@ def render_street(v, now):
         draw_empty_lot(ch, co, v, walls, p_, now, wet)
     for c_ in near_chimneys(v, 260.0 if v.eye < 10.0 else ROOF_REACH):
         draw_chimney(ch, co, v, walls, c_, now, wet)
+    if v.eye < 10.0:
+        draw_strip_median(ch, co, v, walls, now, wet)
+        draw_strip_traffic(ch, co, v, walls, now, wet)
+        far_first = sorted(strip_signs(v, 200.0),
+                           key=lambda s_: -((s_[0] - v.x) ** 2 + (s_[1] - v.z) ** 2))
+        for sx_, sz_, st_ in far_first:
+            draw_strip_sign(ch, co, v, walls, sx_, sz_, st_, now)
     draw_car_park(ch, co, v, walls, now, wet)
     draw_walkers(ch, co, v, walls, now, wet)
     draw_traffic(ch, co, v, walls, now, wet)
@@ -14383,6 +14648,7 @@ CHEAT_PLACES = [
     ("]", "building site", "site"),
     ("}", "empty lot", "plot"),
     ("0", "the suburbs", "suburbs"),
+    (":", "the strip", "strip"),
     (";", "lemonade, 3am", "lemonade"),
     ("?", "the stargazer", "telescope"),
     ("r", "ramen", "ramen"),
@@ -14405,7 +14671,7 @@ CHEAT_PLACES = [
 ]
 
 # Placed parts of town, listed after the picked ones.
-CHEAT_ZONES = ["industrial", "site", "plot", "suburbs"]
+CHEAT_ZONES = ["industrial", "site", "plot", "suburbs", "strip"]
 
 # The panel's groups, by what you would go there for.
 CHEAT_GROUPS = [
@@ -14725,6 +14991,23 @@ def _suburb_spot(x, z):
                 # Along the street, the way it runs furthest before it bends.
                 return px, pz, max((k * math.pi / 2 for k in range(4)),
                                    key=lambda a: probe(px, pz, a, 60.0))
+    return None
+
+
+def _strip_spot(x, z):
+    """At one end of the nearest Strip, in the middle of the boulevard,
+    looking up the length of it."""
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    homes = sorted((strip_home(ti * WOODS_TILE, tj * WOODS_TILE)
+                    for ti in range(ci // WOODS_TILE - 1, ci // WOODS_TILE + 2)
+                    for tj in range(cj // WOODS_TILE - 1, cj // WOODS_TILE + 2)),
+                   key=lambda h: (h[0] - ci) ** 2 + (h[1] - cj) ** 2)
+    for hi, hj in homes:
+        px, pz = (hi - 1 + 0.5) * CELL, (hj - STRIP_HALF + 3 + 0.5) * CELL
+        if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
+            continue
+        if can_stand(px, pz):
+            return px, pz, 0.0
     return None
 
 
@@ -15270,6 +15553,8 @@ def find_place(x, z, kind):
         return _factory_spot(x, z, kind)
     if kind == "suburbs":
         return _suburb_spot(x, z)
+    if kind == "strip":
+        return _strip_spot(x, z)
     if kind in ("lemonade", "telescope"):
         return _egg_spot(x, z, kind)
     if kind == "exchange":
@@ -15333,7 +15618,7 @@ def draw_cheats(ch, co, note):
     left = groups["NIGHTLIFE"] + [("/", "closing time")] + gap + groups["FUN"] \
         + gap + groups["EAT"]
     middle = groups["MONEY"] + [("+", "+$1000"), ("%", "jackpot next")]
-    middle += gap + [("", "PARTS OF TOWN")] + [(d["key"], d["name"]) for d in DISTRICTS]
+    middle += [("", "PARTS OF TOWN")] + [(d["key"], d["name"]) for d in DISTRICTS]
     middle += [names[kind] for kind in CHEAT_ZONES if kind in names]
     right = groups["AROUND TOWN"] + gap + groups["OUT OF TOWN"] + gap + groups["VIEWS"]
     sky = [("", "WEATHER & SKY"),
