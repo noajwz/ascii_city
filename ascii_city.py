@@ -75,7 +75,6 @@ BODY = 1.15            # how close to a wall you can get
 NEAR_Z = 0.6
 MAX_VIEW = 130.0       # how far a wall ray is followed
 GROUND_FAR = 80.0
-HALF_GROUND = 12000     # cells: from a 200x60 window, high up, half-resolution ground
 PLANE = 0.9            # half-width of the camera plane: about 84 degrees across
 FLOOR_H = 2.4          # world height of one storey
 BAY_W = 1.6            # world width of one window bay
@@ -7412,18 +7411,6 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
     # ever needs - at seventy units up the nearest is a hundred away - so the
     # ground goes as far as the view does.
     far = GROUND_FAR if v.eye < 10.0 else v.reach
-    # High up on a big window, the ground is worked out at half resolution
-    # and each point it skips copies its neighbour: from a roof or the plane
-    # every point is a long way off, the ground was over half of the frame,
-    # and at 300 by 90 that frame was half as long again as the time there
-    # is for one. On the street and on smaller windows, every point.
-    half = v.eye >= 10.0 and v.width * v.height >= HALF_GROUND
-    done = set()                    # the rows worked out in full this frame
-    # Which cells of each row are ground, worked out or copied. Only those
-    # are copied from, and only into a cell nothing else has drawn in: from
-    # up there the buildings stand in the same rows as the ground, and a
-    # copy that took their cells doubled every roof.
-    marks = {}
 
     for y in range(v.horizon + 1, v.height):
         d = v.eye * v.fy / (y - v.horizon)
@@ -7436,14 +7423,6 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
         li = lj = None
         solid = False
         x0 = y0 = 0.0
-        copy_row = half and (y - v.horizon) % 2 == 0 and y - 1 in done
-        if half and not copy_row:
-            done.add(y)
-        up_c, up_o = ch[y - 1], co[y - 1]
-        row_c, row_o = ch[y], co[y]
-        if half:
-            up_m = marks.get(y - 1)
-            mark = marks[y] = bytearray(width)
 
         for sx in range(width):
             x, z = wx, wz
@@ -7451,19 +7430,6 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
             wz += stepz
             if y <= wall_base[sx]:
                 continue
-            if half and row_c[sx] == " ":
-                if copy_row and up_m is not None and up_m[sx]:
-                    row_c[sx], row_o[sx] = up_c[sx], up_o[sx]       # the row above's
-                    mark[sx] = 1
-                    if (y - 1, sx) in v.water:
-                        v.water.add((y, sx))
-                    continue
-                if sx & 1 and mark[sx - 1]:
-                    row_c[sx], row_o[sx] = row_c[sx - 1], row_o[sx - 1]  # its left
-                    mark[sx] = 1
-                    if (y, sx - 1) in v.water:
-                        v.water.add((y, sx))
-                    continue
             i = int(x * inv + BIG) - BIG
             j = int(z * inv + BIG) - BIG
             if i != li or j != lj:
@@ -7475,8 +7441,6 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 hollow = hollow and v.hollow is not None
             if solid:
                 continue
-            if half:
-                mark[sx] = 1
 
             # How far this point is from the nearest wall decides whether it is
             # pavement, the kerb line, or road.
