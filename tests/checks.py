@@ -4784,6 +4784,27 @@ sv = ac.View(ssp[0], ssp[1], ssp[2], 100, 30)
 stext = "\n".join("".join(r) for r in ac.render_street(sv, 300.0)[0])
 check("and from across the road you see it, the hoarding and all", ssp is not None
       and list(ac.near_sites(sv, 160.0)) and "OUT" in stext, str(ssp))
+plots_ = ac.zone_plots(hi_, hj_)
+empties_ = [p_ for p_ in plots_ if p_["kind"] == "empty"]
+areas_ = [(p_["rect"][2] - p_["rect"][0] + 1) * (p_["rect"][3] - p_["rect"][1] + 1)
+          for p_ in empties_]
+check("empty plots behind fences, several, some of them big",
+      len(empties_) >= 3 and max(areas_) >= 16,
+      "%d plots, areas %s" % (len(empties_), areas_))
+check("open ground with no road through them, and none overlapping",
+      all(ac.is_open(i, j) and not ac.road_at(i, j) and ac.plot_at(i, j) is p_
+          for p_ in plots_ for i in range(p_["rect"][0], p_["rect"][2] + 1)
+          for j in range(p_["rect"][1], p_["rect"][3] + 1)))
+check("each with a fence, a sign, and something left on it",
+      all(p_["fence"] in ("chain", "hoard") and p_["sign"] in ac.PLOT_SIGNS
+          and p_["junk"]
+          for p_ in empties_))
+psp = ac.find_place(x0, z0, "plot")
+pv = ac.View(psp[0], psp[1], psp[2], 100, 30)
+ptext = "\n".join("".join(r) for r in ac.render_street(pv, 300.0)[0])
+check("the menu stands you looking at the biggest, its fence in view",
+      psp is not None and list(ac.near_plots(pv, 110.0))
+      and ("x" in ptext or "#" in ptext))
 wh_ = ac.zone_warehouse(hi_, hj_)
 wlot = ac.lot(wh_[0], wh_[1])
 check("the old factory stands by it with a street front", wlot["warehouse"] is not None

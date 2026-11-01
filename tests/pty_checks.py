@@ -167,7 +167,8 @@ ok &= report("pace: up to very fast, walk, run into a wall, back down", *run(
     + [(b"w", .5)], cols=100, rows=30))
 ok &= report("the factories: the zone, the site, into the rave and out", *run(
     [(b"`", .5), (b"9", 1.5), (b"W", 1.0), (b"`", .5), (b"]", 1.5), (b"`", .5),
-     (b"[", 1.5)] + [(b"w", .25)] * 14 + [(b"x", 1.0), (b"s", .6), (b"s", .6)],
+     (b"}", 1.5), (b"w", 1.0), (b"`", .5), (b"[", 1.5)] + [(b"w", .25)] * 14
+    + [(b"x", 1.0), (b"s", .6), (b"s", .6)],
     cols=100, rows=30))
 ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)], cols=100, rows=30))
 print("ALL OK" if ok else "FAILURES")

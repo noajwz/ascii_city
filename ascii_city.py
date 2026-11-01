@@ -1981,11 +1981,84 @@ def zone_site(ci, cj):
     return hit
 
 
-def site_at(i, j):
+PLOT_SIZES = [(2, 2), (3, 2), (2, 3), (3, 3), (5, 4), (4, 5), (6, 4)]
+PLOT_SIGNS = ["KEEP OUT", "FOR SALE", "NO DUMPING", "PRIVATE", "DANGER", "SOLD"]
+PLOT_JUNK = ["skip", "wreck", "tyres", "pallets", "lamp", "barrel"]
+_plot_cache = {}
+
+
+def zone_plots(ci, cj):
+    """The fenced plots in the factories round (ci, cj): the building site
+    first, then the empty ones - a handful, mostly a few cells, one or two
+    most of a block - wherever there is ground with no road through it, clear
+    of each other and of the site. Each with its fence, its sign, and what
+    has been left on it."""
+    hit = _plot_cache.get((ci, cj))
+    if hit is None:
+        site = zone_site(ci, cj)
+        hit = [{"rect": site, "kind": "site", "seed": _mix(ci, cj, 3751)}]
+        taken = [site]
+        # Block by block across the zone: one in three gets a plot, grown
+        # out from the middle of the block until it meets a road, as big as
+        # its size says - so the big ones take most of a block.
+        bi0, bi1 = (ci - 26) // XP, (ci + 26) // XP
+        bj0, bj1 = (cj - 14) // ZP, (cj + 14) // ZP
+        for bi in range(bi0, bi1 + 1):
+            for bj in range(bj0, bj1 + 1):
+                m = _mix(bi, bj, 3753)
+                if m % 3 or len(hit) >= 9:
+                    continue
+                w, h = PLOT_SIZES[(m >> 3) % len(PLOT_SIZES)]
+                a, b = bi * XP + XP // 2, bj * ZP + ZP // 2
+                if road_at(a, b) or zone_depth("industrial", a, b) < 2.0:
+                    continue
+                i0 = i1 = a
+                j0 = j1 = b
+                grew = True
+                while grew:
+                    grew = False
+                    for d_ in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                        n0, n1 = i0 + min(0, d_[0]), i1 + max(0, d_[0])
+                        m0, m1 = j0 + min(0, d_[1]), j1 + max(0, d_[1])
+                        if n1 - n0 + 1 > w or m1 - m0 + 1 > h:
+                            continue
+                        if all(not road_at(x_, z_) and not water_at(x_, z_)
+                               and zone_depth("industrial", x_, z_) > 1.0
+                               for x_ in range(n0, n1 + 1) for z_ in range(m0, m1 + 1)):
+                            i0, i1, j0, j1 = n0, n1, m0, m1
+                            grew = True
+                rect = (i0, j0, i1, j1)
+                if (i1 - i0 + 1) * (j1 - j0 + 1) < 4:
+                    continue
+                if any(not (rect[2] + 1 < t[0] or t[2] + 1 < rect[0]
+                            or rect[3] + 1 < t[1] or t[3] + 1 < rect[1])
+                       for t in taken):
+                    continue
+                taken.append(rect)
+                area = (i1 - i0 + 1) * (j1 - j0 + 1)
+                hit.append({"rect": rect, "kind": "empty", "seed": m % 99991,
+                            "fence": "chain" if m % 5 > 1 else "hoard",
+                            "sign": PLOT_SIGNS[(m >> 6) % len(PLOT_SIGNS)],
+                            "junk": [PLOT_JUNK[(m >> (9 + 3 * n)) % len(PLOT_JUNK)]
+                                     for n in range(1 + area // 6)]})
+        _plot_cache[(ci, cj)] = hit
+    return hit
+
+
+def plot_at(i, j):
+    """The fenced plot this cell is in, or None."""
     if not industrial_at(i, j):
-        return False
-    i0, j0, i1, j1 = zone_site(*zone_home("industrial", i, j))
-    return i0 <= i <= i1 and j0 <= j <= j1
+        return None
+    for p_ in zone_plots(*zone_home("industrial", i, j)):
+        i0, j0, i1, j1 = p_["rect"]
+        if i0 <= i <= i1 and j0 <= j <= j1:
+            return p_
+    return None
+
+
+def site_at(i, j):
+    """Fenced off and nothing built: the building site, or an empty plot."""
+    return plot_at(i, j) is not None
 
 
 _warehouse_cache = {}
@@ -4030,6 +4103,102 @@ def near_sites(v, reach):
         yield site
 
 
+def near_plots(v, reach):
+    """The empty plots in front of you."""
+    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
+    if zone_depth("industrial", ci, cj) < -reach / CELL:
+        return
+    for p_ in zone_plots(*zone_home("industrial", ci, cj))[1:]:
+        i0, j0, i1, j1 = p_["rect"]
+        rx = (i0 + i1 + 1) * 0.5 * CELL - v.x
+        rz = (j0 + j1 + 1) * 0.5 * CELL - v.z
+        if rx * rx + rz * rz < reach * reach and rx * v.dx + rz * v.dz > -4 * CELL:
+            yield p_
+
+
+def _plot_gate(rect):
+    """Which side the gate is on: the one with a road outside it, or the
+    south one. As (side, gate x or z)."""
+    i0, j0, i1, j1 = rect
+    for side, cells in (("s", [(a, j0 - 1) for a in range(i0, i1 + 1)]),
+                        ("n", [(a, j1 + 1) for a in range(i0, i1 + 1)]),
+                        ("w", [(i0 - 1, b) for b in range(j0, j1 + 1)]),
+                        ("e", [(i1 + 1, b) for b in range(j0, j1 + 1)])):
+        if any(road_at(a, b) for a, b in cells):
+            return side
+    return "s"
+
+
+def draw_empty_lot(ch, co, v, walls, p_, now, wet):
+    """An empty plot behind its fence: chain-link on posts or a plywood
+    hoarding, a gate in it on the road side with a sign, and inside on the
+    mud whatever was left there - a skip, a burnt-out car, tyres, pallets,
+    a lamp that still works now and then, somebody's fire in a barrel."""
+    i0, j0, i1, j1 = p_["rect"]
+    x0, z0, x1, z1 = i0 * CELL, j0 * CELL, (i1 + 1) * CELL, (j1 + 1) * CELL
+    gate = _plot_gate(p_["rect"])
+    chain = p_["fence"] == "chain"
+    wood = tone_colour("rust", 0.6)
+    mx, mz = (x0 + x1) * 0.5, (z0 + z1) * 0.5
+    sides = (("s", [(x0 + k * 0.5, z0) for k in range(int((x1 - x0) * 2) + 1)]),
+             ("n", [(x0 + k * 0.5, z1) for k in range(int((x1 - x0) * 2) + 1)]),
+             ("w", [(x0, z0 + k * 0.5) for k in range(int((z1 - z0) * 2) + 1)]),
+             ("e", [(x1, z0 + k * 0.5) for k in range(int((z1 - z0) * 2) + 1)]))
+    for side, pts in sides:
+        for n, (px_, pz_) in enumerate(pts):
+            if side == gate and abs((px_ - mx) if side in "sn" else (pz_ - mz)) < 1.3:
+                continue                             # the gate, open
+            if chain:
+                post = n % 4 == 0
+                for h in (0.5, 1.1, 1.7):
+                    if post:
+                        put_point(ch, co, v, walls, px_, h, pz_, "|", CONCRETE)
+                    elif (n + int(h * 2)) % 2 == 0:
+                        put_point(ch, co, v, walls, px_, h, pz_, "x", CURB)
+                put_point(ch, co, v, walls, px_, 2.2, pz_, "-", CURB)
+            else:
+                for h in (0.4, 0.9, 1.4):
+                    put_point(ch, co, v, walls, px_, h, pz_, "#", wood)
+                put_point(ch, co, v, walls, px_, 1.9, pz_, "=", CURB)
+    # What has been left on it, spread over the plot by its seed.
+    seed = p_["seed"]
+    for n, junk in enumerate(p_["junk"]):
+        m = _mix(seed, n, 3757)
+        jx = x0 + 1.5 + (m % 1000) / 1000.0 * (x1 - x0 - 3.0)
+        jz = z0 + 1.5 + ((m >> 10) % 1000) / 1000.0 * (z1 - z0 - 3.0)
+        if junk == "skip":
+            blit_sprite(ch, co, v, walls, ["[______]", "|______|"], jx, jz, 0.0, 1.3,
+                        2.4, tone_colour("rust", 0.8))
+        elif junk == "wreck":
+            blit_sprite(ch, co, v, walls, ["  ____  ", "_/x__x\\_", "(_)--(_)"], jx, jz,
+                        0.0, 1.4, 2.6, CONCRETE)
+        elif junk == "tyres":
+            blit_sprite(ch, co, v, walls, [" OO ", "OOOO"], jx, jz, 0.0, 0.9, 1.4, BARK)
+        elif junk == "pallets":
+            blit_sprite(ch, co, v, walls, ["#=#=#", "=#=#=", "#=#=#"], jx, jz, 0.0, 0.8,
+                        1.6, BARK)
+        elif junk == "lamp":
+            for h in (0.6, 1.6, 2.6, 3.6):
+                put_point(ch, co, v, walls, jx, h, jz, "|", CONCRETE)
+            if _mix(seed, int(now * 7), 3759) % 5:
+                put_lit(ch, co, v, walls, jx, 4.3, jz, "o", BULB, max(wet, 0.3), now)
+        else:                                        # a fire in a barrel
+            blit_sprite(ch, co, v, walls, ["|##|", "|__|"], jx, jz, 0.0, 1.0, 0.8,
+                        tone_colour("rust", 0.5))
+            for k in range(3):
+                put_point(ch, co, v, walls, jx + (k - 1) * 0.2, 1.2 + 0.2 * (
+                    (int(now * 9) + k) % 3), jz, "*^'"[(int(now * 7) + k) % 3],
+                    EMBER_HOT if k != 1 else EMBER)
+    # The sign, on the gate, last.
+    gx, gz = {"s": (mx, z0), "n": (mx, z1), "w": (x0, mz), "e": (x1, mz)}[gate]
+    pr = v.project(gx, 1.4, gz)
+    if pr is not None and pr[2] < 45.0:
+        word = p_["sign"]
+        for n_, c_ in enumerate(word):
+            put_cell(ch, co, v, walls, int(round(pr[0])) - len(word) // 2 + n_,
+                     int(round(pr[1])), pr[2] - 0.1, c_, ROU_RED)
+
+
 def render_warehouse(wh, width, height, now):
     """Inside the old factory: the roof trusses and the broken skylights with
     the night coming through, a stage of pallets at the far end with the DJ on
@@ -4880,6 +5049,11 @@ def collect_glow(v, now, wet):
         _spill(glow, lx, lz, 7.0, EMBER)          # sodium, on the factory streets
     for site_ in near_sites(v, 70.0):
         _spill(glow, (site_[0] + 1.5) * CELL, (site_[1] + 1.0) * CELL, 9.0, BULB_DIM)
+    for p_ in near_plots(v, 70.0):
+        if "barrel" in p_["junk"]:
+            i0_, j0_, i1_, j1_ = p_["rect"]
+            _spill(glow, (i0_ + i1_ + 1) * 0.5 * CELL, (j0_ + j1_ + 1) * 0.5 * CELL,
+                   5.0, EMBER)
     for _, cx_, cz_, (dx_, dz_), kind, g in near_cars(v, now, 70.0, every=True):
         _spill(glow, cx_ + dx_ * 5.0, cz_ + dz_ * 5.0, 2.5, BULB_DIM)
         if kind == "police":
@@ -5389,7 +5563,9 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 rock = not wet_cell and not solid and headland_at(i, j)
                 tarmac = not wet_cell and not solid and car_park_at(i, j)
                 mh = None if solid or wet_cell else manhole_at(i, j)
-                dirt = not solid and not wet_cell and site_at(i, j)
+                plot_ = None if solid or wet_cell else plot_at(i, j)
+                dirt = plot_ is not None
+                weeds = dirt and plot_["kind"] == "empty"
                 hollow = (woods and v.hollow is not None
                           and hollow_at(i, j))
                 lane = None
@@ -5420,9 +5596,12 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 edge = CELL - fz_
 
             if dirt:
-                # The building site: churned mud and puddles, no paving.
+                # The building site: churned mud and puddles, no paving; an
+                # empty plot, weeds coming up through it.
                 h_ = _mix(int(x * 2.5), int(z * 2.5), 3733) % 9
-                if h_ < 2:
+                if h_ == 3 and weeds:
+                    ch[y][sx], co[y][sx] = '"', GRASS
+                elif h_ < 2:
                     ch[y][sx], co[y][sx] = ("." if h_ else ","), BARK
                 elif h_ == 2:
                     g_ = glow.get(((int(x / GLOW_CELL + BIG) - BIG) * 65536)
@@ -11010,6 +11189,8 @@ def render_street(v, now):
     draw_ind_lamps(ch, co, v, walls, v.ind_lamps, now, wet)
     for site_ in near_sites(v, 160.0):
         draw_site(ch, co, v, walls, site_, now, wet)
+    for p_ in near_plots(v, 110.0):
+        draw_empty_lot(ch, co, v, walls, p_, now, wet)
     for c_ in near_chimneys(v, 260.0 if v.eye < 10.0 else ROOF_REACH):
         draw_chimney(ch, co, v, walls, c_, now, wet)
     draw_car_park(ch, co, v, walls, now, wet)
@@ -13748,6 +13929,7 @@ CHEAT_PLACES = [
     ("[", "factory rave", "warehouse"),
     ("9", "the factories", "industrial"),
     ("]", "building site", "site"),
+    ("}", "empty lot", "plot"),
     ("r", "ramen", "ramen"),
     ("d", "diner", "diner"),
     ("^", "sky deck", "tower"),
@@ -13768,7 +13950,7 @@ CHEAT_PLACES = [
 ]
 
 # Placed parts of town, listed after the picked ones.
-CHEAT_ZONES = ["industrial", "site", "suburbs"]
+CHEAT_ZONES = ["industrial", "site", "plot", "suburbs"]
 
 # The panel's groups, by what you would go there for.
 CHEAT_GROUPS = [
@@ -14094,9 +14276,17 @@ def _factory_spot(x, z, kind):
             if can_stand(p[0], p[2]):
                 return p[0], p[2], math.atan2(-nx, -nz)
         return None
-    if kind == "site":
-        i0, j0, i1, j1 = zone_site(hi, hj)
-        tx, tz = (i0 + 1.5) * CELL, (j0 + 1.0) * CELL
+    if kind in ("site", "plot"):
+        plots = zone_plots(hi, hj)
+        if kind == "plot":
+            if len(plots) < 2:
+                return None
+            big = max(plots[1:], key=lambda p_: (p_["rect"][2] - p_["rect"][0] + 1)
+                      * (p_["rect"][3] - p_["rect"][1] + 1))
+            i0, j0, i1, j1 = big["rect"]
+        else:
+            i0, j0, i1, j1 = zone_site(hi, hj)
+        tx, tz = (i0 + i1 + 1) * 0.5 * CELL, (j0 + j1 + 1) * 0.5 * CELL
         for r in range(2, 8):
             for a in range(16):
                 ang = a * math.tau / 16
@@ -14574,7 +14764,7 @@ def find_place(x, z, kind):
         return _doorway(x, z, 2501, "arcade", ARCADE_ODDS)
     if kind == "temple":
         return _temple_spot(x, z)
-    if kind in ("industrial", "site", "warehouse"):
+    if kind in ("industrial", "site", "warehouse", "plot"):
         return _factory_spot(x, z, kind)
     if kind == "exchange":
         return _doorway(x, z, 2701, "exchange", EXCHANGE_ODDS)
