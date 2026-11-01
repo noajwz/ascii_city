@@ -2391,6 +2391,24 @@ been so before; showing things through buildings had only hidden it. Two parts:
   airport), off on a blackout block, and only up high (`v.eye >= 10`): the street is frame for
   frame unchanged. About 5 ms at 300x90: the roof and the plane are 26 ms a frame with it.
 
+**Buildings blinked in and out from the plane**, and from a roof. `cast()` stopped at
+`v.depth` (22) walls, and up high a ray meets a wall in every cell of every block it passes over
+- most of them hidden behind the nearer ones - so the 22 were used up two or three blocks off.
+Further buildings were drawn only where a ray ran down a street, which changed as the plane
+moved: whole buildings went and came back from one frame to the next (up to 4.4% of the
+building cells in a frame of level flight). It also left the middle of the plane's window half
+empty, which was most of "the black blob". Up high now (`v.eye >= 10`) `cast()` is a generator
+taken to `WALL_REACH_HIGH` (170) with no count at all - a distance holds still where a count did
+not - and a wall whose roof line falls under what is already drawn in the column is skipped
+before any of the rest of the work. Past 170 the ground, `draw_far_lamps()` and `far_lights()`
+carry on to `ROOF_REACH`. Tried and dropped: every wall to 520 (65 ms a frame), every wall to
+200 (35), and all to 170 plus only the tall ones beyond (worse: looking up every block to 520 to
+find the tall ones cost more than drawing them). At 300x90: roof 21 ms, plane 25-30. The check
+in `checks.py` flies twelve frames level and asserts the building cells never change by 2% in
+one. `far_lights()` is keyed on the row's place under the horizon, not its distance: keyed on
+distance it reshuffled itself whenever the plane climbed or came down. On the street nothing of
+this applies: `cast(v, ..., v.depth)` as ever.
+
 **Do not draw the ground at half resolution to buy more.** It was tried: every other row and
 column worked out and the rest copied from a neighbour. It was faster (roof 28, plane 32), and
 the owner tried it and said no - the flight looked blurry; and copying into cells nothing had
