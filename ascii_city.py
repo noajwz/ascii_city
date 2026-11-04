@@ -6582,7 +6582,7 @@ def draw_walls(ch, co, v, now):
     # ray happened to run down a street, which changed as the plane flew, so
     # they blinked in and out. Up there every building out to WALL_REACH_HIGH
     # is drawn, however many - a distance holds still where a count did not
-    # - and the ground, the street lights and the far lights go on past it.
+    # - and the ground and the far lights go on past it.
     high = v.eye >= 10.0
     for sx in range(width):
         rdx, rdz = v.ray(sx)
@@ -7443,52 +7443,6 @@ def far_lights(ch, co, walls, y, d, k, bearings):
             continue
         row_c[sx] = ":" if (m >> 10) % 6 == 0 else "."
         row_o[sx] = (BULB_DIM, GOLD_DIM)[(m >> 13) % 2] if (m >> 4) % 7 == 0 else HAZE
-
-
-FAR_LAMP_STEP = 15.0   # units between the lamps seen from up high, along a street
-FAR_LAMP_NEAR = 60.0   # nearer than this the street's own lights are drawn
-
-
-def draw_far_lamps(ch, co, v, walls, now):
-    """From up high, the street lights: a lamp every FAR_LAMP_STEP along
-    every avenue and cross street out to the edge of what is drawn, on
-    both kerbs, sodium orange and now and then a white one. Without
-    them the city past the nearest streets was dark fronts and black road -
-    a black blob, its edge sliding along the roofs as the plane flew. They
-    are points in the world, at fixed places along the streets, so they
-    move with the city and hold still rather than flicker; a building in
-    front hides them; a blacked-out block's are off."""
-    reach = v.reach
-    ci, cj = int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG
-    n = int(reach / CELL) + 1
-    for axis, period, salt in ((0, XP, 91), (1, ZP, 137)):
-        c0 = ci if axis == 0 else cj
-        along0 = v.z if axis == 0 else v.x
-        k0 = int((along0 - reach) // FAR_LAMP_STEP)
-        k1 = int((along0 + reach) // FAR_LAMP_STEP) + 1
-        for c in range(c0 - n, c0 + n + 1):
-            span = road_span(c, period, salt)
-            if span is None or span[0] != c:
-                continue                      # once a street, from its first cell
-            for across in ((span[0] + 0.15) * CELL, (span[0] + span[1] - 0.15) * CELL):
-                for k in range(k0, k1):
-                    along = k * FAR_LAMP_STEP
-                    x, z = (across, along) if axis == 0 else (along, across)
-                    rx, rz = x - v.x, z - v.z
-                    f = rx * v.dx + rz * v.dz         # how far ahead
-                    if not FAR_LAMP_NEAR < f < reach:
-                        continue
-                    lat = rx * v.dz - rz * v.dx       # and across: in the view?
-                    if abs(lat) > f * PLANE:
-                        continue
-                    li, lj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
-                    if not road_at(li, lj):
-                        continue              # the woods, a lawn, the Strip...
-                    if v.blackout and power_off(li, lj, now):
-                        continue
-                    put_cell(ch, co, v, walls, int(round(v.cx + lat * v.fx / f)),
-                             int(round(v.horizon - (4.0 - v.eye) * v.fy / f)), f, ".",
-                             BULB if _mix(c, k, 4611) % 9 == 0 else EMBER)
 
 
 def draw_ground(ch, co, v, walls, glow, wet, now):
@@ -13148,8 +13102,6 @@ def render_street(v, now):
     walls = draw_walls(ch, co, v, now)
     draw_sky(ch, co, v, walls, wet, now)
     draw_ground(ch, co, v, walls, collect_glow(v, now, wet), wet, now)
-    if v.eye >= 10.0:
-        draw_far_lamps(ch, co, v, walls, now)
     tunnels = v.tunnels
     draw_tunnel_ceiling(ch, co, v, walls, now, tunnels)
     draw_flash(ch, co, v, walls, v.flash)

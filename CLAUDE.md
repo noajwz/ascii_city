@@ -2386,13 +2386,11 @@ been so before; showing things through buildings had only hidden it. Two parts:
   each column's bearing and the row's distance - the way the skyline over the horizon is done -
   so it holds still as you fly. Done in screen terms on purpose: at that range nothing should
   move, and anything worked out from world cells per point flickers.
-- **Inside it**, at night the streets were black past the 60 units the street's own lights
-  reach. `draw_far_lamps()` puts a street light every `FAR_LAMP_STEP` (15) along both kerbs of
-  every avenue and cross street out to `v.reach`, sodium orange and the odd white one - as world
-  points, so they move with the city as the plane flies, and through `put_cell()`, so a building
-  in front hides them. Only on `road_at()` cells (not the woods, the suburbs, the Strip, the
-  airport), off on a blackout block, and only up high (`v.eye >= 10`): the street is frame for
-  frame unchanged. About 5 ms at 300x90: the roof and the plane are 26 ms a frame with it.
+- **Inside it**, at night the streets are black past the 60 units the street's own lights reach,
+  and they stay that way. `draw_far_lamps()` once put a street light every 15 units along both
+  kerbs of every street out to `v.reach`, and the owner took it out again: they did not like the
+  lights filling up all the black space. Do not fill the dark between the buildings without
+  asking.
 
 **Buildings blinked in and out from the plane**, and from a roof. `cast()` stopped at
 `v.depth` (22) walls, and up high a ray meets a wall in every cell of every block it passes over
@@ -2403,7 +2401,7 @@ building cells in a frame of level flight). It also left the middle of the plane
 empty, which was most of "the black blob". Up high now (`v.eye >= 10`) `cast()` is a generator
 taken to `WALL_REACH_HIGH` (170) with no count at all - a distance holds still where a count did
 not - and a wall whose roof line falls under what is already drawn in the column is skipped
-before any of the rest of the work. Past 170 the ground, `draw_far_lamps()` and `far_lights()`
+before any of the rest of the work. Past 170 the ground and `far_lights()`
 carry on to `ROOF_REACH`. Tried and dropped: every wall to 520 (65 ms a frame), every wall to
 200 (35), and all to 170 plus only the tall ones beyond (worse: looking up every block to 520 to
 find the tall ones cost more than drawing them). At 300x90: roof 21 ms, plane 25-30. The check
