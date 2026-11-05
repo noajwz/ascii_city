@@ -5661,6 +5661,48 @@ ac.ROOF_CAT_ODDS = lr_real
 lr_seq = [ac.find_place(x0, z0, "lowroof") is not None for _ in ac.LOW_ROOFS]
 check("the menu's key goes round them all", all(lr_seq))
 
+# --- the pigeon loft, played with ------------------------------------------------
+lf_t = lr_find("loft")
+lf_s = ac.new_loft()
+check("feed them", ac.loft_key(lf_s, "f", 600.0) is None and lf_s["fed"] == 600.0)
+check("once is plenty", ac.loft_key(lf_s, "f", 605.0) is not None
+      and lf_s["fed"] == 600.0)
+check("let them out, and that is the end of the meal",
+      ac.loft_key(lf_s, "r", 606.0) is None and lf_s["fed"] is None)
+check("they cannot go twice, or eat in the air",
+      ac.loft_key(lf_s, "r", 610.0) is not None
+      and ac.loft_key(lf_s, "f", 610.0) is not None)
+check("one note at a time", ac.loft_key(lf_s, "n", 610.0) is None
+      and ac.loft_key(lf_s, "n", 611.0) is not None and lf_s["sent"] == 1
+      and ac.loft_key(lf_s, "n", 610.0 + ac.POST_TRIP + 1) is None)
+
+
+def lf_frame(st_, now_, w_=110, h_=34):
+    v_ = ac.roof_view(lf_t, ac.low_roof_yaw(lf_t), w_, h_)
+    c_ = [[" "] * w_ for _ in range(h_)]
+    ac.draw_low_roof(c_, [[0] * w_ for _ in range(h_)], v_, lf_t, now_, 0.0, st_)
+    return "\n".join("".join(r_) for r_ in c_)
+
+
+lf_a = ac.new_loft()
+lf_a["fed"] = 600.0
+check("fed, they come down to the gravel to peck",
+      "(_" in lf_frame(lf_a, 606.0) and "(_" not in lf_frame(ac.new_loft(), 606.0))
+lf_b = ac.new_loft()
+lf_b["post"] = 600.0
+lf_b["sent"] = 1
+check("and the note comes back to be read", "with a note" not in lf_frame(lf_b, 605.0)
+      and "with a note" in lf_frame(lf_b, 600.0 + ac.POST_TRIP + 1)
+      and "with a note" not in lf_frame(lf_b, 600.0 + ac.POST_TRIP + ac.NOTE_LEN + 1))
+for w_, h_ in ((80, 24), (60, 20), (49, 30), (150, 44), (300, 90), (451, 133)):
+    for st_ in (lf_a, lf_b):
+        for t_ in (600.2, 606.0, 619.7, 615.0):
+            lf_frame(st_, t_, w_, h_)
+check("all of it draws at every size", True)
+check("every note fits on two lines at 80 columns", all(
+    len(ac.bar_lines("The pigeon is back, with a note: " + n_, 74)) <= 2
+    for n_ in ac.PIGEON_NOTES))
+
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
 ac.FLASH, ac.ROU_RED = 901, 902
