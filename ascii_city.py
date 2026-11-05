@@ -3332,6 +3332,7 @@ class View:
         self.skip = None        # cells not to draw: the landmark whose roof you are on
         self.high_walls = WALL_REACH_ROOF   # up high, how far real buildings go
         self.clear = 0.0        # how much of the sky is showing, from draw_sky()
+        self.ticker_anchor = {}  # the exchange's walls: where each one's middle is
         self.roof_edge = None   # the parapet's top row per column, on an alley roof
 
     def ray(self, sx):
@@ -4162,11 +4163,61 @@ def ticker(now):
     return out
 
 
+TICKER_LOW = 4.2        # the wall of tickers round the exchange: over the door,
+TICKER_HIGH = 7.4       # and as high as can be seen from across a street
+TICKER_SPEED = 16.0     # characters a second, on the fastest row
+_ticker_strip = [None]
+
+
+def ticker_strip(now):
+    """The market as one long line, worked out once a tick: (text, a colour for
+    each character)."""
+    k = tick_of(now)
+    hit = _ticker_strip[0]
+    if hit is None or hit[0] != k:
+        runs = ticker(now)
+        hit = _ticker_strip[0] = (k, "".join(t for t, _ in runs),
+                                  [a for t, a in runs for _ in t])
+    return hit[1:]
+
+
+def draw_ticker(ch, co, v, sx, dist, b, face, r_lo, r_hi, now):
+    """The tickers, in the wall, so they go round all four sides and behind
+    anything in front of them. Rows of the market going by, every other row the
+    other way. One letter a column whichever way you see the wall from, counted
+    from the middle of that wall: spaced in world units, it reads at one distance
+    and is noise at every other. A wall is one lot wide, so block letters only
+    ever got two or three on it, and no stock's name."""
+    scale = v.fy / dist
+    top = int(round(v.horizon - (TICKER_HIGH - v.eye) * scale))
+    bot = int(round(v.horizon - (TICKER_LOW - v.eye) * scale))
+    key = (b["exchange"]["i"], b["exchange"]["j"], face)
+    anchor = v.ticker_anchor.get(key)
+    if anchor is None:
+        pr = v.project(*face_point(key[0], key[1], face, CELL * 0.5, 0.0, TICKER_LOW))
+        anchor = v.ticker_anchor[key] = int(pr[0]) if pr is not None else 0
+    text, colours = ticker_strip(now)
+    size = len(text)
+    for y in range(max(r_lo, top), min(r_hi, bot) + 1):
+        if y in (top, bot):
+            ch[y][sx], co[y][sx] = "=", GOLD
+            continue
+        ch[y][sx], co[y][sx] = " ", 0
+        row = y - top - 1
+        if row % 2:
+            continue                    # a dark line between, or it is a smear
+        line = row // 2
+        speed = TICKER_SPEED * (1.0 - (line % 3) * 0.2)
+        way = -1 if line % 2 else 1
+        n = (sx - anchor + way * int(now * speed) + line * 41) % size
+        ch[y][sx], co[y][sx] = text[n], colours[n]
+
+
 def draw_exchange_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
                          cont, now):
     """One column of the exchange: pale stone among the glass towers, a
-    column standing up the front in every bay, dark between, a cornice along
-    the top and steps at the foot."""
+    column standing up the front in every bay, lit from its foot, dark between,
+    a cornice along the top, steps at the foot - and the market going round it."""
     scale = v.fy / dist
     stone = FLASH if v.flash > 0.35 else MOON_DIM
     roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
@@ -4181,8 +4232,10 @@ def draw_exchange_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
     facade_line(ch, co, sx, cornice, None, r_lo, r_hi, "=", stone)
     frac = u / BAY_W - int(u / BAY_W)
     if BAY_W * v.fx / dist > 2.5 and 0.3 < frac < 0.6 or BAY_W * v.fx / dist <= 2.5:
+        lit = int(round(v.horizon - (TICKER_LOW * 0.55 - v.eye) * scale))
         for y in range(max(r_lo, cornice + 1), min(r_hi, foot - 1) + 1):
-            ch[y][sx], co[y][sx] = "|", stone                # a column
+            ch[y][sx] = "|"                                  # a column
+            co[y][sx] = stone if v.flash > 0.35 or y < lit else BULB
     else:
         for y in range(max(r_lo, cornice + 1), min(r_hi, foot - 1) + 1):
             if (y + sx) % 5 == 0:
@@ -4191,6 +4244,7 @@ def draw_exchange_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
     for y in range(max(r_lo, steps), min(r_hi, foot) + 1):
         ch[y][sx], co[y][sx] = "_" if (y - steps) % 2 == 0 else "=", stone
     facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    draw_ticker(ch, co, v, sx, dist, b, face, r_lo, r_hi, now)
     return roof, None, foot, None, ()
 
 
@@ -6124,28 +6178,28 @@ def clock_hint(x, z):
 
 
 def draw_exchange_front(ch, co, v, walls, ex, world, now):
-    """STOCK EXCHANGE over the columns, and the ticker running across the
-    front under it - the market going by, green when it went up and red when
-    it came down. Screen space, for the casino marquee's reason: a ticker
-    you cannot read is a stripe."""
+    """STOCK EXCHANGE over the market going by, on a board of its own, in block
+    letters where they fit on the screen. The tickers themselves are in the wall
+    (draw_ticker()). Screen space, for the casino marquee's reason."""
     pr = v.project(world[0], world[1], world[2])
     if pr is None or pr[2] > 90.0:
         return
     sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
     word = "STOCK  EXCHANGE"
-    for k, c in enumerate(word):
-        put_cell(ch, co, v, walls, sx - len(word) // 2 + k, sy - 1, dist, c, GOLD)
-    width_ = max(16, min(48, int(CELL * v.fx / dist)))
-    runs = ticker(now)
-    text = "".join(t for t, _ in runs)
-    colours = [a for t, a in runs for _ in t]
-    shift = int(now * 6.0)
-    x0 = sx - width_ // 2
-    for k in range(width_):
-        n = (k + shift) % len(text)
-        put_cell(ch, co, v, walls, x0 + k, sy + 1, dist, text[n], colours[n])
-    for x in (x0 - 1, x0 + width_):
-        put_cell(ch, co, v, walls, x, sy + 1, dist, "|", GOLD_DIM)
+    rows = 6
+    big = (dist < ARCADE_BIG and big_width(word) + 4 <= v.width and sy - rows >= 0)
+    wide = big_width(word) if big else len(word)
+    rows = rows if big else 1
+    for y in range(sy - rows, sy + 1):
+        for x in range(sx - wide // 2 - 1, sx - wide // 2 + wide + 1):
+            put_cell(ch, co, v, walls, x, y, dist, " ", 0)
+    if big:
+        for dx, dy, _ in big_cells(word):
+            put_cell(ch, co, v, walls, sx - wide // 2 + dx, sy - rows + 1 + dy, dist,
+                     "#", GOLD)
+    else:
+        for k, c in enumerate(word):
+            put_cell(ch, co, v, walls, sx - wide // 2 + k, sy, dist, c, GOLD)
 
 
 class Broker:
@@ -7195,9 +7249,14 @@ def collect_glow(v, now, wet):
                 _spill(glow, p[0], p[2], 6.0, GOLD_DIM)
                 continue
             if b["exchange"] is not None:
-                if f == b["exchange"]["door"]:
-                    p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
-                    _spill(glow, p[0], p[2], 5.0, GOLD_DIM)
+                # The pavement goes the colour of the way the market went.
+                k_ = tick_of(now)
+                ex_ = b["exchange"]["stock"]
+                up_ = stock_price(ex_, k_ * TICK_LEN) >= stock_price(
+                    ex_, (k_ - 1) * TICK_LEN)
+                p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
+                _spill(glow, p[0], p[2], 6.5 if f == b["exchange"]["door"] else 4.5,
+                       ROU_GREEN if up_ else ROU_RED)
                 continue
             if b["temple"] is not None:
                 if f == b["temple"]["door"]:
@@ -13823,7 +13882,7 @@ def draw_props(ch, co, v, walls, now, wet):
                 props.append((_d2(v, w), "lobby", b["tower"], w, (nx, nz)))
             if b["exchange"] is not None:
                 if f == b["exchange"]["door"]:
-                    w = face_point(i, j, f, CELL * 0.5, 0.5, 2.0 * FLOOR_H + 1.2)
+                    w = face_point(i, j, f, CELL * 0.5, 0.5, TICKER_HIGH + 0.3)
                     props.append((_d2(v, w), "exchange", b["exchange"], w, (nx, nz)))
                 continue
             if b["temple"] is not None:

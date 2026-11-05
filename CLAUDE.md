@@ -2117,8 +2117,13 @@ In the financial district only: `EXCHANGE_ODDS` of its street fronts, about two 
 one in 900 left some districts without one and the menu's search came back empty from one start
 in 96. Low and old among the glass towers: `draw_exchange_column()` is pale stone with a column in
 every bay, a cornice, and steps at the foot; `draw_exchange_front()` puts STOCK EXCHANGE over the
-columns and the **ticker** under it, the market scrolling by in screen space — every stock, its
-price, and the last tick's move in green `^` or red `v`. `e` in the menu stands you on the floor
+columns, in block letters where they fit on screen, and **the tickers cover the wall under it**
+(`draw_ticker()`, from `draw_exchange_column()`, so on all four sides and behind anything in front):
+rows of the market between gold rails, every other row the other way - every stock, its price, and
+the last tick's move in green `^` or red `v`. One letter a column, counted from the middle of that
+wall (`v.ticker_anchor`), so it reads at any distance. Block letters were tried first: a wall is one
+lot wide, and two or three of them fitted and no stock's name. The columns are lit from the foot and
+the pavement takes the colour of its own stock's last tick. It was asked to be more apparent. `e` in the menu stands you on the floor
 (it is listed under the parts of town: the first column of the panel was a row past 80x24).
 
 **The market is a function of time.** Sixteen made-up `STOCKS`, four to each of the `SECTORS`,
