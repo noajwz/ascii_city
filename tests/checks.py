@@ -4355,9 +4355,11 @@ tk_top = int(round(tk_v.horizon - (ac.TICKER_HIGH - tk_v.eye) * tk_v.fy / 12.0))
 tk_a, tk_b = tk_row(405.0, tk_top + 1), tk_row(405.0, tk_top + 3)
 tk_a2, tk_b2 = tk_row(405.25, tk_top + 1), tk_row(405.25, tk_top + 3)
 tk_shift = int(405.25 * ac.TICKER_SPEED) - int(405.0 * ac.TICKER_SPEED)
-check("each row is the market, moved along, and the next one the other way",
-      tk_a[tk_shift:] == tk_a2[:-tk_shift] and tk_b != tk_b2
-      and tk_b[:-3] != tk_b2[3:] or tk_a != tk_a2, repr((tk_a, tk_a2)))
+tk_back = (int(405.25 * ac.TICKER_SPEED * 0.8) - int(405.0 * ac.TICKER_SPEED * 0.8))
+check("each row is the market moving along", tk_a[tk_shift:] == tk_a2[:-tk_shift],
+      repr((tk_a, tk_a2)))
+check("and the next one going the other way", tk_b[:-tk_back] == tk_b2[tk_back:],
+      repr((tk_b, tk_b2)))
 tk_text = ac.ticker_strip(405.0)[0]
 check("with every stock on it", all(sym in tk_text for sym, _, _ in ac.STOCKS))
 
