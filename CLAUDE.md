@@ -2024,6 +2024,19 @@ garden stand on `draw_roof_floor()`, a wall and gravel: without it they hung in 
 and were reported as not looking great. Keep each scene together and big, not scattered. `2` in the menu goes
 to the next kind round; `|` still finds any escape at all.
 
+### Washing lines
+
+The owner liked the washing on the low roofs enough to want it off them too. In the residential
+parts of town, one street cell in `WASH_ODDS` has a line across it, building to building
+(`wash_lines_at()`: both ends on a real building, under both roofs, at most four cells across, and
+now and then a second a floor up); and one low building in `WASH_ROOF_ODDS` has one on its roof, on
+posts, seen only from up high. Found per city block and cached (`washing_in_block()`), hash first.
+`draw_washing()` is **world points, one screen cell apart**, so nothing bunches at arm's length: you
+walk under it, buildings hide it, and it swings from the peg, most at the hem and more in rain. Set
+low on purpose, 5 to 8 units: the camera cannot tilt, and from a little way off that is in frame. About
+2 ms a frame on a street that has them at 300x90, nothing elsewhere. `3` in the menu stands you down
+the street from one.
+
 ## The pictures
 
 A cinema is as rare as a club — `CLUB_ODDS` on its own hash, a street front required — and from

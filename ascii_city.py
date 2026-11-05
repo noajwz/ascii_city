@@ -12467,8 +12467,7 @@ PIGEON_NOTES = (
     "You have the wrong pigeon. This one is mine. - a very angry gull",
     "The bartender at The Top Shelf says you owe for the last one.",
 )
-LOFT_HUD = (" a pigeon loft, %s  -  f feed  -  r let them out  -  n send a note"
-            "  -  ad look  -  s down ")
+LOFT_HUD = " pigeon loft, %s  -  f feed, r let out, n note  -  ad look  -  s down "
 LOFT_SACK = [" ____ ", "/FEED\\", "|    |", "|____|"]
 LOFT_BUCKET = ["\\___/", " |  |", " |__|"]
 WASH_SHIRT = ["_/-\\_", "|   |", "|   |", "|___|"]
@@ -12522,6 +12521,172 @@ def low_roof(t):
 def low_roof_yaw(t):
     """The way it stands from where you are, the way you come up facing."""
     return _mix(t["i"], t["j"], 5303) % 6283 / 1000.0
+
+
+WASH_ODDS = 14          # of the street cells in a residential part of town
+WASH_ROOF_ODDS = 11     # of the buildings there, one in this many on its roof
+WASH_REACH = 75.0       # how far off you can see one from the street
+WASH_REACH_HIGH = 130.0  # and from up high
+_wash_blocks = {}
+
+
+def wash_lines_at(i, j):
+    """The washing lines strung across the street at this cell, building to
+    building, as [(x0, z0, x1, z1, height, seed)], or [] - most of them. Only
+    in the residential parts of town, and only between two real buildings."""
+    m = _mix(i, j, 5401)
+    if m % WASH_ODDS or not is_open(i, j) or not dry_at((i + 0.5) * CELL,
+                                                        (j + 0.5) * CELL):
+        return []
+    if district(i, j)["name"] != "residential":
+        return []
+    for ax, az in (((1, 0), (0, 1)) if m & 16 else ((0, 1), (1, 0))):
+        lo = hi = 0
+        while lo < 4 and is_open(i - ax * (lo + 1), j - az * (lo + 1)):
+            lo += 1
+        while hi < 4 and is_open(i + ax * (hi + 1), j + az * (hi + 1)):
+            hi += 1
+        if lo + hi >= 4:
+            continue                          # too far across for a line
+        a_, b_ = lot(i - ax * (lo + 1), j - az * (lo + 1)), lot(i + ax * (hi + 1),
+                                                                j + az * (hi + 1))
+        if a_["tree"] or b_["tree"] or a_["height"] < 6.0 or b_["height"] < 6.0:
+            continue
+        top = min(a_["height"], b_["height"]) - 0.7
+        cx, cz = (i + 0.5) * CELL, (j + 0.5) * CELL
+        x0 = cx - ax * (lo + 0.5) * CELL
+        x1 = cx + ax * (hi + 0.5) * CELL
+        z0 = cz - az * (lo + 0.5) * CELL
+        z1 = cz + az * (hi + 0.5) * CELL
+        y = min(top, 5.2 + ((m >> 8) & 3))
+        lines = [(x0, z0, x1, z1, y, m)]
+        if top > y + 3.0 and (m >> 12) & 1:
+            lines.append((x0, z0, x1, z1, y + 2.8, m >> 3))  # and one a floor up
+        return lines
+    return []
+
+
+def washing_in_block(bi, bj):
+    """Every line in city block (bi, bj), found once: those across the streets,
+    and (x0, z0, x1, z1, height, seed, True) on the roofs."""
+    key = (bi, bj)
+    hit = _wash_blocks.get(key)
+    if hit is None:
+        _evict(_wash_blocks, 4000)
+        hit = []
+        for i in range(bi * XP, bi * XP + XP):
+            for j in range(bj * ZP, bj * ZP + ZP):
+                hit.extend(wash_lines_at(i, j))
+                m = _mix(i, j, 5403)
+                if m % WASH_ROOF_ODDS or is_open(i, j):
+                    continue
+                if district(i, j)["name"] != "residential":
+                    continue
+                b = lot(i, j)
+                if b["tree"] or b["height"] > 15.0:
+                    continue
+                x, z = i * CELL, j * CELL
+                y = b["height"] + 2.2
+                if m & 1:
+                    hit.append((x + 0.6, z + 2.5, x + 4.4, z + 2.5, y, m, True))
+                else:
+                    hit.append((x + 2.5, z + 0.6, x + 2.5, z + 4.4, y, m, True))
+        _wash_blocks[key] = hit
+    return hit
+
+
+def draw_washing(ch, co, v, walls, line, now, wet):
+    """One line and what is on it, as world points one cell apart on screen -
+    any closer and it costs more, any further and it comes out as dots. What
+    is pegged out hangs from the line, swinging more at the hem, more in rain."""
+    x0, z0, x1, z1, y, seed = line[:6]
+    mx, mz = (x0 + x1) * 0.5, (z0 + z1) * 0.5
+    pr = v.project(mx, y, mz)
+    if pr is None:
+        return
+    span = math.hypot(x1 - x0, z1 - z0)
+    ux, uz = (x1 - x0) / span, (z1 - z0) / span
+    d = max(1.0, pr[2])
+    step = max(0.08, d / v.fx)
+    drop = max(0.08, d / v.fy)
+    for n in range(int(span / step) + 1):
+        u = n * step
+        f = u / span
+        put_point(ch, co, v, walls, x0 + ux * u, y - 0.5 * (1.0 - (2.0 * f - 1.0) ** 2),
+                  z0 + uz * u, "-", CONCRETE)
+    if len(line) > 6:
+        for px, pz in ((x0, z0), (x1, z1)):      # the posts, on a roof
+            for n in range(int(2.2 / drop) + 1):
+                put_point(ch, co, v, walls, px, y - n * drop, pz, "|", BARK)
+    swing = 0.05 + 0.22 * wet
+    u = 0.35 + (seed & 3) * 0.1
+    n = 0
+    while u < span - 0.3:
+        m = _mix(seed & 4095, n, 5405)
+        wide, long_, glyph = ((1.0, 1.1, "#"), (1.0, 1.1, "#"), (1.9, 1.7, "="),
+                              (0.3, 0.5, "|"))[m % 4]
+        if u + wide > span - 0.2:
+            break
+        f = (u + wide * 0.5) / span
+        top = y - 0.5 * (1.0 - (2.0 * f - 1.0) ** 2)
+        attr = (ROOF, FOG, FOG_DIM, GOLD_DIM, CROWN_BLUE, ROOF, ROU_RED)[(m >> 4) % 7]
+        wave = math.sin(now * 1.3 + (seed & 63) + n * 1.9)
+        for r in range(int(long_ / drop) + 1):
+            down = r * drop
+            shift = wave * swing * down
+            # A shirt has shoulders: under them it is narrower than the sleeves.
+            inset = wide * 0.22 if glyph == "#" and down > long_ * 0.34 else 0.0
+            for c in range(int((wide - inset * 2.0) / step) + 1):
+                a = u + inset + c * step + shift
+                put_point(ch, co, v, walls, x0 + ux * a, top - down, z0 + uz * a,
+                          glyph, attr)
+        u += wide + 0.25 + ((m >> 8) & 3) * 0.2
+        n += 1
+
+
+def draw_washing_lines(ch, co, v, walls, now, wet):
+    """The washing lines in reach. Up high you see the ones on the roofs too,
+    and at street level those are over your head and over the edge of the
+    screen, so they are left out."""
+    high = v.eye >= 10.0
+    reach = WASH_REACH_HIGH if high else WASH_REACH
+    b0, b1 = int((v.x - reach) // (XP * CELL)), int((v.x + reach) // (XP * CELL))
+    c0, c1 = int((v.z - reach) // (ZP * CELL)), int((v.z + reach) // (ZP * CELL))
+    for bi in range(b0, b1 + 1):
+        for bj in range(c0, c1 + 1):
+            for line in washing_in_block(bi, bj):
+                if len(line) > 6 and not high:
+                    continue
+                rx = (line[0] + line[2]) * 0.5 - v.x
+                rz = (line[1] + line[3]) * 0.5 - v.z
+                if rx * rx + rz * rz > reach * reach or rx * v.dx + rz * v.dz < 0.5:
+                    continue
+                draw_washing(ch, co, v, walls, line, now, wet)
+
+
+def _washing_spot(x, z):
+    """Down a street from a washing line, looking along the street at it."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    for i, j in _rings(ci, cj, CHEAT_RINGS):
+        if _mix(i, j, 5401) % WASH_ODDS:
+            continue
+        lines = wash_lines_at(i, j)
+        if not lines:
+            continue
+        x0, z0, x1, z1 = lines[0][:4]
+        span = math.hypot(x1 - x0, z1 - z0)
+        dx, dz = (z1 - z0) / span, -(x1 - x0) / span
+        for sign in (1.0, -1.0):
+            px = (i + 0.5) * CELL + dx * sign * 14.0
+            pz = (j + 0.5) * CELL + dz * sign * 14.0
+            if can_stand(px, pz) and all(
+                    is_open(int(((i + 0.5) * CELL + dx * sign * n) / CELL + BIG) - BIG,
+                            int(((j + 0.5) * CELL + dz * sign * n) / CELL + BIG) - BIG)
+                    for n in range(0, 15, 3)):
+                if (px - x) ** 2 + (pz - z) ** 2 >= CHEAT_SKIP ** 2:
+                    return px, pz, math.atan2(-dx * sign, -dz * sign)
+    return None
 
 
 def draw_roof_floor(ch, co, width, height, k):
@@ -14253,6 +14418,7 @@ def render_street(v, now):
     for t_ in near_towers(v, 150.0 if v.eye < 10.0 else ROOF_REACH):
         if v.roof is None or t_["i"] != v.roof["i"] or t_["j"] != v.roof["j"]:
             draw_tower_beacon(ch, co, v, walls, t_, now, wet)
+    draw_washing_lines(ch, co, v, walls, now, wet)
     if v.roof is not None:
         draw_roof_ledge(ch, co, v, walls, v.roof, now, wet)
     for ci_, cj_ in near_dock_cranes(v, 95.0):
@@ -17588,6 +17754,7 @@ CHEAT_PLACES = [
     ("=", "under the el", "el"),
     ("|", "fire escape", "escape"),
     ("2", "a low roof", "lowroof"),
+    ("3", "washing lines", "washing"),
     ("_", "car park", "carpark"),
     ("<", "police car", "police"),
     (")", "highway", "highway"),
@@ -18524,6 +18691,8 @@ def find_place(x, z, kind):
         return _tower_spot(x, z)
     if kind == "bar":
         return _tower_spot(x, z, True)
+    if kind == "washing":
+        return _washing_spot(x, z)
     if kind == "escape":
         return _escape_spot(x, z)
     if kind == "lowroof":
@@ -18637,7 +18806,7 @@ def find_place(x, z, kind):
 
 # The fifth column.
 CHEAT_MORE = ["university", "library", "metro", "flight", "center", "bar",
-              "lowroof"]
+              "lowroof", "washing"]
 _panel_page = [0]       # which page an 80-column panel is showing
 
 
