@@ -12450,6 +12450,25 @@ LOFT_ART = ["       ______________________________       ",
             "    |__|__|__|__|__|__|__|__|__|__|__|_|    ",
             "     ||                             ||      ",
             "     ||                             ||      "]
+FLOCK_LAP = 14.0        # seconds they are up for, once round
+FEED_LEN = 20.0         # how long a handful of feed keeps them down
+POST_TRIP = 14.0        # seconds a pigeon takes there and back, with a note
+NOTE_LEN = 12.0         # and how long you read the answer for
+PIGEON = [["  o>", "(_/ "], ["    ", "(_o>"]]   # standing, and pecking
+PIGEON_NOTES = (
+    "Whoever this is, stop writing. It is a pigeon. - the fire station",
+    "The turtles say the pizza is late again. They know where you live.",
+    "A kid on a lawn past the woods is still up. Bring a dollar.",
+    "If the sky starts to pulse, look up. Everyone else will be.",
+    "Red seven pays. Nothing else in that casino is your friend.",
+    "Someone has been asking about you at the temple. It was God.",
+    "Old man with a telescope says the moon winked. Please send help.",
+    "The bridge lamps are on. That is all. Not everything is news.",
+    "You have the wrong pigeon. This one is mine. - a very angry gull",
+    "The bartender at The Top Shelf says you owe for the last one.",
+)
+LOFT_HUD = (" a pigeon loft, %s  -  f feed  -  r let them out  -  n send a note"
+            "  -  ad look  -  s down ")
 LOFT_SACK = [" ____ ", "/FEED\\", "|    |", "|____|"]
 LOFT_BUCKET = ["\\___/", " |  |", " |__|"]
 WASH_SHIRT = ["_/-\\_", "|   |", "|   |", "|___|"]
@@ -12525,7 +12544,84 @@ def draw_roof_floor(ch, co, width, height, k):
                 ch[y][x], co[y][x] = " ", 0
 
 
-def draw_low_roof(ch, co, v, t, now, wet):
+def new_loft():
+    """Your visit to the loft: when each thing was last done, and nothing else."""
+    return {"fed": None, "out": None, "post": None, "sent": 0}
+
+
+def loft_key(state, key, now):
+    """f, r or n at the loft. What it says back, if it says no."""
+    flying = state["out"] is not None and now - state["out"] < FLOCK_LAP
+    if key == "f":
+        if flying:
+            return "they are up in the air"
+        if state["fed"] is not None and now - state["fed"] < FEED_LEN:
+            return "they have plenty"
+        state["fed"] = now
+    elif key == "r":
+        if flying:
+            return "they are already up"
+        state.update(out=now, fed=None)
+    elif key == "n":
+        if state["post"] is not None and now - state["post"] < POST_TRIP:
+            return "one is out with a note already"
+        state["post"] = now
+        state["sent"] += 1
+    return None
+
+
+def draw_loft_visit(ch, co, v, b, cx, x0, y0, foot, k, state, now):
+    """What you have got them doing: feed on the gravel with the flock down on
+    it pecking, and the one you sent off with a note. A function of when."""
+    width, height = v.width, v.height
+    board = y0 + 9 * k - 1
+    if state["fed"] is not None and now - state["fed"] < FEED_LEN:
+        since = now - state["fed"]
+        left = FEED_LEN - since
+        for n in range(30):
+            x = cx + (_mix(n, 0, 5321) % 90 - 45) * k
+            y = foot - _mix(n, 1, 5321) % (5 * k)
+            if 0 <= x < width and 0 <= y < height and ch[y][x] in " .":
+                ch[y][x], co[y][x] = ".", GOLD
+        for n in range(7):
+            sx = cx + (n * 12 - 36) * k
+            sy = foot - (n % 3) * 2 * k
+            come = min(since - n * 0.4, left - n * 0.2)
+            if come <= 0.0:
+                continue                         # still up on the board, or back
+            if come < 0.7:                       # on the wing, down or up
+                u = come / 0.7
+                bx = x0 + (6 + n * 5) * k
+                x, y = int(bx + (sx - bx) * u), int(board + (sy - board) * u)
+                if 0 <= x < width and 0 <= y < height:
+                    ch[y][x], co[y][x] = "v" if int(now * 9.0) % 2 else "^", MOON
+                continue
+            frame = PIGEON[int(now * 3.0 + n * 1.7) % 2]
+            _bar_sprite(ch, co, frame, lambda c, m: GOLD_DIM if c == ">" else MOON,
+                        sx, sy, k)
+    if state["post"] is not None:
+        since = now - state["post"]
+        if since < POST_TRIP:
+            # Off over the parapet and getting smaller, and back the same way.
+            u = min(since, POST_TRIP - since) / 4.0
+            if u < 1.0:
+                sx = bar_col(v, b - 0.1 - 0.5 * u)
+                y = int(y0 + (v.horizon * 0.5 - y0) * u)
+                if sx is not None and 0 <= sx < width and 0 <= y < height:
+                    ch[y][sx] = "v" if int(now * 8.0) % 2 else "^"
+                    co[y][sx] = MOON
+        elif since < POST_TRIP + NOTE_LEN:
+            which = state["sent"] * 3 + int(state["post"])
+            line = ("The pigeon is back, with a note: "
+                    + PIGEON_NOTES[which % len(PIGEON_NOTES)])
+            for n, text in enumerate(bar_lines(line, width - 6)[:2]):
+                x = max(1, (width - len(text)) // 2)
+                for xx in range(max(0, x - 1), min(width, x + len(text) + 1)):
+                    ch[2 + n][xx], co[2 + n][xx] = " ", 0     # the stars stop for it
+                _text(ch, co, 2 + n, x, text, BULB)
+
+
+def draw_low_roof(ch, co, v, t, now, wet, loft=None):
     """Somebody's something on an alley roof, and the cat. By bearing and in
     screen space, the bar's way: all of it is within arm's length, so it goes
     on last, over whatever the city drew."""
@@ -12550,18 +12646,30 @@ def draw_low_roof(ch, co, v, t, now, wet):
                     "\\": BARK, "|": BARK, "_": BARK, ".": BARK, "-": BARK}
             x0, y0 = _bar_sprite(ch, co, LOFT_ART, lambda c, n: inks.get(c, BARK),
                                  cx, foot, k)
-            # They shuffle along the landing board, on their own counts.
+            # They shuffle along the landing board, on their own counts, unless
+            # they are up, or down here with you.
             board = y0 + 9 * k - 1
-            for n in range(7):
+            busy = loft is not None and (
+                (loft["out"] is not None and now - loft["out"] < FLOCK_LAP)
+                or (loft["fed"] is not None and now - loft["fed"] < FEED_LEN))
+            for n in range(0 if busy else 7):
                 step = _mix(n, int(now / (2.0 + n * 0.7)), 5311) % 3
                 x = x0 + (6 + n * 5 + step) * k
                 if 0 <= board < height and 0 <= x < width:
                     ch[board][x], co[board][x] = "v" if n % 3 else "o", MOON
-        # And now and then all of them go, round over the street and back.
+            if loft is not None:
+                draw_loft_visit(ch, co, v, b, cx, x0, y0, foot, k, loft, now)
+        # Now and then all of them go, round over the street and back; or you
+        # let them; and while they are eating they are going nowhere.
         lap = (now + seed % 37) % 37.0
-        if lap < 14.0:
+        if loft is not None:
+            if loft["fed"] is not None and now - loft["fed"] < FEED_LEN:
+                lap = FLOCK_LAP
+            elif loft["out"] is not None and now - loft["out"] < FLOCK_LAP:
+                lap = now - loft["out"]
+        if lap < FLOCK_LAP:
             for n in range(12):
-                a = lap / 14.0 * math.tau + n * 0.07
+                a = lap / FLOCK_LAP * math.tau + n * 0.07
                 sx = bar_col(v, b + 0.75 * math.sin(a) + 0.03 * ((n * 5) % 7))
                 y = int(v.horizon * (0.42 - 0.26 * math.cos(a))) + (n * 3) % 5
                 if sx is not None and 0 <= sx < width and 0 <= y < height:
@@ -18249,7 +18357,7 @@ def _car_park_spot(x, z):
     return None
 
 
-_low_roof_next = [0]    # which of LOW_ROOFS the menu's key goes to next
+_low_roof_next = [-1]   # which of LOW_ROOFS the menu's key last went to
 
 
 def _escape_spot(x, z, want=None):
@@ -20768,6 +20876,7 @@ def main(stdscr):
     sewer = None                # down a manhole: {"t0", "taken"}
     on_roof = None              # the tower whose roof you are standing on
     at_bar = None               # up at a rooftop bar: your tab, for this visit
+    at_loft = None              # up at a pigeon loft: what you have done, this visit
     roof_x = roof_z = 0.0       # where you are on the landmark's roof
     wheel_at = 0.0
     cheats = False              # is the cheat panel up
@@ -21179,6 +21288,15 @@ def main(stdscr):
                 sewer = {"t0": now, "taken": 0}  # lift the cover, down the ladder
                 fwd = side = spin = 0.0
                 autopilot = False
+            elif (at_loft is not None and lift is None
+                  and key in (ord("f"), ord("r"), ord("n"))):
+                if abs((low_roof_yaw(on_roof) - yaw + math.pi) % math.tau
+                       - math.pi) < 1.1:
+                    said = loft_key(at_loft, chr(key), now)
+                    if said:
+                        note, note_at = said, now
+                else:
+                    note, note_at = "the loft is behind you", now
             elif (at_bar is not None and lift is None
                   and ord("1") <= key < ord("1") + len(BAR_DRINKS)):
                 if bar_facing(yaw, on_roof):
@@ -21462,6 +21580,9 @@ def main(stdscr):
         height, width = stdscr.getmaxyx()
         if on_roof is None or on_roof.get("kind") != "bar":
             at_bar = None               # gone: the next visit is a new tab
+        if on_roof is None or low_roof(on_roof) != "loft" or (
+                on_roof.get("kind") != "escape"):
+            at_loft = None
         if sewer is not None and street:
             ch, co = render_sewer(width, height, now, sewer["t0"], sewer["taken"])
             hud = SEWER_HUD
@@ -21512,10 +21633,13 @@ def main(stdscr):
             v.roof = on_roof
             ch, co, wet = render_street(v, now)
             if on_roof.get("kind") == "escape":
-                draw_low_roof(ch, co, v, on_roof, now, wet)
-            hud = (ESCAPE_ROOF_HUD if on_roof.get("kind") == "escape"
-                   else ROOF_HUD) % (int(on_roof["height"] / FLOOR_H),
-                                     sky_word(now, wet))
+                if at_loft is None and low_roof(on_roof) == "loft":
+                    at_loft = new_loft()
+                draw_low_roof(ch, co, v, on_roof, now, wet, at_loft)
+            hud = (LOFT_HUD % sky_word(now, wet) if at_loft is not None
+                   else (ESCAPE_ROOF_HUD if on_roof.get("kind") == "escape"
+                         else ROOF_HUD) % (int(on_roof["height"] / FLOOR_H),
+                                           sky_word(now, wet)))
         elif wheel is not None:
             slot.settle(now)
             table.update(now)

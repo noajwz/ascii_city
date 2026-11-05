@@ -2002,6 +2002,12 @@ landing at every floor and the count in the corner; at the top the sky opens out
 parapet. It shares `main()`'s lift state — the same ride, a different picture — and `s` on the
 roof climbs you back down into the alley. `|` in the menu stands you at the foot of one.
 
+**The loft can be played with** (`at_loft` in `main()`, `new_loft()`, for the visit): `f` feed, the
+flock flutters down and pecks at seed on the gravel for `FEED_LEN`; `r` lets them out, once round on
+`FLOCK_LAP`; `n` sends one off, and `POST_TRIP` later it is back with a line from `PIGEON_NOTES`.
+Each is only *when it was done*, and `draw_loft_visit()` works out the rest from the time. `loft_key()`
+is what says no. You have to be facing it, near enough.
+
 (The back of a giant neon sign, letters reversed, was tried too, and was not interesting enough.)
 
 **Most of these roofs are plain, and that is the point** (the owner asked for it). One in
