@@ -2410,6 +2410,20 @@ one. `far_lights()` is keyed on the row's place under the horizon, not its dista
 distance it reshuffled itself whenever the plane climbed or came down. On the street nothing of
 this applies: `cast(v, ..., v.depth)` as ever.
 
+**The far city, one shape a block** (`draw_far_blocks()`, `far_block()`): up high, past
+`WALL_REACH_HIGH` and out to `FAR_BLOCK_REACH` (2000), each city block is 2-4 buildings of
+different heights with a faint edge, its district's roof and the odd lit window, so the far
+distance is a skyline and not a black void. The owner asked for no void at the horizon and no
+filling of the dark with dots: the fronts stay mostly dark. One flat slab a block ran together
+into long ruled lines, and edges down the full height made a wall of lines; the edge goes two rows
+down from the roof. The blocks are found by scanning the view's triangle over the block grid,
+not by rays, and a block's height comes from the numbers `lot()` uses (`base * 1.4 * scale`,
+clamped, capped) rather than from `lot()`, which would build 81 buildings per block and push the
+near ones out of its cache. Each is drawn only above what its column has (`sky_top`) and added
+to `walls[4]`, so the near walls stand in front and rain and the sky respect them. About 4 ms at
+300x90: roof 22, plane 30 (30% of the plane's frames over 33 ms; 4% without). Reach hardly matters
+to the cost. `far_lights()` fills the last rows at the horizon.
+
 **Do not draw the ground at half resolution to buy more.** It was tried: every other row and
 column worked out and the rest copied from a neighbour. It was faster (roof 28, plane 32), and
 the owner tried it and said no - the flight looked blurry; and copying into cells nothing had

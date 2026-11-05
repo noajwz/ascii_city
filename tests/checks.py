@@ -5386,6 +5386,29 @@ bp_jump = max(abs(bp_cover[k_] - bp_cover[k_ - 1]) / bp_cover[k_ - 1]
 check("in the plane the buildings slide by, they do not blink in and out",
       bp_jump < 0.02, "%.1f%% the most that changed in a frame" % (bp_jump * 100))
 
+# --- the far city, one shape a block --------------------------------------------
+fb_v = ac.View(x0, z0, 0.7, 300, 90, eye=90.0, reach=ac.ROOF_REACH)
+fb_c = [[" "] * 300 for _ in range(90)]
+fb_o = [[0] * 300 for _ in range(90)]
+fb_w = ac.draw_walls(fb_c, fb_o, fb_v, 600.0)
+fb_far = [r_ for col_ in fb_w[4] for r_ in col_ if r_[0] > ac.WALL_REACH_HIGH]
+check("past the buildings the city goes on as shapes, towards the horizon",
+      len(fb_far) > 200 and max(r_[0] for r_ in fb_far) > ac.FAR_BLOCK_REACH * 0.5)
+check("nearest first, each only above the last: the real ones stand in front",
+      all(a_[0] <= b_[0] and b_[2] < a_[1] for col_ in fb_w[4]
+          for a_, b_ in zip(col_, col_[1:])))
+fb_home = ac.zone_home("airport", 0, 0)
+check("nothing stands for water or the airport",
+      ac.far_block(fb_home[0] // ac.XP, fb_home[1] // ac.ZP) is None
+      and all(ac.far_block(b_, c_) is None or not ac.water_at(
+          b_ * ac.XP + ac.XP // 2, c_ * ac.ZP + ac.ZP // 2)
+              for b_ in range(-60, 60) for c_ in range(-60, 60)))
+fb_s = ac.View(x0, z0, 0.7, 300, 90)
+fb_sw = ac.draw_walls([[" "] * 300 for _ in range(90)], [[0] * 300 for _ in range(90)],
+                      fb_s, 600.0)
+check("and on the street there are none",
+      all(r_[0] <= ac.MAX_VIEW for col_ in fb_sw[4] for r_ in col_))
+
 # --- the autopilot and the turn keys -------------------------------------------------
 def walk_auto(x, z, secs):
     """The autopilot as the main loop runs it, minus the drawing."""

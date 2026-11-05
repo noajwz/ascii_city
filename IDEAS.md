@@ -8,7 +8,7 @@ what to watch for. Remove an idea from here once it is built.
 Agreed on 2026-11-02, after the flight and the roofs were made smooth and solid. All of these are
 for the views from up high only (`v.eye >= 10`) - the street stays exactly as it is - and each
 has to keep the roof and the plane under 33 ms a frame at 300x90, checked like every speed change
-here. Suggested order: 1 first, then as wanted.
+here. Suggested order: 1 first, then as wanted. (Distant skyline shapes are built.)
 
 1. **Proper rooftops.** The renderer only knows building fronts, so a roof seen from above is
    faked by stacking thin slices of front: up close it reads as stripes. Draw real roofs - the
@@ -16,10 +16,6 @@ here. Suggested order: 1 first, then as wanted.
    stairwell hut - so near buildings look solid from above.
 2. **Red aircraft warning lights** blinking on the tallest towers, the way a real skyline looks at
    night. From the plane they mark out downtown. Cheap: a few points.
-3. **Distant skyline shapes.** Past `WALL_REACH_HIGH` (170) only lights are drawn. Draw each city
-   block out there as one simple dark shape at its tallest building's height: a skyline to the
-   horizon at a fraction of the cost of real buildings, and tied to the blocks, so nothing
-   blinks (the reason the 170 limit exists - see CLAUDE.md, "Buildings blinked in and out").
 4. **Moving lights on the roads.** Streams of white headlights one way and red tail lights the
    other along the avenues and the highway, much further out than cars are drawn now: from up
    high, traffic is the most alive part of a city at night.

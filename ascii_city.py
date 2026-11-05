@@ -6555,6 +6555,120 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     return roof, awning, foot, letter_k, bands
 
 
+FAR_BLOCK_REACH = 2000.0   # up high, how far the city goes on as one shape a block
+FAR_BLOCK_WINDOWS = 11     # one cell of a far block in about this many has a light
+_far_blocks = {}
+
+
+def far_block(bi, bj):
+    """(height, seed, roof glyph) of the shape standing for city block (bi, bj)
+    far off, or None if there is nothing to stand for: water, the woods, a park,
+    the airport. The height is what the block's tallest buildings come to, from
+    the same numbers lot() builds them with - not by asking lot(), which would
+    build all eighty-one of them, and push the near ones out of its cache."""
+    key = bi * 65536 + bj
+    hit = _far_blocks.get(key, 0)
+    if hit != 0:
+        return hit
+    _evict(_far_blocks, 20000)
+    i, j = bi * XP + XP // 2, bj * ZP + ZP // 2
+    d = district(i, j)
+    hit = None
+    if not (water_at(i, j) or d["park"] or d is WOODS or d is AIRPORT
+            or woods_at(i, j) or fair_at(i, j) or headland_at(i, j)):
+        base = 11.0 + _mix(bi, bj, 43) % 26
+        h = max(d["lo"], min(d["hi"], base * 1.4 * d["scale"]))
+        for cap in (seafront_cap(i, j), approach_cap(i, j)):
+            if cap is not None:
+                h = min(h, cap)
+        if landmark_at(i, j) is not None:
+            h = LANDMARK_H
+        hit = (h, _mix(bi, bj, 4701), d.get("roof") or "_")
+    _far_blocks[key] = hit
+    return hit
+
+
+def draw_far_blocks(ch, co, v, now, walls):
+    """From up high, the city past WALL_REACH_HIGH: one simple shape a block,
+    dark, with a faint roofline and a few lit windows, so that the far
+    distance is a skyline and not a void. Nearest first, each only above what
+    is drawn in its column, as the real walls are. Found by scanning the view's
+    triangle over the block grid - a ray for every column would be a hundred
+    steps each - and fixed to the blocks, so nothing blinks: windows go by the
+    cell's place in its block, and travel with it."""
+    wall_d, wall_top, wall_base, sky_top, runs = walls
+    cw, cd = XP * CELL, ZP * CELL
+    near, reach = WALL_REACH_HIGH, FAR_BLOCK_REACH
+    lx, lz = v.x + (v.dx - v.plx) * reach, v.z + (v.dz - v.plz) * reach
+    rx, rz = v.x + (v.dx + v.plx) * reach, v.z + (v.dz + v.plz) * reach
+    edges = (((v.x, v.z), (lx, lz)), ((v.x, v.z), (rx, rz)), ((lx, lz), (rx, rz)))
+    half = cw * 0.5 - CELL * 1.5               # a street's width between the shapes
+    wide = half * (abs(v.dx) + abs(v.dz))      # how wide it looks, end on or square
+    found = []
+    for bi in range(int(min(v.x, lx, rx) // cw) - 1, int(max(v.x, lx, rx) // cw) + 2):
+        mid = (bi + 0.5) * cw
+        zs = []
+        for (ax, az), (bx, bz) in edges:
+            if ax != bx and min(ax, bx) - cw <= mid <= max(ax, bx) + cw:
+                t = max(0.0, min(1.0, (mid - ax) / (bx - ax)))
+                zs.append(az + (bz - az) * t)
+        if not zs:
+            continue
+        for bj in range(int(min(zs) // cd) - 1, int(max(zs) // cd) + 2):
+            ox, oz = mid - v.x, (bj + 0.5) * cd - v.z
+            f = ox * v.dx + oz * v.dz
+            if not near - wide < f < reach:
+                continue
+            lat = ox * v.dz - oz * v.dx
+            if abs(lat) - wide > f * PLANE:
+                continue
+            block = far_block(bi, bj)
+            if block is not None:
+                found.append((f, lat, block, bi, bj))
+    found.sort()
+    height, width = v.height, v.width
+    for f, lat, (h, seed, roof), bi, bj in found:
+        d = max(f, near)                       # never in front of the real ones
+        scale = v.fy / d
+        base = int(math.ceil(v.horizon + v.eye * scale))
+        x0 = int(round(v.cx + (lat - wide) * v.fx / d))
+        x1 = int(round(v.cx + (lat + wide) * v.fx / d))
+        dark = v.blackout and power_off(bi * XP + XP // 2, bj * ZP + ZP // 2, now)
+        # A few buildings of different heights, not one slab: flat-topped
+        # blocks side by side ran together into long ruled lines.
+        parts = 2 + seed % 3
+        tops = [int(math.floor(v.horizon - (h * (0.55 + 0.03 * (
+            _mix(seed, n, 4705) % 16)) - v.eye) * scale)) for n in range(parts)]
+        span = max(1, x1 - x0 + 1)
+        was = -1
+        for sx in range(max(0, x0), min(width - 1, x1) + 1):
+            part = (sx - x0) * parts // span
+            lo = max(0, tops[part])
+            cover = sky_top[sx]
+            hi = min(height - 1, base, cover - 1)
+            if hi >= lo:
+                row = ch[lo]
+                if part != was:
+                    # Its edge, a little way down from the roof: full height,
+                    # a far city was a wall of lines, not a dark one.
+                    row[sx], co[lo][sx] = "|", HAZE
+                    if lo < hi:
+                        ch[lo + 1][sx], co[lo + 1][sx] = "|", HAZE
+                else:
+                    row[sx], co[lo][sx] = roof, HAZE
+                if not dark and hi > lo + 1:
+                    for y in range(lo + 1, hi + 1):
+                        m = _mix(seed, (sx - x0) * 64 + y - lo, 4703)
+                        if m % FAR_BLOCK_WINDOWS == 0:
+                            ch[y][sx] = "."
+                            co[y][sx] = GOLD_DIM if m & 256 else BULB_DIM
+                sky_top[sx] = lo
+                runs[sx].append((d, lo, hi))
+                if wall_d[sx] is None:
+                    wall_d[sx], wall_top[sx], wall_base[sx] = d, lo, hi
+            was = part
+
+
 def draw_walls(ch, co, v, now):
     """Cast one ray per screen column and paint what it hits.
 
@@ -6645,6 +6759,8 @@ def draw_walls(ch, co, v, now):
             if cover <= 0:
                 break
 
+    if high:
+        draw_far_blocks(ch, co, v, now, (wall_d, wall_top, wall_base, sky_top, runs))
     return (wall_d, wall_top, wall_base, sky_top, runs)
 
 
