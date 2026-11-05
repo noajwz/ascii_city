@@ -6865,12 +6865,18 @@ def sky_col(v, bearing):
     return int(round((cam + 1.0) * 0.5 * (v.width - 1)))
 
 
+MOON_BIG = {"()": (".--.", "'--'"), "O": (".-.", "'-'"),
+            "D": ("|-.", "|-'"), "C": (".-|", "'-|"),
+            ")": ("\\", "/"), "(": ("/", "\\")}
+
+
 def draw_moon(ch, co, v, tops, now, seen):
     """The moon, if it is up and this side of the sky.
 
     One or two characters and no glow around it. It is the only object in the
     sky and it does not need help - anything more and it stops being a moon in
-    a city and starts being a poster."""
+    a city and starts being a poster. On a big window, where one character is
+    half the size, a drawing that comes out the same size as that one."""
     face = moon_face(night(now)["phase"])
     if not face:
         return
@@ -6878,14 +6884,17 @@ def draw_moon(ch, co, v, tops, now, seen):
     sx = sky_col(v, bearing)
     if sx is None:
         return
-    y = int(round((1.0 - alt) * (v.horizon - 2)))
+    y0 = int(round((1.0 - alt) * (v.horizon - 2)))
     dim = abs(night(now)["phase"] - 0.5) * 2.0 > 0.34
-    for k, c in enumerate(face):
-        x = sx + k
-        if 0 <= x < v.width and 0 <= y < tops[x] and y < v.horizon:
-            ch[y][x] = c
-            co[y][x] = MOON_DIM if dim else MOON
-            seen.add((y, x))
+    rows = MOON_BIG[face] if big_scale(v.width, v.height) > 1 else (face,)
+    for r, row in enumerate(rows):
+        y = y0 + r
+        for k, c in enumerate(row):
+            x = sx + k
+            if c != " " and 0 <= x < v.width and 0 <= y < tops[x] and y < v.horizon:
+                ch[y][x] = c
+                co[y][x] = MOON_DIM if dim else MOON
+                seen.add((y, x))
 
 
 def draw_meteor(ch, co, v, tops, now, seen):
@@ -6908,12 +6917,14 @@ def draw_meteor(ch, co, v, tops, now, seen):
     y0 = ((m >> 18) & 15) / 15.0 * 0.5 + 0.05
     slope = 1.0 if (m >> 3) & 1 else -1.0
     run = int(t / 0.22 * 9)
-    for k in range(max(0, run - 3), run + 1):
+    # Twice the cells on a big window, for the same streak at the same angle.
+    big = big_scale(v.width, v.height)
+    for k in range(max(0, run - 3) * big, (run + 1) * big):
         x = sx + int(k * slope)
-        y = int(round((y0 + k * 0.035) * (v.horizon - 2)))
+        y = int(round((y0 + k / float(big) * 0.035) * (v.horizon - 2)))
         if 0 <= x < v.width and 0 <= y < tops[x] and y < v.horizon:
             ch[y][x] = "\\" if slope > 0 else "/"
-            co[y][x] = MOON if k == run else STAR_DIM
+            co[y][x] = MOON if k // big == run else STAR_DIM
             seen.add((y, x))
 
 
@@ -6946,13 +6957,16 @@ def draw_sky(ch, co, v, walls, wet, now):
     # roof is still a building, and stars were being drawn straight into it.
     tops = walls[3]
     seen = set()
+    last = None
 
     for sx in range(v.width):
         top = tops[sx]
         cam = 2.0 * sx / (v.width - 1) - 1.0
         rad = v.yaw + math.atan(cam * PLANE)
         bearing = int(rad * 90.0)
-        if clear > 0.02:
+        # Only in the first column of a bearing: on a wide window one bearing
+        # covers two or three columns, and every star came out as a dash.
+        if clear > 0.02 and bearing != last:
             # Per visible cell, not per bearing with a random height: from a
             # street the rooftops hide five sixths of the sky, so stars
             # scattered over the whole hemisphere nearly all land behind a
@@ -6982,6 +6996,7 @@ def draw_sky(ch, co, v, walls, wet, now):
                 ch[y][sx] = glyph
                 co[y][sx] = attr
                 seen.add((y, sx))
+        last = bearing
         empty = walls[0][sx] is None
         deep = _mix(bearing // 3, 2, 17) % 7 if empty else 0
         for d in range(max(deep, _mix(bearing, 1, 3) % thin)):
