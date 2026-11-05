@@ -294,6 +294,11 @@ def cases(run, report):
            (b"a", .3), (b"s", 8.0)], cols=110, rows=34))
     ok &= report("under the washing lines", *run(
         [(b"`", .5), (b"3", 1.5)] + [(b"w", .25)] * 10, cols=300, rows=90))
+    for bw_size in ((110, 34), (300, 90)):
+        ok &= report("a frame of bowling, %dx%d" % bw_size, *run(
+            [(b"`", .5), (b"4", 1.5), (b"p", .4), (b"d", .2), (b"a", .2), (b"p", .4),
+             (b"p", 5.0), (b"p", .4), (b"p", .4), (b"z", .3), (b"x", .4)],
+            cols=bw_size[0], rows=bw_size[1]))
     for rb_size in ((110, 34), (300, 90)):
         ok &= report("a drink at the rooftop bar, %dx%d" % rb_size, *run(
             [(b"`", .5), (b"1", 1.5)] + [(b"\x1bOA", .3)] * 6

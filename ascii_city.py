@@ -3059,6 +3059,7 @@ def lot(i, j):
         # and be invisible.
         b["club"] = b["casino"] = b["tower"] = b["cinema"] = None
         b["diner"] = b["billboard"] = b["arcade"] = b["exchange"] = None
+        b["bowling"] = None
         b["temple"] = b["warehouse"] = None
         if d is INDUSTRIAL:
             wh = zone_warehouse(*zone_home("industrial", i, j))
@@ -3172,6 +3173,16 @@ def lot(i, j):
                                                     % len(ARCADE_NAMES)],
                                "seed": _mix(i, j, 2507) % 9973,
                                "height": b["height"]}
+        elif (_mix(i, j, 2801) % BOWL_ODDS == 0 and not d["park"]
+              and d["name"] not in ("financial", "residential")):
+            # Long and low, on a street, and never where it would be lost.
+            face = _road_face(i, j, _mix(i, j, 2803) % 4)
+            if face is not None:
+                b["height"] = max(d["lo"], min(b["height"], 9.0))
+                b["bowling"] = {"door": face, "u": CELL * 0.5, "i": i, "j": j,
+                                "name": BOWL_NAMES[_mix(i, j, 2805) % len(BOWL_NAMES)],
+                                "seed": _mix(i, j, 2807) % 9973,
+                                "height": b["height"]}
         elif _mix(i, j, 3201) % TEMPLE_ODDS == 0 and d["name"] != "financial":
             # Stone among the shopfronts, with its front on a street, and
             # low: the rose window over the door has to be in sight from
@@ -3205,6 +3216,7 @@ def lot(i, j):
         if (b["club"] is None and b["casino"] is None and b["tower"] is None
                 and b["cinema"] is None and b["diner"] is None
                 and b["arcade"] is None and b["exchange"] is None and not d["park"]
+                and b["bowling"] is None
                 and b["temple"] is None and b["warehouse"] is None
                 and d["name"] in BILL_DISTRICTS and 8.0 <= b["height"] <= 12.0
                 and _mix(i, j, 2405) % BILL_ODDS == 0):
@@ -3218,6 +3230,7 @@ def lot(i, j):
             b["height"] = CENTER_H
             b["club"] = b["casino"] = b["cinema"] = b["diner"] = None
             b["arcade"] = b["billboard"] = b["tower"] = b["exchange"] = None
+            b["bowling"] = None
             b["temple"] = b["warehouse"] = None
             b["tree"] = False
         lm = landmark_at(i, j)
@@ -3227,6 +3240,7 @@ def lot(i, j):
             b["height"] = LANDMARK_BASE if ring == 0 else LANDMARK_H
             b["club"] = b["casino"] = b["cinema"] = b["diner"] = None
             b["arcade"] = b["billboard"] = b["tower"] = b["exchange"] = None
+            b["bowling"] = None
             b["temple"] = b["warehouse"] = None
             b["tree"] = False
             if (i, j) == lm["lobby"]:
@@ -6372,6 +6386,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     if b["arcade"] is not None:
         return draw_arcade_column(ch, co, v, sx, dist, b, face, u,
                                   r_lo, r_hi, edge, cont, now)
+    if b["bowling"] is not None:
+        return draw_bowling_column(ch, co, v, sx, dist, b, face, u,
+                                   r_lo, r_hi, edge, cont, now)
     if b["temple"] is not None:
         return draw_temple_column(ch, co, v, sx, dist, b, face, u,
                                   r_lo, r_hi, edge, cont, now)
@@ -7188,6 +7205,10 @@ def collect_glow(v, now, wet):
                 if f == b["warehouse"]["door"]:
                     p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
                     _spill(glow, p[0], p[2], 6.0, warehouse_light(now)[0])
+                continue
+            if b["bowling"] is not None:
+                p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
+                _spill(glow, p[0], p[2], 6.0, NEON[b["bowling"]["seed"] % len(NEON)][1])
                 continue
             if b["arcade"] is not None:
                 # The pavement in front takes the colour of whatever the
@@ -11865,6 +11886,7 @@ def climbable(i, j, f):
             and not b["tree"] and b["club"] is None
             and b["casino"] is None and b["tower"] is None
             and b["arcade"] is None and b["exchange"] is None
+            and b["bowling"] is None
             and b["temple"] is None and b["warehouse"] is None):
         return False
     # And only off a roof that is the high point of its corner: climbed from
@@ -12419,6 +12441,559 @@ def draw_rooftop_bar(ch, co, v, t, now, state):
                   HUD)
         for n, line in enumerate(bar_lines(state["say"], wide - 4)[:2]):
             _text(ch, co, y0 + (5 + n) * k, x0 + (wide - len(line)) // 2, line, BULB)
+
+
+# Bowling. In inches, because that is what a lane is measured in: sixty feet of
+# it, forty-one and a half across, a heavy ball and ten light pins a foot apart.
+BOWL_ODDS = 1000        # like the arcade, on its own hash
+BOWL_COST = 6           # a game, shoes included
+BOWL_NAMES = ["MOONLIGHT LANES", "THE SPLIT", "GUTTER PALACE", "TEN PIN CLUB",
+              "NEON LANES", "GLOW BOWL", "SEVEN-TEN", "THE LAST FRAME"]
+LANE_LONG = 720.0       # to the head pin
+LANE_HALF = 20.75       # the gutter is past this
+PIN_GAP = 12.0
+PIN_R = 2.4
+BALL_R = 4.3
+PIN_MASS = 3.4
+BALL_MASS = 15.0
+BALL_SLOW = 230.0       # inches a second, at the bottom of the power meter
+BALL_FAST = 340.0       # and the top
+HOOK = 7.0              # sideways, in inches a second a second, at full spin
+BOWL_STEP = 1.0 / 240.0
+BOWL_METER = 1.5        # seconds for a meter to go there and back
+BOWL_AIM = 1.6          # inches a press of a or d moves you
+BOWL_SETTLE = 2.2       # seconds after the ball reaches the pins, to see what falls
+BOWL_SHOW = 1.6         # and how long you get to look at it
+
+
+def bowl_rack():
+    """Ten pins: [x, depth, vx, vz, down], head pin nearest."""
+    pins = []
+    for row in range(4):
+        for n in range(row + 1):
+            pins.append([(n - row * 0.5) * PIN_GAP,
+                         LANE_LONG + row * PIN_GAP * 0.866, 0.0, 0.0, False])
+    return pins
+
+
+def bowl_scores(frames):
+    """The running score after each frame that can be scored yet, by the rules:
+    a strike is ten and your next two balls, a spare ten and your next one, and
+    the tenth frame is its own balls."""
+    rolls = [r for f in frames for r in f]
+    out, at, total = [], 0, 0
+    for f in range(10):
+        if at >= len(rolls):
+            break
+        if rolls[at] == 10:
+            if at + 2 >= len(rolls):
+                break
+            total += 10 + rolls[at + 1] + rolls[at + 2]
+            at += 1
+        else:
+            if at + 1 >= len(rolls):
+                break
+            if rolls[at] + rolls[at + 1] == 10:
+                if at + 2 >= len(rolls):
+                    break
+                total += 10 + rolls[at + 2]
+            else:
+                total += rolls[at] + rolls[at + 1]
+            at += 2
+        out.append(total)
+    return out
+
+
+class Bowling:
+    """One game of ten frames, and it is really played: the ball and the pins
+    are circles on a lane, stepped at BOWL_STEP and knocking into each other,
+    so a strike is what a good ball into the pocket does and a split is what a
+    ball on the nose does, and nobody decides. Curses never sees a key go up, so
+    nothing here asks you to hold one: a and d walk you across, p stops the spin
+    meter, p stops the power meter."""
+
+    def __init__(self, rng=None):
+        self.rng = rng or _spin_rng
+        self.playing = False
+        self.over = False
+        self.frames = [[]]
+        self.pins = bowl_rack()
+        self.x = 0.0
+        self.phase = "idle"             # aim, spin, power, roll, show
+        self.t0 = 0.0
+        self.spin = 0.0
+        self.power = 0.0
+        self.ball = None
+        self.clock = None
+        self.said = ""
+        self.said_at = -99.0
+        self.gutter = False
+
+    def start(self, now):
+        self.__init__(self.rng)
+        self.playing = True
+        self.phase = "aim"
+        self.t0 = now
+
+    def meter(self, now):
+        """Where a running meter is: -1 to 1 and back, forever, until stopped."""
+        u = ((now - self.t0) / BOWL_METER) % 1.0
+        return 1.0 - abs(u * 4.0 - 2.0) if u >= 0.0 else 0.0
+
+    def key(self, what, now):
+        if not self.playing:
+            return
+        if self.phase == "aim":
+            if what == "left":
+                self.x = max(-LANE_HALF + 2.0, self.x - BOWL_AIM)
+            elif what == "right":
+                self.x = min(LANE_HALF - 2.0, self.x + BOWL_AIM)
+            elif what == "act":
+                self.phase, self.t0 = "spin", now
+        elif self.phase == "spin" and what == "act":
+            self.spin = self.meter(now)
+            self.phase, self.t0 = "power", now
+        elif self.phase == "power" and what == "act":
+            self.power = (self.meter(now) + 1.0) * 0.5
+            # And the hand is never quite the same twice.
+            self.bowl(self.x + self.rng.uniform(-0.35, 0.35), self.spin, self.power,
+                      now)
+
+    def bowl(self, x, spin, power, now):
+        speed = BALL_SLOW + (BALL_FAST - BALL_SLOW) * power
+        self.ball = [x, 0.0, 0.0, speed, spin]
+        self.gutter = False
+        self.phase, self.t0, self.clock = "roll", now, now
+        self.left = sum(1 for p in self.pins if not p[4])
+        self.at_pins = None
+
+    def step(self):
+        """One tick of the physics. True while anything is still going."""
+        ball = self.ball
+        dt = BOWL_STEP
+        if ball is not None:
+            if not self.gutter:
+                late = max(0.0, ball[1] / LANE_LONG - 0.35)
+                ball[2] += ball[4] * HOOK * late * 2.0 * dt
+            ball[0] += ball[2] * dt
+            ball[1] += ball[3] * dt
+            if abs(ball[0]) > LANE_HALF and not self.gutter:
+                self.gutter = True      # in the gutter, and past the pins
+                ball[0] = math.copysign(LANE_HALF + 2.0, ball[0])
+                ball[2] = 0.0
+            if ball[1] > LANE_LONG + 70.0:
+                self.ball = ball = None
+        pins = self.pins
+        alive = [p for p in pins if not p[4] or p[2] or p[3]]
+        if ball is not None and not self.gutter:
+            for p in alive:
+                dx, dz = p[0] - ball[0], p[1] - ball[1]
+                reach = PIN_R + BALL_R
+                if dx * dx + dz * dz < reach * reach:
+                    self._hit(ball, p, BALL_MASS, PIN_MASS)
+        for n, p in enumerate(alive):
+            for q in alive[n + 1:]:
+                dx, dz = q[0] - p[0], q[1] - p[1]
+                if dx * dx + dz * dz < 4.0 * PIN_R * PIN_R:
+                    self._hit(p, q, PIN_MASS, PIN_MASS)
+        moving = False
+        for p in alive:
+            if p[2] or p[3]:
+                p[0] += p[2] * dt
+                p[1] += p[3] * dt
+                p[2] *= 0.9985
+                p[3] *= 0.9985
+                if p[2] * p[2] + p[3] * p[3] < 25.0:
+                    p[2] = p[3] = 0.0   # lying where it fell
+                else:
+                    moving = True
+        return ball is not None or moving
+
+    def _hit(self, a, b, ma, mb):
+        """Two round things, a hit straight along the line between them. b is
+        always a pin, and a pin that has been hit is a pin that has fallen."""
+        dx, dz = b[0] - a[0], b[1] - a[1]
+        d = math.hypot(dx, dz) or 1.0
+        nx, nz = dx / d, dz / d
+        rel = (a[2] - b[2]) * nx + (a[3] - b[3]) * nz
+        if rel <= 0.0:
+            return
+        impulse = 1.6 * rel / (1.0 / ma + 1.0 / mb)
+        a[2] -= impulse / ma * nx
+        a[3] -= impulse / ma * nz
+        b[2] += impulse / mb * nx
+        b[3] += impulse / mb * nz
+        b[4] = True
+        if ma == PIN_MASS:
+            a[4] = True
+
+    def update(self, now):
+        if self.phase == "roll":
+            n = int((now - self.clock) / BOWL_STEP)
+            going = True
+            for _ in range(min(n, 200)):
+                going = self.step()
+                if not going:
+                    break
+            self.clock += n * BOWL_STEP
+            if not going or now - self.t0 > 8.0:
+                self.finish(now)
+        elif self.phase == "show" and now - self.t0 > BOWL_SHOW:
+            self.next_ball(now)
+
+    def finish(self, now):
+        """The ball is in the pit and everything has stopped: count them."""
+        self.ball = None
+        down = sum(1 for p in self.pins if p[4])
+        fell = down - (10 - self.left)
+        self.frames[-1].append(fell)
+        f = self.frames[-1]
+        tenth = len(self.frames) == 10
+        said = str(fell) if fell else ("GUTTER" if self.gutter else "MISS")
+        if self.left == 10 and fell == 10:
+            said = "STRIKE"
+        elif self.left + 0 < 10 and down == 10:
+            said = "SPARE"
+        elif self.left == 10 and fell < 10 and self._split():
+            said = "SPLIT"
+        self.said, self.said_at = said, now
+        self.phase, self.t0 = "show", now
+        self.frame_done = (len(f) == 3 or (len(f) == 2 and sum(f) < 10)) if tenth else (
+            f[0] == 10 or len(f) == 2)
+        self.rerack = down == 10
+
+    def _split(self):
+        """The head pin gone and two standing with a gap between them."""
+        pins = self.pins
+        if not pins[0][4]:
+            return False
+        left = [p for p in pins if not p[4]]
+        return len(left) >= 2 and (max(p[0] for p in left)
+                                   - min(p[0] for p in left)) > 20.0
+
+    def next_ball(self, now):
+        if self.frame_done:
+            if len(self.frames) == 10:
+                self.phase, self.playing, self.over = "idle", False, True
+                return
+            self.frames.append([])
+            self.pins = bowl_rack()
+        else:
+            # Sweep what fell off the deck; what stands stays where it stood.
+            self.pins = [p if not p[4] else [p[0], p[1], 0.0, 0.0, True]
+                         for p in self.pins]
+            if self.rerack:
+                self.pins = bowl_rack()
+        self.phase, self.t0 = "aim", now
+
+    def total(self):
+        got = bowl_scores(self.frames)
+        return got[-1] if got else 0
+
+
+PIN_ART = [" o ", "(_)"]
+PIN_DOWN = ["   ", "o=="]
+BOWLER_ART = [" o ", "/|\\", " | ", "/ \\"]
+
+
+def render_bowling(alley, game, width, height, now, hi=0):
+    """Inside: the score over the pins, your lane going away from you between
+    two others with somebody else bowling on them, glowing under the black
+    light. Drawn from the maths, so on a big window it grows rather than
+    stretches; the sum and what just happened in block letters, the rest plain."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    if width < 44 or height < 16:
+        said = "%s: too small to bowl" % alley["name"]
+        _text(ch, co, height // 2, 1, said[:width - 2], HUD)
+        return ch, co
+    k = big_scale(width, height)
+    n_neon = len(NEON)
+    seed = alley["seed"]
+    # The black light: flecks on the wall that hold still, in the neon's colours.
+    for y in range(height):
+        for x in range(0, width, k):
+            m = _mix(x // k, y // k, 5501 + seed % 7)
+            if m % 37 == 0:
+                ch[y][x] = "." if m & 64 else "*"
+                co[y][x] = NEON[(m >> 8) % n_neon][1]
+    # The score: every frame, and the sum in block letters.
+    rows = 4 if k == 1 else 5
+    cw = min(6 * k + 1, (width - 2) // 11)
+    x0 = max(1, (width - cw * 10 - 8 * k) // 2)
+    scores = bowl_scores(game.frames)
+    for f in range(10):
+        x = x0 + f * cw
+        for y in range(rows):
+            ch[1 + y][x], co[1 + y][x] = "|", GOLD_DIM
+        here = game.playing and f == len(game.frames) - 1
+        _text(ch, co, 1, x + 1, str(f + 1), GOLD if here else HUD)
+        balls = game.frames[f] if f < len(game.frames) else []
+        marks = []
+        for n, b in enumerate(balls):
+            if b == 10 and (f == 9 or n == 0):
+                marks.append("X")
+            elif n and balls[n - 1] != 10 and balls[n - 1] + b == 10:
+                marks.append("/")
+            else:
+                marks.append("-" if b == 0 else str(b))
+        _text(ch, co, 2, x + 1, " ".join(marks), ROU_GREEN)
+        if f < len(scores):
+            _text(ch, co, 3, x + 1, str(scores[f]), BULB)
+    for x in range(x0, x0 + cw * 10 + 1):
+        ch[rows + 1][x], co[rows + 1][x] = "-", GOLD_DIM
+    total = str(game.total())
+    tx = x0 + cw * 10 + 2
+    if k > 1:
+        _blocks(ch, co, 1, tx, total, GOLD, 2, 1)
+    else:
+        _text(ch, co, 2, tx, total, GOLD)
+    if hi and k > 1:
+        _text(ch, co, 7, tx, "BEST %d" % hi, HUD)
+    # The name, between the score and the pins, with the lights running along.
+    y_top = rows + 3
+    bw = blocks_width(alley["name"], k - 1) if k > 1 else len(alley["name"])
+    nx = (width - bw) // 2
+    if k > 1 and bw < width - 4:
+        _blocks(ch, co, y_top, nx, alley["name"], NEON[seed % n_neon][0], k - 1, k - 1)
+        y_top += 5 * (k - 1) + 1
+    else:
+        _text(ch, co, y_top, max(0, nx), alley["name"][:width], NEON[seed % n_neon][0])
+        y_top += 1
+    for x in range(width):
+        lit = chase(x * 0.4, now)
+        ch[y_top][x] = "o" if lit else "."
+        co[y_top][x] = NEON[(x // (6 * k) + int(now * 3.0)) % n_neon][0 if lit else 1]
+    y_far, y_near = y_top + 2, height - 2
+    half_near = min(width * 0.2, (y_near - y_far) * 1.5 * 1.1)
+    cx = width // 2
+
+    def place(x, d):
+        """Lane to screen. The last stretch to the pins is drawn longer than it
+        is: true to scale, the rows of pins land on top of each other."""
+        t = max(0.0, d / LANE_LONG)
+        u = 0.72 * t if t < 1.0 else 0.72 + 0.28 * (t - 1.0) / 0.06
+        u = min(1.0, u)
+        wide = half_near * (1.0 - 0.62 * u)
+        return (cx + x / LANE_HALF * wide,
+                y_near + (y_far - y_near) * u, u)
+
+    # Three lanes: yours, and one either side.
+    for y in range(y_far, y_near + 1):
+        u = (y_near - y) / float(max(1, y_near - y_far))
+        wide = half_near * (1.0 - 0.62 * u)
+        for lane in (-1, 1, 0):
+            mid = cx + lane * wide * 2.4
+            lo, hi_ = int(mid - wide), int(mid + wide)
+            for x in range(max(0, lo), min(width - 1, hi_) + 1):
+                ch[y][x], co[y][x] = " ", 0
+                m = _mix(x // k, int(u * 400.0), 5503)
+                if m % 11 == 0:
+                    # The boards, and the glow going down them.
+                    ch[y][x] = "."
+                    co[y][x] = NEON[(int(now * 2.0 + u * 8.0) + lane) % n_neon][
+                        0 if m & 256 else 1]
+            for x, g in ((lo, "/"), (hi_, "\\")):
+                if 0 <= x < width:
+                    ch[y][x], co[y][x] = g, ROOF if lane == 0 else CONCRETE
+                gut = x + (-k if g == "/" else k)
+                if 0 <= gut < width and ch[y][gut] in " .*":
+                    ch[y][gut], co[y][gut] = ":", CONCRETE
+    # The arrows you aim by, and the foul line.
+    for n in range(-3, 4):
+        ax, ay, _ = place(n * 5.0, 190.0 - abs(n) * 16.0)
+        if 0 <= int(ax) < width and 0 <= int(ay) < height:
+            ch[int(ay)][int(ax)], co[int(ay)][int(ax)] = "^", ROU_RED
+    for x in range(int(cx - half_near) + 1, int(cx + half_near)):
+        if 0 <= x < width:
+            ch[y_near][x], co[y_near][x] = "=", ROU_RED
+    # Somebody else's game: pins standing, and a ball going down now and then.
+    for lane in (-1, 1):
+        wide = half_near * (1.0 - 0.62 * 0.9)
+        mid = cx + lane * half_near * (1.0 - 0.62 * 0.9) * 2.4
+        for row in range(4):
+            for n in range(row + 1):
+                x = int(mid + (n - row * 0.5) * 0.58 * wide)
+                y = int(y_near + (y_far - y_near) * (0.72 + row * 0.08))
+                if 0 <= x < width and 0 <= y < height:
+                    ch[y][x], co[y][x] = "i", ROOF
+        go = (now + (seed % 9) + lane * 5.0) % 11.0
+        if go < 3.0:
+            u = go / 3.0 * 0.72
+            x = int(cx + lane * half_near * (1.0 - 0.62 * u) * 2.4)
+            y = int(y_near + (y_far - y_near) * u)
+            if 0 <= x < width and 0 <= y < height:
+                ch[y][x], co[y][x] = "@", NEON[(seed + lane) % n_neon][0]
+        _bar_sprite(ch, co, BOWLER_ART, lambda c, m: HUD,
+                    int(cx + lane * half_near * 2.1), y_near - k, k)
+    # The pins, the far ones first.
+    showing = game.phase in ("roll", "show")
+    for p in sorted(game.pins, key=lambda p_: -p_[1]):
+        if p[4] and (not showing or p[1] > LANE_LONG + 3.0 * PIN_GAP
+                     or abs(p[0]) > LANE_HALF):
+            continue                    # swept up, or gone into the pit
+        sx, sy, _ = place(p[0], p[1])
+        _bar_sprite(ch, co, PIN_DOWN if p[4] else PIN_ART,
+                    lambda c, m: (ROU_RED if c == "o" and not p[4] else
+                                  CONCRETE if p[4] else ROOF),
+                    int(sx), int(sy), k)
+    # The ball, in your hand or on its way.
+    if game.ball is not None or (game.playing
+                                 and game.phase in ("aim", "spin", "power")):
+        bx, bz = (game.ball[0], game.ball[1]) if game.ball else (game.x, 0.0)
+        sx, sy, u = place(bx, bz)
+        r = (0.6 + 2.6 * max(0.0, 1.0 - u * 1.2)) * k
+        tint = NEON[(seed + 2) % n_neon][0]
+        for dy in range(-int(r), int(r) + 1):
+            across = math.sqrt(max(0.0, r * r - dy * dy)) * 2.0
+            for dx in range(-int(across), int(across) + 1):
+                x, y = int(sx) + dx, int(sy) + dy - int(r)
+                if 0 <= x < width and 0 <= y < height:
+                    ch[y][x] = "o" if dx < -across * 0.3 and dy < 0 else "@"
+                    co[y][x] = tint
+        if game.ball is None:
+            # Where you are lined up, up the lane.
+            for n in range(1, 18):
+                ax, ay, _ = place(game.x, n * 40.0)
+                if 0 <= int(ax) < width and 0 <= int(ay) < height and n % 2:
+                    ch[int(ay)][int(ax)], co[int(ay)][int(ax)] = ":", GOLD_DIM
+    # The meters, on a board of their own.
+    if game.playing and game.phase in ("aim", "spin", "power"):
+        wid = 21
+        pos = game.meter(now)
+        bar = ["-"] * wid
+        if game.phase == "spin":
+            bar[int((pos + 1.0) * 0.5 * (wid - 1))] = "O"
+        elif game.phase == "power":
+            for n in range(int((pos + 1.0) * 0.5 * wid)):
+                bar[n] = "#"
+        elif game.phase == "aim":
+            bar = [" "] * wid
+        lines = {"aim": ("a d: line up  -  p: spin", ""),
+                 "spin": ("SPIN  left    right  -  p", "".join(bar)),
+                 "power": ("POWER  -  p bowls", "".join(bar))}[game.phase]
+        by = height - 5
+        for n, text in enumerate(lines):
+            for x in range(1, min(width, 3 + len(lines[0]))):
+                ch[by + n][x], co[by + n][x] = " ", 0
+            _text(ch, co, by + n, 2, text, GOLD if n else HUD)
+    # What it came to.
+    if game.phase == "show" and game.said:
+        word = game.said
+        sx_ = 2 * k
+        sy_ = k
+        tw = blocks_width(word, sx_)
+        if tw < width - 2:
+            wy = y_far + (y_near - y_far) // 3
+            attr = (NEON[int(now * 6.0) % n_neon][0]
+                    if word in ("STRIKE", "SPARE") else GOLD)
+            for y in range(wy - 1, min(height, wy + 5 * sy_ + 1)):
+                for x in range(max(0, (width - tw) // 2 - 1),
+                               min(width, (width + tw) // 2 + 1)):
+                    ch[y][x], co[y][x] = " ", 0
+            _blocks(ch, co, wy, (width - tw) // 2, word, attr, sx_, sy_)
+    if not game.playing:
+        said = ("%d - p for another, $%d" % (game.total(), BOWL_COST) if game.over
+                else "p bowls a game, $%d, shoes included" % BOWL_COST)
+        ty = (y_far + y_near) // 2
+        if game.over and k > 1:
+            tw = blocks_width(str(game.total()), 3)
+            _blocks(ch, co, ty - 8, (width - tw) // 2, str(game.total()), GOLD, 3, 2)
+        for x in range(max(0, (width - len(said)) // 2 - 1),
+                       min(width, (width + len(said)) // 2 + 1)):
+            ch[ty][x], co[ty][x] = " ", 0
+        _text(ch, co, ty, (width - len(said)) // 2, said, GOLD)
+    return ch, co
+
+
+def draw_bowling_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
+                        cont, now):
+    """One column of a bowling alley: long, low and dark, two bands of neon
+    along it running in opposite directions, and glass along the bottom with the
+    lanes glowing through."""
+    scale = v.fy / dist
+    alley = b["bowling"]
+    n = len(NEON)
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    tube = NEON[alley["seed"] % n][0]
+    tube2 = NEON[(alley["seed"] + 3) % n][0]
+    if edge:
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx], co[y][sx] = "|", FLASH if v.flash > 0.35 else tube
+        return roof, None, foot, None, ()
+    prev_roof, prev_awn, prev_foot = cont[:3]
+    awning = int(round(v.horizon - (FLOOR_H - v.eye) * scale))
+    trim = FLASH if v.flash > 0.35 else tone_colour("dark", 0.3)
+    facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "=",
+                roof_colour(b, dist, v.flash, v.cover))
+    facade_line(ch, co, sx, awning, prev_awn, r_lo, r_hi, "-", trim)
+    for frac, attr, way in ((0.45, tube, 1.0), (0.72, tube2, -1.0)):
+        row = int(round(v.horizon - ((b["height"] * frac) - v.eye) * scale))
+        if r_lo <= row <= r_hi and row < awning and chase(u * way, now * way):
+            ch[row][sx], co[row][sx] = "=", attr
+    # The glass: what is inside, glowing.
+    top = awning + 1
+    if abs(u - alley["u"]) < 0.9 and face == alley["door"]:
+        for y in range(max(r_lo, top), min(r_hi, foot - 1) + 1):
+            ch[y][sx], co[y][sx] = "#", BULB
+    else:
+        for y in range(max(r_lo, top), min(r_hi, foot - 1) + 1):
+            m = _mix(int(u * 2.0) + face * 9, y, 5505)
+            if m % 5 == 0:
+                ch[y][sx], co[y][sx] = ".", NEON[(m >> 6) % n][(m >> 3) & 1]
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, awning, foot, None, ()
+
+
+def draw_bowling_front(ch, co, v, walls, alley, world, now):
+    """BOWLING over the door on a board of its own, big when you are near enough,
+    its name under it, and a neon pin and ball either side. Screen space, for
+    the casino marquee's reason."""
+    pr = v.project(world[0], world[1], world[2])
+    if pr is None or pr[2] > 80.0:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    n = len(NEON)
+    word = "BOWLING"
+    big = dist < ARCADE_BIG and big_width(word) + 6 <= v.width
+    w = max((big_width(word) if big else len(word)) + 6, len(alley["name"]) + 4)
+    rows = 7 if big else 3
+    x0, y0 = sx - w // 2, sy - rows
+    tube = NEON[alley["seed"] % n]
+    for r in range(rows + 1):
+        for x in range(x0, x0 + w):
+            if r in (0, rows) or x in (x0, x0 + w - 1):
+                lit = chase((x - x0 + r) * 0.4, now)
+                put_cell(ch, co, v, walls, x, y0 + r, dist, "o" if lit else ".",
+                         tube[0 if lit else 1])
+            else:
+                put_cell(ch, co, v, walls, x, y0 + r, dist, " ", GOLD_DIM)
+    if big:
+        lx = sx - big_width(word) // 2
+        for dx, dy, k in big_cells(word):
+            put_cell(ch, co, v, walls, lx + dx, y0 + 1 + dy, dist, "#",
+                     NEON[(k + int(now)) % n][0])
+    else:
+        for k, c in enumerate(word):
+            put_cell(ch, co, v, walls, sx - len(word) // 2 + k, y0 + 1, dist, c,
+                     tube[0])
+    name = alley["name"]
+    for k, c in enumerate(name):
+        put_cell(ch, co, v, walls, sx - len(name) // 2 + k, y0 + rows - 1, dist, c,
+                 GOLD)
+    # The pin one side, the ball rolling on the spot the other.
+    for row, line in enumerate((" o ", "( )", "| |", "( )", "(_)")):
+        for k, c in enumerate(line):
+            if c != " ":
+                put_cell(ch, co, v, walls, x0 - 5 + k, y0 + rows - 4 + row, dist, c,
+                         FLASH)
+    spin = int(now * 4.0) % 2
+    for row, line in enumerate((" __ ", "/.:\\" if spin else "/:.\\", "\\__/")):
+        for k, c in enumerate(line):
+            if c != " ":
+                put_cell(ch, co, v, walls, x0 + w + 2 + k, y0 + rows - 2 + row, dist, c,
+                         tube[0])
 
 
 def bar_lines(say, room):
@@ -13214,7 +13789,8 @@ def fire_near(x, z):
 
 
 # What goes out in a blackout: anything on a facade that is lit by the mains.
-LIGHT_PROPS = {"arcade", "blade", "bulb", "cinema", "diner", "exchange", "hung",
+LIGHT_PROPS = {"arcade", "bowling", "blade", "bulb", "cinema", "diner", "exchange",
+               "hung",
                "lanterns", "lobby", "marquee", "overdoor", "ramenfront", "clubdoor",
                "bass"}
 
@@ -13251,6 +13827,11 @@ def draw_props(ch, co, v, walls, now, wet):
                 if f == b["temple"]["door"]:
                     w = face_point(i, j, f, CELL * 0.5, 0.4, ROSE_Y)
                     props.append((_d2(v, w), "temple", b["temple"], w, (nx, nz)))
+                continue
+            if b["bowling"] is not None:
+                if f == b["bowling"]["door"]:
+                    w = face_point(i, j, f, CELL * 0.5, 0.5, FLOOR_H + 0.6)
+                    props.append((_d2(v, w), "bowling", b["bowling"], w, (nx, nz)))
                 continue
             if b["arcade"] is not None:
                 if f == b["arcade"]["door"]:
@@ -13339,6 +13920,8 @@ def draw_props(ch, co, v, walls, now, wet):
             draw_temple_front(ch, co, v, walls, s, world, now)
         elif kind == "arcade":
             draw_arcade_front(ch, co, v, walls, s, world, now)
+        elif kind == "bowling":
+            draw_bowling_front(ch, co, v, walls, s, world, now)
         elif kind == "exchange":
             draw_exchange_front(ch, co, v, walls, s, world, now)
         elif kind == "diner":
@@ -15917,7 +16500,7 @@ def venue_at(x, z):
                 continue
             b = lot(i, j)
             for kind in ("casino", "club", "tower", "cinema", "diner", "arcade",
-                         "temple", "exchange", "warehouse"):
+                         "bowling", "temple", "exchange", "warehouse"):
                 v = b[kind]
                 if v is None:
                     continue
@@ -17755,6 +18338,7 @@ CHEAT_PLACES = [
     ("|", "fire escape", "escape"),
     ("2", "a low roof", "lowroof"),
     ("3", "washing lines", "washing"),
+    ("4", "bowling", "bowling"),
     ("_", "car park", "carpark"),
     ("<", "police car", "police"),
     (")", "highway", "highway"),
@@ -18706,6 +19290,8 @@ def find_place(x, z, kind):
         return _diner_door(x, z)
     if kind == "arcade":
         return _doorway(x, z, 2501, "arcade", ARCADE_ODDS)
+    if kind == "bowling":
+        return _doorway(x, z, 2801, "bowling", BOWL_ODDS)
     if kind == "temple":
         return _temple_spot(x, z)
     if kind in ("industrial", "site", "warehouse", "plot"):
@@ -18806,7 +19392,7 @@ def find_place(x, z, kind):
 
 # The fifth column.
 CHEAT_MORE = ["university", "library", "metro", "flight", "center", "bar",
-              "lowroof", "washing"]
+              "lowroof", "washing", "bowling"]
 _panel_page = [0]       # which page an 80-column panel is showing
 
 
@@ -20953,6 +21539,8 @@ TEMPLE_HUD = (" in %s  -  g asks for the word of god  -  c the confession booth"
 CONFESS_HUD = " in the confession booth  -  type, enter to confess  -  esc steps out "
 EXCHANGE_HUD = (" on the trading floor  -  b buys, n sells, arrows pick, l lists  -"
                 "  s walks out  -  q quit ")
+BOWL_HUD = " %s  -  a d line up  -  p spin, p power  -  x stop playing "
+BOWL_OUT_HUD = " %s  -  p bowls a game  -  s walks out  -  q quit "
 ARCADE_HUD = (" in the %s arcade  -  ad choose a game  -  p plays  -  s walks out"
               "  -  q quit ")
 GAME_HUD = " playing %s  -  %s  -  x leaves the cabinet  -  q quit "
@@ -21037,6 +21625,9 @@ def main(stdscr):
     broker = Broker(wallet)     # your account at the exchange
     at_exchange = False
     at_arcade = False
+    at_bowl = False
+    bowl = None                 # the game on your lane, while you are in the place
+    bowl_hi = {}                # your best at each, for the session
     at_temple = False
     striker = None              # the last strength tester you stood at
     at_striker = False
@@ -21330,7 +21921,7 @@ def main(stdscr):
                     said_[-1] += " " + word_
                 oracle["said"] = said_[-20:]
                 oracle["at"], oracle["sung"] = now, word_
-            elif ((wheel is not None or at_arcade or at_bar is not None)
+            elif ((wheel is not None or at_arcade or at_bar is not None or at_bowl)
                   and key in (ord("z"), ord("Z"))):
                 _big_screens[0] = not _big_screens[0]     # big screens, off and on
                 note, note_at = ("big screens " + ("on" if _big_screens[0]
@@ -21398,6 +21989,19 @@ def main(stdscr):
             elif at_exchange and key in (ord("+"), ord("="), ord("-"), ord("_")):
                 step = 1 if key in (ord("+"), ord("=")) else -1
                 broker.lot = (broker.lot + step) % len(LOTS)
+            elif at_bowl and bowl.playing:
+                if key in (ord("x"), ord("X")):
+                    bowl.playing, bowl.phase = False, "idle"
+                else:
+                    bowl.key({curses.KEY_LEFT: "left", ord("a"): "left",
+                              ord("A"): "left", curses.KEY_RIGHT: "right",
+                              ord("d"): "right", ord("D"): "right", ord("p"): "act",
+                              ord("P"): "act", ord(" "): "act"}.get(key, ""), now)
+            elif at_bowl and key in (ord("p"), ord("P")):
+                if wallet.take(BOWL_COST):
+                    bowl.start(now)
+                else:
+                    note, note_at = "a game is $%d" % BOWL_COST, now
             elif at_arcade and play["game"] is not None:
                 # Playing: the keys are the game's, but for x, which leaves.
                 g_ = play["game"]
@@ -21720,6 +22324,11 @@ def main(stdscr):
         at_exchange = (venue[1] if venue is not None and venue[0] == "exchange"
                        else False)
         at_arcade = venue is not None and venue[0] == "arcade"
+        at_bowl = venue is not None and venue[0] == "bowling"
+        if not at_bowl:
+            bowl = None
+        elif bowl is None:
+            bowl = Bowling()
         at_temple = venue is not None and venue[0] == "temple"
         if venue is None or venue[0] != "telescope":
             scope_at = None             # step back and it starts again
@@ -21884,6 +22493,15 @@ def main(stdscr):
             else:
                 ch, co = render_arcade(venue[1], width, height, now, play["sel"])
                 hud = ARCADE_HUD % venue[1]["name"].lower()
+        elif venue is not None and venue[0] == "bowling":
+            bowl.update(now)
+            if bowl.over:
+                bowl_hi[venue[1]["seed"]] = max(bowl_hi.get(venue[1]["seed"], 0),
+                                                bowl.total())
+            ch, co = render_bowling(venue[1], bowl, width, height, now,
+                                    bowl_hi.get(venue[1]["seed"], 0))
+            hud = ((BOWL_HUD if bowl.playing else BOWL_OUT_HUD)
+                   % venue[1]["name"].lower())
         elif venue is not None and venue[0] == "cinema":
             ch, co = render_cinema(venue[1], width, height, now)
             hud = CINEMA_HUD % (venue[1]["title"].lower(), cam_x, cam_z)

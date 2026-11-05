@@ -66,6 +66,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   queue, a bouncer and a rope, and now and then the door opens and lets the light out; the
   windows next door shake on the kick, the puddles ripple, and at closing time the lights come
   up and everyone spills out into the street.
+- a bowling alley under the black light: ten frames, aim and spin, and ten real pins knocking into
+  each other, so a strike is earned and so is a split.
 - a rooftop bar on some of those towers: the real skyline behind it, a drink off the wallet, a trio
   and a bartender with opinions.
 - up the fire escapes, some roofs with somebody's something on them: a pigeon loft to feed and send

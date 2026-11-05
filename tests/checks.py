@@ -171,7 +171,7 @@ blind = []
 for _, name, kind in ac.CHEAT_PLACES:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
                 "diner", "billboard", "highway", "arcade", "claw", "roofparty",
-                "exchange", "metro", "bar", "lowroof"):
+                "exchange", "metro", "bar", "lowroof", "bowling"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -5768,6 +5768,101 @@ for ln_ in ws_roofs[:6]:
                    300, 90, eye=ln_[4] + 15.0, reach=ac.ROOF_REACH)
     ac.render_street(ws_v, 600.0)
 check("the roofs' draw from up high", True)
+
+# --- bowling ----------------------------------------------------------------------
+check("the score: 300 for all strikes",
+      ac.bowl_scores([[10]] * 9 + [[10, 10, 10]])[-1] == 300)
+check("150 for all fives and spares",
+      ac.bowl_scores([[5, 5]] * 9 + [[5, 5, 5]])[-1] == 150)
+check("90 for all nines", ac.bowl_scores([[9, 0]] * 10)[-1] == 90)
+check("a strike waits for its next two balls", ac.bowl_scores([[10], [3]]) == []
+      and ac.bowl_scores([[10], [3, 4]]) == [17, 24])
+check("and a spare for its next one", ac.bowl_scores([[6, 4]]) == []
+      and ac.bowl_scores([[6, 4], [3]]) == [13])
+
+
+def bw_throw(x_, spin_, power_):
+    g_ = ac.Bowling()
+    g_.bowl(x_, spin_, power_, 0.0)
+    while g_.step():
+        pass
+    return sum(1 for p_ in g_.pins if p_[4])
+
+
+bw_x = [float(a_) for a_ in range(-16, 17, 2)]
+bw_grid = [bw_throw(x_, s_, 0.7) for x_ in bw_x for s_ in (-1.0, -0.6, 0.0, 0.6, 1.0)]
+check("a hooked ball in the pocket can strike", 10 in bw_grid, str(bw_grid.count(10)))
+check("but most balls leave something", bw_grid.count(10) < len(bw_grid) / 4)
+check("a gutter ball knocks nothing down", bw_throw(20.5, 1.0, 1.0) == 0)
+check("left and right are the same game", abs(bw_throw(6.0, -1.0, 0.7)
+                                              - bw_throw(-6.0, 1.0, 0.7)) <= 2)
+bw_rng = random.Random(11)
+bw_g = ac.Bowling(bw_rng)
+bw_t = 100.0
+bw_g.start(bw_t)
+bw_g.key("left", bw_t)
+check("a and d line you up", bw_g.x < 0.0)
+for _ in range(200):
+    bw_g.key("left", bw_t)
+check("but not into the gutter", abs(bw_g.x) < ac.LANE_HALF)
+bw_seen = set()
+for _ in range(40000):
+    bw_t += 1.0 / 30.0
+    if bw_g.phase in ("aim", "spin", "power") and bw_rng.random() < 0.05:
+        bw_g.key("act", bw_t)
+    bw_g.update(bw_t)
+    bw_seen.add(bw_g.phase)
+    if bw_g.over:
+        break
+check("a whole game, through its keys, comes to an end", bw_g.over
+      and len(bw_g.frames) == 10 and 0 <= bw_g.total() <= 300, str(bw_g.frames))
+check("with a score for all ten frames", len(ac.bowl_scores(bw_g.frames)) == 10)
+check("each frame by the rules", all(
+    (len(f_) == 1 and f_[0] == 10) or (len(f_) == 2 and sum(f_) <= 10)
+    for f_ in bw_g.frames[:9]) and 2 <= len(bw_g.frames[9]) <= 3)
+check("and it went through every stage",
+      {"aim", "spin", "power", "roll", "show"} <= bw_seen)
+bw_g2 = ac.Bowling(random.Random(1))
+bw_g2.start(0.0)
+bw_g2.bowl(4.0, 0.0, 0.7, 0.0)
+while bw_g2.step():
+    pass
+bw_g2.finish(5.0)
+bw_up = [p_[:2] for p_ in bw_g2.pins if not p_[4]]
+bw_g2.next_ball(7.0)
+check("what stands stays standing for the second ball",
+      [p_[:2] for p_ in bw_g2.pins if not p_[4]] == bw_up
+      and bw_g2.frames == [[10 - len(bw_up)]])
+bw_sp = ac.find_place(x0, z0, "bowling")
+bw_v = ac.venue_at(bw_sp[0], bw_sp[1])
+check("the menu stands you in the door of an alley", bw_v is not None
+      and bw_v[0] == "bowling" and bw_v[1]["name"] in ac.BOWL_NAMES)
+bw_al = [ac.lot(i_, j_)["bowling"] for i_ in range(-400, 400) for j_ in range(-400, 400)
+         if not ac.is_open(i_, j_) and ac._mix(i_, j_, 2801) % ac.BOWL_ODDS == 0
+         and ac.lot(i_, j_)["bowling"] is not None]
+check("there are a few about", len(bw_al) > 20, str(len(bw_al)))
+bw_alley = bw_v[1]
+for w_, h_ in ((80, 24), (60, 20), (44, 16), (43, 30), (20, 8), (110, 34), (150, 44),
+               (299, 87), (300, 90), (451, 133)):
+    for g_ in (ac.Bowling(), bw_g, bw_g2):
+        ac.render_bowling(bw_alley, g_, w_, h_, 7.0, 120)
+    bw_g3 = ac.Bowling(random.Random(2))
+    bw_g3.start(0.0)
+    for ph_ in ("aim", "spin", "power"):
+        bw_g3.phase = ph_
+        ac.render_bowling(bw_alley, bw_g3, w_, h_, 0.4)
+    bw_g3.bowl(5.0, -1.0, 0.8, 0.0)
+    for _ in range(600):
+        bw_g3.step()
+        if _ % 60 == 0:
+            ac.render_bowling(bw_alley, bw_g3, w_, h_, 1.0)
+check("the room draws at every size, at every stage", True)
+bw_bigz = "\n".join("".join(r_) for r_ in
+                    ac.render_bowling(bw_alley, bw_g, 300, 90, 7.0)[0])
+bw_smallz = "\n".join("".join(r_) for r_ in
+                      ac.render_bowling(bw_alley, bw_g, 299, 87, 7.0)[0])
+check("the name in block letters big, and plain small", bw_alley["name"] not in bw_bigz
+      and bw_alley["name"] in bw_smallz)
 
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
