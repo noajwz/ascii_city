@@ -2461,6 +2461,16 @@ and the far traffic in, turning slowly on three roofs: 200 is 26 ms a frame and 
 The plane, over a whole flight: 170 is a median of 32 with 44% of frames over 33, 200 is 35 with
 53%. The owner chose to have them split, roof further out than plane.
 
+**The moon on the horizon, and the river as moonlight**, up high only - from the street the moon
+stays on `moon_dir()`, which never sets. `moon_high()` takes the same path and brings it up over
+the first `MOON_RISE` of the night and down over the last. Under `MOON_LOW` up the sky,
+`draw_low_moon()` draws a whole disc, big and warm, phase and all, only into cells above everything
+in the column, so the skyline stands black against it. `draw_moon_river()` follows the middle of
+the channel (`river_centre()`) out to `RIVER_LINE_CELLS` either way, on grid points further apart
+further off so that they hold still, brightest towards the moon's bearing, with a bit of glitter;
+`hidden()` puts buildings in front of it. It needs a moon: none on a new one, nor through cloud.
+`1` in the menu brings a full moon up straight ahead, whatever the sky is doing.
+
 **Do not draw the ground at half resolution to buy more.** It was tried: every other row and
 column worked out and the rest copied from a neighbour. It was faster (roof 28, plane 32), and
 the owner tried it and said no - the flight looked blurry; and copying into cells nothing had
