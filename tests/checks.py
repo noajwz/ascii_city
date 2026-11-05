@@ -5417,6 +5417,65 @@ check("real buildings go further from a roof than from the plane",
                                            "look": 0.0, "want": 0.0})[2].high_walls
       == ac.WALL_REACH_PLANE)
 
+# --- the night sky on a big window --------------------------------------------
+ns_real = ac.STAR, ac.STAR_DIM, ac.STAR_WARM, ac.STAR_COLD, ac.BAND, ac.MOON, ac.MOON_DIM
+ac.STAR = ac.STAR_DIM = ac.STAR_WARM = ac.STAR_COLD = ac.BAND = 921
+ac.MOON = ac.MOON_DIM = 922
+ns_funcs = ac.night, ac.moon_face, ac.moon_dir, ac.cloud_cover
+ns_night = dict(ac.night(600.0), band=False, alien=False, clarity=1.0, meteors=5)
+ac.night = lambda t_: ns_night
+ac.cloud_cover = lambda t_: 0.0
+ac.moon_face = lambda p_: "()"
+ac.moon_dir = lambda t_: (0.7, 0.5)
+
+
+def ns_sky(w_, h_, yaw_=0.7, t_=600.0):
+    c_ = [[" "] * w_ for _ in range(h_)]
+    o_ = [[0] * w_ for _ in range(h_)]
+    v_ = ac.View(x0, z0, yaw_, w_, h_)
+    v_.dawn, v_.flash, v_.fog, v_.blackout = 0.0, 0.0, False, False
+    ac.draw_sky(c_, o_, v_, ([None] * w_, None, None, [h_] * w_, None), 0.0, t_)
+    return c_, o_, v_
+
+
+ns_c, ns_o, ns_v = ns_sky(300, 90)
+ns_stars = {(y_, x_) for y_ in range(90) for x_ in range(300) if ns_o[y_][x_] == 921}
+ns_pairs = sum(1 for y_, x_ in ns_stars if (y_, x_ + 1) in ns_stars)
+check("at 300 wide a star is one cell, not a dash",
+      len(ns_stars) > 100 and ns_pairs < len(ns_stars) * 0.12,
+      "%d stars, %d side by side" % (len(ns_stars), ns_pairs))
+_, ns_o2, ns_v2 = ns_sky(300, 90, yaw_=0.72)
+ns_stars2 = {(y_, x_) for y_ in range(90) for x_ in range(300) if ns_o2[y_][x_] == 921}
+ns_mid = [(y_, x_) for y_, x_ in ns_stars if 100 <= x_ < 200]
+ns_kept = 0
+for y_, x_ in ns_mid:
+    b_ = 0.7 + math.atan((2.0 * x_ / 299 - 1.0) * ac.PLANE)
+    x2_ = ac.sky_col(ns_v2, b_)
+    if any((y_, x2_ + d_) in ns_stars2 for d_ in (-1, 0, 1)):
+        ns_kept += 1
+check("and they hold still as you turn", ns_kept >= len(ns_mid) * 0.9,
+      "%d of %d" % (ns_kept, len(ns_mid)))
+ns_moon = sorted((y_, x_) for y_ in range(90) for x_ in range(300) if ns_o[y_][x_] == 922)
+_, ns_o3, _ = ns_sky(120, 40)
+ns_small = [(y_, x_) for y_ in range(40) for x_ in range(120) if ns_o3[y_][x_] == 922]
+check("the moon is a drawing on a big window, and one or two characters on a small one",
+      len({y_ for y_, _ in ns_moon}) == 2 and len(ns_moon) == 8 and len(ns_small) == 2,
+      "%d and %d" % (len(ns_moon), len(ns_small)))
+ns_lit = []
+for t_ in range(0, 6000, 3):
+    ns_cells = ns_sky(300, 90, t_=t_ + 0.5)[0]
+    ns_lit = [(x_, y_) for y_, r_ in enumerate(ns_cells) for x_, c_ in enumerate(r_)
+              if c_ in "\\/" and (y_, x_) not in ns_moon]
+    if len(ns_lit) >= 6:
+        break
+ns_lit.sort()
+check("a meteor on a big window is an unbroken streak",
+      len(ns_lit) >= 6 and all(b_[0] - a_[0] <= 1 and abs(b_[1] - a_[1]) <= 2
+                               for a_, b_ in zip(ns_lit, ns_lit[1:])), str(ns_lit[:8]))
+ac.night, ac.moon_face, ac.moon_dir, ac.cloud_cover = ns_funcs
+(ac.STAR, ac.STAR_DIM, ac.STAR_WARM, ac.STAR_COLD, ac.BAND, ac.MOON,
+ ac.MOON_DIM) = ns_real
+
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
 ac.FLASH, ac.ROU_RED = 901, 902

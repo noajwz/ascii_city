@@ -31,6 +31,14 @@ first to scale (see The casino, big), then the arcade (see The arcade, big) and 
 Center (see The Pokemon Center); the cinema was looked at and does not need it. More venues are
 to follow, and they all work the same way:
 
+The night sky goes by the same scale. Stars are not scaled but fixed: a star is drawn only in the
+first column of its bearing (90 to the radian, about 132 across the screen), because on a wide
+window one bearing covers two or three columns and each star came out as a dash. That is at every
+width, not only big ones - below about 90 columns no bearing is shared and nothing changes - and
+the number of stars and where they are stay as they were. The moon has a second drawing
+(`MOON_BIG`) and a meteor twice the cells, so both come out the size and the angle they are on a
+small window.
+
 - **One threshold, in characters, for everything.** The scale is `min(width // 150,
   height // 44)`, capped at 3 (`big_scale()`, `BIG_W`, `BIG_H`, `BIG_MAX`): 2 from a
   300x88 window up, 3 from 450x132. The game never sees the zoom level or the screen - only the
