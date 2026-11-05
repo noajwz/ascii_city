@@ -73,8 +73,10 @@ ZP = 9                 # ... and from one cross street to the next
 EYE_Y = 3.2            # how high off the road you are looking from
 BODY = 1.15            # how close to a wall you can get
 NEAR_Z = 0.6
-MAX_VIEW = 130.0       # how far a wall ray is followed
-GROUND_FAR = 80.0
+MAX_VIEW = 260.0       # how far a wall ray is followed
+GROUND_FAR = 270.0
+WALL_BARS = 130.0      # past here a building's corner gets no bar: one column is a
+                       # whole building down a street, and they made a solid wall
 PLANE = 0.9            # half-width of the camera plane: about 84 degrees across
 FLOOR_H = 2.4          # world height of one storey
 BAY_W = 1.6            # world width of one window bay
@@ -6737,7 +6739,7 @@ def draw_walls(ch, co, v, now):
             nx, nz = FACES[f]
             seen[key] = (sx, draw_wall_column(
                 ch, co, v, sx, dist, b, f, u, r_lo, r_hi,
-                cont is None and sx > 0,
+                cont is None and sx > 0 and (high or dist <= WALL_BARS),
                 cont or (None, None, None, None, ()),
                 face_kind(i + nx, j + nz), now))
             if b["diner"] is not None and f == b["diner"]["door"]:
