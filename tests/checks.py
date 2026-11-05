@@ -5478,49 +5478,23 @@ ac.night, ac.moon_face, ac.moon_dir, ac.cloud_cover = ns_funcs
 (ac.STAR, ac.STAR_DIM, ac.STAR_WARM, ac.STAR_COLD, ac.BAND, ac.MOON,
  ac.MOON_DIM) = ns_real
 
-# --- the moon on the horizon, and on the river ---------------------------------
-mr_real = ac.MOON, ac.MOON_DIM, ac.BULB, ac.BULB_DIM, ac.FOG_DIM
-ac.MOON, ac.MOON_DIM, ac.BULB, ac.BULB_DIM, ac.FOG_DIM = 931, 932, 933, 934, 935
-
-
-def mr_moon(eye_, tops_=None, t_=600.0):
-    c_ = [[" "] * 300 for _ in range(90)]
-    o_ = [[0] * 300 for _ in range(90)]
-    v_ = ac.View(x0, z0, 0.7, 300, 90, eye=eye_, reach=ac.ROOF_REACH)
-    v_.flash, v_.dawn = 0.0, 0.0
-    ac.draw_moon(c_, o_, v_, tops_ or [90] * 300, t_, set())
-    return {(y_, x_) for y_ in range(90) for x_ in range(300)
-            if o_[y_][x_] in (931, 932, 933, 934)}, v_
-
-
-ac._moon_asked[0] = (600.0, 0.7)
-mr_low, mr_v = mr_moon(70.0)
-mr_up, _ = mr_moon(70.0, t_=640.0)
-mr_clip, _ = mr_moon(70.0, tops_=[mr_v.horizon - 2] * 300)
-check("from up high the moon comes up big, and shrinks as it climbs",
-      len(mr_low) > 60 and 0 < len(mr_up) < len(mr_low) and all(
-          y_ < mr_v.horizon for y_, _ in mr_low), "%d, %d" % (len(mr_low), len(mr_up)))
-check("the skyline stands in front of it",
-      mr_clip and all(y_ < mr_v.horizon - 2 for y_, _ in mr_clip))
-ac._moon_asked[0] = None
-mr_st_before = mr_moon(1.6)[0]
-ac._moon_asked[0] = (600.0, 0.7)
-check("and from the street the moon is where it always was",
-      mr_moon(1.6)[0] == mr_st_before)
-
-
+# --- the river as a line of moonlight ------------------------------------------
+mr_real = ac.MOON, ac.MOON_DIM, ac.FOG_DIM
+ac.MOON, ac.MOON_DIM, ac.FOG_DIM = 931, 932, 935
+mr_night = ac.night
 mr_along = max((0.0, math.pi / 2), key=lambda y_: abs(ac.View(0.0, 0.0, y_, 9, 9).dx))
 
 
-def mr_river(runs_=None, clear_=1.0, eye_=70.0, ask_=True):
-    ac._moon_asked[0] = (600.0, 1.0) if ask_ else None
+def mr_river(runs_=None, clear_=1.0, phase_=0.5):
+    ac.night = lambda t_: dict(mr_night(t_), phase=phase_)
     c_ = [[" "] * 300 for _ in range(90)]
     o_ = [[0] * 300 for _ in range(90)]
-    v_ = ac.View(0.0, ac.river_centre(0) * ac.CELL + 40.0, mr_along, 300, 90, eye=eye_,
+    v_ = ac.View(0.0, ac.river_centre(0) * ac.CELL + 40.0, mr_along, 300, 90, eye=70.0,
                  reach=ac.ROOF_REACH)
     v_.clear = clear_
     ac.draw_moon_river(c_, o_, v_, (None, None, None, None,
                                     runs_ or [[] for _ in range(300)]), 600.0)
+    ac.night = mr_night
     return sum(1 for r_ in o_ for x_ in r_ if x_ in (931, 932, 935))
 
 
@@ -5528,14 +5502,9 @@ mr_wall = [[(1.0, 0, 89)] for _ in range(300)]
 mr_n = mr_river()
 check("the river is a line of moonlight, off into the dark", mr_n > 30, str(mr_n))
 check("buildings stand in front of it", mr_river(runs_=mr_wall) == 0)
-mr_phase = ac.moon_high
-ac.moon_high = lambda t_: (1.0, 0.3, 0.0)
-check("and no moon, no line", mr_river(ask_=False) == 0)
-ac.moon_high = lambda t_: (1.0, 0.3, 0.5)
-check("nor through the cloud", mr_river(ask_=False, clear_=0.0) == 0)
-ac.moon_high = mr_phase
-ac._moon_asked[0] = None
-ac.MOON, ac.MOON_DIM, ac.BULB, ac.BULB_DIM, ac.FOG_DIM = mr_real
+check("and no moon, no line", mr_river(phase_=0.0) == 0)
+check("nor through the cloud", mr_river(clear_=0.0) == 0)
+ac.MOON, ac.MOON_DIM, ac.FOG_DIM = mr_real
 
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED

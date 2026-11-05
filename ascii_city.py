@@ -6871,84 +6871,22 @@ MOON_BIG = {"()": (".--.", "'--'"), "O": (".-.", "'-'"),
             ")": ("\\", "/"), "(": ("/", "\\")}
 
 
-MOON_RISE = 0.12        # the part of a night the moon takes to rise, and to set
-MOON_LOW = 0.26         # how high up the sky it still looks big and warm
-MOON_ASK_LEN = 200.0    # how long one asked for from the menu stays
-MOON_ASK_RISE = 70.0    # and how long it takes to come up
-_moon_asked = [None]    # (when, bearing)
-
-
-def moon_high(now):
-    """(bearing, height up the sky, phase) of the moon from up high, where the
-    horizon can be seen. From the street it never needed to set: it would only
-    have gone behind the roofs early, so there it keeps to moon_dir()."""
-    asked = _moon_asked[0]
-    if asked is not None and 0.0 <= now - asked[0] < MOON_ASK_LEN:
-        return asked[1], min(0.34, (now - asked[0]) / MOON_ASK_RISE * MOON_LOW), 0.5
-    bearing, alt = moon_dir(now)
-    t = ((now + _night_skip) % NIGHT_LENGTH) / NIGHT_LENGTH
-    return bearing, alt * min(1.0, min(t, 1.0 - t) / MOON_RISE), night(now)["phase"]
-
-
-def draw_low_moon(ch, co, v, tops, seen, sx, y0, alt, phase):
-    """The moon low over the skyline: a whole disc, big and warm, shrinking and
-    whitening as it climbs. By rows, twice that across, the cells being twice
-    as tall as they are wide, and only into cells above everything in their
-    column, so the city stands black against it. Its dark side hides the stars."""
-    low = 1.0 - alt / MOON_LOW
-    big = big_scale(v.width, v.height) > 1
-    r = (2.0 + 4.0 * low) if big else (1.0 + 2.0 * low)
-    p = abs(phase - 0.5) * 2.0
-    side = 1.0 if phase < 0.5 else -1.0
-    attr = BULB if low > 0.45 else MOON
-    dim = BULB_DIM if low > 0.45 else MOON_DIM
-    for dy in range(-int(r), int(r) + 1):
-        y = y0 + dy
-        if not 0 <= y < v.horizon:
-            continue
-        across = math.sqrt(max(0.0, 1.0 - (dy / r) ** 2))
-        for dx in range(-int(across * r * 2.0), int(across * r * 2.0) + 1):
-            x = sx + dx
-            if not 0 <= x < v.width or y >= tops[x]:
-                continue
-            fx = dx / (r * 2.0)
-            if side * fx < (2.0 * p - 1.0) * across:
-                ch[y][x] = " "
-                continue
-            m = _mix(dx // 3, dy, 4961)
-            if fx * fx + (dy / r) ** 2 > 0.74:
-                ch[y][x], co[y][x] = "o", attr          # the rim
-            elif m % 5 == 0:
-                ch[y][x], co[y][x] = ":", dim           # the seas on it
-            else:
-                ch[y][x], co[y][x] = "#", attr
-            seen.add((y, x))
-
-
 def draw_moon(ch, co, v, tops, now, seen):
     """The moon, if it is up and this side of the sky.
 
     One or two characters and no glow around it. It is the only object in the
     sky and it does not need help - anything more and it stops being a moon in
     a city and starts being a poster. On a big window, where one character is
-    half the size, a drawing that comes out the same size as that one. From up
-    high you can see it come up, and low down it is the big one."""
-    if v.eye >= 10.0:
-        bearing, alt, phase = moon_high(now)
-    else:
-        phase = night(now)["phase"]
-        bearing, alt = moon_dir(now)
-    face = moon_face(phase)
+    half the size, a drawing that comes out the same size as that one."""
+    face = moon_face(night(now)["phase"])
     if not face:
         return
+    bearing, alt = moon_dir(now)
     sx = sky_col(v, bearing)
     if sx is None:
         return
     y0 = int(round((1.0 - alt) * (v.horizon - 2)))
-    if v.eye >= 10.0 and alt < MOON_LOW:
-        draw_low_moon(ch, co, v, tops, seen, sx, y0, alt, phase)
-        return
-    dim = abs(phase - 0.5) * 2.0 > 0.34
+    dim = abs(night(now)["phase"] - 0.5) * 2.0 > 0.34
     rows = MOON_BIG[face] if big_scale(v.width, v.height) > 1 else (face,)
     for r, row in enumerate(rows):
         y = y0 + r
@@ -7090,11 +7028,8 @@ def draw_sky(ch, co, v, walls, wet, now):
         draw_saucers(ch, co, v, tops, now, seen)
         draw_landing_beam(ch, co, v, tops, now, seen)
     v.clear = clear
-    asked = _moon_asked[0]
-    if clear > 0.15 or (v.eye >= 10.0 and asked is not None
-                        and 0.0 <= now - asked[0] < MOON_ASK_LEN):
-        draw_moon(ch, co, v, tops, now, seen)
     if clear > 0.15:
+        draw_moon(ch, co, v, tops, now, seen)
         draw_meteor(ch, co, v, tops, now, seen)
 
 
@@ -11038,15 +10973,10 @@ def draw_moon_river(ch, co, v, walls, now):
     cells at a time, further apart further off, so a point stays where it is.
     Only with a moon up to do it; buildings stand in front of it, and they
     are tested with the distance, so it goes behind each one properly."""
-    bearing, _, phase = moon_high(now)
-    power = 1.0 - abs(phase - 0.5) * 2.0
-    asked = _moon_asked[0]
-    if asked is not None and 0.0 <= now - asked[0] < MOON_ASK_LEN:
-        power = 1.0
-    elif v.clear <= 0.15:
+    if v.clear <= 0.15:
         return
-    else:
-        power *= min(1.0, v.clear)
+    bearing = moon_dir(now)[0]
+    power = (1.0 - abs(night(now)["phase"] - 0.5) * 2.0) * min(1.0, v.clear)
     if power < 0.12:
         return
     width, height, horizon = v.width, v.height, v.horizon
@@ -18078,7 +18008,6 @@ def draw_cheats(ch, co, note):
            ("`", "close")]
     more = [("", "AND THE REST")] + [names[k] for k in CHEAT_MORE if k in names]
     more.append(("\\", "storm far ahead"))
-    more.append(("1", "moon coming up"))
     col = 18
     if width >= col * 5 + 7:
         columns = (left, middle, right, sky, more)     # room for all five
@@ -20315,19 +20244,15 @@ def main(stdscr):
                 elif key == ord("L"):
                     force_strike(now)
                     note = "lightning"
-                elif key in (ord("\\"), ord("1")):
+                elif key == ord("\\"):
                     # Straight out of whichever way you are looking, flying or not.
                     ahead_ = yaw
                     if flight is not None and flight["phase"] == "air":
                         ahead_ = (flight_pose(flight["home"], flight_s(
                             now - flight["t0"], flight["home"]))[2]
                             + math.pi / 2 + flight["look"])
-                    if key == ord("1"):
-                        _moon_asked[0] = (now, ahead_)
-                        note = "the moon coming up - look from up high"
-                    else:
-                        _far_storm_force[0] = (now, ahead_)
-                        note = "a storm far off - look from up high"
+                    _far_storm_force[0] = (now, ahead_)
+                    note = "a storm far off - look from up high"
                 elif key == ord("u"):
                     note = ("the sky is busy tonight"
                             if skip_to_alien(now) else "no such night near")
