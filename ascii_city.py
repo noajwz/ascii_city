@@ -3349,7 +3349,8 @@ def cast(v, rdx, rdz, limit=4, reach=None):
     """March a ray through the grid, handing over the walls it meets, nearest
     first, up to `limit` of them. It keeps going past the first one because a
     taller building behind a short one still shows over its roof. One at a
-    time, so a caller that has seen enough can stop it early."""
+    time, so a caller that has seen enough can stop it early. Each comes with
+    how far off the ray leaves the cell again, which is where its roof ends."""
     cx = v.x / CELL
     cz = v.z / CELL
     i = int(cx + BIG) - BIG
@@ -3396,7 +3397,7 @@ def cast(v, rdx, rdz, limit=4, reach=None):
                 u = v.z + rdz * dist - u0
             else:
                 u = v.x + rdx * dist - u0
-            yield max(dist, 0.35), i, j, f, u
+            yield max(dist, 0.35), i, j, f, u, min(next_x, next_z) * CELL
             found += 1
             if found >= limit:
                 return
@@ -6675,6 +6676,37 @@ def draw_far_blocks(ch, co, v, now, walls):
             was = part
 
 
+ROOF_THINGS_FAR = 200.0    # up high, how far off a roof's air conditioners show
+
+
+def draw_roof_things(ch, co, v, walls, roofs):
+    """What stands on the roofs in view, on about half of them: an air
+    conditioner, a water tank or a stairwell hut with its light on or off.
+    Points in the world, one place on each roof, so they hold still; bigger
+    near to, a mark further off."""
+    for i, j in roofs:
+        m = _mix(i, j, 5001)
+        kind = m % 6
+        if kind > 2:
+            continue
+        b = lot(i, j)
+        pr = v.project((i + 0.2 + ((m >> 4) & 15) / 25.0) * CELL, b["height"] + 0.7,
+                       (j + 0.2 + ((m >> 8) & 15) / 25.0) * CELL)
+        if pr is None:
+            continue
+        sx, sy, f = int(round(pr[0])), int(round(pr[1])), pr[2]
+        lit = (m >> 12) & 1
+        attr = GOLD_DIM if kind == 2 and lit else CONCRETE
+        glyph = "#" if kind != 1 else "O"
+        put_cell(ch, co, v, walls, sx, sy, f, glyph, attr)
+        if f < 110.0:
+            if kind == 1:
+                put_cell(ch, co, v, walls, sx, sy + 1, f, "|", CURB)   # on its legs
+            else:
+                put_cell(ch, co, v, walls, sx - 1, sy, f, "[" if kind else "=", CURB)
+                put_cell(ch, co, v, walls, sx + 1, sy, f, "]" if kind else "=", CURB)
+
+
 def draw_walls(ch, co, v, now):
     """Cast one ray per screen column and paint what it hits.
 
@@ -6704,23 +6736,63 @@ def draw_walls(ch, co, v, now):
     # is drawn, however many - a distance holds still where a count did not
     # - and the ground and the far lights go on past it.
     high = v.eye >= 10.0
+    roofs = set()      # up high, the cells whose roofs are in view
+    height, horizon, eye, fy = v.height, v.horizon, v.eye, v.fy
+
+    def roof_over(sx, b, i, j, dist, out, over, cover, rdx, rdz):
+        """From above a building, its roof: from the top of the front the ray
+        came in by, to where the ray leaves the cell. Only its back edge is
+        drawn, so it is dark and flat - and it stands in the way, so the thin
+        slices of the fronts behind, which used to fake a roof as stripes, are
+        never drawn at all. Returns the new cover."""
+        back = int(math.floor(horizon + over / out))
+        lo = max(0, back)
+        hi = min(height - 1, int(math.floor(horizon + over / dist)) - 1)
+        if cover is not None:
+            hi = min(hi, cover - 1)
+        if hi < lo:
+            return cover
+        if back == lo:
+            ni = int((v.x + rdx * (out + 0.01)) / CELL + BIG) - BIG
+            nj = int((v.z + rdz * (out + 0.01)) / CELL + BIG) - BIG
+            if is_open(ni, nj) or lot(ni, nj)["height"] < b["height"] - 0.5:
+                ch[lo][sx] = b["district"].get("roof") or "_"
+                co[lo][sx] = roof_colour(b, dist, v.flash, v.cover)
+        if dist < ROOF_THINGS_FAR:
+            roofs.add((i, j))
+        sky_top[sx] = lo
+        runs[sx].append((out, lo, hi))
+        if wall_d[sx] is None:
+            wall_d[sx], wall_top[sx], wall_base[sx] = out, lo, hi
+        return lo
+
     for sx in range(width):
         rdx, rdz = v.ray(sx)
         cover = None
-        for dist, i, j, f, u in (cast(v, rdx, rdz, 1 << 30, v.high_walls)
-                                 if high else cast(v, rdx, rdz, v.depth)):
+        for dist, i, j, f, u, out in (cast(v, rdx, rdz, 1 << 30, v.high_walls) if high
+                                      else cast(v, rdx, rdz, v.depth)):
             if v.skip and (i, j) in v.skip:
                 continue                 # the building you are standing on
             b = lot(i, j)
-            if cover is not None and (v.horizon - (b["height"] - v.eye) * v.fy / dist
-                                      >= cover):
-                continue                 # its roof is under what is drawn already
+            over = (eye - b["height"]) * fy
+            roofed = high and over > 0.0 and not b["tree"]
+            if cover is not None:
+                # All of it under what is drawn already: most of what a ray
+                # meets up high, and this is where it ends. The far edge of
+                # its roof is the highest part of it, where it has a roof.
+                if horizon + over / (out if roofed else dist) >= cover:
+                    continue
+                if horizon + over / dist >= cover:
+                    cover = roof_over(sx, b, i, j, dist, out, over, cover, rdx, rdz)
+                    continue
             top, base = wall_span(v, dist, b["height"])
             r_lo = max(0, top)
             r_hi = min(v.height - 1, base)
             if cover is not None:
                 r_hi = min(r_hi, cover - 1)
             if r_hi < r_lo:
+                if roofed:
+                    cover = roof_over(sx, b, i, j, dist, out, over, cover, rdx, rdz)
                 continue
             key = (i, j, f)
             was = seen.get(key)
@@ -6762,12 +6834,16 @@ def draw_walls(ch, co, v, now):
                 wall_d[sx] = dist
                 wall_top[sx] = r_lo
                 wall_base[sx] = r_hi
+            if roofed:
+                cover = roof_over(sx, b, i, j, dist, out, over, cover, rdx, rdz)
             if cover <= 0:
                 break
 
+    walls = (wall_d, wall_top, wall_base, sky_top, runs)
     if high:
-        draw_far_blocks(ch, co, v, now, (wall_d, wall_top, wall_base, sky_top, runs))
-    return (wall_d, wall_top, wall_base, sky_top, runs)
+        draw_far_blocks(ch, co, v, now, walls)
+        draw_roof_things(ch, co, v, walls, roofs)
+    return walls
 
 
 # ---------------------------------------------------------------------------

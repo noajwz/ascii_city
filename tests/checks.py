@@ -2484,7 +2484,7 @@ for want in ("downtown", "financial", "docks", "residential", "old town"):
         shown += sum(1 for r in colour for c in r if c in SKY)
         for c in range(110):
             cover = None
-            for k, (dist, i, j, f, u) in enumerate(ac.cast(vv, *vv.ray(c))):
+            for k, (dist, i, j, f, u, _o) in enumerate(ac.cast(vv, *vv.ray(c))):
                 lo, hi = ac.wall_span(vv, dist, ac.lot(i, j)["height"])
                 lo, hi = max(0, lo), min(31, hi)
                 if cover is not None:
@@ -5417,6 +5417,26 @@ check("real buildings go further from a roof than from the plane",
       and ac.render_flight(100, 30, 40.0, {"phase": "air", "home": bp_home, "t0": 0.0,
                                            "look": 0.0, "want": 0.0})[2].high_walls
       == ac.WALL_REACH_PLANE)
+
+# --- proper rooftops, from up high ------------------------------------------
+rt_v = ac.View(x0, z0, 0.7, 300, 90, eye=70.0, reach=ac.ROOF_REACH)
+rt_c = [[" "] * 300 for _ in range(90)]
+rt_o = [[0] * 300 for _ in range(90)]
+rt_w = ac.draw_walls(rt_c, rt_o, rt_v, 600.0)
+check("a roof goes in the column's runs: nearest first, and never overlapping",
+      all(a_[0] <= b_[0] and b_[2] < a_[1] for col_ in rt_w[4]
+          for a_, b_ in zip(col_, col_[1:])))
+rt_gaps = sum(1 for col_ in rt_w[4] for r_ in col_ if r_[2] > r_[1])
+check("from up high the roofs have depth", rt_gaps > 300)
+rt_hits = []
+for yaw_ in (0.7, 0.72):
+    rt_c2 = [[" "] * 300 for _ in range(90)]
+    rt_o2 = [[0] * 300 for _ in range(90)]
+    rt_v2 = ac.View(x0, z0, yaw_, 300, 90, eye=70.0, reach=ac.ROOF_REACH)
+    rt_hits.append(ac.draw_walls(rt_c2, rt_o2, rt_v2, 600.0 + yaw_)[3])
+check("the skyline does not jump as you turn a little",
+      sum(1 for a_, b_ in zip(rt_hits[0][3:], rt_hits[1]) if abs(a_ - b_) > 6) < 60,
+      str(sum(1 for a_, b_ in zip(rt_hits[0][3:], rt_hits[1]) if abs(a_ - b_) > 6)))
 
 # --- the night sky on a big window --------------------------------------------
 ns_real = (ac.STAR, ac.STAR_DIM, ac.STAR_WARM, ac.STAR_COLD, ac.BAND, ac.MOON,

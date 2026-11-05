@@ -2461,6 +2461,18 @@ and the far traffic in, turning slowly on three roofs: 200 is 26 ms a frame and 
 The plane, over a whole flight: 170 is a median of 32 with 44% of frames over 33, 200 is 35 with
 53%. The owner chose to have them split, roof further out than plane.
 
+**Proper rooftops** (`roof_over()` inside `draw_walls()`, up high only). The renderer knows only
+fronts, and a roof was faked by the thin slices of the fronts behind it: stripes up close. Now, from
+above a building (and not a tree), the stretch of the ray from the front it came in by to where it
+leaves the cell (`cast()` hands over that `out` too) is a roof: its rows go in the column's `runs`
+at distance `out` and raise the cover, so those fronts behind are never drawn. It is left dark, with
+only its back edge drawn, in the roof glyph, where the next cell is open or lower - don't fill the
+dark. `draw_roof_things()` then puts an air conditioner, water tank or lit stairwell hut on about
+half of those nearer than `ROOF_THINGS_FAR`, world points, so they hold still. It hides a third of
+the slices (2423 to 1659 a frame) and costs that back in roof work: break-even, about 1 ms on a roof
+at 300x90. The test that does most is the one in the main loop: most of what a ray meets up high is
+wholly under the cover, and the far edge of the roof is its highest part (`roofed`, `out`).
+
 **How far the street goes.** `MAX_VIEW` (buildings) was 130 and `GROUND_FAR` (road) 80, and the
 owner saw the street suddenly cut off in the distance. Raising the road alone did nothing they could
 see - a dark road is mostly blank - so buildings go to 260 and the road to 270, for about 0.3 ms at
