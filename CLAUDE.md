@@ -2435,6 +2435,18 @@ solid mass and a real block is not, and with the shapes hiding them hardly any f
 of lights, so the far ones are thinned by distance, by each car's own hash (`FAR_CAR_THIN`).
 About 2 ms at 300x90.
 
+**Out on the horizon** (`draw_far_sky()`, up high only, not fog or the strange night), by compass
+bearing like the stars, and only into cells above everything in the column (`tops`), so the
+skyline stands black against them. **A far storm** (`far_storm()`, `far_strike()`): a slot of
+`FAR_STORM_SLOT` in `FAR_STORM_ODDS` has one on one bearing, while nothing is falling overhead;
+every `FAR_STRIKE_EVERY` or so a strike lights a patch of sky over the horizon, thinning upward and
+to the sides, with a stutter in it and half the time a bolt. Silent, and unrelated to the storm
+overhead (`storm_window()`). `\\` in the menu starts one straight ahead - `yaw`, or out of the
+plane's window - for looking at. **Flights** every `FAR_PLANE_EVERY` round the compass, each
+crossing for `FAR_PLANE_LIFE`: a white light, red and green taking turns, a strobe, at 3 to 10%
+of `v.fy` over the horizon; one in four is coming down, brighter, and sinks behind the skyline.
+Nothing at street level changes. They cost well under a millisecond.
+
 **Do not draw the ground at half resolution to buy more.** It was tried: every other row and
 column worked out and the rest copied from a neighbour. It was faster (roof 28, plane 32), and
 the owner tried it and said no - the flight looked blurry; and copying into cells nothing had

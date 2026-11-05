@@ -285,6 +285,14 @@ def cases(run, report):
             and "hope to see you" in pcb_txt)
     print("%-34s %s" % ("  and big, then small, then big", "ok" if seen else "FAIL"))
     ok &= seen
+    ok &= report("a far storm out of the plane's window", *run(
+        [(b"`", .5), (b".", 1.5)] + [(b"\x1bOA", .3)] * 6
+        + [(b"\r", 12.0), (b"`", .4), (b"\\", .4), (b"`", .4), (b"", 4.0)],
+        cols=300, rows=90))
+    ok &= report("a far storm from a roof", *run(
+        [(b"`", .5), (b"^", 1.5)] + [(b"\x1bOA", .25)] * 6
+        + [(b"", 6.0), (b"`", .4), (b"\\", .4), (b"`", .4), (b"", 4.0), (b"s", 5.0)],
+        cols=300, rows=90))
     ok &= report("the highway", *run([(b"`", .5), (b")", 1.2), (b"w", .5)],
                                      cols=100, rows=30))
     return ok
