@@ -5841,6 +5841,9 @@ bw_al = [ac.lot(i_, j_)["bowling"] for i_ in range(-400, 400) for j_ in range(-4
          if not ac.is_open(i_, j_) and ac._mix(i_, j_, 2801) % ac.BOWL_ODDS == 0
          and ac.lot(i_, j_)["bowling"] is not None]
 check("there are a few about", len(bw_al) > 20, str(len(bw_al)))
+check("and they go by different names", len({a_["name"] for a_ in bw_al}) >= 6,
+      str({a_["name"] for a_ in bw_al}))
+check("with their doors facing all ways", len({a_["door"] for a_ in bw_al}) == 4)
 bw_alley = bw_v[1]
 for w_, h_ in ((80, 24), (60, 20), (44, 16), (43, 30), (20, 8), (110, 34), (150, 44),
                (299, 87), (300, 90), (451, 133)):
