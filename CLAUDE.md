@@ -2002,6 +2002,19 @@ landing at every floor and the count in the corner; at the top the sky opens out
 parapet. It shares `main()`'s lift state — the same ride, a different picture — and `s` on the
 roof climbs you back down into the alley. `|` in the menu stands you at the foot of one.
 
+**Most of these roofs are plain, and that is the point** (the owner asked for it). One in
+`LOW_ROOF_ODDS` has somebody's something on it, by a hash of the cell (`low_roof()`): a **pigeon loft**
+that sends its flock round over the street on a lap of the clock; **washing lines** that sway harder
+in the rain; **the back of a giant neon sign** (`draw_backward_sign()`: last letter first, each
+mirrored, with a letter dropping out as it buzzes, on steel you can see the city through); or
+**someone's garden**, with pots, tomatoes, two deck chairs, a string of bulbs and a radio. One roof
+in `ROOF_CAT_ODDS`, of any kind, has **the cat**: on the parapet (`v.roof_edge`), and every forty seconds
+it walks along it to somewhere else, a function of the time like everything that moves. You come up
+facing what is there (`low_roof_yaw()`). `draw_low_roof()` runs in `main()` after `render_street()`,
+in screen space by bearing with the bar's helpers (`bar_col()`, `_bar_sprite()`), so a far beam never
+cuts across something at arm's length, and the big-window scale comes with them. `2` in the menu goes
+to the next kind round; `|` still finds any escape at all.
+
 ## The pictures
 
 A cinema is as rare as a club — `CLUB_ODDS` on its own hash, a street front required — and from
