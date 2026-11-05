@@ -5418,7 +5418,8 @@ check("real buildings go further from a roof than from the plane",
       == ac.WALL_REACH_PLANE)
 
 # --- the night sky on a big window --------------------------------------------
-ns_real = ac.STAR, ac.STAR_DIM, ac.STAR_WARM, ac.STAR_COLD, ac.BAND, ac.MOON, ac.MOON_DIM
+ns_real = (ac.STAR, ac.STAR_DIM, ac.STAR_WARM, ac.STAR_COLD, ac.BAND, ac.MOON,
+           ac.MOON_DIM)
 ac.STAR = ac.STAR_DIM = ac.STAR_WARM = ac.STAR_COLD = ac.BAND = 921
 ac.MOON = ac.MOON_DIM = 922
 ns_funcs = ac.night, ac.moon_face, ac.moon_dir, ac.cloud_cover
@@ -5455,7 +5456,8 @@ for y_, x_ in ns_mid:
         ns_kept += 1
 check("and they hold still as you turn", ns_kept >= len(ns_mid) * 0.9,
       "%d of %d" % (ns_kept, len(ns_mid)))
-ns_moon = sorted((y_, x_) for y_ in range(90) for x_ in range(300) if ns_o[y_][x_] == 922)
+ns_moon = sorted((y_, x_) for y_ in range(90) for x_ in range(300)
+                 if ns_o[y_][x_] == 922)
 _, ns_o3, _ = ns_sky(120, 40)
 ns_small = [(y_, x_) for y_ in range(40) for x_ in range(120) if ns_o3[y_][x_] == 922]
 check("the moon is a drawing on a big window, and one or two characters on a small one",
