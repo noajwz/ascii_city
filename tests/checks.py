@@ -5409,6 +5409,36 @@ fb_sw = ac.draw_walls([[" "] * 300 for _ in range(90)], [[0] * 300 for _ in rang
 check("and on the street there are none",
       all(r_[0] <= ac.MAX_VIEW for col_ in fb_sw[4] for r_ in col_))
 
+# --- the cars' lights, a long way off ----------------------------------------------
+tf_real = ac.FLASH, ac.ROU_RED
+ac.FLASH, ac.ROU_RED = 901, 902
+tf_fl = {"phase": "air", "home": bp_home, "t0": 0.0, "look": 0.0, "want": 0.0}
+
+
+def tf_cells(t_):
+    return {(y_, x_) for y_, r_ in enumerate(ac.render_flight(300, 90, t_, tf_fl)[1])
+            for x_, a_ in enumerate(r_) if a_ in (901, 902)}
+
+
+tf_a, tf_b = tf_cells(62.0), tf_cells(62.0 + 1.0)
+tf_rows = {}
+for y_, _ in tf_a:
+    tf_rows[y_] = tf_rows.get(y_, 0) + 1
+tf_real_far = ac.draw_far_traffic
+ac.draw_far_traffic = lambda *a_: None
+tf_none = tf_cells(62.0)
+ac.draw_far_traffic = tf_real_far
+tf_mode = ac._traffic
+ac._traffic = ac.TRAFFIC.index("none")
+tf_off = tf_cells(62.0)
+ac._traffic = tf_mode
+ac.FLASH, ac.ROU_RED = tf_real
+check("from up high the far cars' lights add to what is on screen, and move",
+      len(tf_a) > len(tf_none) + 50 and len(tf_a ^ tf_b) > len(tf_a) // 2)
+check("a far highway across the view is a stream of lights, not a solid line",
+      max(tf_rows.values()) < 300 // 2, str(max(tf_rows.values())))
+check("and with the traffic set to none there are none", len(tf_off) < len(tf_none) + 1)
+
 # --- the autopilot and the turn keys -------------------------------------------------
 def walk_auto(x, z, secs):
     """The autopilot as the main loop runs it, minus the drawing."""
