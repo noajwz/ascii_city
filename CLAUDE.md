@@ -2461,6 +2461,14 @@ and the far traffic in, turning slowly on three roofs: 200 is 26 ms a frame and 
 The plane, over a whole flight: 170 is a median of 32 with 44% of frames over 33, 200 is 35 with
 53%. The owner chose to have them split, roof further out than plane.
 
+**How far the street goes.** `MAX_VIEW` (buildings) was 130 and `GROUND_FAR` (road) 80, and the
+owner saw the street suddenly cut off in the distance. Raising the road alone did nothing they could
+see - a dark road is mostly blank - so buildings go to 260 and the road to 270, for about 0.3 ms at
+300x90: with `v.depth` still 4, only the rays that run down a street go any further. Past
+`WALL_BARS` (130) a street-level building gets no corner bar, because there each column is a new
+building and the bars made a solid wall. Far block shapes past that were tried and dropped: 3 ms,
+and messy. Cars and people still stop at about 110.
+
 **The river as a line of moonlight**, up high only. `draw_moon_river()` follows the middle of the
 channel (`river_centre()`) out to `RIVER_LINE_CELLS` either way, on grid points further apart
 further off so that they hold still, brightest towards the moon's bearing, with a bit of glitter;

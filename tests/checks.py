@@ -3283,7 +3283,8 @@ check("and the lights along the cables", lights > 20, "%d bulbs" % lights)
 av = ac.View(mx_, (int(ghi) + 50.5) * ac.CELL, math.pi, 120, 34)
 _, acol, _ = ac.render_street(av, 300.0)
 far = sum(1 for r in acol for a in r if a == 991)
-check("and it stands over the end of the avenue from 250 units back", far >= 8,
+# 6: the buildings along the avenue are drawn this far out now, and hide its edges.
+check("and it stands over the end of the avenue from 250 units back", far >= 6,
       "%d cells" % far)
 tops = set()
 for k in range(4):
