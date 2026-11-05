@@ -332,8 +332,9 @@ TOWER_ODDS = 9         # of the buildings tall enough, one in this many
 TOWER_MIN = 34.0       # how tall, in world units, a building must be to have one
 TOWER_TOP = 72.0       # and how tall it is made: over everything else in town
 ROOF_REACH = 520.0     # how far you can see from up there: at 260 the town
-WALL_REACH_HIGH = 170.0  # up high, every building out to here is drawn - and
-                         # none past it: the ground and the lights go on to ROOF_REACH
+WALL_REACH_ROOF = 250.0   # up high, every building out to here is drawn - and
+WALL_REACH_PLANE = 200.0  # less from the plane, moving and with more ground to draw;
+                          # past it the far blocks, the ground and the lights go on
                        # stopped well short of the horizon
 # The top floors of a sky-deck tower are a weather beacon, the old way:
 #   steady blue, clear view; flashing blue, clouds due;
@@ -3305,6 +3306,7 @@ class View:
         self.crown = None       # the sky decks' weather light this instant
         self.bass = set()       # the lots by a club whose windows shake this instant
         self.skip = None        # cells not to draw: the landmark whose roof you are on
+        self.high_walls = WALL_REACH_ROOF   # up high, how far real buildings go
 
     def ray(self, sx):
         cam = 2.0 * sx / (self.width - 1) - 1.0
@@ -5697,6 +5699,7 @@ def render_flight(width, height, now, flight):
     yaw = heading + math.pi / 2 + flight["look"]
     v = View(x, z, yaw, width, height, eye=alt + FLIGHT_EYE,
              reach=ROOF_REACH if alt > 8.0 else MAX_VIEW)
+    v.high_walls = WALL_REACH_PLANE
     # Looking down out of the window, the way a raycaster looks down: the
     # horizon goes up the screen as the plane climbs. The camera cannot tilt,
     # and with the horizon where it is on the street everything within two
@@ -6589,7 +6592,7 @@ def far_block(bi, bj):
 
 
 def draw_far_blocks(ch, co, v, now, walls):
-    """From up high, the city past WALL_REACH_HIGH: one simple shape a block,
+    """From up high, the city past v.high_walls: one simple shape a block,
     dark, with a faint roofline and a few lit windows, so that the far
     distance is a skyline and not a void. Nearest first, each only above what
     is drawn in its column, as the real walls are. Found by scanning the view's
@@ -6598,7 +6601,7 @@ def draw_far_blocks(ch, co, v, now, walls):
     cell's place in its block, and travel with it."""
     wall_d, wall_top, wall_base, sky_top, runs = walls
     cw, cd = XP * CELL, ZP * CELL
-    near, reach = WALL_REACH_HIGH, FAR_BLOCK_REACH
+    near, reach = v.high_walls, FAR_BLOCK_REACH
     lx, lz = v.x + (v.dx - v.plx) * reach, v.z + (v.dz - v.plz) * reach
     rx, rz = v.x + (v.dx + v.plx) * reach, v.z + (v.dz + v.plz) * reach
     edges = (((v.x, v.z), (lx, lz)), ((v.x, v.z), (rx, rz)), ((lx, lz), (rx, rz)))
@@ -6694,14 +6697,14 @@ def draw_walls(ch, co, v, now):
     # passes over, most of them hidden, and counting those, v.depth ran out
     # two or three blocks off: the buildings beyond were drawn only where a
     # ray happened to run down a street, which changed as the plane flew, so
-    # they blinked in and out. Up there every building out to WALL_REACH_HIGH
+    # they blinked in and out. Up there every building out to v.high_walls
     # is drawn, however many - a distance holds still where a count did not
     # - and the ground and the far lights go on past it.
     high = v.eye >= 10.0
     for sx in range(width):
         rdx, rdz = v.ray(sx)
         cover = None
-        for dist, i, j, f, u in (cast(v, rdx, rdz, 1 << 30, WALL_REACH_HIGH)
+        for dist, i, j, f, u in (cast(v, rdx, rdz, 1 << 30, v.high_walls)
                                  if high else cast(v, rdx, rdz, v.depth)):
             if v.skip and (i, j) in v.skip:
                 continue                 # the building you are standing on
@@ -11003,7 +11006,7 @@ def draw_far_traffic(ch, co, v, walls, now):
             put_cell(ch, co, v, walls, sx, sy, f, glyph, attr)
         elif 0 <= sx < v.width and 0 <= sy < v.height:
             for wd, lo, hi in runs[sx]:
-                if wd > WALL_REACH_HIGH:
+                if wd > v.high_walls:
                     break
                 if lo <= sy <= hi:
                     return

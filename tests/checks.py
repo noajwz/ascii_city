@@ -5378,6 +5378,7 @@ for k_ in range(12):
     bx_, bz_, by_, ba_ = ac.flight_pose(bp_home, ac.flight_s(35.0 + k_ / 30.0, bp_home))
     bv_ = ac.View(bx_, bz_, by_ + math.pi / 2, 300, 90, eye=ba_ + ac.FLIGHT_EYE,
                   reach=ac.ROOF_REACH)
+    bv_.high_walls = ac.WALL_REACH_PLANE
     bw_ = ac.draw_walls([[" "] * 300 for _ in range(90)],
                         [[0] * 300 for _ in range(90)], bv_, 600.0)
     bp_cover.append(sum(hi_ - lo_ + 1 for col_ in bw_[4] for _, lo_, hi_ in col_))
@@ -5391,7 +5392,7 @@ fb_v = ac.View(x0, z0, 0.7, 300, 90, eye=90.0, reach=ac.ROOF_REACH)
 fb_c = [[" "] * 300 for _ in range(90)]
 fb_o = [[0] * 300 for _ in range(90)]
 fb_w = ac.draw_walls(fb_c, fb_o, fb_v, 600.0)
-fb_far = [r_ for col_ in fb_w[4] for r_ in col_ if r_[0] > ac.WALL_REACH_HIGH]
+fb_far = [r_ for col_ in fb_w[4] for r_ in col_ if r_[0] > fb_v.high_walls]
 check("past the buildings the city goes on as shapes, towards the horizon",
       len(fb_far) > 200 and max(r_[0] for r_ in fb_far) > ac.FAR_BLOCK_REACH * 0.5)
 check("nearest first, each only above the last: the real ones stand in front",
@@ -5408,6 +5409,13 @@ fb_sw = ac.draw_walls([[" "] * 300 for _ in range(90)], [[0] * 300 for _ in rang
                       fb_s, 600.0)
 check("and on the street there are none",
       all(r_[0] <= ac.MAX_VIEW for col_ in fb_sw[4] for r_ in col_))
+
+check("real buildings go further from a roof than from the plane",
+      ac.WALL_REACH_ROOF > ac.WALL_REACH_PLANE
+      and ac.View(0.0, 0.0, 0.0, 10, 10).high_walls == ac.WALL_REACH_ROOF
+      and ac.render_flight(100, 30, 40.0, {"phase": "air", "home": bp_home, "t0": 0.0,
+                                           "look": 0.0, "want": 0.0})[2].high_walls
+      == ac.WALL_REACH_PLANE)
 
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
