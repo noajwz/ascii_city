@@ -18401,6 +18401,7 @@ CHEAT_PLACES = [
     ("2", "a low roof", "lowroof"),
     ("3", "washing lines", "washing"),
     ("4", "bowling", "bowling"),
+    ("5", "the turtles", "lair"),
     ("_", "car park", "carpark"),
     ("<", "police car", "police"),
     (")", "highway", "highway"),
@@ -19329,6 +19330,8 @@ def find_place(x, z, kind):
         return _ramen_spot(x, z)
     if kind == "manhole":
         return _manhole_spot(x, z)
+    if kind == "lair":
+        return _lair_spot(x, z)
     if kind == "highway":
         return _hwy_spot(x, z)
     if kind == "el":
@@ -19454,7 +19457,8 @@ def find_place(x, z, kind):
 
 # The fifth column.
 CHEAT_MORE = ["university", "library", "metro", "flight", "center", "bar",
-              "lowroof", "washing", "bowling"]
+              "lowroof", "washing", "bowling",
+              "lair"]
 _panel_page = [0]       # which page an 80-column panel is showing
 
 
@@ -20132,6 +20136,326 @@ SEWER_SAY = [("dude. close the lid.", 0), ("you want a slice?", 1),
              ("shh. someone's up there.", 0), ("this one's got anchovies!", 2)]
 # Each one's headband, and the turtle sprite: head, band, shell, legs.
 SEWER_BANDS = ("red", "blue", "orange", "purple")
+
+
+# The tunnels: what is under the streets, down the middle of each of them, so
+# that walking along down here is walking along up there. Nothing is stored.
+SEWER_H = 3.2           # floor to roof
+SEWER_EYE = 1.5
+SEWER_WALK = 8.0        # units a second, a bit careful
+SEWER_TURN = 1.7        # radians a second
+SEWER_GRACE = 0.28      # seconds a key keeps you moving, between repeats
+SEWER_SEE = 42.0        # how far the dark lets you
+SEWER_BODY = 0.8        # how near a wall you can get
+LAIR_TILE = 45          # cells: at most one lair to a square this size...
+LAIR_ODDS = 2           # ...and one square in this many has one
+LAIR_SMELL = 26.0       # how far off you can smell the pizza
+_sewer_cache = {}
+_lair_cache = {}
+
+
+def _street_middle(i, period, salt):
+    """Is this the middle cell of a street across this axis?"""
+    span = road_span(i, period, salt)
+    return span is not None and i == span[0] + span[1] // 2
+
+
+def sewer_cell(i, j):
+    """Is there tunnel under this cell? Under the middle of every street, and
+    from there across to any manhole in the same street - so every ladder comes
+    down into something. Under the river too: an avenue that stops at the water
+    up here carries on down there, or the river cuts the tunnels in half."""
+    key = i * 1048576 + j
+    hit = _sewer_cache.get(key)
+    if hit is None:
+        _evict(_sewer_cache, 60000)
+        hit = False
+        if road_at(i, j):
+            hit = _street_middle(i, XP, 91) or _street_middle(j, ZP, 137)
+            if not hit:
+                for d in (-2, -1, 0, 1, 2):
+                    if (manhole_at(i + d, j) and road_span(i, XP, 91)) or (
+                            manhole_at(i, j + d) and road_span(j, ZP, 137)):
+                        hit = True
+                        break
+        _sewer_cache[key] = hit
+    return hit
+
+
+def lair_in_tile(ti, tj):
+    """The door of the lair in this square of the map, if it has one, as (door
+    cell, the tunnel cell in front of it): a bit of blank wall off a tunnel, at
+    a hashed place. It is meant to be hard to come across."""
+    key = (ti, tj)
+    if key in _lair_cache:
+        return _lair_cache[key]
+    _evict(_lair_cache, 4000)
+    hit = None
+    m = _mix(ti, tj, 5601)
+    if not (m >> 3) % LAIR_ODDS:
+        ci = ti * LAIR_TILE + (m >> 8) % LAIR_TILE
+        cj = tj * LAIR_TILE + (m >> 16) % LAIR_TILE
+        for i, j in _rings(ci, cj, 14):
+            if not sewer_cell(i, j):
+                continue
+            for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                if not sewer_cell(i + dx, j + dz) and not sewer_cell(i - dx, j - dz):
+                    continue
+                a, b = (i + dz, j + dx), (i - dz, j - dx)
+                for door in (a, b):
+                    if not sewer_cell(*door) and door[0] // LAIR_TILE == ti and (
+                            door[1] // LAIR_TILE == tj):
+                        hit = (door, (i, j))
+                        break
+                if hit:
+                    break
+            if hit:
+                break
+    _lair_cache[key] = hit
+    return hit
+
+
+def lair_door_at(i, j):
+    hit = lair_in_tile(i // LAIR_TILE, j // LAIR_TILE)
+    return hit is not None and hit[0] == (i, j)
+
+
+def lair_near(x, z):
+    """How far off the nearest lair's door is, within LAIR_SMELL, or None."""
+    i, j = int(x // CELL), int(z // CELL)
+    ti, tj = i // LAIR_TILE, j // LAIR_TILE
+    best = None
+    for a in (ti - 1, ti, ti + 1):
+        for b in (tj - 1, tj, tj + 1):
+            hit = lair_in_tile(a, b)
+            if hit:
+                d = math.hypot((hit[0][0] + 0.5) * CELL - x,
+                               (hit[0][1] + 0.5) * CELL - z)
+                if d < LAIR_SMELL and (best is None or d < best):
+                    best = d
+    return best
+
+
+def _lair_spot(x, z):
+    """In the tunnel in front of the nearest lair's door, looking at it."""
+    ti, tj = int(x // CELL) // LAIR_TILE, int(z // CELL) // LAIR_TILE
+    best = None
+    for r in range(0, 12):
+        for a in range(ti - r, ti + r + 1):
+            for b in range(tj - r, tj + r + 1):
+                if max(abs(a - ti), abs(b - tj)) != r:
+                    continue
+                hit = lair_in_tile(a, b)
+                if hit is None:
+                    continue
+                px, pz = (hit[1][0] + 0.5) * CELL, (hit[1][1] + 0.5) * CELL
+                d = (px - x) ** 2 + (pz - z) ** 2
+                if best is None or d < best[0]:
+                    best = (d, px, pz, math.atan2(hit[0][0] - hit[1][0],
+                                                  hit[0][1] - hit[1][1]))
+        if best is not None:
+            return best[1:]
+    return None
+
+
+def new_sewer(x, z, yaw, now):
+    """Your place in the tunnels. The lair's screen, while you are in it, is
+    the old sewer's: its t0 and its slices."""
+    return {"x": x, "z": z, "yaw": yaw, "t0": now, "taken": 0, "lair": False,
+            "fwd": 0.0, "turn": 0.0, "go": 0.0, "spin": 0.0}
+
+
+def sewer_from_manhole(mh, now):
+    """Down the ladder of this manhole, facing along the tunnel."""
+    x, z = mh[0], mh[1]
+    i, j = int(x // CELL), int(z // CELL)
+    x, z = (i + 0.5) * CELL, (j + 0.5) * CELL
+    yaw = 0.0
+    for a in (0.0, math.pi / 2, math.pi, -math.pi / 2):
+        if sewer_cell(int((x + math.sin(a) * CELL) // CELL),
+                      int((z + math.cos(a) * CELL) // CELL)):
+            yaw = a
+            break
+    return new_sewer(x, z, yaw, now)
+
+
+def sewer_open(x, z):
+    """Can you stand here, keeping off the walls?"""
+    for dx, dz in ((SEWER_BODY, 0.0), (-SEWER_BODY, 0.0), (0.0, SEWER_BODY),
+                   (0.0, -SEWER_BODY)):
+        if not sewer_cell(int((x + dx) // CELL), int((z + dz) // CELL)):
+            return False
+    return True
+
+
+def sewer_ladder(x, z, reach=2.6):
+    """The manhole overhead, if you are at the foot of its ladder."""
+    i, j = int(x // CELL), int(z // CELL)
+    for a in (i - 1, i, i + 1):
+        for b in (j - 1, j, j + 1):
+            mh = manhole_at(a, b)
+            if mh and (((a + 0.5) * CELL - x) ** 2
+                       + ((b + 0.5) * CELL - z) ** 2 < reach ** 2):
+                return mh
+    return None
+
+
+def sewer_step(sew, dt, now):
+    """A frame of walking down there. True if it took you through the door."""
+    if now < sew["go"]:
+        sew["yaw"] += sew["turn"] * dt
+        move = sew["fwd"] * dt
+        nx = sew["x"] + math.sin(sew["yaw"]) * move
+        nz = sew["z"] + math.cos(sew["yaw"]) * move
+        if sewer_open(nx, sew["z"]):
+            sew["x"] = nx
+        if sewer_open(sew["x"], nz):
+            sew["z"] = nz
+        if move > 0.0:
+            ax = sew["x"] + math.sin(sew["yaw"]) * (SEWER_BODY + 0.7)
+            az = sew["z"] + math.cos(sew["yaw"]) * (SEWER_BODY + 0.7)
+            if lair_door_at(int(ax // CELL), int(az // CELL)):
+                return True
+    return False
+
+
+def render_tunnels(sew, width, height, now):
+    """Down in the tunnels: a raycaster of its own, the street's in small. Old
+    brick and a pipe along it, a walkway and the water going by down the middle,
+    a lamp now and then, and it goes dark a long way before it stops. A ladder
+    with the streetlight coming down it, and nothing to say which way is which."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    v = View(sew["x"], sew["z"], sew["yaw"], width, height, eye=SEWER_EYE,
+             reach=SEWER_SEE)
+    v.horizon = height // 2
+    depth = [SEWER_SEE] * width
+    x0, z0 = sew["x"], sew["z"]
+    for sx in range(width):
+        rdx, rdz = v.ray(sx)
+        cx, cz = x0 / CELL, z0 / CELL
+        i, j = int(x0 // CELL), int(z0 // CELL)
+        dt_x = abs(1.0 / rdx) if rdx else 1e30
+        dt_z = abs(1.0 / rdz) if rdz else 1e30
+        step_i = 1 if rdx > 0 else -1
+        step_j = 1 if rdz > 0 else -1
+        next_x = ((i + 1 - cx) if rdx > 0 else (cx - i)) * dt_x
+        next_z = ((j + 1 - cz) if rdz > 0 else (cz - j)) * dt_z
+        t, side = 0.0, 0
+        while True:
+            if next_x < next_z:
+                t, next_x = next_x, next_x + dt_x
+                i += step_i
+                side = 0
+            else:
+                t, next_z = next_z, next_z + dt_z
+                j += step_j
+                side = 1
+            if t * CELL > SEWER_SEE or not sewer_cell(i, j):
+                break
+        dist = max(0.3, t * CELL)
+        depth[sx] = dist
+        if dist >= SEWER_SEE:
+            continue
+        u = (z0 + rdz * dist) if side == 0 else (x0 + rdx * dist)
+        scale = v.fy / dist
+        top = int(v.horizon - (SEWER_H - SEWER_EYE) * scale)
+        bot = int(v.horizon + SEWER_EYE * scale)
+        door = lair_door_at(i, j)
+        near = dist < 14.0
+        dim = CONCRETE if dist < 26.0 else HAZE
+        for y in range(max(0, top), min(height - 1, bot) + 1):
+            h = SEWER_EYE + (v.horizon - y) / scale
+            if door and h < 2.5 and abs(u % CELL - CELL * 0.5) < 1.3:
+                # A door that is not the city's: green light round the edges.
+                edge = abs(u % CELL - CELL * 0.5) > 1.0 or h > 2.2
+                ch[y][sx] = "#" if edge else ":"
+                co[y][sx] = ROU_GREEN if edge else GRASS
+                continue
+            course = int(h * 2.0)
+            if abs(h - 2.3) < 0.14:
+                ch[y][sx], co[y][sx] = "=", BARK       # the pipe
+            elif int(h * 1.6 + 0.5) != int((h + 1.0 / scale) * 1.6 + 0.5) and near:
+                ch[y][sx], co[y][sx] = "-", dim        # the courses
+            elif near and int(u * 1.5 + (course % 2) * 0.5) % 2 == 0 and (
+                    int(u * 12.0) % 8 == 0):
+                ch[y][sx], co[y][sx] = "|", dim        # and the joints
+            elif _mix(int(u * 2.0), int(h * 3.0), 5603) % 23 == 0 and dist < 30.0:
+                ch[y][sx], co[y][sx] = ".", dim
+        if 0 <= top < height:
+            ch[top][sx], co[top][sx] = "_", dim
+        if 0 <= bot < height:
+            ch[bot][sx], co[bot][sx] = "_", dim
+    # The floor, and the water down the middle of the tunnel you are looking along.
+    tick = now * 2.5
+    rdx0, rdz0 = v.ray(0)
+    rdx1, rdz1 = v.ray(width - 1)
+    for y in range(v.horizon + 1, height):
+        d = SEWER_EYE * v.fy / (y - v.horizon)
+        if d > SEWER_SEE:
+            continue
+        wx, wz = x0 + rdx0 * d, z0 + rdz0 * d
+        sx_, sz_ = (rdx1 - rdx0) * d / (width - 1), (rdz1 - rdz0) * d / (width - 1)
+        for sx in range(width):
+            if d < depth[sx]:
+                fx, fz = (wx % CELL) / CELL - 0.5, (wz % CELL) / CELL - 0.5
+                i, j = int(wx // CELL), int(wz // CELL)
+                ew = sewer_cell(i + 1, j) or sewer_cell(i - 1, j)
+                ns = sewer_cell(i, j + 1) or sewer_cell(i, j - 1)
+                wet = (abs(fz) < 0.2 and ew) or (abs(fx) < 0.2 and ns)
+                if wet:
+                    if _mix(int(wx * 2.0 + tick), int(wz * 2.0), 5605) % 5 == 0:
+                        ch[y][sx] = "~"
+                        co[y][sx] = CROWN_BLUE if d < 18.0 else HAZE
+                elif _mix(int(wx * 3.0), int(wz * 3.0), 5607) % 31 == 0:
+                    ch[y][sx], co[y][sx] = ".", CONCRETE if d < 20.0 else HAZE
+            wx += sx_
+            wz += sz_
+    # What is in the tunnels, as points: the far ones first.
+    things = []
+    ci, cj = int(x0 // CELL), int(z0 // CELL)
+    for i in range(ci - 8, ci + 9):
+        for j in range(cj - 8, cj + 9):
+            if not sewer_cell(i, j):
+                continue
+            mh = manhole_at(i, j)
+            m = _mix(i, j, 5609)
+            px, pz = (i + 0.5) * CELL, (j + 0.5) * CELL
+            if mh:
+                things.append(("ladder", px, pz, m))
+            elif m % 11 == 0:
+                things.append(("lamp", px, pz, m))
+            elif m % 13 == 0:
+                # A rat, along the wall, and off again.
+                off = ((now * 1.3 + (m >> 8)) % 7.0 - 3.5) * 0.6
+                things.append(("rat", px + off, pz + off * 0.3, m))
+    for what, px, pz, m in sorted(
+            things, key=lambda t_: -((t_[1] - x0) ** 2 + (t_[2] - z0) ** 2)):
+        if what == "ladder":
+            for n in range(int(SEWER_H / 0.28) + 8):
+                y_ = n * 0.28
+                pr = v.project(px, y_, pz)
+                if pr is None:
+                    break
+                x_, yy = int(round(pr[0])), int(round(pr[1]))
+                if 0 <= x_ < width - 1 and 0 <= yy < height and pr[2] < depth[x_]:
+                    ch[yy][x_], co[yy][x_] = "H", GOLD_DIM
+                    if pr[2] < 16.0 and _mix(x_, yy, 5611) % 3 == 0:
+                        ch[yy][x_ + 1], co[yy][x_ + 1] = "'", BULB
+        elif what == "lamp":
+            pr = v.project(px, SEWER_H - 0.2, pz)
+            if pr is not None:
+                x_, yy = int(round(pr[0])), int(round(pr[1]))
+                if 0 <= x_ < width and 0 <= yy < height and pr[2] < depth[x_]:
+                    on = _mix(int(now * 3.0), m & 63, 5613) % 19 != 0
+                    ch[yy][x_], co[yy][x_] = "o", BULB if on else CONCRETE
+        else:
+            pr = v.project(px, 0.15, pz)
+            if pr is not None and pr[2] < 22.0:
+                x_, yy = int(round(pr[0])), int(round(pr[1]))
+                if 0 <= x_ < width and 0 <= yy < height and pr[2] < depth[x_]:
+                    ch[yy][x_], co[yy][x_] = "~" if int(now * 5.0) % 2 else "-", BARK
+    return ch, co
 
 
 def render_sewer(width, height, now, since, taken):
@@ -21613,7 +21937,8 @@ CLAW_HUD = (" at the claw machine at %d,%d  -  p plays, p again drops  -  s walk
 CLIMB_HUD = " on the fire escape, climbing %s "
 STAIRS_HUD = " on the lighthouse stair, climbing %s "
 TURNED_HUD = " turned away  -  s walks back out  -  q quit "
-SEWER_HUD = " down the sewer  -  p takes a slice  -  s climbs back up  -  q quit "
+SEWER_HUD = " somebody's place  -  p a slice  -  s back out  -  q quit "
+TUNNEL_HUD = " in the tunnels  -  w s walk, a d turn%s  -  q quit "
 PARTY_HUD = (" on the roof of %s, %s  -  ws walk  ad turn  -  into the lift hut to go"
              " down  -  q quit ")
 GALLERY_HUD = " up the lighthouse, %s  -  ad round  -  s down  -  q quit "
@@ -21799,6 +22124,8 @@ def main(stdscr):
                             auto = {}
                             wheel = None
                             sewer = None
+                            if kind == "lair":
+                                sewer = new_sewer(cam_x, cam_z, yaw, now)
                             booth = None
                             taxi = None
                             metro = None
@@ -21941,16 +22268,36 @@ def main(stdscr):
                 return
             elif key == CHEAT_KEY:
                 cheats, note = True, ""
-            elif sewer is not None:
-                if key in (ord("s"), ord("S"), ord("e"), ord("E"), curses.KEY_DOWN):
-                    sewer = None                # up the ladder, onto the cover
-                    note, note_at = "back up in the street", now
+            elif sewer is not None and sewer["lair"]:
+                if key in (ord("s"), ord("S"), ord("x"), ord("X"), curses.KEY_DOWN):
+                    sewer["lair"] = False       # and back out into the tunnel
+                    sewer["yaw"] += math.pi
+                    note, note_at = "they wave, not looking up", now
                 elif key in (ord("p"), ord("P")):
                     if sewer_slices(now - sewer["t0"], sewer["taken"]):
                         sewer["taken"] += 1
                         note, note_at = "you take a slice. still warm.", now
                     else:
                         note, note_at = "the box is empty. they look at you.", now
+            elif sewer is not None:
+                if key in (curses.KEY_UP, ord("w"), ord("W")):
+                    sewer.update(fwd=SEWER_WALK, turn=0.0, go=now + SEWER_GRACE)
+                elif key in (curses.KEY_DOWN, ord("s"), ord("S")):
+                    sewer.update(fwd=-SEWER_WALK * 0.7, turn=0.0, go=now + SEWER_GRACE)
+                elif key in (curses.KEY_LEFT, ord("a"), ord("A")):
+                    sewer.update(fwd=0.0, turn=-SEWER_TURN, go=now + SEWER_GRACE)
+                elif key in (curses.KEY_RIGHT, ord("d"), ord("D")):
+                    sewer.update(fwd=0.0, turn=SEWER_TURN, go=now + SEWER_GRACE)
+                elif key in (ord("e"), ord("E")):
+                    mh_ = sewer_ladder(sewer["x"], sewer["z"])
+                    if mh_ is not None:
+                        cam_x, cam_z = mh_[0], mh_[1]   # up, onto that cover
+                        fwd = side = spin = 0.0
+                        yaw = sewer["yaw"]
+                        sewer = None
+                        note, note_at = "back up in the street", now
+                    else:
+                        note, note_at = "no ladder here", now
             elif key in (ord("\t"), ord("v")):
                 street = not street
                 sky_v = fwd = side = spin = 0.0
@@ -22120,7 +22467,8 @@ def main(stdscr):
                 autopilot = False
             elif (street and on_roof is None and key in (ord("e"), ord("E"))
                   and manhole_under(cam_x, cam_z) is not None):
-                sewer = {"t0": now, "taken": 0}  # lift the cover, down the ladder
+                # Lift the cover, down the ladder.
+                sewer = sewer_from_manhole(manhole_under(cam_x, cam_z), now)
                 fwd = side = spin = 0.0
                 autopilot = False
             elif (at_loft is not None and lift is None
@@ -22423,9 +22771,20 @@ def main(stdscr):
         if on_roof is None or low_roof(on_roof) != "loft" or (
                 on_roof.get("kind") != "escape"):
             at_loft = None
-        if sewer is not None and street:
+        if sewer is not None and street and sewer["lair"]:
             ch, co = render_sewer(width, height, now, sewer["t0"], sewer["taken"])
             hud = SEWER_HUD
+        elif sewer is not None and street:
+            if sewer_step(sewer, frame_time, now):
+                sewer.update(lair=True, t0=now, taken=0, go=0.0)
+                ch, co = render_sewer(width, height, now, sewer["t0"], sewer["taken"])
+                hud = SEWER_HUD
+            else:
+                ch, co = render_tunnels(sewer, width, height, now)
+                hud = TUNNEL_HUD % (
+                    "  -  e climbs this ladder" if sewer_ladder(sewer["x"], sewer["z"])
+                    else "  -  you can smell pizza" if lair_near(sewer["x"], sewer["z"])
+                    else "")
         elif lift is not None:
             floors = max(2, int(lift["t"]["height"] / FLOOR_H))
             if lift["t"].get("kind") == "lighthouse":

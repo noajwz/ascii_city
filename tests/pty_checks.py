@@ -153,9 +153,13 @@ def cases(run, report):
         [(b"`", .5), (b"+", .4), (b"m", 2.0), (b"s", .6), (b"s", .6), (b"`", .5),
          (b"r", .6)] + IN + [(b"s", .1), (b"w", 5.0), (b"s", .6), (b"s", .6)],
         cols=100, rows=30))
-    ok &= report("a manhole: walk on, down, a slice, back up", *run(
+    ok &= report("a manhole: down, along the tunnel, back up the ladder", *run(
         [(b"`", .5), (b"x", 1.0)] + [(b"w", .25)] * 3
-        + [(b"e", 1.5), (b"p", .5), (b"s", .8), (b"w", .4)], cols=100, rows=30))
+        + [(b"e", 1.0), (b"d", .4), (b"w", .4), (b"a", .4), (b"s", .4), (b"e", .8),
+           (b"w", .4)], cols=100, rows=30))
+    ok &= report("the lair: through the door, a slice, back out", *run(
+        [(b"`", .5), (b"5", 1.0)] + [(b"w", .25)] * 6
+        + [(b"p", .5), (b"s", .6), (b"w", .3)], cols=300, rows=90))
     ok &= report("the temple: across the street, in, the word of god twice, out", *run(
         [(b"`", .5), (b"*", 1.0)] + IN + IN + [(b"g", .3), (b"g", .45), (b"g", .7),
                                                  (b"s", .6),
