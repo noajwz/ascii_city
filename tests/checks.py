@@ -5439,6 +5439,44 @@ check("a far highway across the view is a stream of lights, not a solid line",
       max(tf_rows.values()) < 300 // 2, str(max(tf_rows.values())))
 check("and with the traffic set to none there are none", len(tf_off) < len(tf_none) + 1)
 
+# --- out on the horizon: a far storm, and other people's flights ---------------------
+hz_real = ac.FLASH, ac.BULB, ac.ROU_RED, ac.ROU_GREEN
+ac.FLASH, ac.BULB, ac.ROU_RED, ac.ROU_GREEN = 911, 912, 913, 914
+hz_tall = [40] * 300
+
+
+def hz_draw(t_, wet_=0.0, tops_=None, yaw_=0.7):
+    c_ = [[" "] * 300 for _ in range(90)]
+    o_ = [[0] * 300 for _ in range(90)]
+    v_ = ac.View(x0, z0, yaw_, 300, 90, eye=90.0, reach=ac.ROOF_REACH)
+    v_.fog = False
+    ac.draw_far_sky(c_, o_, v_, (None, None, None, tops_ or [v_.horizon] * 300, None),
+                    wet_, t_)
+    return [(y_, x_) for y_ in range(90) for x_ in range(300) if c_[y_][x_] != " "], v_
+
+
+hz_lit = 0
+ac._far_storm_force[0] = (590.0, 0.7)
+hz_ts = [600.0 + i_ * 0.05 for i_ in range(200)]
+hz_st = [t_ for t_ in hz_ts if ac.far_strike(t_, 0.7) is not None]
+hz_cells, hz_v = hz_draw(hz_st[0])
+hz_low, _ = hz_draw(hz_st[0], tops_=hz_tall)
+ac._far_storm_force[0] = None
+check("a storm far off lights the sky over the horizon, only in strikes, and never "
+      "the buildings' cells",
+      0 < len(hz_st) < len(hz_ts) and len(hz_cells) > 40
+      and all(y_ < hz_v.horizon for y_, _ in hz_cells)
+      and all(y_ < 40 for y_, _ in hz_low))
+check("not with weather overhead, unless asked for",
+      ac.far_storm(600.0, 0.9) is None)
+hz_counts = [len(hz_draw(600.0 + i_ * 13.0)[0]) for i_ in range(24)]
+hz_mv_a, _ = hz_draw(707.0)
+hz_mv_b, _ = hz_draw(727.0)
+check("planes out on the horizon, most of the time, and they move",
+      sum(1 for n_ in hz_counts if n_) > 16 and set(hz_mv_a) != set(hz_mv_b),
+      str(hz_counts))
+ac.FLASH, ac.BULB, ac.ROU_RED, ac.ROU_GREEN = hz_real
+
 # --- the autopilot and the turn keys -------------------------------------------------
 def walk_auto(x, z, secs):
     """The autopilot as the main loop runs it, minus the drawing."""

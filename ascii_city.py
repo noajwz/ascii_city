@@ -10835,6 +10835,115 @@ def draw_hwy(ch, co, v, walls, x0, x1, now, wet):
                       FLASH if coming else ROU_RED)
 
 
+# What is out on the horizon, seen from up high: a storm a long way off, and
+# other people's flights. Both go by compass bearing, like the stars, so they
+# hold still on the sky however you fly or turn, and only into the cells above
+# everything in their column, so the skyline stands black against them.
+FAR_STORM_SLOT = 240.0  # seconds a far storm stays, on one bearing...
+FAR_STORM_ODDS = 3      # ...one slot in this many having one
+FAR_STRIKE_EVERY = 2.6  # at most one strike in this many seconds
+FAR_STRIKE_LEN = 0.45   # and how long one lasts
+FAR_PLANE_EVERY = 4.0   # seconds between flights setting out, round the compass
+FAR_PLANE_LIFE = 70.0   # and how long each is about
+_far_storm_force = [None]   # (when, bearing): one asked for from the menu
+
+
+def _wrap_pi(a):
+    return (a + math.pi) % math.tau - math.pi
+
+
+def far_storm(now, wet):
+    """The bearing of the storm out on the horizon just now, or None. Not
+    while there is weather overhead to look at instead, unless asked for."""
+    asked = _far_storm_force[0]
+    if asked is not None and 0.0 <= now - asked[0] < FAR_STORM_SLOT * 0.5:
+        return asked[1]
+    if wet > 0.4 or snowfall(now) > 0.0 or storm_window(now):
+        return None
+    slot = int(now // FAR_STORM_SLOT)
+    if _mix(slot, 0, 4901) % FAR_STORM_ODDS:
+        return None
+    return _mix(slot, 1, 4903) % 6283 / 1000.0
+
+
+def far_strike(now, bearing):
+    """The strike going on in that storm, as (id, age, power, bearing, width,
+    with a bolt), or None: most of the time there is none, and each has a
+    moment's gap in it, the way lightning stutters."""
+    k = int(now // FAR_STRIKE_EVERY)
+    m = _mix(k, 0, 4905)
+    if m % 3 == 0:
+        return None
+    age = now - k * FAR_STRIKE_EVERY - ((m >> 4) & 255) / 255.0 * (
+        FAR_STRIKE_EVERY - FAR_STRIKE_LEN)
+    if not 0.0 <= age < FAR_STRIKE_LEN or 0.07 < age < 0.13:
+        return None
+    power = (0.55 + ((m >> 12) & 7) / 15.0) * (1.0 - age / FAR_STRIKE_LEN * 0.6)
+    return (k, age, power, bearing + (((m >> 16) & 255) / 255.0 - 0.5) * 0.7,
+            0.14 + ((m >> 24) & 15) / 15.0 * 0.2, (m >> 28) & 1)
+
+
+def draw_far_sky(ch, co, v, walls, wet, now):
+    """What is out on the horizon from up high: the far storm and the flights.
+    Fog and the strange night have the sky to themselves."""
+    if v.fog or night(now)["alien"]:
+        return
+    tops = walls[3]
+    width, horizon = v.width, v.horizon
+    bearing = far_storm(now, wet)
+    strike = None if bearing is None else far_strike(now, bearing)
+    if strike is not None:
+        k, age, power, mid, wide, bolt = strike
+        rows = max(3, int(v.fy * 0.2))
+        for sx in range(width):
+            cam = 2.0 * sx / (width - 1) - 1.0
+            ang = v.yaw + math.atan(cam * PLANE)
+            off = abs(_wrap_pi(ang - mid)) / wide
+            if off >= 1.0:
+                continue
+            for y in range(max(0, horizon - rows), min(horizon, tops[sx])):
+                up = (horizon - 1 - y) / float(rows)
+                p = power * (1.0 - off * off) * (1.0 - up) ** 1.5
+                if _mix(int(ang * 300.0), y, 4907 + k) % 1000 < p * 700.0:
+                    ch[y][sx] = ":" if p > 0.3 else "."
+                    co[y][sx] = FLASH if p > 0.55 else FOG if p > 0.25 else FOG_DIM
+        d = _wrap_pi(mid - v.yaw)
+        if bolt and age < 0.22 and abs(d) < 1.5:
+            sx = int(round((math.tan(d) / PLANE + 1.0) * 0.5 * (width - 1)))
+            for y in range(max(0, horizon - int(rows * 0.75)), horizon):
+                step = _mix(k, y, 4909) % 3 - 1
+                sx += step
+                if 0 <= sx < width and y < tops[sx]:
+                    ch[y][sx], co[y][sx] = "/|\\"[step + 1], FLASH
+    for k in range(int((now - FAR_PLANE_LIFE) // FAR_PLANE_EVERY) + 1,
+                   int(now // FAR_PLANE_EVERY) + 1):
+        t = now - k * FAR_PLANE_EVERY
+        m = _mix(k, 0, 4911)
+        rate = (0.012 + ((m >> 13) & 31) * 0.0008) * (1 if (m >> 18) & 1 else -1)
+        d = _wrap_pi(m % 6283 / 1000.0 + rate * t - v.yaw)
+        if abs(d) > 1.5:
+            continue
+        cam = math.tan(d) / PLANE
+        if abs(cam) > 1.0:
+            continue
+        sx = int(round((cam + 1.0) * 0.5 * (width - 1)))
+        high = 0.03 + ((m >> 21) & 31) / 31.0 * 0.07
+        landing = (m >> 19) & 3 == 0           # one in four is coming down
+        if landing:
+            high *= 1.0 - t / FAR_PLANE_LIFE
+        y = int(round(horizon - high * v.fy))
+        if not 0 <= y < horizon or not 0 <= sx < width or y >= tops[sx]:
+            continue
+        ch[y][sx] = "*" if landing else "."
+        co[y][sx] = FLASH if landing else BULB
+        if int(now * 1.5 + k) % 2 and sx > 0 and y < tops[sx - 1]:
+            ch[y][sx - 1], co[y][sx - 1] = ".", ROU_RED
+        elif not int(now * 1.5 + k) % 2 and sx + 1 < width and y < tops[sx + 1]:
+            ch[y][sx + 1], co[y][sx + 1] = ".", ROU_GREEN
+        if (now + k * 0.37) % 1.6 < 0.12 and y > 0:
+            ch[y - 1][sx], co[y - 1][sx] = "'", FLASH  # the strobe
+
+
 FAR_CAR_SLOT = 60.0    # up high, between slots on a wide street's far traffic
 FAR_CAR_ODDS = {"some": 3, "busy": 2}      # one slot in this many has a car
 FAR_CAR_REACH = 1200.0  # and how far
@@ -13343,6 +13452,8 @@ def render_street(v, now):
     v.tunnels = near_tunnels(v, 90.0)
     walls = draw_walls(ch, co, v, now)
     draw_sky(ch, co, v, walls, wet, now)
+    if v.eye >= 10.0:
+        draw_far_sky(ch, co, v, walls, wet, now)
     draw_ground(ch, co, v, walls, collect_glow(v, now, wet), wet, now)
     if v.eye >= 10.0:
         draw_far_traffic(ch, co, v, walls, now)
@@ -17820,6 +17931,7 @@ def draw_cheats(ch, co, note):
            names["lemonade"], names["telescope"], names["fountain"],
            ("`", "close")]
     more = [("", "AND THE REST")] + [names[k] for k in CHEAT_MORE if k in names]
+    more.append(("\\", "storm far ahead"))
     col = 18
     if width >= col * 5 + 7:
         columns = (left, middle, right, sky, more)     # room for all five
@@ -20056,6 +20168,15 @@ def main(stdscr):
                 elif key == ord("L"):
                     force_strike(now)
                     note = "lightning"
+                elif key == ord("\\"):
+                    # Straight out of whichever way you are looking, flying or not.
+                    ahead_ = yaw
+                    if flight is not None and flight["phase"] == "air":
+                        ahead_ = (flight_pose(flight["home"], flight_s(
+                            now - flight["t0"], flight["home"]))[2]
+                            + math.pi / 2 + flight["look"])
+                    _far_storm_force[0] = (now, ahead_)
+                    note = "a storm far off - look from up high"
                 elif key == ord("u"):
                     note = ("the sky is busy tonight"
                             if skip_to_alien(now) else "no such night near")
