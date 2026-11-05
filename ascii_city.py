@@ -13058,6 +13058,115 @@ def draw_bowling_front(ch, co, v, walls, alley, world, now):
                          tube[0])
 
 
+# The case. One for a sitting, a trail through places you already know: each
+# says who to ask next, and a line on the screen says which way that is.
+CASE_NAME = "THE CASE OF THE LAST SLICE"
+CASE_AFTER = 240.0      # seconds of play before a note finds you by itself
+CASE_SHOW = 11.0        # how long what somebody says stays up
+CASE_REWARD = 250
+CASE_OPENINGS = {
+    "pocket": "There is a note in your pocket that you did not put there. \"Somebody "
+              "is taking the last slice of everything in this city. Start at a "
+              "diner.\"",
+    "bar": "The bartender slides a note over with the drink. \"Somebody is taking the "
+           "last slice of everything in this city. Start at a diner.\"",
+    "pigeon": "The pigeon has a note on its leg that is not an answer to yours. "
+              "\"Somebody is taking the last slice of everything. Start at a diner.\"",
+    "menu": "A note, under your shoe. \"Somebody is taking the last slice of "
+            "everything in this city. Start at a diner.\"",
+}
+# Where you have to be, what to call it, where to look for it, what they say there.
+CASE_TRAIL = (
+    ("diner", "a diner", "diner",
+     "The drone tops up your coffee. \"Last slice of pie, gone. Every night. And the "
+     "price of pie keeps going up. Ask at the stock exchange who is buying.\""),
+    ("exchange", "the stock exchange", "exchange",
+     "A trader, not looking up from PIES. \"Nobody is buying. They are all just gone. "
+     "The priest at the temple hears everything. Ask there.\""),
+    ("temple", "a temple", "temple",
+     "\"I cannot say what I hear. But four of them confessed to hunger, under the "
+     "streets. Go down a manhole. Follow your nose.\""),
+    ("lair", "the door that smells of pizza, under the streets", "lair",
+     "Four of them, round an empty box, looking at you. \"We thought it was YOU.\" One "
+     "holds up the lid: small muddy prints. \"Ask the pigeons. They see everything.\""),
+    ("loft", "a pigeon loft, up a fire escape", "loftroof",
+     "A note in the seed tray, in very small writing. \"Saw it. Fur. Tail. Goes along "
+     "the parapets at night, on the low roofs. Do not tell it we told you.\""),
+    ("cat", "a cat, on a low roof", "catroof",
+     "It sits on a neat pile of crusts, and looks at you, and does not stop looking at "
+     "you. There is nothing to be done. Case closed. Four grateful turtles and the "
+     "pigeons have had a whip-round. $%d." % CASE_REWARD),
+)
+_case_way = ("ahead", "ahead right", "to the right", "behind you to the right",
+             "behind you", "behind you to the left", "to the left", "ahead left")
+
+
+def roof_has_cat(t):
+    return _mix(t["i"], t["j"], 5313) % ROOF_CAT_ODDS == 0
+
+
+def new_case(opening, x, z, now):
+    case = {"stage": 0, "said": CASE_OPENINGS[opening], "at": now, "hide": False,
+            "target": None, "done": False}
+    case["target"] = find_place(x, z, CASE_TRAIL[0][2])
+    return case
+
+
+def case_arrive(case, where, x, z, now):
+    """You have got somewhere. If it is where the trail goes next, what they say
+    goes up and the trail moves on. True if that closed the case."""
+    if case is None or case["done"] or where != CASE_TRAIL[case["stage"]][0]:
+        return False
+    case["said"], case["at"] = CASE_TRAIL[case["stage"]][3], now
+    case["stage"] += 1
+    if case["stage"] == len(CASE_TRAIL):
+        case["done"], case["target"] = True, None
+        return True
+    case["target"] = find_place(x, z, CASE_TRAIL[case["stage"]][2])
+    return False
+
+
+def case_line(case, x, z, yaw):
+    """Who to ask next, and which way, as far as you can tell."""
+    label = CASE_TRAIL[case["stage"]][1]
+    if case["target"] is None:
+        return "%s: %s" % (CASE_NAME.lower(), label)
+    dx, dz = case["target"][0] - x, case["target"][1] - z
+    d = math.hypot(dx, dz)
+    turn = (math.atan2(dx, dz) - yaw) % math.tau
+    return "next: %s, %s, %s  -  j hides this" % (
+        label, _case_way[int(turn / math.tau * 8.0 + 0.5) % 8],
+        "here" if d < 12.0 else "close" if d < 60.0 else "not far" if d < 200.0
+        else "a way off" if d < 600.0 else "far off")
+
+
+def draw_case(ch, co, case, x, z, yaw, now, line=True):
+    """What somebody just said, in the middle on a board of its own; and under
+    it all the time, small, who to ask next. Plain letters: it is sentences."""
+    height, width = len(ch), len(ch[0])
+    if width < 40 or height < 10:
+        return
+    if now - case["at"] < CASE_SHOW:
+        lines = [CASE_NAME] + bar_lines(case["said"], min(width - 6, 74))
+        y0 = max(1, height // 3 - len(lines) // 2)
+        wide = max(len(t) for t in lines)
+        x0 = (width - wide) // 2
+        for n in range(-1, len(lines) + 1):
+            y = y0 + n
+            if 0 <= y < height:
+                for xx in range(max(0, x0 - 2), min(width, x0 + wide + 2)):
+                    ch[y][xx], co[y][xx] = " ", 0
+        for n, text in enumerate(lines):
+            if y0 + n < height:
+                _text(ch, co, y0 + n, x0, text, GOLD if n == 0 else BULB)
+    if line and not case["done"] and not case["hide"]:
+        text = case_line(case, x, z, yaw)[:width - 4]
+        y = height - 2
+        for xx in range(1, min(width, len(text) + 3)):
+            ch[y][xx], co[y][xx] = " ", 0
+        _text(ch, co, y, 2, text, GOLD_DIM)
+
+
 def bar_lines(say, room):
     """What the bartender says, broken at the spaces to fit."""
     lines = [""]
@@ -19174,10 +19283,10 @@ def _car_park_spot(x, z):
 _low_roof_next = [-1]   # which of LOW_ROOFS the menu's key last went to
 
 
-def _escape_spot(x, z, want=None):
+def _escape_spot(x, z, want=None, cat=False):
     """In the alley at the foot of a fire escape that goes all the way up,
     a couple of steps back and facing it: walk forward and you are climbing.
-    With `want`, one whose roof has that on it."""
+    With `want`, one whose roof has that on it; with `cat`, one with the cat."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
     for i, j in _rings(ci, cj, CHEAT_RINGS):
@@ -19185,6 +19294,8 @@ def _escape_spot(x, z, want=None):
             if _mix(i, j * 4 + f, 1931) % CLIMB_ODDS or not climbable(i, j, f):
                 continue
             if want is not None and low_roof({"i": i, "j": j}) != want:
+                continue
+            if cat and not roof_has_cat({"i": i, "j": j}):
                 continue
             px, _, pz = face_point(i, j, f, CELL * 0.5, 2.4, 0.0)
             if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
@@ -19332,6 +19443,10 @@ def find_place(x, z, kind):
         return _manhole_spot(x, z)
     if kind == "lair":
         return _lair_spot(x, z)
+    if kind == "loftroof":
+        return _escape_spot(x, z, "loft")
+    if kind == "catroof":
+        return _escape_spot(x, z, None, True)
     if kind == "highway":
         return _hwy_spot(x, z)
     if kind == "el":
@@ -19493,6 +19608,8 @@ def draw_cheats(ch, co, note):
            ("`", "close")]
     more = [("", "AND THE REST")] + [names[k] for k in CHEAT_MORE if k in names]
     more.append(("\\", "storm far ahead"))
+    more.append(("6", "start the mystery"))
+    more.append(("7", "the next clue"))
     col = 18
     if width >= col * 5 + 7:
         columns = (left, middle, right, sky, more)     # room for all five
@@ -22013,6 +22130,9 @@ def main(stdscr):
     at_exchange = False
     at_arcade = False
     at_bowl = False
+    case = None                 # the mystery, once it has found you
+    case_began = time.monotonic()
+    case_over = False           # had one this sitting: that is your lot
     bowl = None                 # the game on your lane, while you are in the place
     bowl_hi = {}                # your best at each, for the session
     at_temple = False
@@ -22107,8 +22227,16 @@ def main(stdscr):
                         "hazy" if nt["clarity"] < 0.4 else
                         "clear" if nt["clarity"] > 0.75 else "middling",
                         moon_face(nt["phase"]) or "no")
+                elif key == ord("6"):
+                    if case is None or case["done"]:
+                        case = new_case("menu", cam_x, cam_z, now)
+                        note = "a note, under your shoe"
+                    else:
+                        note = "you are on the case already"
                 else:
                     jumps = [(k, name, kind) for k, name, kind in CHEAT_PLACES]
+                    if case is not None and not case["done"]:
+                        jumps.append(("7", "next clue", CASE_TRAIL[case["stage"]][2]))
                     jumps += [(d["key"], d["name"], "@%d" % n)
                               for n, d in enumerate(DISTRICTS)]
                     for k, name, kind in jumps:
@@ -22123,6 +22251,7 @@ def main(stdscr):
                             autopilot = False
                             auto = {}
                             wheel = None
+                            on_roof = lift = None    # or you jump and stay up there
                             sewer = None
                             if kind == "lair":
                                 sewer = new_sewer(cam_x, cam_z, yaw, now)
@@ -22268,6 +22397,8 @@ def main(stdscr):
                 return
             elif key == CHEAT_KEY:
                 cheats, note = True, ""
+            elif key in (ord("j"), ord("J")) and case is not None:
+                case["hide"] = not case["hide"]
             elif sewer is not None and sewer["lair"]:
                 if key in (ord("s"), ord("S"), ord("x"), ord("X"), curses.KEY_DOWN):
                     sewer["lair"] = False       # and back out into the tunnel
@@ -22478,6 +22609,8 @@ def main(stdscr):
                     said = loft_key(at_loft, chr(key), now)
                     if said:
                         note, note_at = said, now
+                    elif key == ord("n") and case is None and not case_over:
+                        case = new_case("pigeon", cam_x, cam_z, now)
                 else:
                     note, note_at = "the loft is behind you", now
             elif (at_bar is not None and lift is None
@@ -22486,6 +22619,8 @@ def main(stdscr):
                     said = bar_order(at_bar, key - ord("1"), wallet, now)
                     if said:
                         note, note_at = said, now
+                    elif case is None and not case_over:
+                        case = new_case("bar", cam_x, cam_z, now)
                 else:
                     note, note_at = "the bar is behind you", now
             elif (on_roof is not None and on_roof.get("kind") == "lighthouse"
@@ -23027,6 +23162,26 @@ def main(stdscr):
             ch, co = render_skyline(sky_x, width, height, now)
             hud = SKYLINE_HUD % (sky_x, sky_word(now, rain_intensity(now)))
         hud = " $%d " % int(wallet.money) + hud       # what you have, everywhere
+        # The case: a note finds you in the end, and getting there moves it on.
+        if (case is None and not case_over and street and venue is None
+                and not elsewhere() and on_roof is None
+                and now - case_began > CASE_AFTER):
+            case = new_case("pocket", cam_x, cam_z, now)
+        if case is not None:
+            on_alley_ = on_roof is not None and on_roof.get("kind") == "escape"
+            where_ = ("lair" if sewer is not None and sewer["lair"]
+                      else "loft" if at_loft is not None
+                      else "cat" if on_alley_ and roof_has_cat(on_roof)
+                      else venue[0] if venue is not None else None)
+            if case_arrive(case, where_, cam_x, cam_z, now):
+                wallet.give(CASE_REWARD)
+                case_over = True
+            px_, pz_, py_ = ((sewer["x"], sewer["z"], sewer["yaw"]) if sewer is not None
+                             else (cam_x, cam_z, yaw))
+            quiet = (venue is not None or lift is not None
+                     or (sewer is not None and sewer["lair"])
+                     or flight is not None or metro is not None or taxi is not None)
+            draw_case(ch, co, case, px_, pz_, py_, now, not quiet)
         if cheats:
             draw_cheats(ch, co, note)
         elif now - note_at < 4.0 and note:
