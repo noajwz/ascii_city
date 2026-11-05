@@ -66,6 +66,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   queue, a bouncer and a rope, and now and then the door opens and lets the light out; the
   windows next door shake on the kick, the puddles ripple, and at closing time the lights come
   up and everyone spills out into the street.
+- a rooftop bar on some of those towers: the real skyline behind it, a drink off the wallet, a trio
+  and a bartender with opinions.
 - **A stock exchange** in the financial district, its ticker running across the front in green
   and red, and inside a trading floor with sixteen made-up stocks - charts or a list - to buy and sell
   as they move every thirty seconds, with bull and bear markets, sectors and hot streaks.
