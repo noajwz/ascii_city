@@ -171,7 +171,7 @@ blind = []
 for _, name, kind in ac.CHEAT_PLACES:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
                 "diner", "billboard", "highway", "arcade", "claw", "roofparty",
-                "exchange", "metro", "bar", "lowroof", "bowling"):
+                "exchange", "metro", "bar", "lowroof", "bowling", "lair"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -5897,6 +5897,56 @@ bw_smallz = "\n".join("".join(r_) for r_ in
                       ac.render_bowling(bw_alley, bw_g, 299, 87, 7.0)[0])
 check("the name in block letters big, and plain small", bw_alley["name"] not in bw_bigz
       and bw_alley["name"] in bw_smallz)
+
+# --- the tunnels, and who is down there ------------------------------------------
+sw_start = next((i_, j_) for i_ in range(-20, 20) for j_ in range(-20, 20)
+                if ac.sewer_cell(i_, j_) and ac.manhole_at(i_, j_))
+sw_seen = {sw_start}
+sw_q = [sw_start]
+while sw_q:
+    i_, j_ = sw_q.pop()
+    for a_, b_ in ((i_ + 1, j_), (i_ - 1, j_), (i_, j_ + 1), (i_, j_ - 1)):
+        if (abs(a_) <= 120 and abs(b_) <= 120 and (a_, b_) not in sw_seen
+                and ac.sewer_cell(a_, b_)):
+            sw_seen.add((a_, b_))
+            sw_q.append((a_, b_))
+sw_holes = [(i_, j_) for i_ in range(-100, 100) for j_ in range(-100, 100)
+            if ac.manhole_at(i_, j_)]
+check("every manhole comes down into the tunnels, all joined up, under the river",
+      len(sw_holes) > 100 and all(c_ in sw_seen for c_ in sw_holes),
+      "%d manholes" % len(sw_holes))
+check("and it is tunnels, not one big cellar", len(sw_seen) < 241 * 241 * 0.35,
+      str(len(sw_seen)))
+sw_mh = ac.manhole_at(*sw_holes[0])
+sw_s = ac.sewer_from_manhole(sw_mh, 600.0)
+check("down a ladder you are at the foot of it, in the tunnel",
+      ac.sewer_open(sw_s["x"], sw_s["z"])
+      and ac.sewer_ladder(sw_s["x"], sw_s["z"]) == sw_mh)
+sw_w = dict(sw_s)
+sw_x, sw_z = sw_w["x"], sw_w["z"]
+sw_w.update(fwd=ac.SEWER_WALK, turn=0.0, go=1e9)
+for _ in range(300):
+    ac.sewer_step(sw_w, 1.0 / 30.0, 600.0)
+check("you can walk, and the walls stop you", ac.sewer_open(sw_w["x"], sw_w["z"])
+      and (sw_w["x"], sw_w["z"]) != (sw_x, sw_z))
+sw_lairs = [ac.lair_in_tile(a_, b_) for a_ in range(-5, 5) for b_ in range(-5, 5)]
+sw_have = [l_ for l_ in sw_lairs if l_]
+check("the lair is rare", 0 < len(sw_have) < 70, str(len(sw_have)))
+check("behind a door in a wall, off a tunnel", all(
+    not ac.sewer_cell(*l_[0]) and ac.sewer_cell(*l_[1])
+    and ac.lair_door_at(*l_[0]) for l_ in sw_have))
+sw_sp = ac.find_place(x0, z0, "lair")
+sw_l = ac.new_sewer(sw_sp[0], sw_sp[1], sw_sp[2], 600.0)
+check("you smell it before you see it", ac.lair_near(sw_l["x"], sw_l["z"]) is not None)
+sw_l.update(fwd=ac.SEWER_WALK, turn=0.0, go=1e9)
+sw_in = any(ac.sewer_step(sw_l, 1.0 / 30.0, 600.0) for _ in range(60))
+check("and walking into the door is going in", sw_in)
+for w_, h_ in ((80, 24), (60, 20), (44, 16), (20, 8), (110, 34), (300, 90), (451, 133)):
+    for y_ in (0.0, 0.8, 2.4, 4.0):
+        ac.render_tunnels(dict(sw_s, yaw=y_), w_, h_, 600.0 + y_)
+check("the tunnels draw at every size", True)
+sw_t = "\n".join("".join(r_) for r_ in ac.render_tunnels(sw_s, 110, 34, 600.0)[0])
+check("brick and water", "~" in sw_t and "-" in sw_t)
 
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
