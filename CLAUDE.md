@@ -2399,19 +2399,19 @@ Further buildings were drawn only where a ray ran down a street, which changed a
 moved: whole buildings went and came back from one frame to the next (up to 4.4% of the
 building cells in a frame of level flight). It also left the middle of the plane's window half
 empty, which was most of "the black blob". Up high now (`v.eye >= 10`) `cast()` is a generator
-taken to `WALL_REACH_HIGH` (170) with no count at all - a distance holds still where a count did
+taken to `v.high_walls` (`WALL_REACH_ROOF` 250, `WALL_REACH_PLANE` 200; 170 for both at first) with no count at all - a distance holds still where a count did
 not - and a wall whose roof line falls under what is already drawn in the column is skipped
-before any of the rest of the work. Past 170 the ground and `far_lights()`
+before any of the rest of the work. Past that the ground and `far_lights()`
 carry on to `ROOF_REACH`. Tried and dropped: every wall to 520 (65 ms a frame), every wall to
 200 (35), and all to 170 plus only the tall ones beyond (worse: looking up every block to 520 to
-find the tall ones cost more than drawing them). At 300x90: roof 21 ms, plane 25-30. The check
+find the tall ones cost more than drawing them). The check
 in `checks.py` flies twelve frames level and asserts the building cells never change by 2% in
 one. `far_lights()` is keyed on the row's place under the horizon, not its distance: keyed on
 distance it reshuffled itself whenever the plane climbed or came down. On the street nothing of
 this applies: `cast(v, ..., v.depth)` as ever.
 
 **The far city, one shape a block** (`draw_far_blocks()`, `far_block()`): up high, past
-`WALL_REACH_HIGH` and out to `FAR_BLOCK_REACH` (2000), each city block is 2-4 buildings of
+`v.high_walls` and out to `FAR_BLOCK_REACH` (2000), each city block is 2-4 buildings of
 different heights with a faint edge, its district's roof and the odd lit window, so the far
 distance is a skyline and not a black void. The owner asked for no void at the horizon and no
 filling of the dark with dots: the fronts stay mostly dark. One flat slab a block ran together
@@ -2429,7 +2429,7 @@ coming and red going. The highway past `ROOF_REACH`, in the same slots as `hwy_c
 stream runs on unbroken; the wide streets out to `FAR_CAR_REACH`, sparse and only on `road_at()`
 cells. The owner loved these and asked for more; they did not like the far street lights, so
 this has to stay moving traffic and not a carpet. Past `FAR_CAR_CLEAR` only real buildings hide
-a light (one loop over `walls[4]`, stopping at `WALL_REACH_HIGH`): a far block's shape is one
+a light (one loop over `walls[4]`, stopping at `v.high_walls`): a far block's shape is one
 solid mass and a real block is not, and with the shapes hiding them hardly any far car showed
 (13 more lights on screen, against a couple of hundred now). A highway crossing the view far off packed its cars into one solid ruled line
 of lights, so the far ones are thinned by distance, by each car's own hash (`FAR_CAR_THIN`).
@@ -2446,6 +2446,12 @@ plane's window - for looking at. **Flights** every `FAR_PLANE_EVERY` round the c
 crossing for `FAR_PLANE_LIFE`: a white light, red and green taking turns, a strobe, at 3 to 10%
 of `v.fy` over the horizon; one in four is coming down, brighter, and sinks behind the skyline.
 Nothing at street level changes. They cost well under a millisecond.
+
+**The two reaches are one number each, and tuned by measuring.** At 300x90, with the far blocks
+and the far traffic in, turning slowly on three roofs: 200 is 26 ms a frame and never over 33;
+250 is 30 and over for 15-24% of frames; 300 is 34-36 and over for 50-95%. So the roof is 250.
+The plane, over a whole flight: 170 is a median of 32 with 44% of frames over 33, 200 is 35 with
+53%. The owner chose to have them split, roof further out than plane.
 
 **Do not draw the ground at half resolution to buy more.** It was tried: every other row and
 column worked out and the rest copied from a neighbour. It was faster (roof 28, plane 32), and
