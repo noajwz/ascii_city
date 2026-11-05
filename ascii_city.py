@@ -12433,26 +12433,60 @@ def bar_lines(say, room):
 
 
 # Some of the low roofs have somebody's something on them. Most do not.
-LOW_ROOF_ODDS = 3       # one in this many has one of the four
-LOW_ROOFS = ("loft", "washing", "sign", "garden")
+LOW_ROOF_ODDS = 3       # one in this many has one of these
+LOW_ROOFS = ("loft", "washing", "garden")
 ROOF_CAT_ODDS = 8       # and one in this many, of any kind, has the cat
-BACK_SIGN_WORDS = ("HOTEL", "BAR", "OPEN", "DANCE", "ROOMS", "LATE")
-LOFT_ART = ["  ___________  ",
-            " /___________\\ ",
-            " | v | v | v | ",
-            " |___|___|___| ",
-            " | v | v | v | ",
-            " |___|___|___| ",
-            " |           | "]
+LOFT_ART = ["       ______________________________       ",
+            "      /##############################\\      ",
+            "     /################################\\     ",
+            "    /__________________________________\\    ",
+            "    |  .------.  .------.  .------.    |    ",
+            "    |  |++++++|  |++++++|  |++++++|    |    ",
+            "    |  |++v+++|  |+++v++|  |+v++v+|    |    ",
+            "    |  |++++++|  |++++++|  |++++++|    |    ",
+            "    |__|______|__|______|__|______|____|    ",
+            " =========================================  ",
+            "    |  |  |  |  |  |  |  |  |  |  |  | |    ",
+            "    |__|__|__|__|__|__|__|__|__|__|__|_|    ",
+            "     ||                             ||      ",
+            "     ||                             ||      "]
+LOFT_SACK = [" ____ ", "/FEED\\", "|    |", "|____|"]
+LOFT_BUCKET = ["\\___/", " |  |", " |__|"]
 WASH_SHIRT = ["_/-\\_", "|   |", "|   |", "|___|"]
 WASH_SHEET = ["======", "|    |", "|    |", "|    |", "|____|"]
 WASH_SOCKS = ["| |", "|_|"]
-POTS_ART = ["  Y  *Y   Y* ",
-            " \\|/ \\|/ \\|/",
-            " (_) (_) (_) "]
-TOMATO_ART = ["\\o|o/", " o|o ", "  |  ", " (_) "]
-CHAIRS_ART = ["|\\     |\\  ", "| \\    | \\ ", "|__\\_  |__\\_", "/   \\  /   \\"]
-RADIO_ART = [" \\   ", "__\\__", "|o==o|", "|____|"]
+TRELLIS_ART = [" +---+---+---+---+ ",
+               " |%&%|o%&|&%%|%o&| ",
+               " |&o%|%&%|%o&|&%%| ",
+               " +---+---+---+---+ ",
+               " |%%&|&o%|%&%|o%&| ",
+               " |o&%|%%&|o%%|&%o| ",
+               " +---+---+---+---+ ",
+               " |%&%|%o&|&%%|%&%| ",
+               " |%&o|&%%|%&o|%%&| ",
+               " +---+---+---+---+ ",
+               "  |             |  ",
+               "  |             |  "]
+PLANTER_ART = ["    *       *        *     ",
+               "   %&%     %&%      &%%    ",
+               "  %&%&%   %&%%&%   %&%&%   ",
+               " %&%%&%% %%&%&%%% %%&%%&%  ",
+               " ._______________________. ",
+               " |=======================| ",
+               " |_______________________| "]
+CHAIRS_ART = ["|\\                |\\        ",
+              "| \\               | \\       ",
+              "|  \\              |  \\      ",
+              "|   \\______  i    |   \\_____",
+              "|__________| ==== |_________|",
+              "/          \\  ||  /         \\"]
+RADIO_ART = ["   \\    ",
+             "    \\   ",
+             " ___\\__ ",
+             "|o  ==o|",
+             "|__::__|",
+             "|      |",
+             "|______|"]
 CAT_ART = [["/\\_/\\", "(o.o)", " )_( "],
            ["/\\_/\\", "(-.-)", " )_( "],
            [" /\\_/\\__", "( o.o   )~", " |_|  |_| "]]
@@ -12471,23 +12505,24 @@ def low_roof_yaw(t):
     return _mix(t["i"], t["j"], 5303) % 6283 / 1000.0
 
 
-def draw_backward_sign(ch, co, cx, y0, word, attr, sx, sy, dark):
-    """A word in block letters as seen from behind: last letter first, each
-    drawn mirrored. One letter is dead, `dark`."""
-    h, w = len(ch), len(ch[0])
-    x = cx - blocks_width(word, sx) // 2
-    for n, c in enumerate(reversed(word)):
-        for r, line in enumerate(BIG_FONT.get(c, BIG_FONT["?"])):
-            for dx, px in enumerate(line[::-1]):
-                if px == " ":
-                    continue
-                for yy in range(sy):
-                    for xx in range(sx):
-                        y_, x_ = y0 + r * sy + yy, x + dx * sx + xx
-                        if 0 <= y_ < h and 0 <= x_ < w:
-                            ch[y_][x_] = "#"
-                            co[y_][x_] = CONCRETE if n == dark else attr
-        x += 4 * sx
+def draw_roof_floor(ch, co, width, height, k):
+    """A wall to the edge and gravel to stand on, for what stands on the roof:
+    without them it hung in the air over the city."""
+    rail = int(height * 0.66)
+    floor = rail + 3 * k
+    for x in range(width):
+        ch[rail][x], co[rail][x] = "=", ROOF
+    for y in range(rail + 1, height):
+        for x in range(width):
+            if y >= floor:
+                ch[y][x] = "." if _mix(x // k, y, 5317) % 19 == 0 else " "
+                co[y][x] = CONCRETE
+            elif (y - rail) % (2 * k) == 0:
+                ch[y][x], co[y][x] = "-", CONCRETE
+            elif (x + y // (2 * k) * 3) % 7 == 0:
+                ch[y][x], co[y][x] = "|", CONCRETE
+            else:
+                ch[y][x], co[y][x] = " ", 0
 
 
 def draw_low_roof(ch, co, v, t, now, wet):
@@ -12503,43 +12538,25 @@ def draw_low_roof(ch, co, v, t, now, wet):
     b = low_roof_yaw(t)
     seed = _mix(t["i"], t["j"], 5305)
     foot = height - 1 - k
-    if kind == "sign":
-        # You are behind it. Steel, and the letters backwards, buzzing.
+    if kind == "loft":
+        draw_roof_floor(ch, co, width, height, k)
+        for off, art in ((0.62, LOFT_BUCKET), (0.5, LOFT_SACK)):
+            sx = bar_col(v, b + off)
+            if sx is not None:
+                _bar_sprite(ch, co, art, lambda c, n: GOLD_DIM, sx, foot, k)
         cx = bar_col(v, b)
         if cx is not None:
-            word = BACK_SIGN_WORDS[seed % len(BACK_SIGN_WORDS)]
-            sx_, sy_ = 3 * k, 2 * k
-            wide = blocks_width(word, sx_)
-            y0 = max(1, v.horizon - 5 * sy_ // 2)
-            x0, x1, y1 = cx - wide // 2 - 2 * k, cx + wide // 2 + 2 * k, y0 + 5 * sy_
-            for y in range(max(0, y0 - k), min(foot, height)):
-                for x in range(x0, x1 + 1, 6 * k):
-                    if 0 <= x < width:
-                        ch[y][x], co[y][x] = "|", CONCRETE
-            for y in range(y0 - k, y1 + 1, 2 * sy_):
-                if 0 <= y < height:
-                    for x in range(max(0, x0), min(width, x1 + 1)):
-                        ch[y][x], co[y][x] = "=", CONCRETE
-            tube = NEON[seed % len(NEON)][0]
-            buzz = _mix(int(now * 9.0), t["i"], 5307) % 23
-            draw_backward_sign(ch, co, cx, y0, word, tube, sx_, sy_,
-                               buzz if buzz < len(word) else -1)
-            # Its light, lying on the roof in front of you.
-            if buzz >= len(word):
-                for y in range(y1 + 1, foot):
-                    for x in range(max(0, x0), min(width, x1 + 1)):
-                        if ch[y][x] == " " and _mix(x, y, 5309) % 13 == 0:
-                            ch[y][x], co[y][x] = ".", tube
-    elif kind == "loft":
-        cx = bar_col(v, b)
-        if cx is not None:
-            x0, y0 = _bar_sprite(ch, co, LOFT_ART, lambda c, n: (
-                MOON_DIM if c == "v" else BARK), cx, foot, k)
-            # They shuffle along the perch on top, on their own counts.
-            for n in range(4):
-                x = x0 + (3 + n * 3 + _mix(n, int(now / (2.0 + n)), 5311) % 2) * k
-                if 0 <= y0 - 1 < height and 0 <= x < width:
-                    ch[y0 - 1][x], co[y0 - 1][x] = "v", MOON_DIM
+            inks = {"#": BARK, "+": CONCRETE, "v": MOON, "=": ROOF, "/": BARK,
+                    "\\": BARK, "|": BARK, "_": BARK, ".": BARK, "-": BARK}
+            x0, y0 = _bar_sprite(ch, co, LOFT_ART, lambda c, n: inks.get(c, BARK),
+                                 cx, foot, k)
+            # They shuffle along the landing board, on their own counts.
+            board = y0 + 9 * k - 1
+            for n in range(7):
+                step = _mix(n, int(now / (2.0 + n * 0.7)), 5311) % 3
+                x = x0 + (6 + n * 5 + step) * k
+                if 0 <= board < height and 0 <= x < width:
+                    ch[board][x], co[board][x] = "v" if n % 3 else "o", MOON
         # And now and then all of them go, round over the street and back.
         lap = (now + seed % 37) % 37.0
         if lap < 14.0:
@@ -12575,31 +12592,36 @@ def draw_low_roof(ch, co, v, t, now, wet):
             _bar_sprite(ch, co, art, lambda c, m: attr, sx,
                         line + sag + len(art) * k, k)
     elif kind == "garden":
-        for n in range(-24, 25):
-            sx = bar_col(v, b + n * 0.03)
-            if sx is not None and 0 <= sx < width:
-                y = 2 * k + int((1.0 - (n / 25.0) ** 2) * 3 * k)
-                if n % 3 == 0:
+        draw_roof_floor(ch, co, width, height, k)
+        leaf = {"%": GRASS, "&": ROU_GREEN, "o": ROU_RED, "*": GOLD}
+        wood = lambda c, m: leaf.get(c, BARK)
+        cloth = lambda c, m: (GOLD if c == "i" else ROOF if c == "=" else BARK)
+        # The string of bulbs, between the trellis and the far end of the chairs.
+        for n in range(-22, 23):
+            sx = bar_col(v, b + n * 0.02)
+            if sx is not None and 0 <= sx < width and n % 2 == 0:
+                y = height // 3 + int((1.0 - (n / 23.0) ** 2) * 3 * k)
+                if 0 <= y < height:
                     ch[y][sx], co[y][sx] = "o", BULB
-        inks = {"Y": ROU_GREEN, "*": ROU_RED, "o": ROU_RED, "|": GRASS, "\\": GRASS,
-                "/": GRASS, "(": BARK, ")": BARK, "_": BARK}
-        for off, art in ((-0.65, POTS_ART), (-0.3, TOMATO_ART), (0.55, RADIO_ART),
-                         (0.1, CHAIRS_ART)):
-            sx = bar_col(v, b + off)
-            if sx is None:
-                continue
-            if art is POTS_ART or art is TOMATO_ART:
-                fn = lambda c, m: inks.get(c, HUD)
-            else:
-                fn = lambda c, m: BARK if art is CHAIRS_ART else GOLD_DIM
-            _bar_sprite(ch, co, art, fn, sx, foot, k)
-            if art is RADIO_ART:
-                beat = int(now * 1.5)
-                for n in range(3):
-                    y = foot - (5 + n * 2 + beat % 2) * k
-                    x = sx + (n * 3 - 3 + (beat + n) % 3) * k
-                    if 0 <= y < height and 0 <= x < width:
-                        ch[y][x], co[y][x] = BAR_NOTES[(beat + n) % 4], GOLD_DIM
+        sx = bar_col(v, b - 0.46)
+        if sx is not None:
+            _bar_sprite(ch, co, TRELLIS_ART, wood, sx, foot - k, k)
+        sx = bar_col(v, b + 0.62)
+        if sx is not None:
+            _bar_sprite(ch, co, PLANTER_ART, wood, sx, foot - 2 * k, k)
+        sx = bar_col(v, b - 0.05)
+        if sx is not None:
+            _bar_sprite(ch, co, CHAIRS_ART, cloth, sx, foot, k)
+        sx = bar_col(v, b + 0.3)
+        if sx is not None:
+            sprite_x, _ = _bar_sprite(ch, co, RADIO_ART, lambda c, m: GOLD_DIM, sx,
+                                      foot, k)
+            beat = int(now * 1.5)
+            for n in range(3):
+                y = foot - (9 + n * 2 + beat % 2) * k
+                x = sprite_x + (n * 3 + (beat + n) % 3) * k
+                if 0 <= y < height and 0 <= x < width:
+                    ch[y][x], co[y][x] = BAR_NOTES[(beat + n) % 4], GOLD
     # The cat goes on the parapet, on whichever roof it likes.
     if _mix(t["i"], t["j"], 5313) % ROOF_CAT_ODDS == 0:
         slot = int(now / 40.0)
