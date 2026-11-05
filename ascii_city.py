@@ -3176,11 +3176,14 @@ def lot(i, j):
         elif (_mix(i, j, 2801) % BOWL_ODDS == 0 and not d["park"]
               and d["name"] not in ("financial", "residential")):
             # Long and low, on a street, and never where it would be lost.
-            face = _road_face(i, j, _mix(i, j, 2803) % 4)
+            # The high bits: the low ones of these hashes follow the odds above,
+            # and the name's were the same for every alley in the city.
+            face = _road_face(i, j, (_mix(i, j, 2803) >> 9) % 4)
             if face is not None:
                 b["height"] = max(d["lo"], min(b["height"], 9.0))
                 b["bowling"] = {"door": face, "u": CELL * 0.5, "i": i, "j": j,
-                                "name": BOWL_NAMES[_mix(i, j, 2805) % len(BOWL_NAMES)],
+                                "name": BOWL_NAMES[(_mix(i, j, 2805) >> 9)
+                                                   % len(BOWL_NAMES)],
                                 "seed": _mix(i, j, 2807) % 9973,
                                 "height": b["height"]}
         elif _mix(i, j, 3201) % TEMPLE_ODDS == 0 and d["name"] != "financial":
