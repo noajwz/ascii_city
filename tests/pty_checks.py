@@ -303,6 +303,12 @@ def cases(run, report):
             [(b"`", .5), (b"4", 1.5), (b"p", .4), (b"d", .2), (b"a", .2), (b"p", .4),
              (b"p", 5.0), (b"p", .4), (b"p", .4), (b"z", .3), (b"x", .4)],
             cols=bw_size[0], rows=bw_size[1]))
+    ok &= report("a jump off a roof takes you off the roof", *run(
+        [(b"`", .5), (b"^", 1.5)] + [(b"\x1bOA", .3)] * 6
+        + [(b"", 7.0), (b"`", .4), (b"c", 1.0), (b"w", .3)], cols=110, rows=34))
+    ok &= report("the mystery, a note and the first clue", *run(
+        [(b"`", .5), (b"6", .5), (b"7", 1.5), (b"j", .3), (b"j", .3),
+         (b"`", .3), (b"7", 1.5)], cols=110, rows=34))
     for rb_size in ((110, 34), (300, 90)):
         ok &= report("a drink at the rooftop bar, %dx%d" % rb_size, *run(
             [(b"`", .5), (b"1", 1.5)] + [(b"\x1bOA", .3)] * 6

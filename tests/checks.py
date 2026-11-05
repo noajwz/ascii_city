@@ -5948,6 +5948,65 @@ check("the tunnels draw at every size", True)
 sw_t = "\n".join("".join(r_) for r_ in ac.render_tunnels(sw_s, 110, 34, 600.0)[0])
 check("brick and water", "~" in sw_t and "-" in sw_t)
 
+# --- the mystery -------------------------------------------------------------------
+cs_c = ac.new_case("menu", x0, z0, 600.0)
+check("a note starts it, and says to go to a diner", "diner" in cs_c["said"]
+      and cs_c["stage"] == 0 and cs_c["target"] is not None)
+check("every way it can start says the same thing", all(
+    "last slice" in t_ and "diner" in t_ for t_ in ac.CASE_OPENINGS.values()))
+check("the wrong place does nothing", not ac.case_arrive(cs_c, "casino", x0, z0, 601.0)
+      and cs_c["stage"] == 0)
+check("and being somewhere next to nowhere does nothing either",
+      not ac.case_arrive(cs_c, None, x0, z0, 601.0) and cs_c["stage"] == 0)
+cs_x, cs_z = x0, z0
+cs_ok = True
+for n_, st_ in enumerate(ac.CASE_TRAIL):
+    tg_ = cs_c["target"]
+    cs_ok &= tg_ is not None and ac.find_place(cs_x, cs_z, st_[2]) is not None
+    cs_x, cs_z = tg_[0], tg_[1]
+    line_ = ac.case_line(cs_c, cs_x + 40.0, cs_z, 0.0)
+    cs_ok &= st_[1] in line_
+    closed_ = ac.case_arrive(cs_c, st_[0], cs_x, cs_z, 610.0 + n_)
+    cs_ok &= closed_ == (n_ == len(ac.CASE_TRAIL) - 1)
+    cs_ok &= cs_c["said"] == st_[3]
+check("the whole trail, each place leading to the next, to the end", cs_ok
+      and cs_c["done"] and str(ac.CASE_REWARD) in cs_c["said"])
+check("and once it is closed it stays closed",
+      not ac.case_arrive(cs_c, "cat", cs_x, cs_z, 700.0))
+check("the bird and the turtles are on the way", ["lair", "loft"] == [
+    st_[0] for st_ in ac.CASE_TRAIL if st_[0] in ("lair", "loft")])
+
+
+def cs_climb(kind_):
+    sp_ = ac.find_place(x0, z0, kind_)
+    for n_ in range(1, 8):
+        t_ = ac.escape_at(sp_[0] + math.sin(sp_[2]) * n_ * 0.5,
+                          sp_[1] + math.cos(sp_[2]) * n_ * 0.5, sp_[2])
+        if t_ is not None:
+            return t_
+
+
+cs_ct, cs_lt = cs_climb("catroof"), cs_climb("loftroof")
+check("up the ladder the clue sends you to, there is the cat",
+      cs_ct is not None and ac.roof_has_cat(cs_ct))
+check("and the pigeons", cs_lt is not None and ac.low_roof(cs_lt) == "loft")
+cs_d = ac.new_case("pocket", x0, z0, 600.0)
+for w_, h_ in ((80, 24), (60, 20), (40, 10), (39, 12), (110, 34), (300, 90)):
+    for t_ in (601.0, 620.0):
+        c_ = [[" "] * w_ for _ in range(h_)]
+        ac.draw_case(c_, [[0] * w_ for _ in range(h_)], cs_d, x0, z0, 0.0, t_)
+c_ = [[" "] * 110 for _ in range(34)]
+ac.draw_case(c_, [[0] * 110 for _ in range(34)], cs_d, x0, z0, 0.0, 620.0)
+cs_t = "\n".join("".join(r_) for r_ in c_)
+check("it goes up, then only the line stays", ac.CASE_NAME not in cs_t
+      and "next:" in cs_t)
+cs_d["hide"] = True
+c_ = [[" "] * 110 for _ in range(34)]
+ac.draw_case(c_, [[0] * 110 for _ in range(34)], cs_d, x0, z0, 0.0, 620.0)
+check("and j hides that", "next:" not in "\n".join("".join(r_) for r_ in c_))
+check("everything anyone says fits", all(
+    len(ac.bar_lines(st_[3], 74)) <= 5 for st_ in ac.CASE_TRAIL))
+
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
 ac.FLASH, ac.ROU_RED = 901, 902
