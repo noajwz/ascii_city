@@ -171,7 +171,7 @@ blind = []
 for _, name, kind in ac.CHEAT_PLACES:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
                 "diner", "billboard", "highway", "arcade", "claw", "roofparty",
-                "exchange", "metro", "bar"):
+                "exchange", "metro", "bar", "lowroof"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -5593,6 +5593,81 @@ check("the bartender's lines fit the bar", all(
     for ln_ in ac.bar_lines(sa_, rb_room)))
 check("you can only order facing it", ac.bar_facing(rb_t["bar_yaw"] + 0.2, rb_t)
       and not ac.bar_facing(rb_t["bar_yaw"] + 2.0, rb_t))
+
+# --- what is on the low roofs ---------------------------------------------------
+lr_kinds = [ac.low_roof({"i": a_, "j": b_}) for a_ in range(-100, 100, 3)
+            for b_ in range(-100, 100, 3)]
+lr_plain = lr_kinds.count(None) / float(len(lr_kinds))
+check("most low roofs are plain", 0.6 < lr_plain < 0.75, "%.2f" % lr_plain)
+check("and all four kinds turn up",
+      all(lr_kinds.count(k_) > 100 for k_ in ac.LOW_ROOFS))
+lr_real = ac.ROOF_CAT_ODDS
+
+
+def lr_find(kind_):
+    sp_ = ac._escape_spot(x0, z0, kind_)
+    i_, j_ = int(sp_[0] // ac.CELL), int(sp_[1] // ac.CELL)
+    for a_ in range(i_ - 2, i_ + 3):
+        for b_ in range(j_ - 2, j_ + 3):
+            for f_ in range(4):
+                if (ac.climbable(a_, b_, f_)
+                        and ac.low_roof({"i": a_, "j": b_}) == kind_):
+                    return ac.escape_roof(a_, b_, f_)
+
+
+def lr_cells(t_, w_, h_, off_=0.0, now_=600.0):
+    v_ = ac.roof_view(t_, ac.low_roof_yaw(t_) + off_, w_, h_)
+    c_ = [[" "] * w_ for _ in range(h_)]
+    o_ = [[0] * w_ for _ in range(h_)]
+    ac.draw_low_roof(c_, o_, v_, t_, now_, 0.0)
+    return ["".join(r_) for r_ in c_]
+
+
+lr_roofs = {k_: lr_find(k_) for k_ in ac.LOW_ROOFS}
+check("each has a fire escape the menu can find", all(lr_roofs.values()))
+ac.ROOF_CAT_ODDS = 1 << 30
+for k_, t_ in lr_roofs.items():
+    for w_, h_ in ((80, 24), (60, 20), (49, 30), (110, 34), (150, 44), (299, 87),
+                   (300, 90), (451, 133)):
+        for off_ in (0.0, 1.0, -1.0, 3.1):
+            lr_cells(t_, w_, h_, off_)
+check("they draw at every size, from every side", True)
+lr_front = {k_: "\n".join(lr_cells(t_, 110, 34)) for k_, t_ in lr_roofs.items()}
+check("the loft, the washing, the sign and the garden each look like themselves",
+      "|___|___|___|" in lr_front["loft"] and "_/-\\_" in lr_front["washing"]
+      and "#" in lr_front["sign"] and "(_) (_) (_)" in lr_front["garden"])
+check("and they stay in one place: not there behind you", all(
+    "\n".join(lr_cells(t_, 110, 34, 3.1)).strip() != lr_front[k_].strip()
+    for k_, t_ in lr_roofs.items()))
+lr_big = "\n".join(lr_cells(lr_roofs["garden"], 300, 90))
+check("twice over on a big window", "((__))" in lr_big)
+lr_c = [[" "] * 40 for _ in range(10)]
+lr_o = [[0] * 40 for _ in range(10)]
+ac.draw_backward_sign(lr_c, lr_o, 20, 1, "LE", 1, 1, 1, -1)
+lr_rows = ["".join(r_) for r_ in lr_c]
+check("the sign reads backwards from behind it",
+      lr_rows[1].strip().startswith("###") and lr_rows[5].rstrip().endswith("###")
+      and lr_rows[5].find("#") < 20 and lr_rows[1].rstrip().endswith("  #"),
+      str(lr_rows[1:6]))
+lr_plain_t = next({"i": a_, "j": b_, "height": 12.0} for a_ in range(200)
+                  for b_ in range(200) if ac.low_roof({"i": a_, "j": b_}) is None)
+check("a plain roof draws nothing of its own",
+      not "".join(lr_cells(lr_plain_t, 110, 34)).strip())
+ac.ROOF_CAT_ODDS = 1
+lr_v = ac.roof_view(lr_plain_t, 0.0, 110, 34)
+lr_v.roof_edge = [20] * 110
+lr_seen = 0
+for t_ in range(0, 4000, 37):
+    lr_v2 = ac.roof_view(lr_plain_t, (t_ % 7) * 0.9, 110, 34)
+    lr_v2.roof_edge = [20] * 110
+    c_ = [[" "] * 110 for _ in range(34)]
+    ac.draw_low_roof(c_, [[0] * 110 for _ in range(34)], lr_v2, lr_plain_t,
+                     float(t_), 0.0)
+    lr_seen += any("(o.o)" in "".join(r_) or "( o.o" in "".join(r_) for r_ in c_[:20])
+check("and the cat sits on the parapet, somewhere", lr_seen > 3, str(lr_seen))
+ac.ROOF_CAT_ODDS = lr_real
+lr_seq = [ac.find_place(x0, z0, "lowroof") is not None for _ in ac.LOW_ROOFS]
+check("the menu's key goes round all four", all(lr_seq))
 
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED

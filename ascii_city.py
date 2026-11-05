@@ -3315,6 +3315,7 @@ class View:
         self.skip = None        # cells not to draw: the landmark whose roof you are on
         self.high_walls = WALL_REACH_ROOF   # up high, how far real buildings go
         self.clear = 0.0        # how much of the sky is showing, from draw_sky()
+        self.roof_edge = None   # the parapet's top row per column, on an alley roof
 
     def ray(self, sx):
         cam = 2.0 * sx / (self.width - 1) - 1.0
@@ -12167,6 +12168,7 @@ def draw_roof_ledge(ch, co, v, walls, t, now, wet):
     # the roof square somewhere; the coping is at that distance, and below it
     # the wall hides whatever the city put there.
     cap = h + 1.0
+    edge = [None] * v.width              # the parapet's top row, per column
     for sx in range(v.width):
         rdx, rdz = v.ray(sx)
         out = 1e9                        # how far along the ray it leaves the roof
@@ -12178,6 +12180,7 @@ def draw_roof_ledge(ch, co, v, walls, t, now, wet):
         if out <= 0.05 or out > 50.0:
             continue
         top = int(round(v.horizon - (cap - v.eye) * v.fy / out))
+        edge[sx] = top
         for y in range(max(0, top), v.height):
             if y == top:
                 ch[y][sx], co[y][sx] = "=", ROOF
@@ -12213,6 +12216,7 @@ def draw_roof_ledge(ch, co, v, walls, t, now, wet):
             for k in (-0.4, 0.4):
                 ax, az = -FACES[t["door"]][1], FACES[t["door"]][0]
                 put_point(ch, co, v, walls, ex + ax * k, y, ez + az * k, "|", BARK)
+        v.roof_edge = edge
         return
     for y in range(6):
         put_point(ch, co, v, walls, mx, h + 0.5 + y * 0.9, mz, "|", CONCRETE)
@@ -12426,6 +12430,190 @@ def bar_lines(say, room):
         else:
             lines[-1] = (lines[-1] + " " + word).strip()
     return lines
+
+
+# Some of the low roofs have somebody's something on them. Most do not.
+LOW_ROOF_ODDS = 3       # one in this many has one of the four
+LOW_ROOFS = ("loft", "washing", "sign", "garden")
+ROOF_CAT_ODDS = 8       # and one in this many, of any kind, has the cat
+BACK_SIGN_WORDS = ("HOTEL", "BAR", "OPEN", "DANCE", "ROOMS", "LATE")
+LOFT_ART = ["  ___________  ",
+            " /___________\\ ",
+            " | v | v | v | ",
+            " |___|___|___| ",
+            " | v | v | v | ",
+            " |___|___|___| ",
+            " |           | "]
+WASH_SHIRT = ["_/-\\_", "|   |", "|   |", "|___|"]
+WASH_SHEET = ["======", "|    |", "|    |", "|    |", "|____|"]
+WASH_SOCKS = ["| |", "|_|"]
+POTS_ART = ["  Y  *Y   Y* ",
+            " \\|/ \\|/ \\|/",
+            " (_) (_) (_) "]
+TOMATO_ART = ["\\o|o/", " o|o ", "  |  ", " (_) "]
+CHAIRS_ART = ["|\\     |\\  ", "| \\    | \\ ", "|__\\_  |__\\_", "/   \\  /   \\"]
+RADIO_ART = [" \\   ", "__\\__", "|o==o|", "|____|"]
+CAT_ART = [["/\\_/\\", "(o.o)", " )_( "],
+           ["/\\_/\\", "(-.-)", " )_( "],
+           [" /\\_/\\__", "( o.o   )~", " |_|  |_| "]]
+
+
+def low_roof(t):
+    """Which of LOW_ROOFS this roof has, or None, which is most of them."""
+    m = _mix(t["i"], t["j"], 5301)
+    if m % LOW_ROOF_ODDS:
+        return None
+    return LOW_ROOFS[(m >> 8) % len(LOW_ROOFS)]
+
+
+def low_roof_yaw(t):
+    """The way it stands from where you are, the way you come up facing."""
+    return _mix(t["i"], t["j"], 5303) % 6283 / 1000.0
+
+
+def draw_backward_sign(ch, co, cx, y0, word, attr, sx, sy, dark):
+    """A word in block letters as seen from behind: last letter first, each
+    drawn mirrored. One letter is dead, `dark`."""
+    h, w = len(ch), len(ch[0])
+    x = cx - blocks_width(word, sx) // 2
+    for n, c in enumerate(reversed(word)):
+        for r, line in enumerate(BIG_FONT.get(c, BIG_FONT["?"])):
+            for dx, px in enumerate(line[::-1]):
+                if px == " ":
+                    continue
+                for yy in range(sy):
+                    for xx in range(sx):
+                        y_, x_ = y0 + r * sy + yy, x + dx * sx + xx
+                        if 0 <= y_ < h and 0 <= x_ < w:
+                            ch[y_][x_] = "#"
+                            co[y_][x_] = CONCRETE if n == dark else attr
+        x += 4 * sx
+
+
+def draw_low_roof(ch, co, v, t, now, wet):
+    """Somebody's something on an alley roof, and the cat. By bearing and in
+    screen space, the bar's way: all of it is within arm's length, so it goes
+    on last, over whatever the city drew."""
+    width, height = v.width, v.height
+    if width < 50 or height < 20:
+        return
+    edge = v.roof_edge
+    k = big_scale(width, height)
+    kind = low_roof(t)
+    b = low_roof_yaw(t)
+    seed = _mix(t["i"], t["j"], 5305)
+    foot = height - 1 - k
+    if kind == "sign":
+        # You are behind it. Steel, and the letters backwards, buzzing.
+        cx = bar_col(v, b)
+        if cx is not None:
+            word = BACK_SIGN_WORDS[seed % len(BACK_SIGN_WORDS)]
+            sx_, sy_ = 3 * k, 2 * k
+            wide = blocks_width(word, sx_)
+            y0 = max(1, v.horizon - 5 * sy_ // 2)
+            x0, x1, y1 = cx - wide // 2 - 2 * k, cx + wide // 2 + 2 * k, y0 + 5 * sy_
+            for y in range(max(0, y0 - k), min(foot, height)):
+                for x in range(x0, x1 + 1, 6 * k):
+                    if 0 <= x < width:
+                        ch[y][x], co[y][x] = "|", CONCRETE
+            for y in range(y0 - k, y1 + 1, 2 * sy_):
+                if 0 <= y < height:
+                    for x in range(max(0, x0), min(width, x1 + 1)):
+                        ch[y][x], co[y][x] = "=", CONCRETE
+            tube = NEON[seed % len(NEON)][0]
+            buzz = _mix(int(now * 9.0), t["i"], 5307) % 23
+            draw_backward_sign(ch, co, cx, y0, word, tube, sx_, sy_,
+                               buzz if buzz < len(word) else -1)
+            # Its light, lying on the roof in front of you.
+            if buzz >= len(word):
+                for y in range(y1 + 1, foot):
+                    for x in range(max(0, x0), min(width, x1 + 1)):
+                        if ch[y][x] == " " and _mix(x, y, 5309) % 13 == 0:
+                            ch[y][x], co[y][x] = ".", tube
+    elif kind == "loft":
+        cx = bar_col(v, b)
+        if cx is not None:
+            x0, y0 = _bar_sprite(ch, co, LOFT_ART, lambda c, n: (
+                MOON_DIM if c == "v" else BARK), cx, foot, k)
+            # They shuffle along the perch on top, on their own counts.
+            for n in range(4):
+                x = x0 + (3 + n * 3 + _mix(n, int(now / (2.0 + n)), 5311) % 2) * k
+                if 0 <= y0 - 1 < height and 0 <= x < width:
+                    ch[y0 - 1][x], co[y0 - 1][x] = "v", MOON_DIM
+        # And now and then all of them go, round over the street and back.
+        lap = (now + seed % 37) % 37.0
+        if lap < 14.0:
+            for n in range(12):
+                a = lap / 14.0 * math.tau + n * 0.07
+                sx = bar_col(v, b + 0.75 * math.sin(a) + 0.03 * ((n * 5) % 7))
+                y = int(v.horizon * (0.42 - 0.26 * math.cos(a))) + (n * 3) % 5
+                if sx is not None and 0 <= sx < width and 0 <= y < height:
+                    ch[y][sx] = "v" if int(now * 8.0 + n) % 2 else "^"
+                    co[y][sx] = MOON_DIM
+    elif kind == "washing":
+        line = int(height * 0.30)
+        sway = 0.5 + 2.5 * wet
+        for post in (-0.6, 0.6):
+            sx = bar_col(v, b + post)
+            if sx is not None and 0 <= sx < width:
+                for y in range(line - k, foot):
+                    ch[y][sx], co[y][sx] = "|", BARK
+        for n in range(-29, 30):
+            sx = bar_col(v, b + n * 0.02)
+            if sx is not None and 0 <= sx < width:
+                sag = int((1.0 - (n / 30.0) ** 2) * 2 * k)
+                ch[line + sag][sx], co[line + sag][sx] = "-", CONCRETE
+        for n, (off, art) in enumerate(((-0.42, WASH_SHIRT), (-0.17, WASH_SHEET),
+                                        (0.12, WASH_SOCKS), (0.3, WASH_SHIRT),
+                                        (0.47, WASH_SOCKS))):
+            sx = bar_col(v, b + off)
+            if sx is None:
+                continue
+            sx += int(math.sin(now * 1.3 + n * 1.7) * sway * k)
+            sag = int((1.0 - (off / 0.6) ** 2) * 2 * k)
+            attr = (ROOF, FOG_DIM, CONCRETE, FOG, ROOF)[n]
+            _bar_sprite(ch, co, art, lambda c, m: attr, sx,
+                        line + sag + len(art) * k, k)
+    elif kind == "garden":
+        for n in range(-24, 25):
+            sx = bar_col(v, b + n * 0.03)
+            if sx is not None and 0 <= sx < width:
+                y = 2 * k + int((1.0 - (n / 25.0) ** 2) * 3 * k)
+                if n % 3 == 0:
+                    ch[y][sx], co[y][sx] = "o", BULB
+        inks = {"Y": ROU_GREEN, "*": ROU_RED, "o": ROU_RED, "|": GRASS, "\\": GRASS,
+                "/": GRASS, "(": BARK, ")": BARK, "_": BARK}
+        for off, art in ((-0.65, POTS_ART), (-0.3, TOMATO_ART), (0.55, RADIO_ART),
+                         (0.1, CHAIRS_ART)):
+            sx = bar_col(v, b + off)
+            if sx is None:
+                continue
+            if art is POTS_ART or art is TOMATO_ART:
+                fn = lambda c, m: inks.get(c, HUD)
+            else:
+                fn = lambda c, m: BARK if art is CHAIRS_ART else GOLD_DIM
+            _bar_sprite(ch, co, art, fn, sx, foot, k)
+            if art is RADIO_ART:
+                beat = int(now * 1.5)
+                for n in range(3):
+                    y = foot - (5 + n * 2 + beat % 2) * k
+                    x = sx + (n * 3 - 3 + (beat + n) % 3) * k
+                    if 0 <= y < height and 0 <= x < width:
+                        ch[y][x], co[y][x] = BAR_NOTES[(beat + n) % 4], GOLD_DIM
+    # The cat goes on the parapet, on whichever roof it likes.
+    if _mix(t["i"], t["j"], 5313) % ROOF_CAT_ODDS == 0:
+        slot = int(now / 40.0)
+        was = _mix(slot, t["i"], 5315) % 6283 / 1000.0
+        now_at = _mix(slot + 1, t["i"], 5315) % 6283 / 1000.0
+        t_ = now / 40.0 - slot
+        walking = t_ > 0.9
+        turn = (now_at - was + math.pi) % math.tau - math.pi
+        at = was + turn * max(0.0, (t_ - 0.9) * 10.0)
+        sx = bar_col(v, at)
+        if sx is not None and 0 <= sx < width and edge and edge[sx] is not None:
+            art = CAT_ART[2 if walking else int(now / 3.0) % 7 == 0]
+            _bar_sprite(ch, co, art, lambda c, m: GOLD if c in "o-" else FOG_DIM,
+                        sx, edge[sx] - 1, k)
 
 
 def bar_order(state, n, wallet, now):
@@ -17269,6 +17457,7 @@ CHEAT_PLACES = [
     ("y", "lit alley", "yokocho"),
     ("=", "under the el", "el"),
     ("|", "fire escape", "escape"),
+    ("2", "a low roof", "lowroof"),
     ("_", "car park", "carpark"),
     ("<", "police car", "police"),
     (")", "highway", "highway"),
@@ -18038,14 +18227,20 @@ def _car_park_spot(x, z):
     return None
 
 
-def _escape_spot(x, z):
+_low_roof_next = [0]    # which of LOW_ROOFS the menu's key goes to next
+
+
+def _escape_spot(x, z, want=None):
     """In the alley at the foot of a fire escape that goes all the way up,
-    a couple of steps back and facing it: walk forward and you are climbing."""
+    a couple of steps back and facing it: walk forward and you are climbing.
+    With `want`, one whose roof has that on it."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
     for i, j in _rings(ci, cj, CHEAT_RINGS):
         for f in range(4):
             if _mix(i, j * 4 + f, 1931) % CLIMB_ODDS or not climbable(i, j, f):
+                continue
+            if want is not None and low_roof({"i": i, "j": j}) != want:
                 continue
             px, _, pz = face_point(i, j, f, CELL * 0.5, 2.4, 0.0)
             if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
@@ -18201,6 +18396,9 @@ def find_place(x, z, kind):
         return _tower_spot(x, z, True)
     if kind == "escape":
         return _escape_spot(x, z)
+    if kind == "lowroof":
+        _low_roof_next[0] += 1
+        return _escape_spot(x, z, LOW_ROOFS[_low_roof_next[0] % len(LOW_ROOFS)])
     if kind == "carpark":
         return _car_park_spot(x, z)
     if kind == "cinema":
@@ -18308,7 +18506,8 @@ def find_place(x, z, kind):
 
 
 # The fifth column.
-CHEAT_MORE = ["university", "library", "metro", "flight", "center", "bar"]
+CHEAT_MORE = ["university", "library", "metro", "flight", "center", "bar",
+              "lowroof"]
 _panel_page = [0]       # which page an 80-column panel is showing
 
 
@@ -21162,6 +21361,8 @@ def main(stdscr):
                         roof_x, roof_z, yaw = hx_, hz_ - 2.4, math.pi
                     elif on_roof.get("kind") == "bar":
                         yaw = on_roof["bar_yaw"]    # out of the lift, facing the bar
+                    elif on_roof.get("kind") == "escape" and low_roof(on_roof):
+                        yaw = low_roof_yaw(on_roof)  # up the ladder, and there it is
                 elif lift["t"].get("kind") == "lighthouse":
                     cam_x, cam_z, yaw = lift["t"]["exit"]   # out of the door
                     on_roof = None
@@ -21288,6 +21489,8 @@ def main(stdscr):
             v = roof_view(on_roof, yaw, width, height)
             v.roof = on_roof
             ch, co, wet = render_street(v, now)
+            if on_roof.get("kind") == "escape":
+                draw_low_roof(ch, co, v, on_roof, now, wet)
             hud = (ESCAPE_ROOF_HUD if on_roof.get("kind") == "escape"
                    else ROOF_HUD) % (int(on_roof["height"] / FLOOR_H),
                                      sky_word(now, wet))
