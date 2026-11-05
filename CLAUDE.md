@@ -2424,6 +2424,17 @@ to `walls[4]`, so the near walls stand in front and rain and the sky respect the
 300x90: roof 22, plane 30 (30% of the plane's frames over 33 ms; 4% without). Reach hardly matters
 to the cost. `far_lights()` fills the last rows at the horizon.
 
+**The cars' lights, a long way off** (`draw_far_traffic()`): up high, one light a car, white
+coming and red going. The highway past `ROOF_REACH`, in the same slots as `hwy_cars()` so the
+stream runs on unbroken; the wide streets out to `FAR_CAR_REACH`, sparse and only on `road_at()`
+cells. The owner loved these and asked for more; they did not like the far street lights, so
+this has to stay moving traffic and not a carpet. Past `FAR_CAR_CLEAR` only real buildings hide
+a light (one loop over `walls[4]`, stopping at `WALL_REACH_HIGH`): a far block's shape is one
+solid mass and a real block is not, and with the shapes hiding them hardly any far car showed
+(13 more lights on screen, against a couple of hundred now). A highway crossing the view far off packed its cars into one solid ruled line
+of lights, so the far ones are thinned by distance, by each car's own hash (`FAR_CAR_THIN`).
+About 2 ms at 300x90.
+
 **Do not draw the ground at half resolution to buy more.** It was tried: every other row and
 column worked out and the rest copied from a neighbour. It was faster (roof 28, plane 32), and
 the owner tried it and said no - the flight looked blurry; and copying into cells nothing had

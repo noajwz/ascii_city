@@ -10835,6 +10835,132 @@ def draw_hwy(ch, co, v, walls, x0, x1, now, wet):
                       FLASH if coming else ROU_RED)
 
 
+FAR_CAR_SLOT = 60.0    # up high, between slots on a wide street's far traffic
+FAR_CAR_ODDS = {"some": 3, "busy": 2}      # one slot in this many has a car
+FAR_CAR_REACH = 1200.0  # and how far
+FAR_CAR_THIN = 200.0   # the highway's far cars: one in (distance / this) is drawn
+FAR_CAR_CLEAR = 600.0  # past this only real buildings hide a car's lights: a far
+                       # block's shape is one solid mass, and a real block is not
+
+
+def view_span(edges, axis, c):
+    """Where the line x = c (axis 0) or z = c (axis 1) crosses the triangle
+    of the view, as (lo, hi) along it, or None if it misses."""
+    hits = []
+    for a, b in edges:
+        p, q = a[axis] - c, b[axis] - c
+        if p * q <= 0.0 and p != q:
+            t = p / (p - q)
+            hits.append(a[1 - axis] + (b[1 - axis] - a[1 - axis]) * t)
+    return (min(hits), max(hits)) if hits else None
+
+
+def draw_far_traffic(ch, co, v, walls, now):
+    """From up high, the cars' lights a long way off, as far as the far city
+    goes: white coming and red going, one light a car. The highway past where
+    draw_hwy() stops, in the same slots as its cars, so a stream of them runs
+    on unbroken; and here and there on the wide streets either way, far fewer
+    and only on real road, so it stays traffic and does not turn into a carpet
+    of lights over the dark. Only along the stretch of each road in view."""
+    # Up here v.reach is ROOF_REACH: draw_hwy() has the highway's cars to there.
+    mode = TRAFFIC[_traffic]
+    odds = FAR_CAR_ODDS.get(mode)
+    if odds is None:
+        return
+    if night(now)["alien"]:
+        now = int((now + _night_skip) / NIGHT_LENGTH) * NIGHT_LENGTH - _night_skip
+    reach = FAR_BLOCK_REACH
+    a = (v.x, v.z)
+    b = (v.x + (v.dx - v.plx) * reach, v.z + (v.dz - v.plz) * reach)
+    c = (v.x + (v.dx + v.plx) * reach, v.z + (v.dz + v.plz) * reach)
+    edges = ((a, b), (a, c), (b, c))
+    cx, fx, fy, horizon, eye = v.cx, v.fx, v.fy, v.horizon, v.eye
+    dx, dz = v.dx, v.dz
+    runs = walls[4]
+
+    def light(x, y, z, coming, near):
+        rx, rz = x - v.x, z - v.z
+        f = rx * dx + rz * dz
+        if not near < f < reach:
+            return
+        lat = rx * dz - rz * dx
+        if abs(lat) > f * PLANE:
+            return
+        sx = int(round(cx + lat * fx / f))
+        sy = int(round(horizon - (y - eye) * fy / f))
+        glyph = "*" if coming and f < 900.0 else "."
+        attr = FLASH if coming else ROU_RED
+        if f < FAR_CAR_CLEAR:
+            put_cell(ch, co, v, walls, sx, sy, f, glyph, attr)
+        elif 0 <= sx < v.width and 0 <= sy < v.height:
+            for wd, lo, hi in runs[sx]:
+                if wd > WALL_REACH_HIGH:
+                    break
+                if lo <= sy <= hi:
+                    return
+            ch[sy][sx], co[sy][sx] = glyph, attr
+
+    cw = XP * CELL
+    x_lo, x_hi = min(a[0], b[0], c[0]), max(a[0], b[0], c[0])
+    for k in range(int(x_lo // cw) - 1, int(x_hi // cw) + 2):
+        span = hwy_span(k)
+        if span is None:
+            continue
+        x0, x1 = span[0] * CELL, (span[0] + span[1]) * CELL
+        along = view_span(edges, 0, (x0 + x1) * 0.5)
+        if along is None:
+            continue
+        drawn = ROOF_REACH if abs((x0 + x1) * 0.5 - v.x) < ROOF_REACH else 0.0
+        for n, (lx, d) in enumerate(hwy_lanes(x0, x1)):
+            m = _mix(int(x0), n, 2503)
+            fast = 2.5 if abs(lx - (x0 + x1) * 0.5) < 2 else 0.0
+            pace = (19.0 + (m & 7) * 0.8 + fast) * d
+            shift = now * pace + (m >> 3 & 1023) / 1023.0 * HWY_SLOT
+            for s_ in range(int((along[0] - shift) // HWY_SLOT),
+                            int((along[1] - shift) // HWY_SLOT) + 1):
+                cz = s_ * HWY_SLOT + shift
+                g = _mix(int(x0) * 4 + n, s_, 2505)
+                if abs(cz - v.z) < drawn or g % HWY_ODDS:
+                    continue
+                # Thinner the further off, by each car's own hash, so they keep
+                # about the same room on screen: a highway crossing the view a
+                # long way out was a solid ruled line of lights otherwise.
+                off_ = math.hypot(lx - v.x, cz - v.z)
+                if (g >> 8) % 1000 * off_ > FAR_CAR_THIN * 1000.0:
+                    continue
+                light(lx, HWY_H + 0.9, cz, (v.z - cz) * d > 0.0, 0.0)
+    b = (v.x + (dx - v.plx) * FAR_CAR_REACH, v.z + (dz - v.plz) * FAR_CAR_REACH)
+    c = (v.x + (dx + v.plx) * FAR_CAR_REACH, v.z + (dz + v.plz) * FAR_CAR_REACH)
+    edges = ((a, b), (a, c), (b, c))
+    for axis, period, salt in ((0, XP, 91), (1, ZP, 137)):
+        lo = min(a[axis], b[axis], c[axis])
+        hi = max(a[axis], b[axis], c[axis])
+        size = period * CELL
+        for k in range(int(lo // size) - 1, int(hi // size) + 2):
+            span = road_span(k * period + 1, period, salt)
+            if span is None or span[1] < 3 or (axis == 0 and hwy_span(k) is not None):
+                continue
+            mid = (span[0] + span[1] * 0.5) * CELL
+            along = view_span(edges, axis, mid)
+            if along is None:
+                continue
+            for n, (off, d) in enumerate(((2.0, 1), (-2.0, -1))):
+                m = _mix(k, n + axis * 2, 4801)
+                pace = (9.0 + (m & 7) * 0.6) * d
+                shift = now * pace + (m >> 3 & 1023) / 1023.0 * FAR_CAR_SLOT
+                for s_ in range(int((along[0] - shift) // FAR_CAR_SLOT),
+                                int((along[1] - shift) // FAR_CAR_SLOT) + 1):
+                    if _mix(k * 4 + n + axis * 2, s_, 4803) % odds:
+                        continue
+                    pos = s_ * FAR_CAR_SLOT + shift
+                    x, z = (mid + off, pos) if axis == 0 else (pos, mid + off)
+                    if not road_at(int(x / CELL + BIG) - BIG,
+                                   int(z / CELL + BIG) - BIG):
+                        continue
+                    me = v.z if axis == 0 else v.x
+                    light(x, 1.0, z, (me - pos) * d > 0.0, CAR_REACH)
+
+
 def police_light(now, seed):
     """Which colour the lightbar is showing: red, blue, red, blue, fast."""
     return ROU_RED if int(now * 6.0 + (seed & 7)) % 2 else NEON[2][0]
@@ -13218,6 +13344,8 @@ def render_street(v, now):
     walls = draw_walls(ch, co, v, now)
     draw_sky(ch, co, v, walls, wet, now)
     draw_ground(ch, co, v, walls, collect_glow(v, now, wet), wet, now)
+    if v.eye >= 10.0:
+        draw_far_traffic(ch, co, v, walls, now)
     tunnels = v.tunnels
     draw_tunnel_ceiling(ch, co, v, walls, now, tunnels)
     draw_flash(ch, co, v, walls, v.flash)
