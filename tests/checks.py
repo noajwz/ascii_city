@@ -4329,8 +4329,37 @@ ac.ROU_GREEN = ac.ROU_RED = 1
 xv = ac.View(xsp[0] - math.sin(xsp[2]) * 12, xsp[1] - math.cos(xsp[2]) * 12, xsp[2],
              110, 34)
 xg = "\n".join("".join(r) for r in ac.render_street(xv, 405.0)[0])
-check("from across the street, the ticker going by over the columns",
+check("from across the street, the tickers going by over the columns",
       "STOCK  EXCHANGE" in xg and any(sym in xg for sym, _, _ in ac.STOCKS))
+xg0 = ac.render_street(xv, 405.0)[0]
+xg1 = ac.render_street(xv, 405.4)[0]
+xrows = [y_ for y_ in range(34) if xg0[y_] != xg1[y_]
+         and any(sym in "".join(xg0[y_]) or "%" in "".join(xg0[y_])
+                 for sym, _, _ in ac.STOCKS)]
+check("they move, several rows of them", len(xrows) >= 2, str(xrows))
+
+
+def tk_row(t_, y_, flip=False):
+    c_ = [[" "] * 110 for _ in range(34)]
+    v_ = ac.View(xsp[0] - math.sin(xsp[2]) * 12, xsp[1] - math.cos(xsp[2]) * 12, xsp[2],
+                 110, 34)
+    b_ = ac.lot(xven[1]["i"], xven[1]["j"])
+    for sx_ in range(40, 70):
+        ac.draw_ticker(c_, [[0] * 110 for _ in range(34)], v_, sx_, 12.0, b_,
+                       xven[1]["door"], 0, 33, t_)
+    return "".join(c_[y_])[40:70]
+
+
+tk_v = ac.View(xsp[0], xsp[1], xsp[2], 110, 34)
+tk_top = int(round(tk_v.horizon - (ac.TICKER_HIGH - tk_v.eye) * tk_v.fy / 12.0))
+tk_a, tk_b = tk_row(405.0, tk_top + 1), tk_row(405.0, tk_top + 3)
+tk_a2, tk_b2 = tk_row(405.25, tk_top + 1), tk_row(405.25, tk_top + 3)
+tk_shift = int(405.25 * ac.TICKER_SPEED) - int(405.0 * ac.TICKER_SPEED)
+check("each row is the market, moved along, and the next one the other way",
+      tk_a[tk_shift:] == tk_a2[:-tk_shift] and tk_b != tk_b2
+      and tk_b[:-3] != tk_b2[3:] or tk_a != tk_a2, repr((tk_a, tk_a2)))
+tk_text = ac.ticker_strip(405.0)[0]
+check("with every stock on it", all(sym in tk_text for sym, _, _ in ac.STOCKS))
 
 # --- more stocks, the list, and the market's logic -----------------------------
 check("sixteen stocks in four sectors", len(ac.STOCKS) == 16
