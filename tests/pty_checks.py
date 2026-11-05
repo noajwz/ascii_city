@@ -292,6 +292,8 @@ def cases(run, report):
         [(b"`", .5), (b"2", 1.5)] + [(b"\x1bOA", .3)] * 6
         + [(b"", 9.0), (b"f", 3.0), (b"r", 2.0), (b"n", 2.0), (b"d", .3),
            (b"a", .3), (b"s", 8.0)], cols=110, rows=34))
+    ok &= report("under the washing lines", *run(
+        [(b"`", .5), (b"3", 1.5)] + [(b"w", .25)] * 10, cols=300, rows=90))
     for rb_size in ((110, 34), (300, 90)):
         ok &= report("a drink at the rooftop bar, %dx%d" % rb_size, *run(
             [(b"`", .5), (b"1", 1.5)] + [(b"\x1bOA", .3)] * 6

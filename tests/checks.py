@@ -5703,6 +5703,72 @@ check("every note fits on two lines at 80 columns", all(
     len(ac.bar_lines("The pigeon is back, with a note: " + n_, 74)) <= 2
     for n_ in ac.PIGEON_NOTES))
 
+# --- washing across the street ----------------------------------------------------
+ws_sp = ac.find_place(x0, z0, "washing")
+check("the menu finds washing, on a street you can stand in", ws_sp is not None
+      and ac.can_stand(ws_sp[0], ws_sp[1]))
+ws_all = [ln_ for a_ in range(-14, 14) for b_ in range(-14, 14)
+          for ln_ in ac.washing_in_block(a_, b_)]
+ws_across = [ln_ for ln_ in ws_all if len(ln_) == 6]
+ws_roofs = [ln_ for ln_ in ws_all if len(ln_) == 7]
+check("some across the streets and some on the roofs", len(ws_across) > 30
+      and len(ws_roofs) > 30, "%d, %d" % (len(ws_across), len(ws_roofs)))
+
+
+def ws_cell(x_, z_):
+    return int(x_ // ac.CELL), int(z_ // ac.CELL)
+
+
+ws_bad = 0
+for ln_ in ws_across:
+    ws_a = ws_cell(ln_[0] - (ln_[2] - ln_[0]) * 0.02, ln_[1] - (ln_[3] - ln_[1]) * 0.02)
+    ws_b = ws_cell(ln_[2] + (ln_[2] - ln_[0]) * 0.02, ln_[3] + (ln_[3] - ln_[1]) * 0.02)
+    if (ac.is_open(*ws_a) or ac.is_open(*ws_b) or ln_[4] >= ac.lot(*ws_a)["height"]
+            or ln_[4] >= ac.lot(*ws_b)["height"]
+            or ac.district(*ws_a)["name"] == "woods"):
+        ws_bad += 1
+check("each from building to building, under both their roofs", ws_bad == 0,
+      str(ws_bad))
+check("and only in the residential parts of town", all(
+    any(ac.district(*ws_cell(ln_[0] + (ln_[2] - ln_[0]) * f_ / 8.0,
+                             ln_[1] + (ln_[3] - ln_[1]) * f_ / 8.0))["name"]
+        == "residential" for f_ in range(9)) for ln_ in ws_across))
+ws_real = (ac.ROOF, ac.FOG, ac.FOG_DIM, ac.GOLD_DIM, ac.CROWN_BLUE, ac.ROU_RED,
+           ac.CONCRETE)
+ac.ROOF = ac.FOG = ac.FOG_DIM = ac.GOLD_DIM = ac.CROWN_BLUE = ac.ROU_RED = 951
+ac.CONCRETE = 952
+
+
+def ws_frame(runs_=None, t_=600.0, wet_=0.0, eye_=ac.EYE_Y, lines_=None):
+    c_ = [[" "] * 110 for _ in range(34)]
+    o_ = [[0] * 110 for _ in range(34)]
+    v_ = ac.View(ws_sp[0], ws_sp[1], ws_sp[2], 110, 34, eye=eye_)
+    w_ = (None, None, None, None, runs_ or [[] for _ in range(110)])
+    if lines_ is None:
+        ac.draw_washing_lines(c_, o_, v_, w_, t_, wet_)
+    else:
+        for ln_ in lines_:
+            ac.draw_washing(c_, o_, v_, w_, ln_, t_, wet_)
+    return c_, o_
+
+
+ws_c, ws_o = ws_frame()
+ws_cloth = sum(1 for r_ in ws_o for a_ in r_ if a_ == 951)
+check("looking down the street you see it, line and cloth",
+      ws_cloth > 10 and any(a_ == 952 for r_ in ws_o for a_ in r_), str(ws_cloth))
+check("a building in front hides it", not any(
+    a_ for r_ in ws_frame(runs_=[[(1.0, 0, 33)] for _ in range(110)])[1] for a_ in r_))
+ws_quiet = ws_frame(t_=601.0)[0]
+ws_windy = ws_frame(t_=601.0, wet_=1.0)[0]
+check("it swings, and more in the rain", ws_quiet != ws_c and ws_windy != ws_quiet)
+(ac.ROOF, ac.FOG, ac.FOG_DIM, ac.GOLD_DIM, ac.CROWN_BLUE, ac.ROU_RED,
+ ac.CONCRETE) = ws_real
+for ln_ in ws_roofs[:6]:
+    ws_v = ac.View((ln_[0] + ln_[2]) * 0.5 - 25.0, (ln_[1] + ln_[3]) * 0.5 - 25.0, 0.8,
+                   300, 90, eye=ln_[4] + 15.0, reach=ac.ROOF_REACH)
+    ac.render_street(ws_v, 600.0)
+check("the roofs' draw from up high", True)
+
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
 ac.FLASH, ac.ROU_RED = 901, 902

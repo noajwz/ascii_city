@@ -68,6 +68,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   up and everyone spills out into the street.
 - a rooftop bar on some of those towers: the real skyline behind it, a drink off the wallet, a trio
   and a bartender with opinions.
+- up the fire escapes, some roofs with somebody's something on them: a pigeon loft to feed and send
+  notes from, a garden, a line of washing, and across the residential streets, more washing.
 - **A stock exchange** in the financial district, its ticker running across the front in green
   and red, and inside a trading floor with sixteen made-up stocks - charts or a list - to buy and sell
   as they move every thirty seconds, with bull and bear markets, sectors and hot streaks.
