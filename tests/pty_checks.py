@@ -285,6 +285,12 @@ def cases(run, report):
             and "hope to see you" in pcb_txt)
     print("%-34s %s" % ("  and big, then small, then big", "ok" if seen else "FAIL"))
     ok &= seen
+    for rb_size in ((110, 34), (300, 90)):
+        ok &= report("a drink at the rooftop bar, %dx%d" % rb_size, *run(
+            [(b"`", .5), (b"1", 1.5)] + [(b"\x1bOA", .3)] * 6
+            + [(b"", 8.0), (b"1", 3.2), (b"4", 3.2), (b"z", .5), (b"z", .5),
+               (b"d", .3), (b"d", .3), (b"a", .3), (b"s", 8.0)],
+            cols=rb_size[0], rows=rb_size[1]))
     ok &= report("a far storm out of the plane's window", *run(
         [(b"`", .5), (b".", 1.5)] + [(b"\x1bOA", .3)] * 6
         + [(b"\r", 12.0), (b"`", .4), (b"\\", .4), (b"`", .4), (b"", 4.0)],

@@ -440,7 +440,7 @@ LOTS = [1, 10, 100, 0] # how many a trade is: 0 is as many as you can
 STARTING_MONEY = 1000.0  # dollars, to start the night with
 # What things cost, out of the one wallet.
 FEES = {"cinema": 12, "club": 20, "ramen": 14, "diner": 4}
-LIFT_FEES = {None: 15, "party": 30}   # the sky decks, and the roof party
+LIFT_FEES = {None: 15, "party": 30, "bar": 10}   # sky decks, the roof party, the bars
 SHOW_FEE = 50          # a show fired from the lighthouse
 CLAW_COST = 2
 STRIKE_COST = 1
@@ -3197,6 +3197,11 @@ def lot(i, j):
                 b["height"] = TOWER_TOP + _mix(i, j, 1913) % 9
                 b["tower"] = {"door": face, "u": CELL * 0.5, "i": i, "j": j,
                               "height": b["height"]}
+                if _mix(i, j, 1915) % BAR_ODDS == 0:
+                    # A bar on top, instead of a deck. Same lift, same view.
+                    b["tower"].update(
+                        kind="bar", name=BAR_NAMES[_mix(i, j, 1917) % len(BAR_NAMES)],
+                        bar_yaw=_mix(i, j, 1919) % 6283 / 1000.0)
         if (b["club"] is None and b["casino"] is None and b["tower"] is None
                 and b["cinema"] is None and b["diner"] is None
                 and b["arcade"] is None and b["exchange"] is None and not d["park"]
@@ -11531,6 +11536,17 @@ def draw_tower_beacon(ch, co, v, walls, t, now, wet):
     """A red light on the roof, blinking, and a mast under it - the thing you
     find a sky deck by from across town."""
     x, z = (t["i"] + 0.5) * CELL, (t["j"] + 0.5) * CELL
+    if t.get("kind") == "bar":
+        # No mast: a string of warm bulbs round the roof, and that is how you
+        # find one from another roof, or from the plane.
+        h = t["height"] + 1.4
+        x0, z0 = t["i"] * CELL, t["j"] * CELL
+        for k in range(10):
+            a = k * 0.5
+            for px, pz in ((x0 + a, z0), (x0 + a, z0 + CELL), (x0, z0 + a),
+                           (x0 + CELL, z0 + a)):
+                put_point(ch, co, v, walls, px, h, pz, "o", BULB if k % 3 else GOLD)
+        return
     for k in range(5):
         put_point(ch, co, v, walls, x, t["height"] + k * 0.8, z, "|", CONCRETE)
     on = int(now * 1.3 + t["i"]) % 2 == 0
@@ -11799,6 +11815,21 @@ def draw_lobby(ch, co, v, walls, t, now):
         for row, (word, attr) in enumerate(((t["landmark"]["name"], GOLD),
                                             ("ROOF PARTY TONIGHT",
                                              party_light(now) or NEON[1][1]))):
+            for k, c in enumerate(word):
+                put_cell(ch, co, v, walls, sx - len(word) // 2 + k, sy - 1 + row,
+                         dist, c, attr)
+        door = face_point(i, j, f, CELL * 0.5, 0.2, 0.0)
+        blit_sprite(ch, co, v, walls, ["[|]", "[|]", "[|]"], door[0], door[2],
+                    0.0, 2.4, 1.4, BULB)
+        return
+    if t.get("kind") == "bar":
+        # The door: a neon glass, and what is up there.
+        for row, line in enumerate(BAR_GLASS):
+            for k, c in enumerate(line):
+                if c != " ":
+                    put_cell(ch, co, v, walls, sx - 2 + k, sy - 6 + row, dist, c,
+                             GOLD if c == "o" else CROWN_BLUE)
+        for row, (word, attr) in enumerate((("ROOFTOP BAR", GOLD), (t["name"], BULB))):
             for k, c in enumerate(word):
                 put_cell(ch, co, v, walls, sx - len(word) // 2 + k, sy - 1 + row,
                          dist, c, attr)
@@ -12124,8 +12155,8 @@ def draw_roof_ledge(ch, co, v, walls, t, now, wet):
     """Your own roof: a parapet round the edge at waist height, a water tower
     on one corner and the mast with its red light on another. Drawn in world
     space, so it turns with you and frames whichever way you look."""
-    if t.get("kind") in ("lighthouse", "party"):
-        return                          # the gallery's rail, or the party's parapet
+    if t.get("kind") in ("lighthouse", "party", "bar"):
+        return                          # they have rails or parapets of their own
     h = t["height"]
     i, j = t["i"], t["j"]
     x0, z0 = i * CELL, j * CELL
@@ -12188,6 +12219,229 @@ def draw_roof_ledge(ch, co, v, walls, t, now, wet):
     on = int(now * 1.3 + i) % 2 == 0
     put_lit(ch, co, v, walls, mx, h + 5.8, mz, "*" if on else ".",
             ROU_RED if on else CONCRETE, max(wet, 0.3), now)
+
+
+BAR_ODDS = 3            # of the sky-deck towers, one in this many is a bar
+BAR_MIX = 2.6           # seconds a drink takes
+BAR_LIMIT = 6           # and after this many, water
+BAR_NAMES = ["THE LAST FLOOR", "UPSTAIRS", "THE TOP SHELF", "ALTITUDE",
+             "NIGHT AIR", "THE HIGH NOTE", "LOOK DOWN", "THE LONG WAY UP"]
+BAR_DRINKS = [("NEON SOUR", 8, "green"),
+              ("THE LAST LIFT", 10, "gold"),
+              ("MIDNIGHT TONIC", 7, "blue"),
+              ("BLACKOUT", 12, "red")]
+BAR_HELLO = ["Evening. Best view in town and I still have to look at you.",
+             "What'll it be? Mind the edge.",
+             "Up all those floors for a drink. Good. Sit."]
+BAR_SERVED = ["There you go. Don't drop it, it's a long way down.",
+              "On the house? No. Nothing up here is on the house.",
+              "Careful. That one has a habit of being strong.",
+              "See that bridge? Someone proposed on it. I heard how it went.",
+              "You look like someone who takes the stairs.",
+              "Lovely night for it. It is always night, but still."]
+BAR_WATER = "That's your lot. Have some water, on me. Look at the lights."
+BAR_GLASS = ["\\___/", " \\o/ ", "  |  ", "  |  ", " _|_ "]
+BAR_ART = [
+    " ____________________________________________________ ",
+    "|  !i!i! !!i i!! !i!i  [ooo]  i!i !!i i!i! !i! !!i!  |",
+    "|====================================================|",
+    "|  i!! !i! i!i!  !!i!  [ooo]  !i!i !!i !i! i!i!! i!  |",
+    "|====================================================|",
+    "|                                                    |",
+    "|                                                    |",
+    "|                                                    |",
+    "|                                                    |",
+    "|                                                    |",
+    "|____________________________________________________|",
+    "======================================================",
+    " |                                                  | ",
+    " |                                                  | ",
+    " |                                                  | ",
+    " |                                                  | ",
+    " |__________________________________________________| ",
+]
+BAR_KEEP = [[" _ ", "(o)", "/|\\", " | "],     # the bartender, and shaking it
+            [" _ [", "(o)/", "/| ", " | "],
+            ["]_ ", "\\(o)", " |\\", " | "]]
+BAR_BACK = [" o ", "/|\\", " | ", " T "]       # someone on a stool, back to you
+BAR_DRINK = ["\\_/", " | ", "_|_"]
+BAR_TABLE = ["   o       o   ", "  /|\\  i  /|\\  ", "  /|_______|\\  ",
+             "  | |  |  | |  "]
+BAR_LEAN = ["  o  o     o ", " /|\\/|\\   /|\\", "==============", " |  |      | "]
+BAR_TRIO = [" o     o    _o", "/|\\_  /|\\  ( |", " |  ) ||    |8)", "/ \\  / \\   /_|"]
+BAR_HEATER = [" ___ ", "(@@@)", "  |  ", "  |  ", " _|_ "]
+BAR_NOTES = "dbqp"
+BAR_SPOTS = ((1.05, BAR_TABLE), (-1.05, BAR_TABLE), (1.75, BAR_HEATER),
+             (-1.75, BAR_HEATER), (2.4, BAR_TRIO), (-2.4, BAR_LEAN))
+
+
+def bar_col(v, bearing):
+    """A column for a bearing, off the screen if need be: things on the terrace
+    slide on and off the side as you turn. None behind you."""
+    d = (bearing - v.yaw + math.pi) % math.tau - math.pi
+    if abs(d) > 1.25:
+        return None
+    return int(round((math.tan(d) / PLANE + 1.0) * 0.5 * (v.width - 1)))
+
+
+def bar_facing(v_yaw, t):
+    """Are you looking at the bar, near enough to order?"""
+    return abs((t["bar_yaw"] - v_yaw + math.pi) % math.tau - math.pi) < 0.7
+
+
+def _bar_sprite(ch, co, rows, inks, cx, y_bot, k):
+    """Fixed art, k times over, standing on row y_bot and centred on column cx,
+    solid: a blank inside a row hides the city behind it. Ink by glyph."""
+    h, w = len(ch), len(ch[0])
+    y0 = y_bot - len(rows) * k + 1
+    x0 = cx - len(rows[0]) * k // 2
+    for r, line in enumerate(rows):
+        body = line.strip()
+        if not body:
+            continue
+        lead = len(line) - len(line.lstrip())
+        for n, c in enumerate(body):
+            attr = inks(c, n + lead)
+            for dy in range(k):
+                for dx in range(k):
+                    yy, xx = y0 + r * k + dy, x0 + (n + lead) * k + dx
+                    if 0 <= yy < h and 0 <= xx < w:
+                        ch[yy][xx], co[yy][xx] = c, attr
+    return x0, y0
+
+
+def draw_rooftop_bar(ch, co, v, t, now, state):
+    """The terrace, over the real city: a rail, a deck, a string of bulbs, and
+    round you by bearing, so they hold still as you turn, the bar, the tables,
+    the heaters and a trio. Screen space: all of it is within arm's length,
+    where points come out as stripes. Away from the bar is the view."""
+    width, height = v.width, v.height
+    if width < 50 or height < 20:
+        return
+    k = big_scale(width, height)
+    floor = int(height * 0.74)
+    rail = floor - 2 * k
+    # The rail, with the city showing through under it, and the deck.
+    for b in range(-30, 31):
+        sx = bar_col(v, v.yaw + b * 0.08 - v.yaw % 0.08)
+        if sx is not None and 0 <= sx < width:
+            for y in range(rail, floor):
+                ch[y][sx], co[y][sx] = "|", CONCRETE
+    for x in range(width):
+        ch[rail][x], co[rail][x] = "=", ROOF
+    for y in range(floor, height):
+        seam = (y - floor) % (2 * k) == 0
+        for x in range(width):
+            ch[y][x], co[y][x] = ("-", CONCRETE) if seam else (" ", 0)
+    # The string of bulbs, sagging between its poles.
+    top = 1 + k
+    sag = 3.0 * k
+    for n in range(-52, 53):
+        bearing = v.yaw + n * 0.03 - (v.yaw % 0.03)
+        sx = bar_col(v, bearing)
+        if sx is None or not 0 <= sx < width:
+            continue
+        u = (bearing % 0.6) / 0.6
+        y = top + int(sag * (1.0 - (2.0 * u - 1.0) ** 2))
+        if int(bearing * 1000.0 / 30.0 + 0.5) % 3 == 0:
+            ch[y][sx], co[y][sx] = "o", BULB
+    # Round the terrace, what you are not looking straight at first.
+    inks = {"o": BULB, "i": GOLD, "@": EMBER_HOT, "=": ROOF, "8": GOLD,
+            ")": GOLD_DIM, "(": GOLD_DIM}
+    spots = sorted(BAR_SPOTS, key=lambda s_: -abs((t["bar_yaw"] + s_[0] - v.yaw
+                                                   + math.pi) % math.tau - math.pi))
+    for off, art in spots:
+        sx = bar_col(v, t["bar_yaw"] + off)
+        if sx is None:
+            continue
+        _bar_sprite(ch, co, art, lambda c, n: inks.get(c, HUD), sx,
+                    height - 3 * k if art is BAR_LEAN else height - 2 * k, k)
+        if art is BAR_TRIO:
+            beat = int(now * 1.8)
+            for m in range(3):
+                y = height - (8 + m * 2 + beat % 3) * k - 1
+                x = sx + (m * 5 - 5) * k + (beat + m) % 3
+                if 0 <= y < height and 0 <= x < width:
+                    ch[y][x], co[y][x] = BAR_NOTES[(beat + m) % 4], GOLD
+    sx = bar_col(v, t["bar_yaw"])
+    if sx is None:
+        return
+    # The bar. Its bottles lit in the neon's colours, a shelf at a time.
+    tints = (ROU_GREEN, GOLD, CROWN_BLUE, ROU_RED, BULB)
+
+    def bar_ink(c, n):
+        if c in "!i":
+            return tints[_mix(n // 2, 0, 5201) % len(tints)]
+        return {"o": BULB, "=": ROOF, "[": GOLD_DIM, "]": GOLD_DIM}.get(c, GOLD_DIM)
+
+    y_bot = height - 2 * k
+    x0, y0 = _bar_sprite(ch, co, BAR_ART, bar_ink, sx, y_bot, k)
+    wide = len(BAR_ART[0]) * k
+    # The bartender on the blank between the shelves and the counter.
+    mixing = (state["t"] is not None and now - state["t"] < BAR_MIX)
+    frame = BAR_KEEP[1 + int(now * 7.0) % 2] if mixing else BAR_KEEP[0]
+    counter = y0 + 11 * k
+    keep_x = x0 + wide // 2
+    _bar_sprite(ch, co, frame, lambda c, n: GOLD if c in "[]" else HUD, keep_x,
+                counter - 1, k)
+    # What you are drinking, on the counter; the two at the bar either side.
+    if state["t"] is not None and not mixing:
+        tint = {"green": ROU_GREEN, "gold": GOLD, "blue": CROWN_BLUE,
+                "red": ROU_RED}.get(state["tint"], HUD)
+        _bar_sprite(ch, co, BAR_DRINK, lambda c, n: tint, keep_x + 8 * k,
+                    counter - 1, k)
+    for dx in (-19, 19):
+        _bar_sprite(ch, co, BAR_BACK, lambda c, n: HUD, keep_x + dx * k, y_bot, k)
+    # The name: block letters where there is room, in neon, stuttering now and then.
+    flick = _mix(int(now * 6.0), t["i"], 5203) % 40 == 0
+    attr = CONCRETE if flick else GOLD
+    name = t["name"]
+    sw = k - 1
+    tw, tall = (blocks_width(name, sw), 5 * sw + 2) if k > 1 else (len(name), 1)
+    nx = x0 + (wide - tw) // 2
+    # On a board of its own, or the city's lights run through the letters.
+    for y in range(max(0, y0 - tall), y0):
+        for x in range(max(0, nx - k), min(width, nx + tw + k)):
+            ch[y][x], co[y][x] = " ", 0
+    if k > 1:
+        _blocks(ch, co, y0 - tall + 1, nx, name, attr, sw, sw)
+    else:
+        _text(ch, co, y0 - 1, nx, name, attr)
+    # The menu on the front of the bar, and what the bartender says: words, small.
+    if 0 <= x0 and x0 + wide < width:
+        for n, (drink, price, _) in enumerate(BAR_DRINKS):
+            line = "%d  %-15s $%d" % (n + 1, drink, price)
+            _text(ch, co, counter + (1 + n) * k, x0 + (wide - len(line)) // 2, line,
+                  HUD)
+        for n, line in enumerate(bar_lines(state["say"], wide - 4)[:2]):
+            _text(ch, co, y0 + (5 + n) * k, x0 + (wide - len(line)) // 2, line, BULB)
+
+
+def bar_lines(say, room):
+    """What the bartender says, broken at the spaces to fit."""
+    lines = [""]
+    for word in say.split():
+        if lines[-1] and len(lines[-1]) + 1 + len(word) > room:
+            lines.append(word)
+        else:
+            lines[-1] = (lines[-1] + " " + word).strip()
+    return lines
+
+
+def bar_order(state, n, wallet, now):
+    """Order drink n, if you can: the note for the HUD, or None."""
+    if state["t"] is not None and now - state["t"] < BAR_MIX:
+        return "still making the last one"
+    if state["n"] >= BAR_LIMIT:
+        state.update(t=now, tint="blue", say=BAR_WATER)
+        return None
+    name, price, tint = BAR_DRINKS[n]
+    if not wallet.take(price):
+        return "a %s is $%d" % (name.lower(), price)
+    state["n"] += 1
+    state.update(t=now, tint=tint,
+                 say=BAR_SERVED[(state["n"] * 5 + n) % len(BAR_SERVED)])
+    return None
 
 
 def roof_view(t, yaw, width, height):
@@ -17006,6 +17260,7 @@ CHEAT_PLACES = [
     ("r", "ramen", "ramen"),
     ("d", "diner", "diner"),
     ("^", "sky deck", "tower"),
+    ("1", "rooftop bar", "bar"),
     ("i", "lighthouse top", "lighthousedoor"),
     ("b", "big bridge", "grand"),
     ("$", "billboard", "billboard"),
@@ -17801,7 +18056,7 @@ def _escape_spot(x, z):
     return None
 
 
-def _tower_spot(x, z):
+def _tower_spot(x, z, bar=False):
     """Outside the lobby of the nearest sky deck, a few steps back, facing
     the door: one step forward and you are in the lift."""
     ci = int(x / CELL + BIG) - BIG
@@ -17810,7 +18065,7 @@ def _tower_spot(x, z):
         if _mix(i, j, 1907) % TOWER_ODDS or is_open(i, j):
             continue
         t = lot(i, j)["tower"]
-        if t is None:
+        if t is None or (t.get("kind") == "bar") != bar:
             continue
         px, _, pz = face_point(i, j, t["door"], t["u"], CASINO_REACH + 2.4, 0.0)
         if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
@@ -17942,6 +18197,8 @@ def find_place(x, z, kind):
         return _el_spot(x, z)
     if kind == "tower":
         return _tower_spot(x, z)
+    if kind == "bar":
+        return _tower_spot(x, z, True)
     if kind == "escape":
         return _escape_spot(x, z)
     if kind == "carpark":
@@ -18051,7 +18308,7 @@ def find_place(x, z, kind):
 
 
 # The fifth column.
-CHEAT_MORE = ["university", "library", "metro", "flight", "center"]
+CHEAT_MORE = ["university", "library", "metro", "flight", "center", "bar"]
 _panel_page = [0]       # which page an 80-column panel is showing
 
 
@@ -20214,6 +20471,7 @@ PARTY_HUD = (" on the roof of %s, %s  -  ws walk  ad turn  -  into the lift hut 
 GALLERY_HUD = " up the lighthouse, %s  -  ad round  -  s down  -  q quit "
 ESCAPE_ROOF_HUD = (" on a roof in the alleys, %d floors up, %s  -  ad look round  -"
                    "  s climbs down  -  q quit ")
+BAR_HUD = " %s, %s  -  ad look round  -  1-4 order  -  s lift down  -  q quit "
 ROOF_HUD = (" on the roof, %d floors up, %s  -  ad look round  -  s takes the"
             " lift down  -  q quit ")
 
@@ -20288,6 +20546,7 @@ def main(stdscr):
     lift = None                 # riding a sky-deck lift: {"up", "t0", "t"}
     sewer = None                # down a manhole: {"t0", "taken"}
     on_roof = None              # the tower whose roof you are standing on
+    at_bar = None               # up at a rooftop bar: your tab, for this visit
     roof_x = roof_z = 0.0       # where you are on the landmark's roof
     wheel_at = 0.0
     cheats = False              # is the cheat panel up
@@ -20572,7 +20831,8 @@ def main(stdscr):
                     said_[-1] += " " + word_
                 oracle["said"] = said_[-20:]
                 oracle["at"], oracle["sung"] = now, word_
-            elif (wheel is not None or at_arcade) and key in (ord("z"), ord("Z")):
+            elif ((wheel is not None or at_arcade or at_bar is not None)
+                  and key in (ord("z"), ord("Z"))):
                 _big_screens[0] = not _big_screens[0]     # big screens, off and on
                 note, note_at = ("big screens " + ("on" if _big_screens[0]
                                                    else "off")), now
@@ -20698,6 +20958,14 @@ def main(stdscr):
                 sewer = {"t0": now, "taken": 0}  # lift the cover, down the ladder
                 fwd = side = spin = 0.0
                 autopilot = False
+            elif (at_bar is not None and lift is None
+                  and ord("1") <= key < ord("1") + len(BAR_DRINKS)):
+                if bar_facing(yaw, on_roof):
+                    said = bar_order(at_bar, key - ord("1"), wallet, now)
+                    if said:
+                        note, note_at = said, now
+                else:
+                    note, note_at = "the bar is behind you", now
             elif (on_roof is not None and on_roof.get("kind") == "lighthouse"
                   and key in (ord("f"), ord("F"))):
                 # Up on the gallery: light a show, or fire the one going up.
@@ -20892,6 +21160,8 @@ def main(stdscr):
                         # Out of the lift hut, facing the booth.
                         hx_, hz_ = lift_hut(on_roof["landmark"])
                         roof_x, roof_z, yaw = hx_, hz_ - 2.4, math.pi
+                    elif on_roof.get("kind") == "bar":
+                        yaw = on_roof["bar_yaw"]    # out of the lift, facing the bar
                 elif lift["t"].get("kind") == "lighthouse":
                     cam_x, cam_z, yaw = lift["t"]["exit"]   # out of the door
                     on_roof = None
@@ -20967,6 +21237,8 @@ def main(stdscr):
 
         # --- draw ------------------------------------------------------
         height, width = stdscr.getmaxyx()
+        if on_roof is None or on_roof.get("kind") != "bar":
+            at_bar = None               # gone: the next visit is a new tab
         if sewer is not None and street:
             ch, co = render_sewer(width, height, now, sewer["t0"], sewer["taken"])
             hud = SEWER_HUD
@@ -21001,6 +21273,17 @@ def main(stdscr):
             if show is not None:
                 draw_show_bar(ch, co, show, now)
             hud = GALLERY_HUD % sky_word(now, wet) + gallery_hint(now)
+        elif on_roof is not None and on_roof.get("kind") == "bar":
+            if at_bar is None:
+                at_bar = {"n": 0, "t": None, "tint": None,
+                          "say": BAR_HELLO[int(now) % len(BAR_HELLO)]}
+            # After a few, the skyline is not quite as steady as it was.
+            tipsy = max(0, at_bar["n"] - 2) * 0.006 * math.sin(now * 0.7)
+            v = roof_view(on_roof, yaw + tipsy, width, height)
+            v.roof = on_roof
+            ch, co, wet = render_street(v, now)
+            draw_rooftop_bar(ch, co, v, on_roof, now, at_bar)
+            hud = BAR_HUD % (on_roof["name"].lower(), sky_word(now, wet))
         elif on_roof is not None:
             v = roof_view(on_roof, yaw, width, height)
             v.roof = on_roof

@@ -171,7 +171,7 @@ blind = []
 for _, name, kind in ac.CHEAT_PLACES:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
                 "diner", "billboard", "highway", "arcade", "claw", "roofparty",
-                "exchange", "metro"):
+                "exchange", "metro", "bar"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -5526,6 +5526,73 @@ check("buildings stand in front of it", mr_river(runs_=mr_wall) == 0)
 check("and no moon, no line", mr_river(phase_=0.0) == 0)
 check("nor through the cloud", mr_river(clear_=0.0) == 0)
 ac.MOON, ac.MOON_DIM, ac.FOG_DIM = mr_real
+
+# --- the rooftop bar -----------------------------------------------------------
+rb_sp = ac.find_place(x0, z0, "bar")
+rb_i, rb_j = int(rb_sp[0] // ac.CELL), int(rb_sp[1] // ac.CELL)
+rb_t = next(ac.lot(a_, b_)["tower"] for a_ in range(rb_i - 4, rb_i + 5)
+            for b_ in range(rb_j - 4, rb_j + 5)
+            if (ac.lot(a_, b_)["tower"] or {}).get("kind") == "bar")
+check("a rooftop bar has a door you can reach, a name and a place to look",
+      ac.can_stand(rb_sp[0], rb_sp[1]) and rb_t["name"] in ac.BAR_NAMES
+      and 0.0 <= rb_t["bar_yaw"] < math.tau)
+rb_deck = ac.find_place(x0, z0, "tower")
+rb_di, rb_dj = int(rb_deck[0] // ac.CELL), int(rb_deck[1] // ac.CELL)
+check("and the sky deck's key still finds a deck, not a bar", not any(
+    (ac.lot(a_, b_)["tower"] or {}).get("kind") == "bar"
+    and ac._tower_spot(x0, z0)[:2] == ac.face_point(
+        a_, b_, ac.lot(a_, b_)["tower"]["door"], ac.CELL * 0.5,
+        ac.CASINO_REACH + 2.4, 0.0)[::2]
+    for a_ in range(rb_di - 4, rb_di + 5) for b_ in range(rb_dj - 4, rb_dj + 5)))
+
+
+def rb_tab():
+    return {"n": 0, "t": None, "tint": None, "say": ac.BAR_HELLO[0]}
+
+
+def rb_frame(w_, h_, off_=0.0, tab_=None):
+    v_ = ac.roof_view(rb_t, rb_t["bar_yaw"] + off_, w_, h_)
+    c_ = [[" "] * w_ for _ in range(h_)]
+    o_ = [[0] * w_ for _ in range(h_)]
+    ac.draw_rooftop_bar(c_, o_, v_, rb_t, 600.0, tab_ or rb_tab())
+    return ["".join(r_) for r_ in c_]
+
+
+rb_small = "\n".join(rb_frame(110, 34))
+check("facing it, the bar: the name, the menu, what the bartender says",
+      rb_t["name"] in rb_small and all(d_[0] in rb_small for d_ in ac.BAR_DRINKS)
+      and "Evening." in rb_small)
+rb_view = "\n".join(rb_frame(110, 34, math.pi))
+check("and with your back to it, the view", "NEON SOUR" not in rb_view)
+rb_big = "\n".join(rb_frame(300, 90))
+check("big, the name in block letters and the bar twice the size",
+      rb_t["name"] not in rb_big and "#" in rb_big and "[[oooooo]]" in rb_big
+      and "NEON SOUR" in rb_big)
+for w_, h_ in ((80, 24), (60, 20), (49, 30), (120, 19), (150, 44), (299, 87),
+               (450, 132)):
+    for off_ in (0.0, 1.0, -1.0, 2.4, -2.4, 3.1):
+        rb_frame(w_, h_, off_)
+check("it draws at every size, from every side", True)
+rb_w = ac.Wallet(100)
+rb_s = rb_tab()
+check("a drink comes off the wallet", ac.bar_order(rb_s, 0, rb_w, 600.0) is None
+      and rb_w.money == 100 - ac.BAR_DRINKS[0][1] and rb_s["n"] == 1)
+check("one at a time", ac.bar_order(rb_s, 1, rb_w, 600.5) is not None
+      and rb_s["n"] == 1)
+check("nobody drinks on credit",
+      ac.bar_order(rb_tab(), 3, ac.Wallet(1), 600.0) is not None)
+rb_s["n"] = ac.BAR_LIMIT
+rb_m = rb_w.money
+check("and after enough it is water, free",
+      ac.bar_order(rb_s, 0, rb_w, 610.0) is None and rb_w.money == rb_m
+      and rb_s["say"] == ac.BAR_WATER)
+rb_room = len(ac.BAR_ART[0]) - 4
+check("the bartender's lines fit the bar", all(
+    len(ln_) <= rb_room and len(ac.bar_lines(sa_, rb_room)) <= 2
+    for sa_ in ac.BAR_HELLO + ac.BAR_SERVED + [ac.BAR_WATER]
+    for ln_ in ac.bar_lines(sa_, rb_room)))
+check("you can only order facing it", ac.bar_facing(rb_t["bar_yaw"] + 0.2, rb_t)
+      and not ac.bar_facing(rb_t["bar_yaw"] + 2.0, rb_t))
 
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
