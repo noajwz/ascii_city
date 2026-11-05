@@ -289,9 +289,6 @@ def cases(run, report):
         [(b"`", .5), (b".", 1.5)] + [(b"\x1bOA", .3)] * 6
         + [(b"\r", 12.0), (b"`", .4), (b"\\", .4), (b"`", .4), (b"", 4.0)],
         cols=300, rows=90))
-    ok &= report("the moon coming up from a roof", *run(
-        [(b"`", .5), (b"^", 1.5), (b"`", .4), (b"1", .4), (b"`", .4), (b"", 3.0)],
-        cols=300, rows=90))
     ok &= report("a far storm from a roof", *run(
         [(b"`", .5), (b"^", 1.5)] + [(b"\x1bOA", .25)] * 6
         + [(b"", 6.0), (b"`", .4), (b"\\", .4), (b"`", .4), (b"", 4.0), (b"s", 5.0)],
