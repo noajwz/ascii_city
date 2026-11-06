@@ -1538,8 +1538,73 @@ check("the menu stands you down the street from one", bsp is not None
       and ac.can_stand(bsp[0], bsp[1]))
 bg, _, _ = ac.render_street(ac.View(bsp[0], bsp[1], bsp[2], 110, 30), 300.0)
 btext = "\n".join("".join(r) for r in bg)
-check("and from there you can read it", any(words[0] in btext for words, _ in ac.ADS),
-      "brands: " + ", ".join(w[0] for w, _ in ac.ADS))
+
+
+def bb_lines(ad_):
+    return [ln_.strip() for art_ in ad_[2:5] for ln_ in art_ if len(ln_.strip()) >= 3]
+
+
+check("and from there you can see what it is selling", any(
+    ad_[0] in btext or any(ln_ in btext for ln_ in bb_lines(ad_)) for ad_ in ac.ADS))
+check("three pictures to an ad, biggest first", all(
+    len(ad_[2]) > len(ad_[3]) >= len(ad_[4]) >= 2
+    and max(map(len, ad_[2])) > max(map(len, ad_[3])) > max(map(len, ad_[4]))
+    for ad_ in ac.ADS))
+check("sized for the boards they go on", all(
+    max(map(len, ad_[2])) <= 28 and len(ad_[2]) <= 8 and max(map(len, ad_[3])) <= 14
+    and len(ad_[3]) <= 4 and max(map(len, ad_[4])) <= 6 for ad_ in ac.ADS))
+check("not only soda", "DOG DAYS" in {ad_[0] for ad_ in ac.ADS} and len(ac.ADS) >= 8)
+bb_b = next(b_ for b_ in bills)
+
+
+def bb_shot(ad_, w_, h_, back_=0.0, now_=300.0):
+    """A board with this ad on it, drawn from straight down the street."""
+    i_, j_, f_ = bb_b["i"], bb_b["j"], bb_b["face"]
+    nx_, nz_ = ac.FACES[f_]
+    mx_, _, mz_ = ac.face_point(i_, j_, f_, ac.CELL * 0.5, 0.0, 0.0)
+    cx_, cz_ = mx_ + nx_ * 6.1, mz_ + nz_ * 6.1
+    tx_, tz_ = -nz_, nx_
+    yaw_ = math.atan2(-tx_, -tz_)
+    v_ = ac.View(cx_ + tx_ * back_, cz_ + tz_ * back_, yaw_, w_, h_)
+    c_ = [[" "] * w_ for _ in range(h_)]
+    o_ = [[0] * w_ for _ in range(h_)]
+    w0_ = (None, None, None, None, [[] for _ in range(w_)])
+    ac.draw_billboard(c_, o_, v_, w0_, dict(bb_b, ad=ad_), now_, 0.0)
+    return "\n".join("".join(r_) for r_ in c_)
+
+
+
+
+def bb_rows(got_):
+    """How many rows of the board have something on them, top to bottom."""
+    rows_ = got_.split("\n")
+    tops_ = [n_ for n_, r_ in enumerate(rows_) if r_.strip().startswith(".--")]
+    ends_ = [n_ for n_, r_ in enumerate(rows_) if r_.strip().startswith("'")]
+    if not tops_ or not ends_:
+        return 0
+    inner_ = [r_.strip().strip("|").strip() for r_ in rows_[tops_[0] + 1:ends_[-1]]]
+    full_ = [n_ for n_, r_ in enumerate(inner_) if r_]
+    return full_[-1] - full_[0] + 1 if full_ else 0
+
+
+bb_ok = {"big": 0, "small": 0, "mini": 0}
+for n_, ad_ in enumerate(ac.ADS):
+    for back_, name_, art_ in ((30.0, "big", ad_[2]), (42.0, "big", ad_[2]),
+                               (70.0, "small", ad_[3]), (85.0, "small", ad_[3]),
+                               (110.0, "mini", ad_[4]), (120.0, "mini", ad_[4])):
+        if bb_rows(bb_shot(n_, 300, 90, back_)) == len(art_):
+            bb_ok[name_] += 1
+check("from close to far the picture gets smaller, big, small, tiny",
+      all(v_ == 2 * len(ac.ADS) for v_ in bb_ok.values()), str(bb_ok))
+check("far past that, only its name", ac.ADS[0][0] in bb_shot(0, 300, 90, 170.0))
+bb_near = bb_shot(0, 300, 90, 14.0)
+check("close to, it grows", "((______" in bb_near or "||~~~~" in bb_near
+      or "~~~~~~~~~~~~" in bb_near, bb_near[:0])
+for n_ in range(len(ac.ADS)):
+    for w_, h_ in ((80, 24), (110, 34), (190, 50), (300, 90), (451, 133), (60, 20)):
+        for back_ in (8.0, 20.0, 40.0, 90.0, 200.0, 500.0):
+            bb_shot(n_, w_, h_, back_)
+check("every ad draws at every size, from any way back", True)
 
 # --- the panel ------------------------------------------------------------
 big = ([[" "]*100 for _ in range(30)], [[0]*100 for _ in range(30)])

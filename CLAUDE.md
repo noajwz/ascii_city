@@ -1445,7 +1445,7 @@ eye that is not an eye — and `DINER_POUR` seconds after you sit down a drone c
 pot and says what diners have always said. The seat is remembered the way the ramen bowl's is. `d`
 in the menu.
 
-**Billboards** are soda ads (`ADS`, made-up brands) hung out over the wide streets from low roofs
+**Billboards** are ads (`ADS`, made-up brands, soda and a few others) hung out over the wide streets from low roofs
 (8-12 units: on a tall one it is off the top of the screen from anywhere you can stand) in the busy
 districts, one in `BILL_ODDS`. They stand at right angles to the frontage, out over the road like a
 gantry board, so they face along the street: flat against the frontage they could only be read from
@@ -1455,7 +1455,9 @@ own roof they hid behind the roofline of every building that side. Found per cit
 the board's plane looked right and could not be read — from any way back the brand and the slogan
 rows project onto the same screen rows and overwrite each other. So the corners are projected in the
 world (with the depth per column for occlusion) and the lettering laid out in screen space across
-what they cover, and the board's blank cells are blanked so the city does not show through it. `$`
+what they cover, and the board's blank cells are blanked so the city does not show through it. **What is on them is a picture, not words**: each ad has three (`ADS`: big, small and a tiny
+one for far off), the biggest that fits goes up, and past the big one it is blown up a whole
+number of times. At 300x90 from forty units off a board is about 47 by 12; on a small window, 16 by 5. `$`
 in the menu stands you down the middle of the street from one, forty units off.
 
 ## Getting lost is the feature
