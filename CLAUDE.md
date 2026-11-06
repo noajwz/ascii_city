@@ -1105,6 +1105,33 @@ window seat on the right, once round the town, about 80 s:
   Frame time over a whole flight at 30 fps: a median of 21 ms.
 - `.` in the menu stands you in front of the terminal's doors.
 
+**Flying it yourself** (`Cockpit`, `flight["phase"] == "pilot"`). `c` at the desk, `PILOT_FARE`, or
+`8` in the menu, free, straight onto the runway. It is not on rails: `step()` is thrust against drag on
+the square of the speed, a climb costs speed, a bank turns you (`PILOT_TURN`), and under `PILOT_STALL`
+it sinks and the nose drops. **Curses sees no key go up, so the controls are the kind that stay put**:
+`w`/`s` set where the nose is held, like a trim wheel, `+`/`-` the throttle, and a wing stays down only
+as long as the key keeps repeating (`PILOT_GRACE`) and comes back level by itself. `b` brakes, `x` hands
+it back. Touchdown is graded on sink rate (`PILOT_GRADES`), and pays; a tilted wing, too hard, off a
+runway or into a building is a wreck, then you wake up at the terminal. Any airport will do
+(`nearest_airport()`): you come out of the doors of the one you landed at.
+
+`render_cockpit()` is the real city out of the windscreen. The horizon goes with the nose, which is how
+a raycaster looks up and down, and `roll_picture()` tilts it with the wings by sliding columns up one
+side and down the other, never further than the panel can hide. `draw_runway_lights()` is what makes it
+possible to find your way back: edge lights, approach strobes and the four lights beside the touchdown
+that read white over the slope and red under it, seen from 3500 units. The panel (`draw_cockpit()`) has
+speed, throttle, an artificial horizon, a compass, the way to the airport, and needles for the centre
+line and the slope inside 2500. About 30 ms a frame at 300x90.
+
+**The approach had to be made flyable.** `approach_cap()` claimed to keep the town low but sky decks and
+landmarks ignored it, and it stopped 550 units out, under a slope that only cleared the tallest thing at
+1050: the first robot flight hit a building on final. Now it runs `APPROACH_LONG` cells off each end, no
+tower or landmark stands in it, and no venue where the cap is under 18, so a `PILOT_GLIDE` slope clears
+everything at both ends of every runway, which a check walks. That moved a few tall buildings near
+airports. **`pk_fly()` in `checks.py` is a robot pilot on nothing but the keys**: take-off, circuit,
+landing. If you change the handling and it can no longer land, neither can anyone. It flew 36 airports
+out of 36 when this went in.
+
 ## The university
 
 Another placed zone, in each tile between the factories and the next Strip. Old brick halls

@@ -171,7 +171,7 @@ blind = []
 for _, name, kind in ac.CHEAT_PLACES:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
                 "diner", "billboard", "highway", "arcade", "claw", "roofparty",
-                "exchange", "metro", "bar", "lowroof", "bowling", "lair"):
+                "exchange", "metro", "bar", "lowroof", "bowling", "lair", "pilot"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -2561,8 +2561,9 @@ for want in ("downtown", "financial", "docks", "residential", "old town"):
                     break
             if cover is None:
                 continue
+            # Not the moon's colours: a landmark's pale stone is drawn in them.
             inside += sum(1 for y in range(cover, min(32, vv.horizon))
-                          if colour[y][c] in SKY)
+                          if colour[y][c] in SKY - {805, 806})
 check("no star is drawn inside a building, from the street", inside == 0,
       "%d of %d stars were" % (inside, shown))
 
@@ -6071,6 +6072,211 @@ ac.draw_case(c_, [[0] * 110 for _ in range(34)], cs_d, x0, z0, 0.0, 620.0)
 check("and j hides that", "next:" not in "\n".join("".join(r_) for r_ in c_))
 check("everything anyone says fits", all(
     len(ac.bar_lines(st_[3], 74)) <= 5 for st_ in ac.CASE_TRAIL))
+
+# --- flying it yourself -------------------------------------------------------------
+pk_home = ac.zone_home("airport", int(fsp[0] // ac.CELL), int(fsp[1] // ac.CELL))
+pk_rx, pk_zn, pk_zs = ac.runway(*pk_home)
+
+
+def pk_wrap(a_):
+    return (a_ + math.pi) % math.tau - math.pi
+
+
+def pk_fly(home_, dt_=1.0 / 30.0):
+    """A robot pilot, on nothing but the keys you have: down the runway, a
+    circuit at cruise, onto the slope from the north and down. If it can be flown
+    it can do it; this is what says the thing can be landed at all."""
+    ck_ = ac.Cockpit(home_, 0.0)
+    rx_, zn_, zs_ = ac.runway(*home_)
+    legs_ = [("out", rx_, zs_ - 500.0), ("w", rx_ - 520.0, zs_ - 700.0),
+             ("n", rx_ - 520.0, zn_ + 1400.0), ("base", rx_, zn_ + 1500.0),
+             ("final", rx_, zn_ + 700.0), ("land", rx_, zn_ - 30.0)]
+    leg_, t_ = 0, 0.0
+    while ck_.state != "crashed" and ck_.ended is None and t_ < 400.0:
+        name_, gx_, gz_ = legs_[leg_]
+        if ck_.state == "ground":
+            if ck_.throttle < 1.0:
+                ck_.key("more", t_)
+            if ck_.v > ac.PILOT_ROTATE - 4.0 and ck_.pitch_set < 0.14:
+                ck_.key("up", t_)
+        elif ck_.state == "landed":
+            ck_.key("brake", t_)
+        else:
+            if name_ != "land" and math.hypot(gx_ - ck_.x, gz_ - ck_.z) < 90.0:
+                leg_ += 1
+                name_, gx_, gz_ = legs_[leg_]
+            want_ = math.atan2(gx_ - ck_.x, gz_ - ck_.z)
+            if name_ in ("final", "land"):
+                want_ = math.atan2(rx_ - ck_.x,
+                                   -max(60.0, min(300.0, abs(ck_.z - zn_) / 2)))
+            bank_ = max(-0.5, min(0.5, pk_wrap(want_ - ck_.heading) * 1.4))
+            bank_ = 0.0 if ck_.alt < 12.0 else bank_
+            if bank_ > ck_.bank + 0.08:
+                ck_.key("right", t_)
+            elif bank_ < ck_.bank - 0.08:
+                ck_.key("left", t_)
+            high_ = 135.0
+            if name_ in ("final", "land"):
+                high_ = min(135.0, abs(ck_.z - (zn_ - 30.0)) * ac.PILOT_GLIDE + 2.0)
+            nose_ = max(-0.12, min(0.2, (high_ - ck_.alt) * 0.02))
+            fast_ = 70.0
+            if name_ in ("final", "land"):
+                nose_ = max(-0.14, min(0.08, (high_ - ck_.alt) * 0.03 - 0.08))
+            if name_ == "land":
+                fast_ = 46.0
+                if ck_.alt < 5.0:
+                    nose_, fast_ = -0.03, 38.0
+            if ck_.pitch_set < nose_ - 0.02:
+                ck_.key("up", t_)
+            elif ck_.pitch_set > nose_ + 0.02:
+                ck_.key("down", t_)
+            if ck_.v < fast_ - 3.0:
+                ck_.key("more", t_)
+            elif ck_.v > fast_ + 3.0:
+                ck_.key("less", t_)
+        ck_.step(dt_, t_)
+        t_ += dt_
+    return ck_, t_
+
+
+pk_got = [pk_fly(ac.zone_home("airport", a_ * 480 + 100, b_ * 480 + 100))[0]
+          for a_, b_ in ((0, 0), (1, 0), (-1, 1), (2, -2))]
+check("it can be flown: off the runway, round a circuit and down, on the keys alone",
+      all(c_.state == "landed" and c_.grade in ("BUTTER", "NICE") for c_ in pk_got),
+      str([(c_.state, c_.grade, c_.said[:30]) for c_ in pk_got]))
+check("and landing pays, more for a better one", all(c_.pay >= 100 for c_ in pk_got)
+      and ac.PILOT_GRADES[0][2] > ac.PILOT_GRADES[1][2] > ac.PILOT_GRADES[2][2])
+pk_bad = []
+for a_ in range(-4, 4):
+    for b_ in range(-4, 4):
+        h_ = ac.zone_home("airport", a_ * 480 + 100, b_ * 480 + 100)
+        rx_, zn_, zs_ = ac.runway(*h_)
+        for end_, sign_, td_ in ((zn_, 1, zn_ - 30.0), (zs_, -1, zs_ + 30.0)):
+            for d_ in range(0, 1500, 10):
+                z_ = end_ + sign_ * d_
+                line_ = abs(z_ - td_) * ac.PILOT_GLIDE + 2.0
+                for dx_ in range(-25, 26, 10):
+                    i_, j_ = int((rx_ + dx_) // ac.CELL), int(z_ // ac.CELL)
+                    if not ac.is_open(i_, j_) and ac.lot(i_, j_)["height"] > line_:
+                        pk_bad.append((h_, d_, dx_))
+check("nothing stands in the way of the slope, at either end of 64 runways", not pk_bad,
+      str(pk_bad[:4]))
+
+
+def pk_at(alt_=50.0, v_=60.0, x_=None, z_=None, heading_=math.pi, pitch_=0.0):
+    c_ = ac.Cockpit(pk_home, 0.0)
+    c_.state = "air"
+    c_.x = pk_rx if x_ is None else x_
+    c_.z = (pk_zn + pk_zs) / 2 if z_ is None else z_
+    c_.alt, c_.v, c_.heading = alt_, v_, heading_
+    c_.pitch = c_.pitch_set = pitch_
+    return c_
+
+
+pk_grades = {}
+for sink_ in (2.0, 5.0, 9.0, 16.0):
+    c_ = pk_at(alt_=0.01, v_=45.0, pitch_=-math.asin(sink_ / 45.0))
+    c_.step(1.0 / 30.0, 1.0)
+    pk_grades[sink_] = c_.grade if c_.state == "landed" else c_.state
+check("a landing is as good as it was soft", pk_grades == {
+    2.0: "BUTTER", 5.0: "NICE", 9.0: "HARD", 16.0: "crashed"}, str(pk_grades))
+c_ = pk_at(alt_=0.01, v_=45.0, pitch_=-0.05)
+c_.bank = 0.5
+c_.step(1.0 / 30.0, 1.0)
+check("with the wings level", c_.state == "crashed" and "wing" in c_.said)
+pk_open = next((a_, b_) for a_ in range(pk_home[0] - 200, pk_home[0] - 60)
+               for b_ in range(pk_home[1] - 30, pk_home[1] + 30)
+               if ac.is_open(a_, b_) and not ac.airport_at(a_, b_)
+               and not ac.water_at(a_, b_))
+c_ = pk_at(alt_=0.01, v_=45.0, x_=(pk_open[0] + 0.5) * ac.CELL,
+           z_=(pk_open[1] + 0.5) * ac.CELL, pitch_=-0.05)
+c_.step(1.0 / 30.0, 1.0)
+check("and on a runway: anywhere else is a wreck", c_.state == "crashed"
+      and "came down in" in c_.said, c_.said)
+pk_solid = next((a_, b_) for a_ in range(pk_home[0] - 200, pk_home[0] - 60)
+                for b_ in range(pk_home[1] - 30, pk_home[1] + 30)
+                if not ac.is_open(a_, b_) and ac.lot(a_, b_)["height"] > 15.0)
+c_ = pk_at(alt_=5.0, x_=(pk_solid[0] + 0.5) * ac.CELL, z_=(pk_solid[1] + 0.5) * ac.CELL)
+c_.step(1.0 / 30.0, 1.0)
+check("a building is a wreck", c_.state == "crashed")
+c_ = pk_at(alt_=ac.lot(*pk_solid)["height"] + 5.0, x_=(pk_solid[0] + 0.5) * ac.CELL,
+           z_=(pk_solid[1] + 0.5) * ac.CELL)
+c_.step(1.0 / 30.0, 1.0)
+check("and over it is not", c_.state == "air")
+c_ = pk_at(alt_=400.0, v_=60.0, x_=pk_rx - 4000.0)
+for n_ in range(600):
+    c_.step(1.0 / 30.0, n_ / 30.0)
+check("throttle shut, it slows down until it stalls, nose dropping",
+      c_.v < ac.PILOT_STALL + 18.0 and c_.pitch < 0.0)
+c_ = pk_at(alt_=400.0, v_=ac.PILOT_STALL - 2.0, x_=pk_rx - 4000.0)
+check("and the panel says so", "STALL" in c_.warnings())
+c_ = pk_at(alt_=300.0, v_=70.0, x_=pk_rx - 4000.0, heading_=0.0)
+h0_ = c_.heading
+for n_ in range(45):
+    c_.key("right", n_ / 30.0)
+    c_.step(1.0 / 30.0, n_ / 30.0)
+pk_banked = c_.bank
+check("a right wing down turns you right", pk_banked > 0.3 and c_.heading > h0_)
+for n_ in range(45, 300):
+    c_.step(1.0 / 30.0, n_ / 30.0)
+check("and let go, the wings come level", abs(c_.bank) < 0.05)
+c_ = ac.Cockpit(pk_home, 0.0)
+c_.key("up", 0.0)
+c_.key("up", 0.0)
+for _ in range(20):
+    c_.key("more", 0.0)
+for n_ in range(25):
+    c_.step(1.0 / 30.0, n_ / 30.0)
+check("on the runway it does not leave until it has the speed", c_.state == "ground"
+      and 0.0 < c_.v < ac.PILOT_ROTATE and c_.throttle == 1.0)
+for n_ in range(25, 400):
+    c_.step(1.0 / 30.0, n_ / 30.0)
+check("and then it does", c_.state == "air" and c_.alt > 0.0)
+c_ = pk_at(alt_=0.01, v_=45.0, pitch_=-0.03)
+c_.step(1.0 / 30.0, 1.0)
+for n_ in range(500):
+    c_.key("brake", 1.0 + n_ / 30.0)
+    c_.step(1.0 / 30.0, 1.0 + n_ / 30.0)
+check("landed, the brakes stop it, and that is the end of it", c_.ended is not None
+      and c_.state == "landed" and c_.v < 1.5)
+pk_near = ac.nearest_airport(pk_rx + 40.0, pk_zn)
+check("the nearest airport is the one you are at", pk_near == pk_home)
+pk_c = [["x"] * 40 for _ in range(20)]
+pk_c[10] = ["y"] * 40
+pk_o = [[0] * 40 for _ in range(20)]
+pk_r, _ = ac.roll_picture(pk_c, pk_o, 0.5, 40, 20, 8)
+check("a right bank lifts the horizon on the right, lowers it on the left",
+      pk_r[10][20] == "y" and pk_r[10 - 3][38] == "y" and pk_r[10 + 3][2] == "y")
+check("level, the picture is left alone",
+      ac.roll_picture(pk_c, pk_o, 0.0, 40, 20, 8)[0] is pk_c)
+pk_all = [ac.Cockpit(pk_home, 0.0), pk_at(alt_=120.0, v_=70.0),
+          pk_at(alt_=30.0, v_=25.0), pk_at(alt_=0.01, v_=45.0, pitch_=-0.03)]
+pk_all[1].bank = 0.6
+pk_all[3].step(1.0 / 30.0, 1.0)
+pk_w = pk_at(alt_=5.0, x_=(pk_solid[0] + 0.5) * ac.CELL,
+             z_=(pk_solid[1] + 0.5) * ac.CELL)
+pk_w.step(1.0 / 30.0, 1.0)
+pk_all.append(pk_w)
+for c_ in pk_all:
+    for w_, h_ in ((80, 24), (60, 20), (49, 11), (30, 10), (110, 34), (190, 50),
+                   (300, 90)):
+        ac.render_cockpit(w_, h_, 2.0, c_)
+check("the cockpit draws at every size, in every state", True)
+pk_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, pk_all[1])[0])
+check("with what you need on it", "AIRSPEED" in pk_t and "ALTITUDE" in pk_t
+      and "AIRPORT" in pk_t and "x hand it back" in pk_t)
+pk_big = "\n".join("".join(r_) for r_ in ac.render_cockpit(300, 90, 2.0, pk_all[1])[0])
+check("big, the figures in block letters", "##" in pk_big and "AIRSPEED" in pk_big)
+pk_w_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, pk_w)[0])
+check("and a wreck looks like one", "#" in pk_w_t and pk_w.said[:12] in pk_w_t)
+pk_gate = "\n".join("".join(r_) for r_ in
+                    ac.render_gate(110, 34, 2.0, {"home": pk_home})[0])
+check("the desk offers it", "keys are on the desk" in pk_gate
+      and "window seat" in pk_gate)
+pk_grid = ac.Cockpit(pk_home, 0.0)
+pk_grid.x, pk_grid.z, pk_grid.alt, pk_grid.state = 5.0 * 80, 5.0 * 300, 90.0, "air"
+ac.render_cockpit(110, 34, 2.0, pk_grid)
+check("exactly on the grid lines is not a division by nought", True)
 
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED

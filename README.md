@@ -68,6 +68,8 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
   up and everyone spills out into the street.
 - tunnels under every street, with a ladder at every manhole, and somebody's door down there if you
   can find it; and a mystery that starts with a note and goes all over the city.
+- fly the plane yourself: real handling, a cockpit with its instruments, the whole horizon tilting as
+  you bank, any airport to land at, and a grade for how you met the ground.
 - a bowling alley under the black light: ten frames, aim and spin, and ten real pins knocking into
   each other, so a strike is earned and so is a split.
 - a rooftop bar on some of those towers: the real skyline behind it, a drink off the wallet, a trio
