@@ -371,13 +371,145 @@ BILL_W = 11.0          # world units across a board: big, it is an advert
 BILL_ROW = 1.1         # and per row of it
 BILL_SEEN = 170.0
 BILL_DISTRICTS = ("downtown", "market", "docks", "old town", "chinatown")
+# What is on them: a name, its tube, a big picture, a small one and a tiny one
+# for far off, what colours what, and what twinkles. The picture that fits is
+# the one that goes up; past the big one it is blown up a whole number of times.
 ADS = [
-    (["FIZZ COLA", "ICE COLD"], 0),
-    (["SPARKLE", "TASTE THE NIGHT"], 2),
-    (["NOVA SODA", "OUT OF THIS WORLD"], 6),
-    (["KOLA KING", "THE REAL THING"], 3),
-    (["ZAP!", "LEMON-LIME LIGHTNING"], 5),
-    (["DRINK BUBBL", "IT'S A GAS"], 1),
+    ("FIZZ COLA", 0,
+     [r" o  .   .-'''''-.   .  o ",
+      r"  .  o (_________) o  .  ",
+      r" o  .  |~~~~~~~~~|  .  o ",
+      r"   o   |  FIZZ   | o   . ",
+      r" .   . |  COLA   |  .  o ",
+      r"  o .  |~~~~~~~~~| o  .  ",
+      r" .   o (_________)   o . ",
+      r"   .  o  '-----'  . o    "],
+     [r" o .-'-. .",
+      r" .(_____)o",
+      r" o|FIZZ | ",
+      r"  |_____|o"],
+     [r".-.o",
+      r"|_|."], {"~": "white"}, "o."),
+    ("SPARKLE", 2,
+     [r" *      .   __   .     * ",
+      r"    .  *    ||  *   .    ",
+      r" .         /  \       *  ",
+      r"   *  .   /    \  . *    ",
+      r" .    *  /      \   .  . ",
+      r"    .   |SPARKLE| *   *  ",
+      r" *   .  |       |   .    ",
+      r"   .   *'-------' .    * "],
+     [r" * __  . ",
+      r"  /  \ * ",
+      r". |SP| . ",
+      r" *|__|  *"],
+     [r"*/\.",
+      r".||*"], {}, "*."),
+    ("NOVA SODA", 6,
+     [r"    .     *     /\    .   ",
+      r" *   .-.       /  \  *    ",
+      r"   (     ) .  | () |    . ",
+      r" . =(   )=    |NOVA| *    ",
+      r"     '-'   *  |SODA|   .  ",
+      r"  *    .     /|    |\  .  ",
+      r" .       *  /_|____|_\  * ",
+      r"    .         ^^^^^^   .  "],
+     [r" *  /\  .",
+      r".  |()| *",
+      r"  /|NV|\ ",
+      r" * '^^' ."],
+     [r".|^|*",
+      r"*/^\."], {"^": "fire", "=": "gold"}, "*.^"),
+    ("KOLA KING", 3,
+     [r" o       o       o ",
+      r" |\     /|\     /| ",
+      r" | \   / | \   / | ",
+      r" |  \_/  |  \_/  | ",
+      r" |   KOLA KING   | ",
+      r" |_______________| ",
+      r" |o=o=o=o=o=o=o=o| ",
+      r" '---------------' "],
+     [r" o  o  o ",
+      r" |\/|\/| ",
+      r" |KING | ",
+      r" '-----' "],
+     [r"\/\/",
+      r"|KK|"], {"o": "gold", "=": "red"}, ""),
+    ("ZAP!", 5,
+     [r"    ________            ",
+      r"   /       /     .-~~-. ",
+      r"  /  ZAP! /___  /o  o \ ",
+      r" /____       / ( LIME  )",
+      r"     /    __/   \o  o / ",
+      r"    /   /        '-~~-' ",
+      r"   /  /                 ",
+      r"  /_/                   "],
+     [r"  ___       ",
+      r" /ZAP/_ .-. ",
+      r"/__  _/(   )",
+      r"  /_/   '-' "],
+     [r"/_/(",
+      r"/ /)"], {"~": "green", "o": "green"}, ""),
+    ("BUBBL", 1,
+     [r" o   O   o    O    o  ",
+      r"    O   o   O    o    ",
+      r"\~~~~~~~~~~~~~~~~~~/ o",
+      r" \  o   BUBBL  O  /   ",
+      r"  \   o    O     /  O ",
+      r"   \      o     /     ",
+      r"o   \__________/    o ",
+      r"        |__|          "],
+     [r" O o  O ",
+      r"\~~~~~~/",
+      r" \BUBL/ ",
+      r"  \__/  "],
+     [r"\oO/",
+      r" \/ "], {"~": "white"}, "oO"),
+    ("DOG DAYS", 4,
+     [r"   _.------------------._   ",
+      r" .'                      '. ",
+      r"(==========================)",
+      r"(~~~~~~~~~~~~~~~~~~~~~~~~~~)",
+      r"(==========================)",
+      r" '.                      .' ",
+      r"   '------------------'     ",
+      r"       D O G   D A Y S      "],
+     [r" .------. ",
+      r"(=~=~=~=~)",
+      r" '------' ",
+      r"  DOG DAYS"],
+     [r".---.",
+      r"(=~=)"], {"=": "red", "~": "gold"}, ""),
+    ("BIG BITE", 7,
+     [r"     .-'''''''''''''-.    ",
+      r"   .'  .    .    .   '.   ",
+      r"  /  .    .    .    .   \ ",
+      r" (_____________________) ",
+      r" ~~~~~~~~~~~~~~~~~~~~~~~ ",
+      r" ======================= ",
+      r" (_____________________) ",
+      r"      B I G   B I T E    "],
+     [r" .-'''-. ",
+      r"(_______)",
+      r"~~=====~~",
+      r"(_______)"],
+     [r"(___)",
+      r"(===)"], {"=": "wood", "~": "green"}, ""),
+    ("CONE ZONE", 2,
+     [r"       .-''''-.      *  ",
+      r" *   .'  *  * '.        ",
+      r"    (  *    *   )   .   ",
+      r" .   '-._____.-'        ",
+      r"      \\\\\////     *   ",
+      r"  *    \\\\///          ",
+      r"        \\\//    .      ",
+      r"         \\/            "],
+     [r" .--. ",
+      r"( ** )",
+      r" \\// ",
+      r"  \/  "],
+     [r"(*)",
+      r" V "], {"\\": "gold", "/": "gold"}, "*"),
 ]
 
 # --- the cinema ---
@@ -3225,8 +3357,8 @@ def lot(i, j):
                 and _mix(i, j, 2405) % BILL_ODDS == 0):
             face = _wide_face(i, j, _mix(i, j, 2407) % 4)
             if face is not None:
-                words, tone = ADS[_mix(i, j, 2409) % len(ADS)]
-                b["billboard"] = {"face": face, "words": words, "tone": tone,
+                ad = _mix(i, j, 2409) % len(ADS)
+                b["billboard"] = {"face": face, "ad": ad,
                                   "i": i, "j": j, "height": b["height"]}
         b["center"] = center_at(i, j)
         if b["center"] is not None:
@@ -8606,14 +8738,12 @@ def draw_billboard(ch, co, v, walls, bb, now, wet):
 
     It stands out from the roof edge at right angles to the frontage, across
     the road like a gantry board, so it has a face to each end of the street
-    and is read from down the street. Where it is, how big, and what is in
+    and is seen from down the street. Where it is, how big, and what is in
     front of it are all worked out in the world - its corners projected, the
-    depth checked per column - but the lettering is laid out in screen space
-    across what those corners cover, like the cinema's and the diner's signs.
-    Each letter a point on the board's plane looked right and could not be
-    read: from any way back the brand and the slogan landed on the same rows
-    and overwrote each other. The brand in neon, the slogan under it if there
-    is room, bubbles going up the sides, and lamps along the bottom."""
+    depth checked per column - but the picture is laid out in screen space
+    across what those corners cover, like the cinema's and the diner's signs:
+    as world points the rows land on top of each other from any way back. The
+    biggest of its three pictures that fits, and its name if none does."""
     i, j, f = bb["i"], bb["j"], bb["face"]
     nx, nz = FACES[f]
     tx, tz = -nz, nx                             # along the street
@@ -8636,18 +8766,26 @@ def draw_billboard(ch, co, v, walls, bb, now, wet):
     y0 = int(round(min(ha[1], hb[1])))
     y1 = int(round(max(la[1], lb[1])))
     w, h = x1 - x0 + 1, y1 - y0 + 1
-    words = bb["words"]
     if w < 6 or h < 2 or w > v.width * 2:
         return
-    lit, dark = NEON[bb["tone"] % len(NEON)]
-    second = NEON[(bb["tone"] + 4) % len(NEON)][0]
-    flick = int(now * 0.7 + i) % 9 != 0           # the brand dips now and then
-    brand = words[0] if len(words[0]) + 2 <= w else words[0][:w - 2]
-    slogan = words[1][:w - 2]
-    mid = y0 + h // 2
-    rows = {mid - (1 if h >= 4 else 0): (brand, lit if flick else dark)}
-    if h >= 4:
-        rows[mid + (1 if h >= 6 else 0)] = (slogan, second)
+    name, tone, big, small, mini, tints, twinkle = ADS[bb["ad"]]
+    lit, dark = NEON[tone % len(NEON)]
+    second = NEON[(tone + 4) % len(NEON)][0]
+    if int(now * 0.7 + i) % 9 == 0:
+        lit = dark                               # the tube dips now and then
+    room_w, room_h = w - 2, h - 2
+    pic, n = [name[:room_w]], 1
+    for art, grow in ((big, True), (small, False), (mini, False)):
+        wide = max(len(line) for line in art)
+        if wide <= room_w and len(art) <= room_h:
+            pic = art
+            n = min(room_w // wide, room_h // len(art)) if grow else 1
+            break
+    named = {"white": FLASH, "gold": GOLD, "red": ROU_RED, "green": ROU_GREEN,
+             "wood": BARK, "fire": EMBER_HOT}
+    wide = max(len(line) for line in pic)
+    px = x0 + 1 + (room_w - wide * n) // 2
+    py = y0 + 1 + (room_h - len(pic) * n) // 2
     for sx in range(max(0, x0), min(v.width - 1, x1) + 1):
         frac = (sx - x0) / max(1, x1 - x0)
         dist = la[2] + (lb[2] - la[2]) * frac
@@ -8660,16 +8798,19 @@ def draw_billboard(ch, co, v, walls, bb, now, wet):
             elif edge_x:
                 g = "|"
             else:
-                g, line = " ", rows.get(sy)
-                if line is not None:
-                    text, attr = line
-                    k = sx - (x0 + 1) - (w - 2 - len(text)) // 2
-                    if 0 <= k < len(text):
-                        g = text[k]
-                side_col = sx - x0 in (2, 3) or x1 - sx in (2, 3)
-                if g == " " and sy not in rows and side_col \
-                        and int(now * 3.0 - sy + sx) % 4 == 0:
-                    g, attr = "o", second       # bubbles, rising
+                g, attr = " ", lit
+                r, c = (sy - py) // n, (sx - px) // n
+                if sy >= py and sx >= px and r < len(pic) and c < len(pic[r]):
+                    g = pic[r][c]
+                if g != " " and g in twinkle:
+                    # Bubbles rising, stars going off, the flame's flicker.
+                    attr = second
+                    if (int(now * 3.0) + r + c) % 4 == 0:
+                        g = " "
+                elif g in tints:
+                    attr = named[tints[g]]
+                elif g.isalpha() and g.isupper():
+                    attr = FLASH
                 if g == " ":
                     # The board is solid: blank it, or the city shows through.
                     if not hidden(walls, sx, sy, dist):
