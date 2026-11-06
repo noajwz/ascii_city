@@ -309,6 +309,16 @@ def cases(run, report):
     ok &= report("the mystery, a note and the first clue", *run(
         [(b"`", .5), (b"6", .5), (b"7", 1.5), (b"j", .3), (b"j", .3),
          (b"`", .3), (b"7", 1.5)], cols=110, rows=34))
+    for ck_size in ((110, 34), (300, 90)):
+        ok &= report("flying the plane, %dx%d" % ck_size, *run(
+            [(b"`", .5), (b"8", 1.0)] + [(b"+", .1)] * 10 + [(b"", 5.0)]
+            + [(b"w", .1)] * 4 + [(b"", 3.0), (b"d", .1), (b"d", .1), (b"d", .1),
+                                  (b"", 2.0), (b"a", .1), (b"s", .1), (b"-", .1),
+                                  (b"", 1.0), (b"x", .8), (b"w", .3)],
+            cols=ck_size[0], rows=ck_size[1]))
+    ok &= report("the desk: the keys, and straight into a wall", *run(
+        [(b"`", .5), (b".", 1.0)] + [(b"w", .25)] * 6 + [(b"c", .6)]
+        + [(b"+", .1)] * 10 + [(b"d", .1)] * 12 + [(b"", 8.0)], cols=110, rows=34))
     for rb_size in ((110, 34), (300, 90)):
         ok &= report("a drink at the rooftop bar, %dx%d" % rb_size, *run(
             [(b"`", .5), (b"1", 1.5)] + [(b"\x1bOA", .3)] * 6
