@@ -315,7 +315,8 @@ def cases(run, report):
             + [(b"s", .1)] * 4 + [(b"", 3.0), (b"d", .1), (b"d", .1), (b"d", .1),
                                   (b"", 2.0), (b"a", .1), (b"w", .1), (b"-", .1),
                                   (b"r", 1.5), (b"f", .2), (b"g", .3), (b"p", 2.0),
-                                  (b"g", .3), (b"z", .3),
+                                  (b"g", .3), (b"z", .3), (b"v", 1.5), (b"l", .5),
+                                  (b"a", .3), (b"v", 1.0), (b"l", .3),
                                   (b"", 1.0), (b"x", .8), (b"w", .3)],
             cols=ck_size[0], rows=ck_size[1]))
     ok &= report("the desk: the keys, and straight into a wall", *run(

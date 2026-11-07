@@ -1161,6 +1161,32 @@ the line, so a wind could put you on final and off it in one go, round and round
 that want still air set `ck.calm`; `pk_at()` and the robot circuit do. Flown: 80 starts in each
 night's wind, 40 in a 9-unit crosswind, 30 whole flights to their plans, all landed NICE.
 
+**The view from outside, the landing light, and thunderstorms you can fly into.** `v` is
+`render_outside()`: a camera `CHASE_BACK` behind and `CHASE_UP` over, swinging round after the
+heading a moment late (`ck.cam`), the world level and the jet banking. `draw_jet()` is a dozen 3D
+points turned by `plane_frame()` and joined by `_plane_seg()` as stairs (flat runs of `-`/`|`
+with the slope glyph only at the steps; plain runs of slashes read as hatching) with a black edge
+round it. **`draw_plane` was already taken** by the planes in the sky: defining it again
+silently replaced that one. `l` is the light (on at the start): `draw_landing_light()` works a
+row at a time like the ground, solving for the interval of each row the beam falls on instead of
+testing every cell, and paints what it finds (`runway_paint()`: piano keys, aiming point,
+touchdown bars, centre line, edges; grass round the field). It only reaches `PILOT_LIGHT_REACH`,
+so from cruise it lights nothing, which is right. Storms: `air_cells()` puts one in some squares of
+an `AIR_CELL_TILE` grid each night, building and dying with it, drifting on `night_wind()` -
+**not** `air_wind(now) * t`, which went backwards whenever the gusts eased. `ck.weather()` is how
+far in you are (`PILOT_TOWN_STORM` everywhere when `storming()`): turbulence in `step()`, gusts in
+`wind()`, the murk, rain on the glass, the jolt; from outside one, `draw_air_storms()` draws the
+shaft of rain, the cloud lit from inside on a strike (`air_strike()`), the bolt, and puts the stars
+out. From the plane `v.air` stops the old by-bearing far storm, which was not anywhere. The guide
+goes round a storm across the way (`_round_weather()`, one side per storm, not one you are in or one
+on the destination), so the tower warns you and the autopilot takes you round; flying in is yours
+to do by hand. Two things the weather showed: the director gave no bank under 12 so a gust on short
+final drifted you off the runway (a little is allowed now), and **the autopilot turned straight off
+the runway into a tower** - it now climbs out along the runway (`climb_out`) to `PILOT_CLEAR`, over
+the tallest roof, first. Flown: 40 whole flights in all weathers, 30 with a storm put across the
+route (all went round, all warned), 24 with one on the airport, all landed. Storms cost about 2 ms
+a frame at 300x90; the street is untouched (frames identical).
+
 **The approach had to be made flyable.** `approach_cap()` claimed to keep the town low but sky decks and
 landmarks ignored it, and it stopped 550 units out, under a slope that only cleared the tallest thing at
 1050: the first robot flight hit a building on final. Now it runs `APPROACH_LONG` cells off each end, no

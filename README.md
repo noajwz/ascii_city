@@ -75,7 +75,9 @@ turning, and **the waterfront**, the whole city seen from across the water. `tab
 - fly the plane yourself: real handling, a cockpit with its instruments, the whole horizon tilting as
   you bank, any airport to land at, and a grade for how you met the ground. A flight plan to
   another airport, a tower that talks you down, an autopilot, flaps and gear (forget them and it is
-  a belly landing), and a crosswind every night.
+  a belly landing), and a crosswind every night. A view from outside the jet, a landing light
+  that picks out the runway's paint, and thunderstorms out there you can fly into, or be taken
+  round.
 - a bowling alley under the black light: ten frames, aim and spin, and ten real pins knocking into
   each other, so a strike is earned and so is a split.
 - a rooftop bar on some of those towers: the real skyline behind it, a drink off the wallet, a trio
