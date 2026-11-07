@@ -10,6 +10,10 @@ python3 ascii_city.py
 
 Stdlib-only Python — `curses` and some arithmetic, no dependencies, no build step.
 
+It is made to be looked at in [Ghostty](https://ghostty.org) with [`ghostty.conf`](ghostty.conf):
+JetBrains Mono with the ligatures off, an opaque black background, no blinking cursor, and a
+200x55 window to start. Any terminal with 256 colours works, though.
+
 ![A Chinatown street at night](docs/street.svg)
 
 *A street in Chinatown — hung signs, lanterns, somebody smoking outside.*
