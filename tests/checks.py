@@ -6087,6 +6087,7 @@ def pk_fly(home_, dt_=1.0 / 30.0):
     circuit at cruise, onto the slope from the north and down. If it can be flown
     it can do it; this is what says the thing can be landed at all."""
     ck_ = ac.Cockpit(home_, 0.0)
+    ck_.calm = True                     # its own, wind-free, circuit
     rx_, zn_, zs_ = ac.runway(*home_)
     legs_ = [("out", rx_, zs_ - 500.0), ("w", rx_ - 520.0, zs_ - 700.0),
              ("n", rx_ - 520.0, zn_ + 1400.0), ("base", rx_, zn_ + 1500.0),
@@ -6165,7 +6166,7 @@ check("nothing stands in the way of the slope, at either end of 64 runways", not
 
 def pk_at(alt_=50.0, v_=60.0, x_=None, z_=None, heading_=math.pi, pitch_=0.0):
     c_ = ac.Cockpit(pk_home, 0.0)
-    c_.state = "air"
+    c_.state, c_.calm = "air", True
     c_.x = pk_rx if x_ is None else x_
     c_.z = (pk_zn + pk_zs) / 2 if z_ is None else z_
     c_.alt, c_.v, c_.heading = alt_, v_, heading_
@@ -6264,7 +6265,7 @@ for c_ in pk_all:
 check("the cockpit draws at every size, in every state", True)
 pk_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, pk_all[1])[0])
 check("with what you need on it", "AIRSPEED" in pk_t and "ALTITUDE" in pk_t
-      and "AIRPORT" in pk_t and "x hand it back" in pk_t)
+      and ac.airport_name(pk_home)[:12] in pk_t and "x hand back" in pk_t)
 pk_big = "\n".join("".join(r_) for r_ in ac.render_cockpit(300, 90, 2.0, pk_all[1])[0])
 check("big, the figures in block letters", "##" in pk_big and "AIRSPEED" in pk_big)
 pk_w_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, pk_w)[0])
@@ -6378,6 +6379,173 @@ for ti_ in range(-2, 2):
                                          int(z_ // 5) + b_ * 480)])[1]
             ap_miss += ac.nearest_airport(x_, z_) != best_
 check("the nearest airport is the nearest", ap_miss == 0, str(ap_miss))
+
+# --- the gear, the wind and the flight plan ---------------------------------------
+
+
+def fp_fly(home_, seed_, t0_, hand_gear_=True):
+    """A whole flight to the flight plan: off the runway by hand, then the
+    autopilot, the gear up after lift-off and down again on final."""
+    dest_ = ac.flight_plan(home_, seed_)
+    c_ = ac.Cockpit(home_, t0_, dest_)
+    c_.said_all, call_ = [], c_.call
+    c_.call = lambda *a_, **k_: (c_.said_all.append(a_[2]), call_(*a_, **k_))
+    t_ = t0_
+    c_.key("radio", t_)
+    for _ in range(10):
+        c_.key("more", t_)
+    while c_.state != "crashed" and c_.ended is None and t_ < t0_ + 900.0:
+        if (c_.state == "ground" and c_.v > ac.PILOT_ROTATE - 4.0
+                and c_.pitch_set < 0.14):
+            c_.key("up", t_)
+        if c_.state == "air" and not c_.ap and c_.alt > 8.0 and c_.leg != "final":
+            c_.key("autopilot", t_)
+        if hand_gear_ and c_.state == "air":
+            if c_.alt > 20.0 and c_.leg != "final" and c_.gear_set > 0.5:
+                c_.key("gear", t_)
+            elif c_.leg == "final" and c_.gear_set < 0.5:
+                c_.key("gear", t_)
+        if c_.state == "landed":
+            c_.key("brake", t_)
+        c_.step(1.0 / 30.0, t_)
+        t_ += 1.0 / 30.0
+    return c_, dest_
+
+
+fp_rng = random.Random(21)
+fp_got = []
+for n_ in range(8):
+    h_ = ac.zone_home("airport", fp_rng.choice((-1, 0, 1)) * 480 + 100,
+                      fp_rng.choice((0, 1)) * 480 + 100)
+    c_, d_ = fp_fly(h_, n_ * 17, fp_rng.uniform(0.0, 40000.0))
+    fp_got.append((c_.state, c_.grade, c_.on_runway()[1] == d_, c_.pay, c_.dest != h_))
+check("a flight plan to another airport, flown there and landed, wind and all",
+      all(s_ == "landed" and at_ and else_ for s_, _, at_, _, else_ in fp_got),
+      str(fp_got))
+check("and landing where it said pays more", all(
+    p_ >= ac.PILOT_DEST_PAY for s_, _, at_, p_, _ in fp_got if at_))
+fp_words = " ".join(c_.said_all)
+check("the tower sends you on your way and hands you over",
+      "proceed direct" in fp_words and "contact" in fp_words and "Tower" in fp_words,
+      fp_words[:160])
+fp_h = ac.zone_home("airport", 100, 100)
+fp_plans = {ac.flight_plan(fp_h, s_) for s_ in range(60)}
+check("flight plans go to other airports, a tile to three off, and not always the same",
+      fp_h not in fp_plans and len(fp_plans) >= 6 and all(
+          1 <= max(abs(p_[0] - fp_h[0]), abs(p_[1] - fp_h[1])) // 400 <= 3
+          for p_ in fp_plans))
+check("every airport has a name, and the first is the city's own",
+      ac.airport_name(fp_h) == ac.AIRPORT_NAMES[0]
+      and all(ac.airport_name(p_) in ac.AIRPORT_NAMES[1:] for p_ in fp_plans)
+      and ac.tower_name(fp_h).endswith(" Tower"))
+fp_gate = "\n".join("".join(r_) for r_ in ac.render_gate(
+    110, 34, 2.0, {"home": fp_h, "dest": sorted(fp_plans)[0]})[0])
+check("the gate says where the flight is going",
+      ac.airport_name(sorted(fp_plans)[0])[:22] in fp_gate)
+fp_n = ac.Cockpit(fp_h, 0.0, sorted(fp_plans)[0])
+fp_n.state, fp_n.alt = "air", 135.0
+check("and the panel navigates you there, not to the nearest",
+      fp_n.goal() == sorted(fp_plans)[0] and fp_n.nav()[1] > 2000.0)
+# The gear.
+gr_c = ac.Cockpit(pk_home, 0.0)
+gr_c.key("gear", 0.0)
+check("the wheels stay down on the ground", gr_c.gear == 1.0 and gr_c.gear_set == 1.0)
+gr_c = pk_at(alt_=200.0, v_=70.0, x_=pk_rx - 4000.0)
+gr_c.calm = True
+gr_c.key("gear", 0.0)
+for n_ in range(int(ac.PILOT_GEAR_TIME * 30 * 0.5)):
+    gr_c.step(1.0 / 30.0, n_ / 30.0)
+gr_half = gr_c.gear
+gr_n = int(ac.PILOT_GEAR_TIME * 30)
+for n_ in range(gr_n // 2 + 5, gr_n + 10):
+    gr_c.step(1.0 / 30.0, n_ / 30.0)
+check("up in the air they come up, and take a while about it",
+      0.2 < gr_half < 0.8 and gr_c.gear == 0.0)
+
+
+def gr_top(gear_):
+    c_ = pk_at(alt_=400.0, v_=60.0, x_=pk_rx - 9000.0)
+    c_.calm, c_.throttle, c_.gear, c_.gear_set = True, 1.0, gear_, gear_
+    for n_ in range(30 * 90):
+        c_.step(1.0 / 30.0, n_ / 30.0)
+    return c_.v
+
+
+check("and with them up it goes faster", gr_top(0.0) > gr_top(1.0) + 3.0)
+gr_c = pk_at(alt_=0.01, v_=45.0, pitch_=-0.05)
+gr_c.calm, gr_c.gear, gr_c.gear_set = True, 0.0, 0.0
+gr_c.step(1.0 / 30.0, 1.0)
+check("forget them and you land on its belly: down, but nobody pays",
+      gr_c.state == "landed" and gr_c.grade == "BELLY" and gr_c.pay == 0)
+for n_ in range(400):
+    gr_c.step(1.0 / 30.0, 1.0 + n_ / 30.0)
+check("and it grinds to a stop", gr_c.ended is not None)
+gr_w = pk_at(alt_=15.0, v_=45.0, pitch_=-0.08)
+gr_w.calm, gr_w.gear, gr_w.vy = True, 0.0, -4.0
+check("the panel shouts about it, low and coming down", "GEAR" in gr_w.warnings())
+gr_w.gear = 1.0
+check("and not with them down", "GEAR" not in gr_w.warnings())
+gr_t = ac.Cockpit(pk_home, 0.0)
+gr_t.state, gr_t.alt, gr_t.v, gr_t.gear = "air", 60.0, 50.0, 0.0
+gr_t.x, gr_t.z, gr_t.heading = pk_rx, pk_zn + 1200.0, math.pi
+gr_t.leg, gr_t.target, gr_t.end = "final", pk_home, pk_zn
+check("the tower says so too, when it clears you to land",
+      "gear" in gr_t.atc_line(gr_t.guide())[1])
+# The wind.
+wd_all = [math.hypot(*ac.air_wind(k_ * ac.NIGHT_LENGTH + 100.0)) for k_ in range(60)]
+check("each night its own wind, calm to strong", min(wd_all) < 2.0
+      and max(wd_all) > ac.PILOT_WIND_MOST * 0.6, str((round(min(wd_all), 1),
+                                                        round(max(wd_all), 1))))
+check("said the way a tower says it", ac.wind_words(0.0, 0.0) == "wind calm"
+      and ac.wind_words(-8.0, 0.0) == "wind 090 at 20")
+wd_real = ac.air_wind
+ac.air_wind = lambda now_: (-8.0, 0.0)
+wd_c = pk_at(alt_=300.0, v_=70.0, x_=pk_rx - 9000.0, heading_=0.0)
+wd_c.calm = False
+x0_ = wd_c.x
+for n_ in range(300):
+    wd_c.step(1.0 / 30.0, n_ / 30.0)
+check("in the air it carries you sideways", wd_c.x < x0_ - 70.0)
+wd_c = pk_at(alt_=0.01, v_=45.0, pitch_=-0.05, heading_=math.pi + 0.25)
+wd_c.step(1.0 / 30.0, 1.0)
+wd_d = pk_at(alt_=0.01, v_=45.0, pitch_=-0.05, heading_=math.pi + 0.45)
+wd_d.step(1.0 / 30.0, 1.0)
+check("touch down crabbed and it is a grade worse; well sideways, a wreck",
+      wd_c.state == "landed" and wd_c.grade == "NICE" and wd_d.state == "crashed")
+for n_ in range(60):
+    wd_c.step(1.0 / 30.0, 1.0 + n_ / 30.0)
+check("on the wheels it straightens up with the runway",
+      abs((wd_c.heading - math.pi + math.pi) % math.tau - math.pi) < 0.05)
+wd_ap = []
+for n_ in range(6):
+    h_ = ac.zone_home("airport", (n_ % 3 - 1) * 480 + 100, (n_ // 3) * 480 + 100)
+    rx_, zn_, zs_ = ac.runway(*h_)
+    c_ = ac.Cockpit(h_, 0.0)
+    c_.state, c_.alt, c_.v, c_.throttle = "air", 135.0, 70.0, 0.6
+    c_.x, c_.z, c_.heading = rx_ + 2500.0 * (n_ % 2 * 2 - 1), zn_ + 2200.0, 3.0
+    c_.key("autopilot", 0.0)
+    t_ = 0.0
+    while c_.state == "air" and t_ < 400.0:
+        c_.step(1.0 / 30.0, t_)
+        t_ += 1.0 / 30.0
+    wd_ap.append(c_.grade if c_.state == "landed" else c_.state)
+check("the autopilot and the director lay off for a strong crosswind, and land",
+      all(g_ in ("BUTTER", "NICE") for g_ in wd_ap), str(wd_ap))
+wd_real_c = ac.FLASH, ac.EMBER_HOT, ac.CONCRETE, ac.ROU_GREEN
+ac.FLASH, ac.EMBER_HOT, ac.CONCRETE, ac.ROU_GREEN = 981, 982, 983, 984
+wd_v = ac.View(pk_rx + ac.RUNWAY_W + 8.0, pk_zn - 40.0, 0.0, 110, 34)
+wd_v.walls = (None, None, None, None, [[] for _ in range(110)])
+wd_ch = [[" "] * 110 for _ in range(34)]
+wd_co = [[0] * 110 for _ in range(34)]
+ac.draw_runway_lights(wd_ch, wd_co, wd_v, pk_home, 1.0)
+check("a windsock at the end, standing out in it",
+      sum(1 for r_ in wd_co for a_ in r_ if a_ == 982) >= 2)
+ac.air_wind = wd_real
+ac.FLASH, ac.EMBER_HOT, ac.CONCRETE, ac.ROU_GREEN = wd_real_c
+wd_p = ac.render_cockpit(110, 34, 2.0, pk_at(alt_=100.0, v_=70.0, x_=pk_rx - 3000.0))[0]
+wd_t = "\n".join("".join(r_) for r_ in wd_p)
+check("the panel has the wind and the gear on it",
+      "WIND " in wd_t and "[GEAR DN]" in wd_t)
 
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED

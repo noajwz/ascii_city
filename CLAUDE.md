@@ -1143,6 +1143,24 @@ town; the strobes and the slope lights within `PILOT_NEAR_LIGHTS`. `nearest_airp
 fifth of a tile away for the next airport, not a whole one, until this - which the first pilot
 commit shipped with.
 
+**Gear, wind and a flight plan.** Every flight from the gate or the menu has a `dest`
+(`flight_plan()`: another airport one to three tiles off, from the seed), and then `goal()` is that
+airport however far, so the panel's nav (`TO ...`), the tower and the autopilot all go there;
+`PILOT_ENROUTE` out it is "proceed direct", and coming inside it the tower hands you over to the
+next (`tower_name()`). Landing anywhere still counts; landing at `dest` adds `PILOT_DEST_PAY`.
+Airports have names now (`airport_name()`; the menu's own is always `AIRPORT_NAMES[0]`, on its
+terminal too). `g` is the gear (`gear`/`gear_set`, `PILOT_GEAR_TIME` to move, a quarter more drag
+down; a `GEAR` warning low, a word from the tower) and landing with it up is `BELLY`: down, unpaid.
+`air_wind(now)` is the wind, each night its own up to `PILOT_WIND_MOST`, more in rain; it only
+moves you in the air (no wind on the roll, and on the wheels you straighten up with the runway).
+Touch down crabbed past 0.18 and it is a grade worse, past 0.35 a wreck. `commands()` lays off the
+nose into it so the guide's headings are tracks, which is what kept the autopilot landing in a
+gale. Two things a crosswind showed: final was caught at 220 from the fix but given up at 160 off
+the line, so a wind could put you on final and off it in one go, round and round (now 150 and
+250); and floating past the end in the last few feet counted as overflown and went round. Checks
+that want still air set `ck.calm`; `pk_at()` and the robot circuit do. Flown: 80 starts in each
+night's wind, 40 in a 9-unit crosswind, 30 whole flights to their plans, all landed NICE.
+
 **The approach had to be made flyable.** `approach_cap()` claimed to keep the town low but sky decks and
 landmarks ignored it, and it stopped 550 units out, under a slope that only cleared the tallest thing at
 1050: the first robot flight hit a building on final. Now it runs `APPROACH_LONG` cells off each end, no

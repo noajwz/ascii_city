@@ -2117,7 +2117,6 @@ RUNWAY_HALF = 52       # half its length, in cells
 TAXIWAY_DX = -34.0     # the taxiway, in units from the runway's middle
 APT_CYCLE = 60.0       # one landing and one take-off, every this many seconds
 APPROACH_LONG = 260    # cells the town is kept low for, off each end of the runway
-AIRPORT_NAME = "ASCII CITY INTERNATIONAL"
 STRIP_HALF = 60        # the boulevard's half length, in cells
 STRIP_NAMES = ["GOLDEN PALM", "NEON OASIS", "SILVER COMET", "LUCKY SEVENS",
                "DIAMOND DUNES", "STARLIGHT", "THE BIG WHEEL", "CROWN JEWEL",
@@ -5964,6 +5963,7 @@ PILOT_FIX = 1600.0     # the final fix, out on the centre line: the slope starts
                        # cruise height there, so it is a glide down and not a dive
 PILOT_AP_FLOOR = 8.0   # the autopilot hands it back below this, on final
 PILOT_RADIO_LAG = 1.2  # seconds before the tower answers
+PILOT_ENROUTE = 4500.0  # further than this from where you are going, you are en route
 PILOT_GRADES = ((3.0, "BUTTER", 150), (6.0, "NICE", 100), (11.0, "HARD", 40))
 PILOT_LOW_WRECK = ("You came down in %s. Nobody saw. It is not mentioned again.",
                    "You came down in %s. The insurance has questions.",
@@ -5971,6 +5971,66 @@ PILOT_LOW_WRECK = ("You came down in %s. Nobody saw. It is not mentioned again."
 PILOT_ROOF_WRECK = ("You met a building. It was there first.",
                     "That was somebody's roof. They are writing to the airline.",
                     "You flew into %s. It is not on the flight plan.")
+
+
+AIRPORT_NAMES = ["ASCII CITY INTERNATIONAL", "NEON FIELD", "HARBOUR POINT",
+                 "MIDNIGHT REGIONAL", "LOW TIDE", "UPTOWN EXECUTIVE",
+                 "THE OLD AERODROME", "SKYLINE", "NORTH GATE", "DOCKSIDE",
+                 "LANTERN BAY", "LAST CALL FIELD"]
+PILOT_DEST_PAY = 200   # on top, for landing where the flight plan said
+PILOT_GEAR_TIME = 4.0  # seconds for the wheels to go up or down
+PILOT_WIND_MOST = 9.0  # units a second: a strong night's crosswind, before a storm
+
+
+def airport_name(home):
+    """Every airport has its own name; the one the city grew up round is the
+    first, where the menu's flights start."""
+    if home == zone_home("airport", 100, 100):
+        return AIRPORT_NAMES[0]
+    return AIRPORT_NAMES[1 + _mix(home[0], home[1], 5901) % (len(AIRPORT_NAMES) - 1)]
+
+
+def tower_name(home):
+    """What its tower answers to on the radio."""
+    words = airport_name(home).replace("THE ", "").split()
+    return words[0].title() + " Tower"
+
+
+def flight_plan(home, seed):
+    """Where a flight from here is going: another airport a tile to three away,
+    picked by the seed, never this one."""
+    picks = []
+    for a in range(-2, 3):
+        for b in range(-2, 3):
+            if (a, b) != (0, 0):
+                there = zone_home("airport", home[0] + a * WOODS_TILE,
+                                  home[1] + b * WOODS_TILE)
+                if there != home and there not in picks:
+                    picks.append(there)
+    return picks[_mix(seed, home[0] * 7 + home[1], 5903) % len(picks)]
+
+
+def air_wind(now):
+    """The wind, as which way it blows towards and how hard, in units a second:
+    each night its own, from calm to a proper crosswind, wandering a little as
+    the night goes on, and harder in the rain. A function of the clock."""
+    k = int((now + _night_skip) // NIGHT_LENGTH)
+    m = _mix(k, 3, 5905)
+    toward = m % 6283 / 1000.0 + 0.4 * math.sin(now * 0.004 + (m & 63))
+    speed = (m >> 13) % 100 / 99.0 * PILOT_WIND_MOST
+    speed *= 0.8 + 0.2 * math.sin(now * 0.05 + (m >> 7))
+    speed *= 1.0 + 0.6 * rain_intensity(now)
+    return math.sin(toward) * speed, math.cos(toward) * speed
+
+
+def wind_words(wx, wz):
+    """The wind the way a tower says it: where it is from, and knots."""
+    speed = math.hypot(wx, wz)
+    if speed < 1.0:
+        return "wind calm"
+    frm = math.degrees(math.atan2(-wx, -wz)) % 360.0
+    frm = int(round(frm / 10.0)) * 10 % 360 or 360
+    return "wind %03d at %d" % (frm, int(round(speed * 2.5)))
 
 
 def nearest_airport(x, z):
@@ -5999,8 +6059,9 @@ class Cockpit:
     throttle, and a wing goes down for as long as a key keeps being pressed and
     comes back level by itself after."""
 
-    def __init__(self, home, now):
+    def __init__(self, home, now, dest=None):
         self.home = home
+        self.dest = dest                # where the flight plan says, or None
         self.rx, zn, zs = runway(*home)
         self.x, self.z = self.rx, zn - 12.0
         self.heading = math.pi          # south, down the runway
@@ -6014,16 +6075,23 @@ class Cockpit:
         self.brake_until = 0.0
         self.state = "ground"           # ground, air, landed, crashed
         self.said = "brakes off: + for the throttle, s to lift the nose"
+        if dest is not None:
+            self.said = "flight plan: %s. %s" % (airport_name(dest).title(), self.said)
         self.grade = None
         self.pay = 0
         self.ended = None
         self.seed = int(now * 7.0)
+        self.clock = now
         self.flaps = 0                  # 0, 1 or 2
         self.ap = False                 # the autopilot
         self.radio, self.radio_on = [], False
         self.atc_key, self.atc_at, self.cleared = None, -99.0, False
         self.leg = None                 # where the guide has you: entry, fix, final
         self.target = None              # and the airport it is
+        self.gear, self.gear_set = 1.0, 1.0  # 1 is down: up and down take a while
+        self.calm = False               # no wind, for the checks that want none
+        self.belly = False
+        self.enroute = False
         self.end, self.side, self.went_round = None, 1.0, False
 
     def key(self, what, now):
@@ -6032,7 +6100,13 @@ class Cockpit:
         if what in ("up", "down", "left", "right") and self.ap:
             self.ap = False             # any hand on the controls takes it back
             self.said = "autopilot off"
-        if what == "flaps":
+        if what == "gear":
+            if self.state != "air":
+                self.said = "the wheels stay down on the ground"
+            else:
+                self.gear_set = 0.0 if self.gear_set > 0.5 else 1.0
+                self.said = "gear coming down" if self.gear_set else "gear coming up"
+        elif what == "flaps":
             self.flaps = (self.flaps + 1) % 3
             self.said = ("flaps up", "flaps one", "flaps two")[self.flaps]
         elif what == "autopilot":
@@ -6058,6 +6132,10 @@ class Cockpit:
             self.throttle = max(0.0, self.throttle - 0.1)
         elif what == "brake":
             self.brake_until = now + PILOT_GRACE
+
+    def wind(self, now):
+        """The wind where you are, unless the check asked for none."""
+        return (0.0, 0.0) if self.calm else air_wind(now)
 
     def stall(self):
         """Under this it stops flying: flaps take it down."""
@@ -6088,13 +6166,17 @@ class Cockpit:
                 self.leg = "fix"
         if self.leg == "fix":
             tx, tz = rx, end + out * PILOT_FIX
-            if math.hypot(tx - self.x, tz - self.z) < 220.0:
+            # Caught well inside what final will put up with, or a crosswind put
+            # you on final and off the line in the same moment, round and round.
+            if math.hypot(tx - self.x, tz - self.z) < 150.0:
                 self.leg = "final"
             elif along < PILOT_FIX * 0.55:
                 self.leg = "entry"               # inside it: go out and round again
                 tx, tz = rx + self.side * 900.0, end + out * (PILOT_FIX + 900.0)
         if self.leg == "final":
-            if abs(lat) > 160.0 or along < -40.0 and self.state == "air":
+            # Round again if blown off the line, or past the end still high - not
+            # when floating in the last few feet, which is a landing.
+            if abs(lat) > 250.0 or (along < -40.0 and self.alt > 20.0):
                 self.leg, self.went_round = "entry", True   # blown off it: round again
                 self.side = 1.0 if lat >= 0.0 else -1.0
                 tx, tz = rx + self.side * 900.0, end + out * (PILOT_FIX + 900.0)
@@ -6109,7 +6191,8 @@ class Cockpit:
             fast = PILOT_APPROACH
         return {"mode": mode, "heading": math.atan2(tx - self.x, tz - self.z),
                 "alt": high, "speed": fast, "runway": rwy, "along": along,
-                "lat": lat, "course": course}
+                "lat": lat, "course": course, "home": self.target,
+                "dist": math.hypot(rx - self.x, (zn + zs) * 0.5 - self.z)}
 
     def goal(self):
         """The airport the tower is bringing you in to: the nearest when it was
@@ -6117,6 +6200,10 @@ class Cockpit:
         the entry point for one takes you nearer the next: switching to whichever
         was nearest turned you round half way there, for ever. Only once you are
         well away from it does it pick again."""
+        if self.dest is not None:
+            if self.target != self.dest:
+                self.target, self.leg = self.dest, None
+            return self.dest                # the flight plan's, however far
         if self.target is not None:
             rx, zn, zs = runway(*self.target)
             if math.hypot(rx - self.x, (zn + zs) * 0.5 - self.z) < PILOT_KEEP:
@@ -6127,7 +6214,14 @@ class Cockpit:
     def commands(self, g=None):
         """What the flight director shows: the bank and the nose to fly the guide."""
         g = g or self.guide()
-        err = (g["heading"] - self.heading + math.pi) % math.tau - math.pi
+        # The guide's way is a track over the ground: to make it in a wind, the
+        # nose has to be into it (sin of the angle times speed against the wind
+        # across the track).
+        wx, wz = self.wind(self.clock)
+        across = wx * math.cos(g["heading"]) - wz * math.sin(g["heading"])
+        lay = max(-0.6, min(0.6, across / max(self.v, 25.0)))
+        nose_to = g["heading"] - math.asin(lay)
+        err = (nose_to - self.heading + math.pi) % math.tau - math.pi
         bank = 0.0 if self.alt < 12.0 else max(-0.5, min(0.5, err * 1.4))
         if g["mode"] == "final":
             nose = max(-0.14, min(0.08, (g["alt"] - self.alt) * 0.03 - 0.08))
@@ -6164,6 +6258,10 @@ class Cockpit:
         way = "right" if err > 0.0 else "left"
         hdg = int(round(math.degrees(g["heading"]) % 360.0 / 10.0)) * 10 % 360 or 360
         feet = format(int(round(g["alt"] * 25.0 / 500.0)) * 500, ",")
+        if g["dist"] > PILOT_ENROUTE:
+            return ("enroute", hdg), (
+                "AC 101, proceed direct %s, heading %03d, maintain %s."
+                % (airport_name(g["home"]).title(), hdg, feet))
         if g["mode"] == "around":
             return ("around", hdg), ("AC 101, turn %s heading %03d, maintain %s, "
                                      "vectors for runway %s." % (way, hdg, feet,
@@ -6175,8 +6273,13 @@ class Cockpit:
         over = self.alt - g["alt"]
         if g["along"] < 2600.0 and not self.cleared:
             self.cleared = True
-            return ("cleared",), ("AC 101, wind calm, runway %s, cleared to land."
-                                  % g["runway"])
+            line = "AC 101, %s, runway %s, cleared to land." % (
+                wind_words(*self.wind(self.clock)), g["runway"])
+            if self.gear < 0.99:
+                line += " Check your gear is down."
+            return ("cleared",), line
+        if self.gear < 0.99 and self.alt < 60.0:
+            return ("gear",), "AC 101, your gear is still up. Gear down, gear down."
         if over > 10.0 and g["along"] > 300.0:
             return ("high",), "AC 101, you are high. Increase your rate of descent."
         if over < -8.0 and g["along"] > 300.0:
@@ -6192,15 +6295,21 @@ class Cockpit:
             return
         self.radio_on = True
         if self.state == "ground":
-            self.call(now, "YOU", "ASCII Tower, AC 101, ready for departure.")
-            self.call(now, "TWR", "AC 101, wind calm, runway 18, cleared for take-off.",
-                      PILOT_RADIO_LAG)
+            here = nearest_airport(self.x, self.z)
+            self.call(now, "YOU", "%s, AC 101, ready for departure." % tower_name(here))
+            line = "AC 101, %s, runway 18, cleared for take-off." % wind_words(
+                *self.wind(now))
+            if self.dest is not None:
+                line += " After departure, proceed direct %s." % (
+                    airport_name(self.dest).title())
+            self.call(now, "TWR", line, PILOT_RADIO_LAG)
         elif self.state == "landed":
             self.call(now, "YOU", "AC 101, down and stopping.")
             self.call(now, "TWR", "AC 101, welcome in. Taxi to the gate.",
                       PILOT_RADIO_LAG)
         else:
-            self.call(now, "YOU", "ASCII Tower, AC 101, request vectors to land.")
+            self.call(now, "YOU", "%s, AC 101, request vectors to land." % tower_name(
+                self.goal()))
             key, line = self.atc_line(self.guide())
             self.atc_key, self.atc_at = key, now
             self.call(now, "TWR", line, PILOT_RADIO_LAG)
@@ -6210,8 +6319,16 @@ class Cockpit:
         when there is one, and the same again now and then if you have not done it."""
         if not self.radio_on or self.state != "air" or now - self.atc_at < 7.0:
             return
-        key, line = self.atc_line(self.guide())
+        g = self.guide()
+        key, line = self.atc_line(g)
         if key != self.atc_key or now - self.atc_at > 25.0:
+            if self.atc_key and self.atc_key[0] == "enroute" and key[0] != "enroute":
+                # Over to the tower where you are going.
+                self.call(now, "TWR", "AC 101, contact %s. Good night." % tower_name(
+                    g["home"]))
+                self.call(now, "YOU", "%s, AC 101, with you." % tower_name(g["home"]),
+                          1.0)
+                now += 2.0
             self.atc_key, self.atc_at = key, now
             self.call(now, "TWR", line)
 
@@ -6236,11 +6353,19 @@ class Cockpit:
         return lot(i, j)["height"] if not is_open(i, j) else None
 
     def step(self, dt, now):
+        self.clock = now
         if self.state == "crashed":
             return
+        if self.gear != self.gear_set:
+            move = dt / PILOT_GEAR_TIME
+            if self.gear_set > self.gear:
+                self.gear = min(self.gear_set, self.gear + move)
+            else:
+                self.gear = max(self.gear_set, self.gear - move)
         braking = now < self.brake_until
         steering = self.bank_in if now < self.bank_until else 0.0
-        drag = PILOT_DRAG * self.v * self.v * (1.0 + 0.18 * self.flaps)
+        drag = PILOT_DRAG * self.v * self.v * (
+            1.0 + 0.18 * self.flaps + 0.25 * self.gear)
         if self.state == "air" and self.ap:
             self._fly_itself(dt, now)
         if self.state == "air":
@@ -6282,6 +6407,18 @@ class Cockpit:
                 self.alt = 0.2
         self.x += math.sin(self.heading) * flat
         self.z += math.cos(self.heading) * flat
+        if self.state == "air":
+            wx, wz = self.wind(now)
+            self.x += wx * dt
+            self.z += wz * dt
+        elif self.state == "landed":
+            # On the wheels it straightens up with the runway; on its belly it
+            # grinds to a halt.
+            course = math.pi if math.cos(self.heading) < 0.0 else 0.0
+            self.heading += ((course - self.heading + math.pi) % math.tau - math.pi
+                             ) * min(1.0, dt * 2.0)
+            if self.belly:
+                self.v = max(0.0, self.v - 9.0 * dt)
         top = self._solid_here()
         if top is not None and self.alt <= top:
             self._wreck(now, PILOT_ROOF_WRECK, place_below(self.x, self.z))
@@ -6292,7 +6429,10 @@ class Cockpit:
         self._radio_tick(now)
         if self.state == "landed" and self.v < 1.5 and self.ended is None:
             self.ended = now
-            self.said = "%s. Stopped. $%d from the passengers." % (self.grade, self.pay)
+            self.said = "Stopped. The passengers want a word."
+            if self.pay:
+                self.said = "%s. Stopped. $%d from the passengers." % (
+                    self.grade, self.pay)
 
     def _touch_down(self, now):
         """The ground, and how you met it."""
@@ -6304,11 +6444,29 @@ class Cockpit:
         if abs(self.bank) > 0.3:
             self.crash(now, "A wing got there first.")
             return
-        for most, grade, pay in PILOT_GRADES:
+        course = math.pi if math.cos(self.heading) < 0.0 else 0.0
+        crab = abs((self.heading - course + math.pi) % math.tau - math.pi)
+        if crab > 0.35:
+            self.crash(now, "Sideways onto the runway. The wheels went one way, "
+                       "the rest of it another.")
+            return
+        if self.gear < 0.99 and sink < PILOT_GRADES[-1][0]:
+            self.state, self.grade, self.pay, self.belly = "landed", "BELLY", 0, True
+            self.home, self.throttle, self.pitch_set = home, 0.0, 0.0
+            self.said = ("On its belly. Sparks, then a very long quiet. "
+                         "Nobody is paying for that.")
+            return
+        # Crabbed onto it: a grade worse.
+        grades = PILOT_GRADES[1:] if crab > 0.18 else PILOT_GRADES
+        for most, grade, pay in grades:
             if sink <= most:
                 self.state, self.grade, self.pay = "landed", grade, pay
                 self.home, self.throttle, self.pitch_set = home, 0.0, 0.0
                 self.said = "%s. b for the brakes" % grade
+                if self.dest is not None and home == self.dest:
+                    self.pay += PILOT_DEST_PAY
+                    self.said = "%s, at %s, as planned. b for the brakes" % (
+                        grade, airport_name(home).title())
                 return
         self.crash(now, "That was less of a landing than a decision by the ground.")
 
@@ -6319,6 +6477,8 @@ class Cockpit:
         out = []
         if self.v < self.stall() + 4.0:
             out.append("STALL")
+        if self.gear < 0.99 and self.alt < 25.0 and self.vy < -1.0:
+            out.append("GEAR")
         for t in (1.0, 2.0, PILOT_LOOK):
             d = self.v * t
             px = self.x + math.sin(self.heading) * d
@@ -6336,8 +6496,7 @@ class Cockpit:
         """The airport to make for: (name of the way, distance, how far off the
         centre line, how far over the slope, in units), the slope and the line
         being the ones to the end of the runway you are coming at."""
-        ci, cj = nearest_airport(self.x, self.z)
-        rx, zn, zs = runway(ci, cj)
+        rx, zn, zs = runway(*self.goal())
         end = zn if abs(self.z - zn) < abs(self.z - zs) else zs
         d = math.hypot(rx - self.x, end - self.z)
         off = self.x - rx
@@ -6400,6 +6559,18 @@ def draw_runway_lights(ch, co, v, home, now):
             lit = n == 8 - run
             put_point(ch, co, v, walls, rx, 0.3, z, "@" if lit else "*",
                       FLASH if lit else BULB_DIM)
+        # The windsock by the end, standing out the way the wind blows.
+        wx, wz = air_wind(now)
+        speed = math.hypot(wx, wz)
+        sx_, sz_ = rx + RUNWAY_W + 8.0, end
+        for n in range(4):
+            put_point(ch, co, v, walls, sx_, n * 1.0, sz_, "|", CONCRETE)
+        if speed > 0.5:
+            for n in range(1, 5):
+                droop = 1.0 - min(1.0, speed / 6.0)
+                put_point(ch, co, v, walls, sx_ + wx / speed * n * 0.7,
+                          3.6 - droop * n * 0.5, sz_ + wz / speed * n * 0.7,
+                          "=", EMBER_HOT if n % 2 else FLASH)
         # The four lights, on the left of the way in, at the touchdown point.
         td = end - sign * 30.0
         over = (v.eye - 3.0) - abs(v.z - td) * PILOT_GLIDE
@@ -6487,9 +6658,14 @@ def draw_cockpit(ch, co, ck, now):
     if y_ + 2 < h - 1:
         # What is switched on, lit when it is.
         x_ = 2
+        gear_ = ("GEAR DN" if ck.gear > 0.99 else "GEAR UP" if ck.gear < 0.01
+                 else "GEAR ..")
         for word, on in (("FLAPS %d" % ck.flaps, ck.flaps > 0), ("AP", ck.ap),
-                         ("RADIO", ck.radio_on)):
-            _text(ch, co, y_ + 2, x_, "[" + word + "]", ROU_GREEN if on else CONCRETE)
+                         ("RADIO", ck.radio_on), (gear_, ck.gear > 0.99)):
+            attr_ = ROU_GREEN if on else CONCRETE
+            if word == "GEAR ..":
+                attr_ = GOLD
+            _text(ch, co, y_ + 2, x_, "[" + word + "]", attr_)
             x_ += len(word) + 3
     # Height, and which way it is going.
     ax = w - sec + 1
@@ -6554,12 +6730,21 @@ def draw_cockpit(ch, co, ck, now):
     # The way there, and how you are doing on the slope.
     nx = w - 2 * sec + 2
     turn, dist, off, over = ck.nav()
-    _text(ch, co, y0, nx, "AIRPORT", HUD)
+    goal_ = ck.goal()
+    _text(ch, co, y0, nx, ("TO " if ck.dest else "") + airport_name(goal_)[:sec - 4],
+          GOLD_DIM if ck.dest else HUD)
     way = ("ahead" if abs(turn) < 0.12 else "%d %s" % (
         abs(math.degrees(turn)), "right" if turn > 0 else "left"))
     here = ck.on_runway()[0]
     _text(ch, co, y0 + 1, nx, "on the runway" if here
           else "%.1f km, %s" % (dist / 200.0, way), GOLD)
+    if y0 + 4 < h - 1:
+        wx_, wz_ = ck.wind(now)
+        side_ = wx_ * math.cos(ck.heading) - wz_ * math.sin(ck.heading)
+        _text(ch, co, y0 + 4, nx, "WIND " + wind_words(wx_, wz_)[5:] + (
+            "" if math.hypot(wx_, wz_) < 1.0 else
+            "  from the left" if side_ > 1.0 else "  from the right" if side_ < -1.0
+            else "  along you"), GOLD_DIM)
     if dist < 2500.0 and y0 + 3 < h - 1 and not here:
         room = max(9, sec - 12) | 1
         mid_ = room // 2
@@ -6572,8 +6757,8 @@ def draw_cockpit(ch, co, ck, now):
             _text(ch, co, y_gauge, nx, label + " " + "".join(bar),
                   ROU_GREEN if at == mid_ else GOLD_DIM)
     # The keys, along the foot, in plain letters.
-    keys = ("s nose up  w down  a d wings  + - power  f flaps  p autopilot  r radio  "
-            "b brakes  x hand it back")
+    keys = ("s nose up  w down  a d wings  + - power  g gear  f flaps  p autopilot  "
+            "r radio  b brakes  x hand back")
     _text(ch, co, h - 1, max(0, cx - len(keys) // 2), keys[:w], CONCRETE)
     # What it is shouting, out where you are looking.
     if warn and int(now * 4.0) % 2:
@@ -6675,6 +6860,8 @@ def render_gate(width, height, now, flight):
     board = [("DEPARTURES", "", GOLD),
              ("", "", 0),
              (FLIGHT_NO + "  ASCII CITY BY NIGHT", "BOARDING", ROU_GREEN),
+             ("AC 102  " + airport_name(flight.get("dest") or flight["home"])[:22],
+              "SEE DESK", GOLD),
              ("AC 404  NOT FOUND", "CANCELLED", ROU_RED),
              ("AC 777  JACKPOT", "DELAYED", GOLD_DIM),
              ("AC 200  OK", "GATE 2", HUD),
@@ -6704,7 +6891,7 @@ def render_gate(width, height, now, flight):
           "-- enter: $%d, a window seat, once round the town  -  x back out --"
           % FLIGHT_FARE, GOLD_DIM)
     _text(ch, co, height - 2, max(1, width // 2 - 32),
-          "-- c: $%d, the captain's sick, and the keys are on the desk --"
+          "-- c: $%d, the captain of AC 102 is sick, and the keys are on the desk --"
           % PILOT_FARE, GOLD)
     return ch, co
 
@@ -6848,7 +7035,7 @@ def draw_airport(ch, co, v, walls, home, now, wet):
     # The name over the terminal's front.
     pr = v.project((ci - 22) * CELL, 14.5, cj * CELL)
     if pr is not None and pr[2] < 160.0:
-        word = AIRPORT_NAME if pr[2] < 90.0 else "AIRPORT"
+        word = airport_name((ci, cj)) if pr[2] < 90.0 else "AIRPORT"
         for k, c in enumerate(word):
             put_cell(ch, co, v, walls, int(round(pr[0])) - len(word) // 2 + k,
                      int(round(pr[1])), pr[2] - 0.2, c, NEON[2][0])
@@ -23156,7 +23343,8 @@ def main(stdscr):
                                 home_ = zone_home("airport", int(cam_x // CELL),
                                                   int(cam_z // CELL))
                                 flight = {"phase": "pilot", "home": home_,
-                                          "ck": Cockpit(home_, now), "last": now}
+                                          "ck": Cockpit(home_, now, flight_plan(
+                                              home_, int(now))), "last": now}
                             reading = False
                             poke = None
                             ledger["jumps"] += 1
@@ -23223,7 +23411,8 @@ def main(stdscr):
                     elif key in (ord("c"), ord("C")):
                         if wallet.take(PILOT_FARE):
                             flight = dict(flight, phase="pilot", last=now,
-                                          ck=Cockpit(flight["home"], now))
+                                          ck=Cockpit(flight["home"], now,
+                                                     flight["dest"]))
                         else:
                             note, note_at = ("the keys are $%d" % PILOT_FARE), now
                 elif flight["phase"] == "pilot":
@@ -23246,7 +23435,8 @@ def main(stdscr):
                             ord("-"): "less", ord("_"): "less", ord("b"): "brake",
                             ord("B"): "brake", ord("f"): "flaps", ord("F"): "flaps",
                             ord("p"): "autopilot", ord("P"): "autopilot",
-                            ord("r"): "radio", ord("R"): "radio"}.get(key, ""), now)
+                            ord("r"): "radio", ord("R"): "radio", ord("g"): "gear",
+                            ord("G"): "gear"}.get(key, ""), now)
                 else:
                     if key in (curses.KEY_LEFT, ord("a")):
                         flight["want"] = max(-1.2, flight["want"] - 0.3)
@@ -23727,7 +23917,8 @@ def main(stdscr):
         if venue is not None and hurry_ and not same_venue(venue, was_):
             venue = None
         if venue is not None and venue[0] == "gate":
-            flight = {"phase": "gate", "home": venue[1]["home"]}
+            flight = {"phase": "gate", "home": venue[1]["home"],
+                      "dest": flight_plan(venue[1]["home"], int(now))}
             fwd = side = spin = 0.0
             autopilot = False
             venue = None
