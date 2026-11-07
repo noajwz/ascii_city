@@ -1109,7 +1109,8 @@ window seat on the right, once round the town, about 80 s:
 `8` in the menu, free, straight onto the runway. It is not on rails: `step()` is thrust against drag on
 the square of the speed, a climb costs speed, a bank turns you (`PILOT_TURN`), and under `PILOT_STALL`
 it sinks and the nose drops. **Curses sees no key go up, so the controls are the kind that stay put**:
-`w`/`s` set where the nose is held, like a trim wheel, `+`/`-` the throttle, and a wing stays down only
+`s`/`w` set where the nose is held, like a trim wheel - the way a stick works, back for up, as
+the owner asked - `+`/`-` the throttle, and a wing stays down only
 as long as the key keeps repeating (`PILOT_GRACE`) and comes back level by itself. `b` brakes, `x` hands
 it back. Touchdown is graded on sink rate (`PILOT_GRADES`), and pays; a tilted wing, too hard, off a
 runway or into a building is a wreck, then you wake up at the terminal. Any airport will do
