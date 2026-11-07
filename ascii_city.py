@@ -6003,7 +6003,7 @@ class Cockpit:
         self.throttle = 0.0
         self.brake_until = 0.0
         self.state = "ground"           # ground, air, landed, crashed
-        self.said = "brakes off: + for the throttle, w to lift the nose"
+        self.said = "brakes off: + for the throttle, s to lift the nose"
         self.grade = None
         self.pay = 0
         self.ended = None
@@ -6322,7 +6322,7 @@ def draw_cockpit(ch, co, ck, now):
             _text(ch, co, y_gauge, nx, label + " " + "".join(bar),
                   ROU_GREEN if at == mid_ else GOLD_DIM)
     # The keys, along the foot, in plain letters.
-    keys = "w s nose  a d wings  + - throttle  b brakes  x hand it back"
+    keys = "s nose up  w down  a d wings  + - throttle  b brakes  x hand it back"
     _text(ch, co, h - 1, max(0, cx - len(keys) // 2), keys[:w], CONCRETE)
     # What it is shouting, out where you are looking.
     if warn and int(now * 4.0) % 2:
@@ -22967,10 +22967,11 @@ def main(stdscr):
                         note, note_at = "the captain takes it from here", now
                         flight = None
                     else:
+                        # A stick: back on it, s or the down arrow, is the nose up.
                         flight["ck"].key({
-                            curses.KEY_UP: "up", ord("w"): "up", ord("W"): "up",
-                            curses.KEY_DOWN: "down", ord("s"): "down",
-                            ord("S"): "down", curses.KEY_LEFT: "left",
+                            curses.KEY_UP: "down", ord("w"): "down", ord("W"): "down",
+                            curses.KEY_DOWN: "up", ord("s"): "up",
+                            ord("S"): "up", curses.KEY_LEFT: "left",
                             ord("a"): "left", ord("A"): "left",
                             curses.KEY_RIGHT: "right", ord("d"): "right",
                             ord("D"): "right", ord("+"): "more", ord("="): "more",

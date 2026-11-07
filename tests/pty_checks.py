@@ -312,8 +312,8 @@ def cases(run, report):
     for ck_size in ((110, 34), (300, 90)):
         ok &= report("flying the plane, %dx%d" % ck_size, *run(
             [(b"`", .5), (b"8", 1.0)] + [(b"+", .1)] * 10 + [(b"", 5.0)]
-            + [(b"w", .1)] * 4 + [(b"", 3.0), (b"d", .1), (b"d", .1), (b"d", .1),
-                                  (b"", 2.0), (b"a", .1), (b"s", .1), (b"-", .1),
+            + [(b"s", .1)] * 4 + [(b"", 3.0), (b"d", .1), (b"d", .1), (b"d", .1),
+                                  (b"", 2.0), (b"a", .1), (b"w", .1), (b"-", .1),
                                   (b"", 1.0), (b"x", .8), (b"w", .3)],
             cols=ck_size[0], rows=ck_size[1]))
     ok &= report("the desk: the keys, and straight into a wall", *run(
