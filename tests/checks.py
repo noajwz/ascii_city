@@ -6265,7 +6265,7 @@ for c_ in pk_all:
 check("the cockpit draws at every size, in every state", True)
 pk_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, pk_all[1])[0])
 check("with what you need on it", "AIRSPEED" in pk_t and "ALTITUDE" in pk_t
-      and ac.airport_name(pk_home)[:12] in pk_t and "x hand back" in pk_t)
+      and ac.airport_name(pk_home)[:12] in pk_t and "x out" in pk_t)
 pk_big = "\n".join("".join(r_) for r_ in ac.render_cockpit(300, 90, 2.0, pk_all[1])[0])
 check("big, the figures in block letters", "##" in pk_big and "AIRSPEED" in pk_big)
 pk_w_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, pk_w)[0])
@@ -6405,6 +6405,8 @@ def fp_fly(home_, seed_, t0_, hand_gear_=True):
                 c_.key("gear", t_)
             elif c_.leg == "final" and c_.gear_set < 0.5:
                 c_.key("gear", t_)
+        if c_.state == "air" and not c_.ap and c_.leg == "final":
+            c_.bank = c_.commands()[0]      # it puts the wings on the director
         if c_.state == "landed":
             c_.key("brake", t_)
         c_.step(1.0 / 30.0, t_)
@@ -6546,6 +6548,225 @@ wd_p = ac.render_cockpit(110, 34, 2.0, pk_at(alt_=100.0, v_=70.0, x_=pk_rx - 300
 wd_t = "\n".join("".join(r_) for r_ in wd_p)
 check("the panel has the wind and the gear on it",
       "WIND " in wd_t and "[GEAR DN]" in wd_t)
+
+# --- the landing light, the view from outside, and the storms --------------------
+lt_c = ac.Cockpit(pk_home, 0.0)
+lt_c.key("light", 0.0)
+lt_off = not lt_c.light
+lt_c.key("light", 0.0)
+check("l is the landing light, on for the take-off and off and on again",
+      ac.Cockpit(pk_home, 0.0).light and lt_off and lt_c.light)
+check("the runway's paint, where the light finds it",
+      ac.runway_paint(pk_rx + 2.0, pk_zn - 3.0, pk_rx, pk_zn, pk_zs) is None
+      and ac.runway_paint(pk_rx + 1.0, pk_zn - 3.0, pk_rx, pk_zn, pk_zs) == "#"
+      and ac.runway_paint(pk_rx + ac.RUNWAY_W - 0.5, pk_zn - 400.0, pk_rx, pk_zn, pk_zs)
+      == "|" and ac.runway_paint(pk_rx + 7.0, pk_zn - 85.0, pk_rx, pk_zn, pk_zs) == "#")
+
+
+def lt_lit(on_, state_="landed", alt_=0.0, back_=60.0):
+    c_ = ac.Cockpit(pk_home, 0.0)
+    c_.calm, c_.state, c_.alt, c_.light = True, state_, alt_, on_
+    c_.x, c_.z, c_.heading = pk_rx, pk_zn - back_, math.pi
+    v_ = ac.View(c_.x, c_.z, c_.heading, 190, 50, eye=c_.alt + ac.FLIGHT_EYE)
+    v_.horizon = 18
+    ch_ = [[" "] * 190 for _ in range(50)]
+    co_ = [[0] * 190 for _ in range(50)]
+    walls_ = ([None] * 190, [0] * 190, [0] * 190, [0] * 190, [[] for _ in range(190)])
+    ac.draw_landing_light(ch_, co_, v_, walls_, c_, 1.0, [(pk_rx, pk_zn, pk_zs)])
+    return sum(1 for r_ in ch_ for g_ in r_ if g_ != " "), "".join(
+        "".join(r_) for r_ in ch_)
+
+
+lt_on, lt_text = lt_lit(True)
+check("on the runway it lights up the paint ahead of you, and off it does not",
+      lt_on > 150 and "#" in lt_text and "|" in lt_text and lt_lit(False)[0] == 0,
+      str(lt_on))
+check("high up it reaches nothing", lt_lit(True, "air", 135.0)[0] == 0)
+ov_c = pk_at(alt_=100.0, v_=70.0, x_=pk_rx - 3000.0)
+ov_c.key("view", 0.0)
+check("v is the view from outside, and back", ov_c.outside)
+ov_real = ac.ROU_RED, ac.ROU_GREEN, ac.render_street
+ac.ROU_RED, ac.ROU_GREEN = 991, 992
+
+
+def ov_blank(v_, now_):
+    """No town: only the jet, so the town's own red lights are not in the way."""
+    v_.walls = ([None] * v_.width, [v_.height] * v_.width, [v_.height] * v_.width,
+                [v_.horizon] * v_.width, [[] for _ in range(v_.width)])
+    return ([[" "] * v_.width for _ in range(v_.height)],
+            [[0] * v_.width for _ in range(v_.height)], 0.0)
+
+
+ac.render_street = ov_blank
+
+
+def ov_tips(bank_):
+    c_ = pk_at(alt_=100.0, v_=70.0, x_=pk_rx - 3000.0)
+    c_.outside, c_.bank = True, bank_
+    co_ = ac.render_cockpit(190, 50, 3.0, c_)[1]  # the beacon and the strobes off
+    # Above the panel's words along the foot, which are lit the same colours.
+    at_ = {a_: (x_, y_) for y_, r_ in enumerate(co_[:46]) for x_, a_ in enumerate(r_)
+           if a_ in (991, 992)}
+    return at_.get(991), at_.get(992)
+
+
+ov_l, ov_r = ov_tips(0.0)
+ov_bl, ov_br = ov_tips(0.45)
+ac.ROU_RED, ac.ROU_GREEN, ac.render_street = ov_real
+check("from behind: red on the left wing, green on the right, level",
+      ov_l is not None and ov_r is not None and ov_l[0] < 95 < ov_r[0]
+      and abs(ov_l[1] - ov_r[1]) <= 1, str((ov_l, ov_r)))
+check("and banked right the right wing goes down", ov_bl is not None
+      and ov_br is not None and ov_br[1] > ov_bl[1] + 2, str((ov_bl, ov_br)))
+ov_c.key("view", 0.0)
+check("v again, and you are back in the seat", not ov_c.outside)
+ov_s = [ac.Cockpit(pk_home, 0.0), pk_at(alt_=120.0, v_=70.0)]
+ov_s[0].outside = ov_s[1].outside = True
+ov_x = pk_at(alt_=0.01, v_=45.0, pitch_=-0.3)
+ov_x.outside = True
+ov_x.step(1.0 / 30.0, 1.0)
+ov_s.append(ov_x)
+for c_ in ov_s:
+    for w_, h_ in ((80, 24), (49, 11), (30, 10), (110, 34), (300, 90)):
+        ac.render_cockpit(w_, h_, 2.0, c_)
+        ac.render_cockpit(w_, h_, 2.3, c_)
+ov_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, ov_s[1])[0])
+check("it draws at every size, crashed or not, with what you need along the foot",
+      " kt" in ov_t and " ft" in ov_t and "v cockpit" in ov_t
+      and ov_x.said[:20] in "\n".join("".join(r_) for r_ in ac.render_cockpit(
+          110, 34, 2.0, ov_x)[0]))
+# The storms.
+st_all = [c_ for k_ in range(12) for c_ in ac.air_cells(0.0, 0.0, k_ * ac.NIGHT_LENGTH
+                                                         + 200.0, 30000.0)]
+check("thunderstorms out in the country, a few about each night, of a size",
+      len(st_all) > 20 and all(650.0 <= c_[2] <= 1500.0 for c_ in st_all)
+      and ac.air_cells(0.0, 0.0, 200.0) == ac.air_cells(0.0, 0.0, 200.0),
+      str(len(st_all)))
+st_one = ac.air_cells(0.0, 0.0, 300.0, 30000.0)[0]
+st_late = [c_ for c_ in ac.air_cells(0.0, 0.0, 330.0, 30000.0) if c_[4] == st_one[4]]
+st_wx, st_wz = ac.night_wind(0)
+st_moved = ((st_late[0][0] - st_one[0]) * st_wx + (st_late[0][1] - st_one[1]) * st_wz
+            if st_late else 0.0)
+check("drifting with the wind", st_moved > 0.0 or math.hypot(st_wx, st_wz) < 1.0,
+      str(st_moved))
+st_new = ac.air_cells(0.0, 0.0, 6.0 * ac.NIGHT_LENGTH + 1.0, 30000.0)
+check("and they build up and die away with the night, never popping in",
+      st_new and all(c_[3] < 0.05 for c_ in st_new), str(len(st_new)))
+st_real = ac.air_cells, ac.storming
+st_cell = (pk_rx - 6000.0, pk_zn, 1200.0, 1.0, 4242)
+ac.air_cells = lambda x_, z_, now_, reach_=0.0: [st_cell]
+ac.storming = lambda now_: False
+
+
+def st_at(x_, z_):
+    c_ = ac.Cockpit(pk_home, 0.0)
+    c_.state, c_.alt, c_.v, c_.throttle, c_.x, c_.z = "air", 200.0, 70.0, 0.6, x_, z_
+    return c_
+
+
+check("how far into one you are: all the way in the middle, none outside",
+      st_at(pk_rx - 6000.0, pk_zn).weather(1.0) == 1.0
+      and st_at(pk_rx - 4500.0, pk_zn).weather(1.0) == 0.0
+      and 0.0 < st_at(pk_rx - 6000.0 + 1000.0, pk_zn).weather(1.0) < 1.0)
+st_c = st_at(pk_rx - 6000.0, pk_zn - 300.0)
+st_c.calm = True
+check("not for the checks that want still air", st_c.weather(1.0) == 0.0)
+ac.storming = lambda now_: True
+check("and the storm over the whole town is a gentler one",
+      st_at(pk_rx + 9000.0, pk_zn).weather(1.0) == ac.PILOT_TOWN_STORM)
+ac.storming = lambda now_: False
+st_vy = []
+for calm_ in (True, False):
+    c_ = st_at(pk_rx - 6000.0, pk_zn - 900.0)
+    c_.calm, c_.heading = calm_, 0.0
+    vs_ = []
+    for n_ in range(300):
+        c_.step(1.0 / 30.0, n_ / 30.0)
+        vs_.append(c_.vy)
+    st_vy.append(max(vs_) - min(vs_))
+check("in one it throws you about; in still air nothing does",
+      st_vy[0] < 0.2 and st_vy[1] > 2.0, str(st_vy))
+st_c = st_at(pk_rx - 6000.0, pk_zn - 300.0)
+st_c.key("radio", 0.0)
+st_c.step(1.0 / 30.0, 1.0)
+check("the tower tells you what you have flown into",
+      any("thunderstorm" in t_ for _, _, t_ in st_c.radio))
+st_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, st_c)[0])
+check("and so does the panel", "WX in the storm" in st_t)
+st_p = st_at(pk_rx - 6000.0, pk_zn - 4000.0)
+st_p.heading = 0.0
+st_words = ac.wx_words(st_p, 1.0)[0]
+check("and ahead of you, how far off", st_words.startswith("WX storm"), st_words)
+# Round one, and down through one.
+st_got = []
+st_far = max((ac.flight_plan(pk_home, s_) for s_ in range(40)),
+             key=lambda h_: math.hypot(ac.runway(*h_)[0] - pk_rx,
+                                       ac.runway(*h_)[1] - pk_zn))
+for n_, (sx_, sz_) in enumerate(((-3000.0, -2200.0), (-2600.0, -2400.0),
+                                 (-3400.0, -1800.0), (2800.0, -2600.0))):
+    d_ = st_far
+    drx_, dzn_, dzs_ = ac.runway(*d_)
+    c_ = ac.Cockpit(pk_home, 0.0, d_)
+    c_.state, c_.alt, c_.v, c_.throttle, c_.gear = "air", 135.0, 70.0, 0.6, 1.0
+    c_.x, c_.z = pk_rx + sx_ * 0.1, pk_zn + 1500.0
+    mx_ = c_.x + (drx_ - c_.x) * 0.4
+    mz_ = c_.z + ((dzn_ + dzs_) * 0.5 - c_.z) * 0.4
+    st_cell = (mx_, mz_, 900.0 + 150 * n_, 1.0, 5000 + n_)
+    ac.air_cells = lambda x_, z_, now_, reach_=0.0, cell_=st_cell: [cell_]
+    said_ = []
+    call_ = c_.call
+    c_.call = lambda now_, who_, text_, delay_=0.0, c2_=call_, s_=said_: (
+        s_.append(text_), c2_(now_, who_, text_, delay_))
+    c_.key("radio", 0.0)
+    c_.key("autopilot", 0.0)
+    t_, worst_ = 0.0, 0.0
+    while c_.state == "air" and t_ < 900.0:
+        if not c_.ap and c_.leg == "final":
+            c_.bank = c_.commands()[0]
+        c_.step(1.0 / 30.0, t_)
+        t_ += 1.0 / 30.0
+        worst_ = max(worst_, c_.weather(t_))
+    st_got.append((c_.state, c_.grade, round(worst_, 2),
+                   any("storm on your way" in w_ for w_ in said_)))
+check("a storm across the way: the tower warns you and the autopilot goes round it",
+      all(s_ == "landed" and w_ < 0.05 and told_ for s_, _, w_, told_ in st_got),
+      str(st_got))
+st_down = []
+for n_ in range(4):
+    st_cell = (pk_rx + 200.0 * n_, (pk_zn + pk_zs) * 0.5, 2000.0, 1.0, 6000 + n_)
+    ac.air_cells = lambda x_, z_, now_, reach_=0.0, cell_=st_cell: [cell_]
+    c_ = ac.Cockpit(pk_home, 0.0)
+    c_.state, c_.alt, c_.v, c_.throttle = "air", 135.0, 70.0, 0.6
+    c_.x, c_.z, c_.heading = pk_rx + 3000.0 * (n_ % 2 * 2 - 1), pk_zn + 2500.0, 3.0
+    c_.key("autopilot", 0.0)
+    t_ = 0.0
+    while c_.state == "air" and t_ < 500.0:
+        if not c_.ap and c_.leg == "final":
+            c_.bank = c_.commands()[0]
+        c_.step(1.0 / 30.0, t_)
+        t_ += 1.0 / 30.0
+    st_down.append(c_.grade if c_.state == "landed" else c_.state)
+check("one sat on the airport, with no way round: down through it, on the director",
+      all(g_ in ("BUTTER", "NICE", "HARD") for g_ in st_down), str(st_down))
+# Seen from outside it, and from in it.
+st_cell = (pk_rx - 6000.0, pk_zn, 1200.0, 1.0, 4242)
+ac.air_cells = lambda x_, z_, now_, reach_=0.0: [st_cell]
+st_real_c = ac.RAIN_FAR, ac.STAR
+ac.RAIN_FAR = 993
+st_c = st_at(pk_rx - 6000.0, pk_zn - 3500.0)
+st_c.heading = 0.0
+st_co = ac.render_cockpit(190, 50, 1.0, st_c)[1]
+check("from outside: a shaft of rain under it",
+      sum(1 for r_ in st_co for a_ in r_ if a_ == 993) > 20)
+ac.RAIN_FAR = st_real_c[0]
+st_c = st_at(pk_rx - 6000.0, pk_zn)
+st_ch = ac.render_cockpit(190, 50, 1.0, st_c)[0]
+st_clear = st_at(pk_rx + 9000.0, pk_zn)
+st_ch2 = ac.render_cockpit(190, 50, 1.0, st_clear)[0]
+check("from in it: rain all over the glass, not a star",
+      sum(1 for r_ in st_ch[:20] for g_ in r_ if g_ in "/\\|-")
+      > sum(1 for r_ in st_ch2[:20] for g_ in r_ if g_ in "/\\|-") + 40)
+ac.air_cells, ac.storming = st_real
 
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED

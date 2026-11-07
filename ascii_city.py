@@ -3478,6 +3478,7 @@ class View:
         self.walls = None       # what draw_walls() made of this frame
         self.ticker_anchor = {}  # the exchange's walls: where each one's middle is
         self.roof_edge = None   # the parapet's top row per column, on an alley roof
+        self.air = False        # seen from the plane: its own storms, not the far one
 
     def ray(self, sx):
         cam = 2.0 * sx / (self.width - 1) - 1.0
@@ -5951,6 +5952,8 @@ PILOT_MAX_PITCH = 0.31
 PILOT_PITCH_STEP = 0.035  # a press of w or s
 PILOT_GRACE = 0.3      # seconds a key keeps a wing down: curses sees no key go up
 PILOT_GLIDE = 0.08     # the slope to come down, under 5 degrees: not the passenger's 8
+PILOT_KEYS = ("s nose up  w down  a d wings  + - power  g gear  f flaps  l light  "
+              "p auto  r radio  v outside  b brakes  x out")
 PILOT_SHEAR = 0.32     # how far the picture tilts, rows a column, at a bank of 1
 PILOT_LOOK = 3.0       # seconds ahead the terrain warning looks
 PILOT_LIGHTS = 9000.0  # how far off an airport's lights and its beacon are seen
@@ -6023,6 +6026,16 @@ def air_wind(now):
     return math.sin(toward) * speed, math.cos(toward) * speed
 
 
+def night_wind(k):
+    """Night k's own wind, before it wanders: what the storms drift on. Drifting
+    them on the wind of the moment times the time since dusk sent one backwards
+    whenever the gusts eased."""
+    m = _mix(k, 3, 5905)
+    toward = m % 6283 / 1000.0
+    speed = (m >> 13) % 100 / 99.0 * PILOT_WIND_MOST
+    return math.sin(toward) * speed, math.cos(toward) * speed
+
+
 def wind_words(wx, wz):
     """The wind the way a tower says it: where it is from, and knots."""
     speed = math.hypot(wx, wz)
@@ -6031,6 +6044,72 @@ def wind_words(wx, wz):
     frm = math.degrees(math.atan2(-wx, -wz)) % 360.0
     frm = int(round(frm / 10.0)) * 10 % 360 or 360
     return "wind %03d at %d" % (frm, int(round(speed * 2.5)))
+
+
+PILOT_LIGHT_REACH = 520.0  # how far down the way the landing light reaches
+PILOT_LIGHT_WIDE = 0.16    # its half-width, as a slope
+PILOT_LIGHT_DIP = 0.09     # how far under the nose it is aimed
+PILOT_LIGHT_TALL = 0.11    # and its half-height, the same way
+PILOT_SPAN = 12.0          # half the jet's wingspan, seen from outside
+CHASE_BACK = 62.0          # the outside view: how far behind it the camera is
+CHASE_UP = 13.0            # and above it
+AIR_CELL_TILE = 7000.0     # at most one thunderstorm to a square this size
+AIR_CELL_ODDS = 3          # one square in this many having one, each night
+AIR_CELL_BASE = 260.0      # the cloud's underside: under it, a shaft of rain
+AIR_CELL_TOP = 900.0       # and how high it towers
+AIR_CELL_SEEN = 16000.0    # how far off one shows
+AIR_STRIKE_EVERY = 3.2     # seconds a slot, for a storm's own lightning
+PILOT_BUMP = 1.0           # how hard a storm throws you about
+PILOT_CLEAR = 95.0         # climbing out, straight ahead until over the tallest roof
+PILOT_TOWN_STORM = 0.45    # and the one over the whole town, which you cannot go round
+
+
+def air_cells(x, z, now, reach=AIR_CELL_SEEN):
+    """The thunderstorms about, as (x, z, radius, power, id). Each night puts one
+    in some of the squares of a coarse grid, and they drift with the night's wind;
+    they build over the first minute and die away over the last, so none ever
+    pops in or out. Stateless, like everything else: a function of the clock."""
+    k = int((now + _night_skip) // NIGHT_LENGTH)
+    t = (now + _night_skip) - k * NIGHT_LENGTH
+    fade = max(0.0, min(1.0, t / 60.0, (NIGHT_LENGTH - t) / 60.0))
+    if fade <= 0.0:
+        return []
+    wx, wz = night_wind(k)
+    gx, gz = x - wx * t * 0.5, z - wz * t * 0.5     # where the air was
+    n = int(reach // AIR_CELL_TILE) + 2
+    a0, b0 = int(gx // AIR_CELL_TILE), int(gz // AIR_CELL_TILE)
+    out = []
+    for a in range(a0 - n, a0 + n + 1):
+        for b in range(b0 - n, b0 + n + 1):
+            m = _mix(a, b * 977 + k, 6001)
+            if m % AIR_CELL_ODDS:
+                continue
+            cx = (a + 0.15 + ((m >> 4) & 255) / 255.0 * 0.7) * AIR_CELL_TILE
+            cz = (b + 0.15 + ((m >> 12) & 255) / 255.0 * 0.7) * AIR_CELL_TILE
+            cx, cz = cx + wx * t * 0.5, cz + wz * t * 0.5
+            if (cx - x) ** 2 + (cz - z) ** 2 > (reach + 1500.0) ** 2:
+                continue
+            r = 650.0 + ((m >> 20) & 255) / 255.0 * 850.0
+            out.append((cx, cz, r, fade, (a * 7919 + b) * 31 + k))
+    return out
+
+
+def air_strike(cell, now):
+    """A storm's own lightning, as (brightness, x, z) or None: a strike in most
+    of its slots, somewhere inside it, the same flicker as the street's."""
+    cx, cz, r, power, cid = cell
+    k = int(now // AIR_STRIKE_EVERY)
+    m = _mix(cid, k, 6013)
+    if m % 4 == 0:
+        return None
+    at = k * AIR_STRIKE_EVERY + ((m >> 4) & 255) / 255.0 * (AIR_STRIKE_EVERY - 1.7)
+    b = _strike_flash(now - at, bool((m >> 12) & 1))
+    if b <= 0.0:
+        return None
+    a = ((m >> 13) & 1023) / 1023.0 * math.tau
+    d = ((m >> 23) & 255) / 255.0 * r * 0.7
+    power *= 0.6 + ((m >> 2) & 3) / 7.5
+    return b * power, cx + math.sin(a) * d, cz + math.cos(a) * d
 
 
 def nearest_airport(x, z):
@@ -6091,6 +6170,14 @@ class Cockpit:
         self.gear, self.gear_set = 1.0, 1.0  # 1 is down: up and down take a while
         self.calm = False               # no wind, for the checks that want none
         self.belly = False
+        self.light = True               # the landing light, on for the take-off
+        self.outside = False            # v: the view from behind it
+        self.cam = None                 # the outside camera: yaw, height, when
+        self.wx_told = set()            # the storms the tower has warned you of
+        self.wx_side = {}               # and which way round each it is taking you
+        self.in_storm = False
+        self._wx_at = self._cells_at = None
+        self.climb_out = None           # the runway's way, until high enough to turn
         self.enroute = False
         self.end, self.side, self.went_round = None, 1.0, False
 
@@ -6100,7 +6187,13 @@ class Cockpit:
         if what in ("up", "down", "left", "right") and self.ap:
             self.ap = False             # any hand on the controls takes it back
             self.said = "autopilot off"
-        if what == "gear":
+        if what == "light":
+            self.light = not self.light
+            self.said = "landing light on" if self.light else "landing light off"
+        elif what == "view":
+            self.outside, self.cam = not self.outside, None
+            self.said = "the view from outside" if self.outside else "back in the seat"
+        elif what == "gear":
             if self.state != "air":
                 self.said = "the wheels stay down on the ground"
             else:
@@ -6134,8 +6227,71 @@ class Cockpit:
             self.brake_until = now + PILOT_GRACE
 
     def wind(self, now):
-        """The wind where you are, unless the check asked for none."""
-        return (0.0, 0.0) if self.calm else air_wind(now)
+        """The wind where you are, unless the check asked for none: the night's,
+        and in a storm, gusting round all over the place."""
+        if self.calm:
+            return 0.0, 0.0
+        wx, wz = air_wind(now)
+        rough = self.weather(now)
+        if rough > 0.0:
+            wx += rough * 5.0 * math.sin(now * 0.9 + 1.3)
+            wz += rough * 5.0 * math.cos(now * 0.7)
+        return wx, wz
+
+    def cells(self, now):
+        """The thunderstorms about, once a frame."""
+        if self._cells_at != (now, self.x, self.z):
+            self._cells_at = (now, self.x, self.z)
+            self._cells = [] if self.calm else air_cells(self.x, self.z, now)
+        return self._cells
+
+    def weather(self, now):
+        """How far into a storm you are, 0 out of it to 1 in the thick of it: one
+        of the storms about, or the one over the whole town."""
+        if self.calm:
+            return 0.0
+        if self._wx_at != (now, self.x, self.z):
+            inside = 0.0
+            for cx, cz, r, power, cid in self.cells(now):
+                d = math.hypot(cx - self.x, cz - self.z)
+                if d < r:
+                    inside = max(inside, min(1.0, (r - d) / (0.4 * r)) * power)
+            if storming(now):
+                inside = max(inside, PILOT_TOWN_STORM)
+            self._wx_at, self._wx = (now, self.x, self.z), inside
+        return self._wx
+
+    def _round_weather(self, heading, tx, tz):
+        """The guide's way round a storm sat across it: off at a tangent, always
+        the same side of the same storm, until the way is clear. Not one you are
+        in already, or one sat on where you are going - there is no round those."""
+        dist = math.hypot(tx - self.x, tz - self.z)
+        if dist < 1.0:
+            return heading, None
+        ux, uz = (tx - self.x) / dist, (tz - self.z) / dist
+        best = None
+        for cx, cz, r, power, cid in self.cells(self.clock):
+            if power < 0.3:
+                continue
+            d = math.hypot(cx - self.x, cz - self.z)
+            if d < r + 150.0 or math.hypot(cx - tx, cz - tz) < r + 300.0:
+                continue
+            t = (cx - self.x) * ux + (cz - self.z) * uz
+            if t <= 0.0 or t > dist:
+                continue
+            if abs((cx - self.x) * uz - (cz - self.z) * ux) > r + 350.0:
+                continue
+            if best is None or t < best[0]:
+                best = (t, cx, cz, r, d, cid)
+        if best is None:
+            return heading, None
+        _, cx, cz, r, d, cid = best
+        at = math.atan2(cx - self.x, cz - self.z)
+        half = math.asin(min(1.0, (r + 400.0) / d))
+        if cid not in self.wx_side:
+            self.wx_side[cid] = (1.0 if abs(_wrap_pi(at + half - heading))
+                                 < abs(_wrap_pi(at - half - heading)) else -1.0)
+        return at + self.wx_side[cid] * half, cid
 
     def stall(self):
         """Under this it stops flying: flaps take it down."""
@@ -6184,12 +6340,15 @@ class Cockpit:
                 lead = max(150.0, min(600.0, along * 0.4))
                 tx, tz = rx, end + out * max(-200.0, along - lead)
         mode = {"entry": "around", "fix": "intercept", "final": "final"}[self.leg]
+        heading, wx = math.atan2(tx - self.x, tz - self.z), None
+        if mode != "final":
+            heading, wx = self._round_weather(heading, tx, tz)
         high = PILOT_CRUISE
         fast = PILOT_CRUISE_SPEED
         if mode == "final":
             high = min(PILOT_CRUISE, (along + 30.0) * PILOT_GLIDE + 2.0)
             fast = PILOT_APPROACH
-        return {"mode": mode, "heading": math.atan2(tx - self.x, tz - self.z),
+        return {"mode": mode, "heading": heading, "wx": wx,
                 "alt": high, "speed": fast, "runway": rwy, "along": along,
                 "lat": lat, "course": course, "home": self.target,
                 "dist": math.hypot(rx - self.x, (zn + zs) * 0.5 - self.z)}
@@ -6214,6 +6373,11 @@ class Cockpit:
     def commands(self, g=None):
         """What the flight director shows: the bank and the nose to fly the guide."""
         g = g or self.guide()
+        if self.climb_out is not None:
+            # Off the runway: straight out along it, up the corridor kept clear for
+            # the approach, and no turning until clear of the tallest roof - a turn
+            # low down out of it is a turn into a tower.
+            g = dict(g, heading=self.climb_out, alt=PILOT_CLEAR + 20.0, mode="around")
         # The guide's way is a track over the ground: to make it in a wind, the
         # nose has to be into it (sin of the angle times speed against the wind
         # across the track).
@@ -6222,7 +6386,10 @@ class Cockpit:
         lay = max(-0.6, min(0.6, across / max(self.v, 25.0)))
         nose_to = g["heading"] - math.asin(lay)
         err = (nose_to - self.heading + math.pi) % math.tau - math.pi
-        bank = 0.0 if self.alt < 12.0 else max(-0.5, min(0.5, err * 1.4))
+        # Low down only a touch of bank, to hold the line in a gust: never enough
+        # to put a wing on the ground.
+        most = 0.1 if self.alt < 12.0 else 0.5
+        bank = max(-most, min(most, err * 1.4))
         if g["mode"] == "final":
             nose = max(-0.14, min(0.08, (g["alt"] - self.alt) * 0.03 - 0.08))
         else:
@@ -6258,6 +6425,9 @@ class Cockpit:
         way = "right" if err > 0.0 else "left"
         hdg = int(round(math.degrees(g["heading"]) % 360.0 / 10.0)) * 10 % 360 or 360
         feet = format(int(round(g["alt"] * 25.0 / 500.0)) * 500, ",")
+        if self.climb_out is not None:
+            return ("climb",), "AC 101, climb straight ahead to %s, then on course." % (
+                format(int(PILOT_CLEAR * 25.0 / 500.0 + 1.0) * 500, ","))
         if g["dist"] > PILOT_ENROUTE:
             return ("enroute", hdg), (
                 "AC 101, proceed direct %s, heading %03d, maintain %s."
@@ -6317,9 +6487,30 @@ class Cockpit:
     def _radio_tick(self, now):
         """Once you are on the radio, the tower keeps you going: a new instruction
         when there is one, and the same again now and then if you have not done it."""
-        if not self.radio_on or self.state != "air" or now - self.atc_at < 7.0:
+        if not self.radio_on or self.state != "air":
             return
+        inside = self.weather(now)
+        if inside > 0.25 and not self.in_storm:
+            self.in_storm = True
+            self.call(now, "TWR", "AC 101, that is a thunderstorm you are in. "
+                      "Expect a rough ride, and keep the speed up.")
+        elif inside < 0.05 and self.in_storm:
+            self.in_storm = False
+            self.call(now, "TWR", "AC 101, you are out of the weather.")
         g = self.guide()
+        fresh = g["wx"] is not None and g["wx"] not in self.wx_told
+        if not fresh and now - self.atc_at < 7.0:
+            return                          # a storm in the way will not wait
+        if fresh:
+            self.wx_told.add(g["wx"])
+            for cx, cz, r, power, cid in self.cells(now):
+                if cid == g["wx"]:
+                    self.call(now, "TWR", "AC 101, there is a storm on your way, "
+                              "%.0f km off. I will take you round it." % (
+                                  max(0.0, math.hypot(cx - self.x, cz - self.z) - r)
+                                  / 200.0))
+                    self.atc_key, now = None, now + 2.0
+            
         key, line = self.atc_line(g)
         if key != self.atc_key or now - self.atc_at > 25.0:
             if self.atc_key and self.atc_key[0] == "enroute" and key[0] != "enroute":
@@ -6387,7 +6578,18 @@ class Cockpit:
             self.heading += PILOT_TURN * math.tan(self.bank) / max(self.v, 25.0) * dt
             self.vy = (self.v * math.sin(self.pitch)
                        - max(0.0, self.stall() - self.v) * 1.2)
+            rough = self.weather(now) * PILOT_BUMP
+            if rough > 0.0:
+                # A storm: up and down draughts, and a wing knocked now and then.
+                j = _mix(int(now * 2.0), self.seed, 6031)
+                self.vy += rough * (1.1 * math.sin(now * 1.7 + self.seed)
+                                    + 0.7 * math.sin(now * 4.3)
+                                    + 0.9 * ((j & 255) / 127.5 - 1.0))
+                self.bank += rough * (0.2 * math.sin(now * 2.6 + 1.0)
+                                      + 0.35 * (((j >> 8) & 255) / 127.5 - 1.0)) * dt
             self.alt += self.vy * dt
+            if self.climb_out is not None and self.alt > PILOT_CLEAR:
+                self.climb_out = None
             flat = self.v * math.cos(self.pitch) * dt
         else:
             if self.v > 2.0 or self.throttle > 0.0:
@@ -6405,6 +6607,7 @@ class Cockpit:
                     and self.pitch_set >= 0.05):
                 self.state, self.said = "air", "positive climb"
                 self.alt = 0.2
+                self.climb_out = math.pi if math.cos(self.heading) < 0.0 else 0.0
         self.x += math.sin(self.heading) * flat
         self.z += math.cos(self.heading) * flat
         if self.state == "air":
@@ -6656,16 +6859,20 @@ def draw_cockpit(ch, co, ck, now):
         _text(ch, co, y_ + 1, 2, "NOSE %+3d  BANK %+3d" % (
             math.degrees(ck.pitch), math.degrees(ck.bank)), HUD)
     if y_ + 2 < h - 1:
-        # What is switched on, lit when it is.
-        x_ = 2
+        # What is switched on, lit when it is, on as many rows as it takes.
+        x_, row_ = 2, y_ + 2
         gear_ = ("GEAR DN" if ck.gear > 0.99 else "GEAR UP" if ck.gear < 0.01
                  else "GEAR ..")
-        for word, on in (("FLAPS %d" % ck.flaps, ck.flaps > 0), ("AP", ck.ap),
-                         ("RADIO", ck.radio_on), (gear_, ck.gear > 0.99)):
+        for word, on in ((gear_, ck.gear > 0.99), ("FLAPS %d" % ck.flaps, ck.flaps > 0),
+                         ("AP", ck.ap), ("LIGHT", ck.light), ("RADIO", ck.radio_on)):
+            if x_ + len(word) + 2 > cx - sec // 2:
+                x_, row_ = 2, row_ + 1
+            if row_ >= h - 1:
+                break
             attr_ = ROU_GREEN if on else CONCRETE
             if word == "GEAR ..":
                 attr_ = GOLD
-            _text(ch, co, y_ + 2, x_, "[" + word + "]", attr_)
+            _text(ch, co, row_, x_, "[" + word + "]", attr_)
             x_ += len(word) + 3
     # Height, and which way it is going.
     ax = w - sec + 1
@@ -6745,6 +6952,9 @@ def draw_cockpit(ch, co, ck, now):
             "" if math.hypot(wx_, wz_) < 1.0 else
             "  from the left" if side_ > 1.0 else "  from the right" if side_ < -1.0
             else "  along you"), GOLD_DIM)
+    if y0 + 5 < h - 1:
+        wx_text, wx_attr = wx_words(ck, now)
+        _text(ch, co, y0 + 5, nx, wx_text[:sec * 2 - 4], wx_attr)
     if dist < 2500.0 and y0 + 3 < h - 1 and not here:
         room = max(9, sec - 12) | 1
         mid_ = room // 2
@@ -6757,10 +6967,432 @@ def draw_cockpit(ch, co, ck, now):
             _text(ch, co, y_gauge, nx, label + " " + "".join(bar),
                   ROU_GREEN if at == mid_ else GOLD_DIM)
     # The keys, along the foot, in plain letters.
-    keys = ("s nose up  w down  a d wings  + - power  g gear  f flaps  p autopilot  "
-            "r radio  b brakes  x hand back")
+    keys = PILOT_KEYS
     _text(ch, co, h - 1, max(0, cx - len(keys) // 2), keys[:w], CONCRETE)
-    # What it is shouting, out where you are looking.
+    draw_flight_words(ch, co, ck, now, top, k)
+
+
+def draw_wreck(ch, co, ck, now):
+    """What was the windscreen: cracks from where it hit, and a word for it."""
+    h, w = len(ch), len(ch[0])
+    t = now - ck.ended
+    cx, cy = w // 2, h // 3
+    for n in range(14):
+        a = n * 2.399 + ck.seed
+        for r in range(1, min(w, h * 3)):
+            x = cx + int(math.cos(a) * r * 1.6 + math.sin(r * 0.5 + n) * 2.0)
+            y = cy + int(math.sin(a) * r * 0.5)
+            if 0 <= x < w and 0 <= y < h and _mix(n, r, 5701) % 5:
+                ch[y][x] = "/" if math.cos(a) * math.sin(a) < 0 else "\\"
+                co[y][x] = FLASH if t < 0.3 else CONCRETE
+    draw_wreck_words(ch, co, ck, now)
+
+
+def draw_wreck_words(ch, co, ck, now):
+    """CRASH, big, and what it hit."""
+    h, w = len(ch), len(ch[0])
+    cx = w // 2
+    k = big_scale(w, h)
+    word = "CRASH"
+    tw = blocks_width(word, 2 * k)
+    y0 = max(1, h // 2 - 3 * k)
+    if tw < w - 2:
+        for y in range(y0 - 1, min(h, y0 + 5 * k + 1)):
+            for x in range(max(0, cx - tw // 2 - 2), min(w, cx + tw // 2 + 3)):
+                ch[y][x], co[y][x] = " ", 0
+        _blocks(ch, co, y0, cx - tw // 2, word, ROU_RED, 2 * k, k)
+    for n, line in enumerate(bar_lines(ck.said, min(w - 10, 70))):
+        y, x = 2 + n, cx - len(line) // 2
+        if y < h:
+            for xx in range(max(0, x - 1), min(w, x + len(line) + 1)):
+                ch[y][xx], co[y][xx] = " ", 0
+            _text(ch, co, y, x, line, GOLD)
+
+
+def _plane_glyph(dx, dy):
+    """The line glyph for a stroke going dx across and dy down, cells being
+    twice as tall as they are wide."""
+    s = 2.0 * abs(dy) / max(abs(dx), 1e-6)
+    if s < 0.45:
+        return "-"
+    if s > 2.6:
+        return "|"
+    return "\\" if (dx > 0) == (dy > 0) else "/"
+
+
+def _plane_seg(marks, v, a, b, attr, glyph=None):
+    """A stroke from a to b into marks, as a stair: flat runs of - or | with the
+    slope's glyph only where it steps, which reads as a line at any angle where
+    a run of slashes reads as a hatching."""
+    pa, pb = v.project(*a), v.project(*b)
+    if pa is None or pb is None:
+        return
+    dx, dy = pb[0] - pa[0], pb[1] - pa[1]
+    s = 2.0 * abs(dy) / max(abs(dx), 1e-6)
+    n = int(max(abs(dx), abs(dy))) + 1
+    pts = [(int(round(pa[0] + dx * k / float(n))),
+            int(round(pa[1] + dy * k / float(n))),
+            pa[2] + (pb[2] - pa[2]) * k / float(n)) for k in range(n + 1)]
+    slope = "\\" if (dx > 0) == (dy > 0) else "/"
+    for k, (x, y, d) in enumerate(pts):
+        g = glyph
+        if g is None:
+            nxt = pts[min(len(pts) - 1, k + 1)]
+            if s < 0.3:
+                g = "-"
+            elif s > 3.5:
+                g = "|"
+            elif s < 2.0:
+                g = slope if nxt[1] != y else "-"
+            else:
+                g = slope if nxt[0] != x else "|"
+        marks[(x, y)] = (g, attr, d)
+
+
+def plane_frame(ck):
+    """Forward, right and up for the jet as it is flying: heading, nose and wings."""
+    h, p, b = ck.heading, ck.pitch, ck.bank
+    f = (math.sin(h) * math.cos(p), math.sin(p), math.cos(h) * math.cos(p))
+    r0 = (math.cos(h), 0.0, -math.sin(h))
+    u0 = (-math.sin(h) * math.sin(p), math.cos(p), -math.cos(h) * math.sin(p))
+    cb, sb = math.cos(b), math.sin(b)
+    # Banked right the right wing goes down, and the top leans the way of the turn.
+    r = tuple(r0[n] * cb - u0[n] * sb for n in range(3))
+    u = tuple(u0[n] * cb + r0[n] * sb for n in range(3))
+    return f, r, u
+
+
+def draw_jet(ch, co, v, walls, ck, now):
+    """The jet from behind: a dozen points, turned with the heading, the nose and
+    the wings, joined up in line glyphs, and its lights out at the ends."""
+    f, r, u = plane_frame(ck)
+    c = (ck.x, ck.alt + 1.5, ck.z)
+    s = PILOT_SPAN
+
+    def at(a, b, e):
+        return tuple(c[n] + (f[n] * a + r[n] * b + u[n] * e) * s for n in range(3))
+
+    if ck.state == "crashed":
+        # Where it came down: what is left, burning.
+        pr = v.project(ck.x, ck.alt + 1.0, ck.z)
+        if pr is not None:
+            sx, sy = int(round(pr[0])), int(round(pr[1]))
+            wide = max(3, int(s * v.fx / max(pr[2], 1.0)))
+            for n in range(wide * 3):
+                m = _mix(n, int(now * 8.0), 6041)
+                x_ = sx + (m % (2 * wide + 1)) - wide
+                y_ = sy - ((m >> 8) % max(2, wide // 2 + 2))
+                put_cell(ch, co, v, walls, x_, y_, pr[2] - 1.0, "^w*"[(m >> 16) % 3],
+                         EMBER_HOT if (m >> 18) & 1 else EMBER)
+            for n in range(wide * 2):
+                m = _mix(n, int(now * 3.0), 6043)
+                put_cell(ch, co, v, walls, sx + (m % (2 * wide + 1)) - wide + n % 3,
+                         sy - wide // 2 - 2 - (m >> 8) % (wide + 2), pr[2],
+                         "(@)"[(m >> 16) % 3], SMOKE)
+        return
+    body, light = CONCRETE, HUD
+    tip_l, tip_r = at(-0.3, -1.0, 0.04), at(-0.3, 1.0, 0.04)
+    root_l, root_r = at(0.1, -0.12, -0.03), at(0.1, 0.12, -0.03)
+    nose, tail = at(0.95, 0.0, 0.0), at(-0.9, 0.0, 0.06)
+    fin = at(-1.05, 0.0, 0.48)
+    stab_l, stab_r = at(-1.0, -0.26, 0.08), at(-1.0, 0.26, 0.08)
+    marks = {}
+
+    def mark(pt, g, attr):
+        pr = v.project(*pt)
+        if pr is not None:
+            marks[(int(round(pr[0])), int(round(pr[1])))] = (g, attr, pr[2])
+
+    _plane_seg(marks, v, nose, tail, light, "=")
+    _plane_seg(marks, v, root_l, tip_l, light)
+    _plane_seg(marks, v, root_r, tip_r, light)
+    for side in (-0.4, 0.4):
+        mark(at(0.12, side, -0.12), "o", body)
+    _plane_seg(marks, v, stab_l, stab_r, body)
+    _plane_seg(marks, v, tail, fin, body)
+    mark(at(-0.92, 0.0, 0.0), "O", light)
+    # The lights: red on the left, green on the right, a white strobe at the tail
+    # and the red beacon on the fin.
+    strobe = (now % 1.3) < 0.12
+    mark(tip_l, "*", FLASH if strobe else ROU_RED)
+    mark(tip_r, "*", FLASH if strobe else ROU_GREEN)
+    if strobe:
+        mark(tail, "*", FLASH)
+    if int(now * 1.6) % 2:
+        mark(fin, "+", ROU_RED)
+    # A black edge round it, so it stands out of the town under it.
+    for (x, y), (g, attr, d) in list(marks.items()):
+        for ex, ey in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+            if (ex, ey) not in marks and 0 <= ex < v.width and 0 <= ey < v.height \
+                    and not hidden(walls, ex, ey, d):
+                ch[ey][ex], co[ey][ex] = " ", 0
+    for (x, y), (g, attr, d) in marks.items():
+        put_cell(ch, co, v, walls, x, y, d, g, attr)
+    if ck.light:
+        # The beam, as far as there is anything in the air to show it.
+        haze = 0.25 + 0.6 * max(ck.weather(now), v.wet)
+        dip = PILOT_LIGHT_DIP
+        d = tuple(f[n] * math.cos(dip) - u[n] * math.sin(dip) for n in range(3))
+        for k in range(4, 70):
+            run = k * 2.5
+            spread = run * PILOT_LIGHT_WIDE
+            for side in (-0.8, -0.4, 0.0, 0.4, 0.8):
+                m = _mix(k, int(side * 10.0) + 9, int(now * 6.0))
+                if m % 100 >= haze * 100.0 * (1.0 - k / 70.0):
+                    continue
+                pt = tuple(nose[n] + d[n] * run + r[n] * spread * side
+                           for n in range(3))
+                pr = v.project(*pt)
+                if pr is None:
+                    continue
+                sx, sy = int(round(pr[0])), int(round(pr[1]))
+                if 0 <= sx < v.width and 0 <= sy < v.height and ch[sy][sx] == " ":
+                    put_cell(ch, co, v, walls, sx, sy, pr[2], "." if k > 25 else ":",
+                             FOG if k < 25 else FOG_DIM)
+        put_point(ch, co, v, walls, *nose, glyph="@", attr=FLASH)
+
+
+def runway_paint(x, z, rx, zn, zs):
+    """What is painted on a runway at a point, for the landing light to find:
+    the piano keys at the ends, the aiming point and the touchdown bars, the
+    centre line and the edges. Or None, for plain asphalt."""
+    across = abs(x - rx)
+    end = min(z - zs, zn - z)
+    if across > RUNWAY_W - 0.9:
+        return "|"
+    if end < 10.0:
+        return "#" if int(across / 1.6) % 2 == 0 and across < RUNWAY_W - 2.0 else None
+    if 70.0 < end < 100.0 and 5.0 < across < 9.0:
+        return "#"
+    if (150.0 < end < 168.0 or 230.0 < end < 248.0) and 5.0 < across < 8.0:
+        return "="
+    if across < 0.8 and int((z - zs) / 18.0) % 2 == 0:
+        return "|"
+    return None
+
+
+GROUND_GLYPHS = " .,:'`\"_"
+
+
+def draw_landing_light(ch, co, v, walls, ck, now, runways):
+    """The landing light, on whatever is under it: a pool of light running out
+    ahead of the nose that picks out the paint on a runway and the grass round
+    it. Worked a row at a time, as the ground is: each row is one distance, so
+    where the beam falls along it is an interval worked out once, not a test
+    in every cell."""
+    if not ck.light or ck.state == "crashed":
+        return
+    high = ck.alt + 1.0
+    dip = PILOT_LIGHT_DIP - ck.pitch
+    near_ang, far_ang = dip + PILOT_LIGHT_TALL, dip - PILOT_LIGHT_TALL
+    if near_ang <= 0.01:
+        return                              # it is all going up into the sky
+    a_lo = high / math.tan(near_ang)
+    a_hi = PILOT_LIGHT_REACH if far_ang <= 0.0 else min(PILOT_LIGHT_REACH,
+                                                         high / math.tan(far_ang))
+    if a_lo >= a_hi:
+        return
+    hx, hz = math.sin(ck.heading), math.cos(ck.heading)
+    wide = PILOT_LIGHT_WIDE
+    w1 = v.width - 1
+    for y in range(v.horizon + 1, v.height):
+        perp = v.eye * v.fy / (y - v.horizon)
+        x0, xc = v.x + perp * v.dx - ck.x, perp * v.plx
+        z0, zc = v.z + perp * v.dz - ck.z, perp * v.plz
+        a0, ac = x0 * hx + z0 * hz, xc * hx + zc * hz
+        l0, lc = x0 * hz - z0 * hx, xc * hz - zc * hx
+        lo, hi = -1.0, 1.0
+        for k0, kc in ((a0 - a_lo, ac), (a_hi - a0, -ac),
+                       (wide * a0 + 1.5 - l0, wide * ac - lc),
+                       (wide * a0 + 1.5 + l0, wide * ac + lc)):
+            if kc > 1e-9:
+                lo = max(lo, -k0 / kc)
+            elif kc < -1e-9:
+                hi = min(hi, -k0 / kc)
+            elif k0 < 0.0:
+                hi = -2.0
+        if lo > hi:
+            continue
+        for sx in range(max(0, int(math.ceil((lo + 1.0) * 0.5 * w1))),
+                        min(v.width, int((hi + 1.0) * 0.5 * w1) + 1)):
+            if hidden(walls, sx, y, perp):
+                continue
+            cam = 2.0 * sx / w1 - 1.0
+            a, lat = a0 + ac * cam, l0 + lc * cam
+            if a <= 0.0:
+                continue
+            side = 1.0 - (lat / (wide * a + 1.5)) ** 2
+            up = 1.0 - ((math.atan2(high, a) - dip) / PILOT_LIGHT_TALL) ** 2
+            glow = (1.0 - a / PILOT_LIGHT_REACH) ** 0.8 * side * max(0.25, up)
+            if glow < 0.1:
+                continue
+            gx, gz = ck.x + x0 + xc * cam, ck.z + z0 + zc * cam
+            old = ch[y][sx]
+            if old not in GROUND_GLYPHS:
+                continue                    # a light, a car: leave it be
+            m = _mix(int(gx * 2.0), int(gz * 2.0), 6021) % 100
+            g, attr = None, CONCRETE
+            for rx, zn, zs in runways:
+                if abs(gx - rx) <= RUNWAY_W and zs <= gz <= zn:
+                    g = runway_paint(gx, gz, rx, zn, zs)
+                    if g is not None:
+                        attr = FLASH if glow > 0.4 else HUD
+                    elif m < 30 + 40 * glow:
+                        g = "." if m % 3 else ","
+                    else:
+                        g = " "
+                    break
+                if abs(gx - rx) < 220.0 and zs - 450.0 < gz < zn + 450.0:
+                    if m < 35 + 50 * glow:
+                        g, attr = ",.'\""[m % 4], GRASS
+                    else:
+                        g = " "
+                    break
+            if g is None:
+                if old != " " or m >= 30 + 50 * glow:
+                    continue
+                g = "." if m % 2 else ","
+            ch[y][sx], co[y][sx] = g, attr
+
+
+def draw_air_storms(ch, co, v, walls, cells, now):
+    """The thunderstorms from the air: a dark mass where the stars go out, a
+    shaft of rain under it hiding the town behind, the cloud lit up from inside
+    when it strikes, and the bolt. Returns how bright it is here this instant -
+    a strike in the storm you are in, or one close by."""
+    tops = walls[3]
+    flash = 0.0
+    w, h = v.width, v.height
+    for cell in cells:
+        cx, cz, r, power, cid = cell
+        relx, relz = cx - v.x, cz - v.z
+        dist = math.hypot(relx, relz)
+        strike = air_strike(cell, now)
+        if strike is not None:
+            near = 1.0 if dist < r else max(0.0, 1.0 - (dist - r) / (1.5 * r)) * 0.5
+            flash = max(flash, strike[0] * near)
+        if dist < r + 30.0:
+            continue                        # in it: the murk does the rest
+        lit = strike[0] if strike is not None else 0.0
+        bolt_x = None
+        if strike is not None and _strike_flash(0.0, False) and lit > 0.35:
+            pr = v.project(strike[1], AIR_CELL_BASE, strike[2])
+            if pr is not None:
+                bolt_x = int(round(pr[0]))
+        for sx in range(w):
+            rdx, rdz = v.ray(sx)
+            a = rdx * rdx + rdz * rdz
+            b = -2.0 * (relx * rdx + relz * rdz)
+            c = dist * dist - r * r
+            disc = b * b - 4.0 * a * c
+            if disc <= 0.0:
+                continue
+            t0 = (-b - math.sqrt(disc)) / (2.0 * a)
+            if t0 < NEAR_Z:
+                continue
+            thick = min(1.0, math.sqrt(disc) / a / r) * power
+            y_top = int(v.horizon - (AIR_CELL_TOP - v.eye) * v.fy / t0)
+            y_base = int(v.horizon - (AIR_CELL_BASE - v.eye) * v.fy / t0)
+            y_floor = int(v.horizon + v.eye * v.fy / t0)
+            # Over the skyline nothing can be in front of it, so no test for it.
+            for y in range(max(0, y_top), min(h, y_base, tops[sx])):
+                if lit and _mix(sx, y, cid + int(now * 9.0)) % 100 < lit * thick * 90:
+                    ch[y][sx] = ":" if lit > 0.5 else "."
+                    co[y][sx] = FLASH if lit > 0.6 else FOG
+                elif ch[y][sx] != " ":
+                    ch[y][sx], co[y][sx] = " ", 0     # the stars go out
+            fall = int(now * 14.0)
+            rain_ = thick * 260
+            dark_ = thick * 700
+            for y in range(max(0, y_base), min(h, y_floor + 1)):
+                m = _mix(sx, y - fall, cid) % 1000
+                if m >= dark_ or hidden(walls, sx, y, t0):
+                    continue
+                if m < rain_:
+                    ch[y][sx], co[y][sx] = "|" if m % 3 else "/", (
+                        FOG if lit > 0.4 else RAIN_FAR)
+                elif m < thick * 700:
+                    ch[y][sx], co[y][sx] = " ", 0     # the town behind, hidden
+            if bolt_x is not None and abs(sx - bolt_x) < 1 and lit > 0.35:
+                x_ = sx
+                for y in range(max(0, y_base), min(h, y_floor + 1)):
+                    x_ += _mix(cid, y, int(now // AIR_STRIKE_EVERY)) % 3 - 1
+                    put_cell(ch, co, v, walls, x_, y, t0, "/|\\"[(x_ - sx + 1) % 3],
+                             FLASH)
+    return flash
+
+
+def draw_murk(ch, co, v, walls, amount, now):
+    """Inside a storm: no stars, and the further off a thing is the more the
+    rain has hidden it."""
+    if amount <= 0.02:
+        return
+    tops, wall_d, wall_top, wall_base = walls[3], walls[0], walls[1], walls[2]
+    w, h = v.width, v.height
+    seed = int(now * 5.0)
+    for sx in range(w):
+        for y in range(0, min(h, tops[sx])):
+            if ch[y][sx] != " ":
+                ch[y][sx], co[y][sx] = " ", 0
+        d = wall_d[sx]
+        if d is not None and d > 120.0:
+            p = int(amount * min(1.0, (d - 120.0) / 500.0) * 95)
+            for y in range(max(0, wall_top[sx]), min(h, wall_base[sx] + 1)):
+                if _mix(sx, y, seed) % 100 < p:
+                    ch[y][sx], co[y][sx] = " ", 0
+    for y in range(v.horizon + 1, h):
+        d = v.eye * v.fy / (y - v.horizon)
+        if d < 150.0:
+            break
+        p = int(amount * min(1.0, (d - 150.0) / 500.0) * 95)
+        row, rowc = ch[y], co[y]
+        for sx in range(w):
+            if row[sx] != " " and _mix(sx, y, seed) % 100 < p and not hidden(
+                    walls, sx, y, d):
+                row[sx], rowc[sx] = " ", 0
+
+
+def draw_glass_rain(ch, co, amount, now, flash, speed, focus, beam, upto):
+    """Rain on the windscreen, or rushing past the camera outside: streaks out
+    from the point you are flying at, faster the faster you go. Screen space -
+    it is on the glass, so it does not tilt with the wings."""
+    if amount <= 0.02:
+        return
+    h, w = len(ch), len(ch[0])
+    fx, fy = focus
+    reach = max(w * 0.5, h * 1.0)
+    pace = 0.4 + speed / 60.0
+    for n in range(int(amount * w * upto / 22.0)):
+        m = _mix(n, 0, 6051)
+        ang = (m % 6283) / 1000.0
+        rate = (0.5 + ((m >> 13) & 63) / 63.0 * 0.9) * pace
+        p = (now * rate + ((m >> 19) & 255) / 255.0) % 1.0
+        ca, sa = math.cos(ang), math.sin(ang) * 0.5
+        rr = (0.08 + p * 1.05) * reach
+        g = _plane_glyph(ca, sa)
+        for back in range(1 + int(p * 3.0)):
+            x = int(round(fx + ca * (rr - back * 1.6)))
+            y = int(round(fy + sa * (rr - back * 1.6)))
+            if 0 <= x < w and 0 <= y < upto:
+                lit = beam and abs(x - fx) < w * 0.2 and abs(y - fy) < h * 0.25
+                ch[y][x] = g
+                co[y][x] = FLASH if flash > 0.35 or (lit and back == 0) else (
+                    RAIN if back == 0 else RAIN_FAR)
+    # And the drops sat on it, crawling a little.
+    for n in range(int(amount * w * upto / 70.0)):
+        m = _mix(n, int(now / 1.5), 6053)
+        x = m % w
+        y = int((m >> 12) % max(1, upto) - ((now % 1.5) * 2.0))
+        if 0 <= y < upto:
+            ch[y][x], co[y][x] = ("," if (m >> 20) & 1 else "."), RAIN_FAR
+
+
+def draw_flight_words(ch, co, ck, now, top, k):
+    """What the jet and the tower are saying, inside or out: the warnings big in
+    the middle, the last thing that happened, the grade, and the radio."""
+    h, w = len(ch), len(ch[0])
+    cx = w // 2
+    warn = ck.warnings()
     if warn and int(now * 4.0) % 2:
         text = " ".join(warn)
         wy = max(1, top // 4)
@@ -6802,51 +7434,151 @@ def draw_cockpit(ch, co, ck, now):
                 y += 1
 
 
-def draw_wreck(ch, co, ck, now):
-    """What was the windscreen: cracks from where it hit, and a word for it."""
+def wx_words(ck, now):
+    """The weather radar, in words: what is ahead and how far, or that you are
+    in it."""
+    if ck.weather(now) > 0.2:
+        return "WX in the storm", ROU_RED
+    best = None
+    for cx, cz, r, power, cid in ck.cells(now):
+        d = math.hypot(cx - ck.x, cz - ck.z) - r
+        turn = _wrap_pi(math.atan2(cx - ck.x, cz - ck.z) - ck.heading)
+        if power > 0.2 and abs(turn) < 1.2 and d < 12000.0 and (
+                best is None or d < best[0]):
+            best = (d, turn)
+    if best is None:
+        return "WX clear ahead", ROU_GREEN
+    d, turn = best
+    way = "ahead" if abs(turn) < 0.12 else "%d %s" % (abs(math.degrees(turn)),
+                                                     "right" if turn > 0 else "left")
+    return "WX storm %.1f km, %s" % (max(0.0, d) / 200.0, way), (
+        GOLD if d > 2500.0 else ROU_RED)
+
+
+def draw_outside_hud(ch, co, ck, now):
+    """The outside view's strip along the foot: what you would read off the
+    panel, in a line."""
     h, w = len(ch), len(ch[0])
-    t = now - ck.ended
-    cx, cy = w // 2, h // 3
-    for n in range(14):
-        a = n * 2.399 + ck.seed
-        for r in range(1, min(w, h * 3)):
-            x = cx + int(math.cos(a) * r * 1.6 + math.sin(r * 0.5 + n) * 2.0)
-            y = cy + int(math.sin(a) * r * 0.5)
-            if 0 <= x < w and 0 <= y < h and _mix(n, r, 5701) % 5:
-                ch[y][x] = "/" if math.cos(a) * math.sin(a) < 0 else "\\"
-                co[y][x] = FLASH if t < 0.3 else CONCRETE
-    k = big_scale(w, h)
-    word = "CRASH"
-    tw = blocks_width(word, 2 * k)
-    y0 = max(1, h // 2 - 3 * k)
-    if tw < w - 2:
-        for y in range(y0 - 1, min(h, y0 + 5 * k + 1)):
-            for x in range(max(0, cx - tw // 2 - 2), min(w, cx + tw // 2 + 3)):
-                ch[y][x], co[y][x] = " ", 0
-        _blocks(ch, co, y0, cx - tw // 2, word, ROU_RED, 2 * k, k)
-    for n, line in enumerate(bar_lines(ck.said, min(w - 10, 70))):
-        y, x = 2 + n, cx - len(line) // 2
-        if y < h:
-            for xx in range(max(0, x - 1), min(w, x + len(line) + 1)):
-                ch[y][xx], co[y][xx] = " ", 0
-            _text(ch, co, y, x, line, GOLD)
+    for y in (h - 2, h - 1):
+        for x in range(w):
+            ch[y][x], co[y][x] = " ", 0
+    turn, dist, off, over = ck.nav()
+    climb = int(ck.vy * 25.0 * 6.0) * 10
+    gear_ = ("GEAR DN" if ck.gear > 0.99 else "GEAR UP" if ck.gear < 0.01
+             else "GEAR ..")
+    warn = ck.warnings()
+    way = ("ahead" if abs(turn) < 0.12 else "%d %s" % (
+        abs(math.degrees(turn)), "right" if turn > 0 else "left"))
+    wx_text, wx_attr = wx_words(ck, now)
+    parts = [("%d kt" % int(ck.v * 2.5), ROU_RED if "STALL" in warn else ROU_GREEN),
+             ("%s ft %s%s" % (format(int(ck.alt * 25.0), ","),
+                              "^" if climb > 500 else "v" if climb < -500 else "-",
+                              "" if abs(climb) <= 500 else format(abs(climb), ",")),
+              ROU_RED if "PULL UP" in warn or "TERRAIN" in warn else ROU_GREEN),
+             ("HDG %03d" % (int(round(math.degrees(ck.heading))) % 360), HUD),
+             ("[" + gear_ + "]", ROU_GREEN if ck.gear > 0.99 else GOLD if
+              ck.gear > 0.01 else CONCRETE),
+             ("[FLAPS %d]" % ck.flaps, ROU_GREEN if ck.flaps else CONCRETE),
+             ("[AP]", ROU_GREEN if ck.ap else CONCRETE),
+             ("[LIGHT]", ROU_GREEN if ck.light else CONCRETE),
+             (("TO " if ck.dest else "") + airport_name(ck.goal()).title() + " "
+              + ("on the runway" if ck.on_runway()[0] else "%.1f km %s" % (
+                  dist / 200.0, way)), GOLD),
+             (wx_text, wx_attr),
+             ("WIND " + wind_words(*ck.wind(now))[5:], GOLD_DIM)]
+    x = 2
+    for text, attr in parts:
+        if x + len(text) > w - 1:
+            break
+        _text(ch, co, h - 2, x, text, attr)
+        x += len(text) + 3
+    keys = PILOT_KEYS.replace("v outside", "v cockpit")
+    _text(ch, co, h - 1, max(0, w // 2 - len(keys) // 2), keys[:w], CONCRETE)
+
+
+def render_outside(width, height, now, ck):
+    """The jet from outside: a camera behind it and a little above, swinging
+    round after it a moment late, so in a turn you see it bank and slide across
+    the town, and the world stays level while it tilts."""
+    k = big_scale(width, height)
+    if ck.cam is None:
+        ck.cam = [ck.heading, ck.alt + 1.5 + CHASE_UP, now]
+    yaw, eye, last = ck.cam
+    dt = max(0.0, min(0.25, now - last))
+    if ck.state != "crashed":
+        yaw += _wrap_pi(ck.heading - yaw) * min(1.0, dt * 2.2)
+        eye += (ck.alt + 1.5 + CHASE_UP - eye) * min(1.0, dt * 3.0)
+    ck.cam = [yaw, eye, now]
+    cam_x = ck.x - math.sin(yaw) * CHASE_BACK
+    cam_z = ck.z - math.cos(yaw) * CHASE_BACK
+    v = View(cam_x, cam_z, yaw, width, height, eye=eye,
+             reach=ROOF_REACH if eye > 12.0 else MAX_VIEW)
+    v.high_walls = WALL_REACH_PLANE
+    v.air = True
+    # The plane two thirds of the way down, the town spread out beyond it.
+    v.horizon = max(2, min(height - 6,
+                           int(height * 0.6 - CHASE_UP * v.fy / CHASE_BACK)))
+    ch, co, wet = render_street(v, now)
+    walls = v.walls
+    cells = ck.cells(now)
+    inside = ck.weather(now)
+    draw_murk(ch, co, v, walls, inside, now)
+    flash = draw_air_storms(ch, co, v, walls, cells, now)
+    if flash > 0.05:
+        draw_flash(ch, co, v, walls, flash)
+        if inside > 0.2:
+            draw_flash_sky(ch, co, v.horizon, flash)
+    runways = [runway(*home) for home in airports_about(ck.x, ck.z, PILOT_LIGHTS)]
+    draw_landing_light(ch, co, v, walls, ck, now, runways)
+    for home in airports_about(ck.x, ck.z, PILOT_LIGHTS):
+        draw_runway_lights(ch, co, v, home, now)
+    draw_jet(ch, co, v, walls, ck, now)
+    pr = v.project(ck.x, ck.alt + 1.5, ck.z)
+    focus = (width // 2, v.horizon) if pr is None else (int(pr[0]), v.horizon)
+    draw_glass_rain(ch, co, max(inside, wet * 0.3) * 0.5, now, flash, ck.v, focus,
+                    False, height - 2)
+    draw_outside_hud(ch, co, ck, now)
+    draw_flight_words(ch, co, ck, now, height - 2, k)
+    if ck.state == "crashed":
+        draw_wreck_words(ch, co, ck, now)
+    return ch, co, v
 
 
 def render_cockpit(width, height, now, ck):
     """Out of the windscreen, and it is the real city: the same picture as the
     window seat's, with the horizon going up and down with the nose - the way a
     raycaster looks up and down - and the whole thing tilted with the wings."""
+    if ck.outside:
+        return render_outside(width, height, now, ck)
     k = big_scale(width, height)
     rows = cockpit_rows(height, k)
     v = View(ck.x, ck.z, ck.heading, width, height, eye=ck.alt + FLIGHT_EYE,
              reach=ROOF_REACH if ck.alt > 8.0 else MAX_VIEW)
     v.high_walls = WALL_REACH_PLANE
+    v.air = True
     base = int((height - rows) * 0.5)
     v.horizon = max(2, min(height - 6, base + int(math.tan(ck.pitch) * v.fy)))
     ch, co, wet = render_street(v, now)
-    for home in airports_about(ck.x, ck.z, PILOT_LIGHTS):
+    walls = v.walls
+    inside = ck.weather(now)
+    draw_murk(ch, co, v, walls, inside, now)
+    flash = draw_air_storms(ch, co, v, walls, ck.cells(now), now)
+    if flash > 0.05:
+        draw_flash(ch, co, v, walls, flash)
+        if inside > 0.2:
+            draw_flash_sky(ch, co, v.horizon, flash)
+    homes = airports_about(ck.x, ck.z, PILOT_LIGHTS)
+    draw_landing_light(ch, co, v, walls, ck, now, [runway(*h_) for h_ in homes])
+    for home in homes:
         draw_runway_lights(ch, co, v, home, now)
     ch, co = roll_picture(ch, co, ck.bank, width, height, rows - 1)
+    if inside > 0.35 and ck.state == "air" and _mix(int(now * 2.0), ck.seed, 6031) & 1:
+        # A jolt: the whole picture jumps a row.
+        ch = [[" "] * width] + ch[:-1]
+        co = [[0] * width] + co[:-1]
+    draw_glass_rain(ch, co, max(inside, wet * 0.4) if ck.state != "crashed" else 0.0,
+                    now, flash, ck.v, (width // 2, v.horizon), ck.light,
+                    height - rows)
     draw_cockpit(ch, co, ck, now)
     if ck.state == "crashed":
         draw_wreck(ch, co, ck, now)
@@ -12152,7 +12884,7 @@ def draw_far_sky(ch, co, v, walls, wet, now):
         return
     tops = walls[3]
     width, horizon = v.width, v.horizon
-    bearing = far_storm(now, wet)
+    bearing = None if v.air else far_storm(now, wet)
     strike = None if bearing is None else far_strike(now, bearing)
     if strike is not None:
         k, age, power, mid, wide, bolt = strike
@@ -23436,7 +24168,8 @@ def main(stdscr):
                             ord("B"): "brake", ord("f"): "flaps", ord("F"): "flaps",
                             ord("p"): "autopilot", ord("P"): "autopilot",
                             ord("r"): "radio", ord("R"): "radio", ord("g"): "gear",
-                            ord("G"): "gear"}.get(key, ""), now)
+                            ord("G"): "gear", ord("l"): "light", ord("L"): "light",
+                            ord("v"): "view", ord("V"): "view"}.get(key, ""), now)
                 else:
                     if key in (curses.KEY_LEFT, ord("a")):
                         flight["want"] = max(-1.2, flight["want"] - 0.3)
