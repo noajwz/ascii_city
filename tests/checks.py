@@ -6278,6 +6278,107 @@ pk_grid.x, pk_grid.z, pk_grid.alt, pk_grid.state = 5.0 * 80, 5.0 * 300, 90.0, "a
 ac.render_cockpit(110, 34, 2.0, pk_grid)
 check("exactly on the grid lines is not a division by nought", True)
 
+# --- the tower, the autopilot, and the lights from far off ---------------------------
+ap_rng = random.Random(9)
+ap_got = []
+for n_ in range(12):
+    h_ = ac.zone_home("airport", ap_rng.choice((-1, 0, 1)) * 480 + 100,
+                      ap_rng.choice((0, 1)) * 480 + 100)
+    rx_, zn_, zs_ = ac.runway(*h_)
+    c_ = ac.Cockpit(h_, 0.0)
+    a_, d_ = ap_rng.uniform(0.0, math.tau), ap_rng.uniform(1200.0, 5000.0)
+    c_.state, c_.alt, c_.v, c_.throttle = "air", 135.0, 70.0, 0.6
+    c_.x, c_.z = rx_ + math.sin(a_) * d_, (zn_ + zs_) / 2 + math.cos(a_) * d_
+    c_.heading = ap_rng.uniform(0.0, math.tau)
+    c_.key("autopilot", 0.0)
+    goals_, t_ = set(), 0.0
+    while c_.state == "air" and t_ < 400.0:
+        c_.step(1.0 / 30.0, t_)
+        goals_.add(c_.target)
+        t_ += 1.0 / 30.0
+    ap_got.append((c_.state, c_.grade, len(goals_)))
+check("the autopilot brings you in from anywhere round an airport, and you land",
+      all(s_ == "landed" and g_ in ("BUTTER", "NICE") for s_, g_, _ in ap_got),
+      str(ap_got))
+check("and it does not change its mind about which airport", all(
+    n_ == 1 for _, _, n_ in ap_got))
+ap_c = ac.Cockpit(pk_home, 0.0)
+ap_c.key("radio", 0.0)
+ap_heard = " ".join(t_ for _, _, t_ in ap_c.heard(5.0))
+check("on the ground the tower clears you to go", "cleared for take-off" in ap_heard
+      and not ap_c.heard(0.5)[1:])
+ap_c = ac.Cockpit(pk_home, 0.0)
+ap_c.state, ap_c.alt, ap_c.v, ap_c.throttle = "air", 135.0, 70.0, 0.6
+ap_c.x, ap_c.z, ap_c.heading = pk_rx + 2500.0, pk_zs - 2000.0, 4.0
+ap_c.key("radio", 0.0)
+ap_c.key("autopilot", 0.0)
+ap_t = 0.0
+while ap_c.state == "air" and ap_t < 400.0:
+    ap_c.step(1.0 / 30.0, ap_t)
+    ap_t += 1.0 / 30.0
+ap_words = " ".join(t_ for _, _, t_ in ap_c.radio)
+check("in the air it talks you round: vectors, the localiser, cleared to land",
+      "heading" in ap_words and "localiser" in ap_words
+      and "cleared to land" in ap_words and "Your landing" in ap_words, ap_words[:200])
+check("and the autopilot gave it back to you, low on final",
+      not ap_c.ap and ap_c.state == "landed")
+ap_c = pk_at(alt_=135.0, v_=70.0, x_=pk_rx - 3000.0)
+ap_c.key("autopilot", 0.0)
+check("the autopilot goes on in the air", ap_c.ap)
+ap_c.key("left", 0.0)
+check("and any hand on the controls takes it off", not ap_c.ap)
+ap_g = ac.Cockpit(pk_home, 0.0)
+ap_g.key("autopilot", 0.0)
+check("not on the ground", not ap_g.ap)
+ap_f = ac.Cockpit(pk_home, 0.0)
+ap_s0 = ap_f.stall()
+ap_f.key("flaps", 0.0)
+ap_s1 = ap_f.stall()
+ap_f.key("flaps", 0.0)
+ap_s2 = ap_f.stall()
+ap_f.key("flaps", 0.0)
+check("flaps let it fly slower, two notches and back up",
+      ap_s0 > ap_s1 > ap_s2 and ap_f.flaps == 0)
+ap_c = pk_at(alt_=135.0, v_=70.0, x_=pk_rx - 3000.0)
+ap_c.key("radio", 0.0)
+ap_ck = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 3.0, ap_c)[0])
+check("with the radio on: what was said, the flight director, what is switched on",
+      "TWR" in ap_ck and "(+)" in ap_ck and "[RADIO]" in ap_ck and "VS " in ap_ck)
+ap_real = ac.FLASH, ac.ROU_GREEN
+ac.FLASH, ac.ROU_GREEN = 971, 972
+
+
+def ap_far(d_):
+    c_ = pk_at(alt_=135.0, v_=70.0, x_=pk_rx, z_=pk_zn + d_, heading_=math.pi)
+    c_.pitch = c_.pitch_set = 0.0
+    v_ = ac.View(c_.x, c_.z, c_.heading, 300, 90, eye=c_.alt + 3.0, reach=ac.ROOF_REACH)
+    c2_ = [[" "] * 300 for _ in range(90)]
+    o_ = [[0] * 300 for _ in range(90)]
+    v_.walls = (None, None, None, None, [[] for _ in range(300)])
+    ac.draw_runway_lights(c2_, o_, v_, pk_home, 1.0)
+    return sum(1 for r_ in o_ for a_ in r_ if a_ in (971, 972))
+
+
+check("the runway's lights and its beacon show from far off, glowing",
+      ap_far(7000.0) >= 8 and ap_far(2000.0) > ap_far(7000.0) and ap_far(9500.0) == 0,
+      str((ap_far(2000.0), ap_far(7000.0), ap_far(9500.0))))
+ac.FLASH, ac.ROU_GREEN = ap_real
+ap_miss = 0
+for ti_ in range(-2, 2):
+    for tj_ in range(-2, 2):
+        for dx_, dz_ in ((-2000, -2400), (0, 1300), (800, 2400), (2400, 0)):
+            h_ = ac.zone_home("airport", ti_ * 480 + 100, tj_ * 480 + 100)
+            rx_, zn_, zs_ = ac.runway(*h_)
+            x_, z_ = rx_ + dx_, (zn_ + zs_) / 2 + dz_
+            best_ = min(
+                ((ac.runway(*hh_)[0] - x_) ** 2
+                 + ((ac.runway(*hh_)[1] + ac.runway(*hh_)[2]) / 2 - z_) ** 2, hh_)
+                for a_ in range(-2, 3) for b_ in range(-2, 3)
+                for hh_ in [ac.zone_home("airport", int(x_ // 5) + a_ * 480,
+                                         int(z_ // 5) + b_ * 480)])[1]
+            ap_miss += ac.nearest_airport(x_, z_) != best_
+check("the nearest airport is the nearest", ap_miss == 0, str(ap_miss))
+
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
 ac.FLASH, ac.ROU_RED = 901, 902

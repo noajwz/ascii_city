@@ -1124,6 +1124,25 @@ that read white over the slope and red under it, seen from 3500 units. The panel
 speed, throttle, an artificial horizon, a compass, the way to the airport, and needles for the centre
 line and the slope inside 2500. About 30 ms a frame at 300x90.
 
+**Help with the landing, asked for after the first ones were hard.** `guide()` is a real approach,
+a step at a time in `ck.leg`: out to an entry point off to the side unless you are already ahead of
+the runway, then to the fix `PILOT_FIX` out on the centre line, where the slope starts at cruise
+height, then down the slope along the line, and round again if you are blown off it. It keeps one
+airport (`goal()`, `PILOT_KEEP`): **airports are only a tile apart**, so going out to one's entry
+point brings you nearer the next, and switching to whichever was nearest turned you round half way,
+for ever; it took three tries and a trace to see. Everything reads `guide()`: **the tower** (`r`,
+`radio_key()`, `_radio_tick()`: take-off clearance, headings and heights, the localiser, cleared
+to land, high or low or off the line, `PILOT_RADIO_LAG` before it answers, the last three lines up
+in the windscreen), **the flight director** (`commands()`, the `(+)` on the artificial horizon:
+put the wings on it), and **the autopilot** (`p`, `_fly_itself()`: it flies the guide down to
+`PILOT_AP_FLOOR` on final and gives you the landing; any hand on the controls takes it off). From
+80 random starts round an airport the autopilot got all 80 down, NICE with nobody flaring. `f` is
+flaps (`stall()` comes down, drag goes up). The runways are lit out to `PILOT_LIGHTS` for every
+airport about (`airports_about()`), with the tower's beacon going green and white up over the
+town; the strobes and the slope lights within `PILOT_NEAR_LIGHTS`. `nearest_airport()` looked a
+fifth of a tile away for the next airport, not a whole one, until this - which the first pilot
+commit shipped with.
+
 **The approach had to be made flyable.** `approach_cap()` claimed to keep the town low but sky decks and
 landmarks ignored it, and it stopped 550 units out, under a slope that only cleared the tallest thing at
 1050: the first robot flight hit a building on final. Now it runs `APPROACH_LONG` cells off each end, no
