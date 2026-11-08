@@ -6096,7 +6096,8 @@ def pk_fly(home_, dt_=1.0 / 30.0):
              ("n", rx_ - 520.0, zn_ + 1400.0), ("base", rx_, zn_ + 1500.0),
              ("final", rx_, zn_ + 700.0), ("land", rx_, zn_ - 30.0)]
     leg_, t_ = 0, 0.0
-    while ck_.state != "crashed" and ck_.ended is None and t_ < 400.0:
+    while (ck_.state != "crashed" and ck_.ended is None and t_ < 400.0
+           and not (ck_.state == "landed" and ck_.v < 1.5)):
         name_, gx_, gz_ = legs_[leg_]
         if ck_.state == "ground":
             if ck_.throttle < 1.0:
@@ -6241,8 +6242,17 @@ c_.step(1.0 / 30.0, 1.0)
 for n_ in range(500):
     c_.key("brake", 1.0 + n_ / 30.0)
     c_.step(1.0 / 30.0, 1.0 + n_ / 30.0)
-check("landed, the brakes stop it, and that is the end of it", c_.ended is not None
-      and c_.state == "landed" and c_.v < 1.5)
+check("landed, the brakes stop it, and the tower sends you off to a gate",
+      c_.state == "landed" and c_.v < 1.5 and c_.taxi and c_.taxi_to[0] == "gate"
+      and c_.ended is None)
+c_.key("autopilot", 20.0)
+for n_ in range(30 * 240):
+    c_.step(1.0 / 30.0, 20.0 + n_ / 30.0)
+    if c_.ended is not None:
+        break
+check("taxi in and park, and that is the end of it",
+      c_.parked and c_.ended is not None and "Parked at gate" in c_.said
+      and math.hypot(c_.x - c_.stand[0], c_.z - c_.stand[1]) < 3.0, c_.said)
 pk_near = ac.nearest_airport(pk_rx + 40.0, pk_zn)
 check("the nearest airport is the one you are at", pk_near == pk_home)
 pk_c = [["x"] * 40 for _ in range(20)]
@@ -6397,7 +6407,8 @@ def fp_fly(home_, seed_, t0_, hand_gear_=True):
     c_.key("radio", t_)
     for _ in range(10):
         c_.key("more", t_)
-    while c_.state != "crashed" and c_.ended is None and t_ < t0_ + 900.0:
+    while (c_.state != "crashed" and c_.ended is None and t_ < t0_ + 900.0
+           and not (c_.state == "landed" and c_.v < 1.5)):
         if (c_.state == "ground" and c_.v > ac.PILOT_ROTATE - 4.0
                 and c_.pitch_set < 0.14):
             c_.key("up", t_)
@@ -6900,9 +6911,16 @@ for n_ in range(30 * 40):
     if lr_c.ended is not None:
         break
 lr_s = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 50.0, lr_c)[0])
-check("stopped: how far it took, how much runway was left, and on when read",
-      lr_c.report["roll"] > 10.0 and "Stopped in" in lr_s and "to the terminal" in lr_s
-      and lr_c.report["left"] > 0.0)
+lr_c.key("autopilot", 50.0)
+for n_ in range(30 * 240):
+    lr_c.step(1.0 / 30.0, 50.0 + n_ / 30.0)
+    if lr_c.ended is not None:
+        break
+lr_p = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 300.0, lr_c)[0])
+check("stopped: how far it took and how much runway was left; parked, on when read",
+      lr_c.report["roll"] > 10.0 and "Stopped in" in lr_s
+      and "to the terminal" not in lr_s and lr_c.report["left"] > 0.0
+      and "to the terminal" in lr_p)
 lr_c.outside = True
 check("and from outside too", "LANDING REPORT" in "\n".join(
     "".join(r_) for r_ in ac.render_cockpit(110, 34, 50.0, lr_c)[0]))
@@ -7020,6 +7038,75 @@ ac.draw_runway_lights(rw_ch, rw_co, rw_v, pk_home, 1.0)
 ac.ROU_GREEN = rw_real_c
 check("lit like the long one: green across its ends",
       sum(1 for r_ in rw_co for a_ in r_ if a_ == 997) >= 4)
+
+# --- the gate, the push, and taxiing ------------------------------------------
+tx_c = ac.Cockpit(pk_home, 0.0, None, gate=1)
+tx_c.calm = True
+tx_sx, tx_sz = ac.taxi_net(pk_home)["stands"][1]
+check("a flight starts at a gate, nose in to the terminal, and nothing moves",
+      tx_c.state == "gate" and (tx_c.x, tx_c.z) == (tx_sx, tx_sz)
+      and abs(tx_c.heading - 1.5 * math.pi) < 1e-6)
+for n_ in range(60):
+    tx_c.step(1.0 / 30.0, n_ / 30.0)
+check("until it is asked to", tx_c.state == "gate" and tx_c.x == tx_sx)
+tx_c.key("more", 2.0)
+for n_ in range(int(ac.PUSH_TIME * 30) + 5):
+    tx_c.step(1.0 / 30.0, 2.0 + n_ / 30.0)
+check("+ is the push back: back from the stand and round to face the taxiway",
+      tx_c.state == "ground" and abs(tx_c.x - (tx_sx + ac.PUSH_BACK)) < 0.5
+      and abs(tx_c.heading - 0.5 * math.pi) < 0.01 and tx_c.taxi
+      and tx_c.taxi_to[0] == "runway")
+# In still air, the nearer end of the long runway: from gate 2, the south one.
+tx_rwy = tx_c.taxi_to[1]
+tx_hold = ac.taxi_net(pk_home)["holds"][tx_rwy]
+check("and the way to the runway the wind gives, by the hold",
+      any(abs(px_ - tx_hold[0]) < 0.1 and abs(pz_ - tx_hold[1]) < 0.1
+          for px_, pz_ in tx_c.taxi) and tx_rwy == "36"
+      and ac.taxi_words(tx_c)[0] == "TAXI to runway 36")
+tx_real = ac.ROU_GREEN
+ac.ROU_GREEN = 998
+tx_co = ac.render_cockpit(160, 45, 15.0, tx_c)[1]
+ac.ROU_GREEN = tx_real
+check("follow the greens: lit along the way", sum(1 for r_ in tx_co for a_ in r_
+                                                 if a_ == 998) >= 10)
+tx_c.key("autopilot", 15.0)
+t_ = 15.0
+while t_ < 400.0 and not tx_c.lined:
+    tx_c.step(1.0 / 30.0, t_)
+    t_ += 1.0 / 30.0
+check("p taxis you out, and stops lined up on the runway",
+      tx_c.lined and tx_c.state == "ground" and tx_c.on_runway()[0]
+      and abs(ac._wrap_pi(tx_c.heading - tx_c.dep["course"])) < 0.09 and tx_c.v < 0.5
+      and not tx_c.ap)
+tx_real_w = ac.air_wind
+ac.air_wind = lambda now_: (7.0, 0.0)          # from the west: the crosswind runway
+tx_w = ac.Cockpit(pk_home, 0.0, None, gate=2)
+tx_w.key("autopilot", 0.0)
+t_ = 0.0
+while t_ < 500.0 and not tx_w.lined:
+    tx_w.step(1.0 / 30.0, t_)
+    t_ += 1.0 / 30.0
+ac.air_wind = tx_real_w
+check("and in a west wind, all the way up to the crosswind one",
+      tx_w.lined and tx_w.dep["name"] == "27"
+      and ac.runway_under(pk_home, tx_w.x, tx_w.z) == 1, str((tx_w.lined, tx_w.dep and
+                                                              tx_w.dep["name"])))
+tx_g = ac.Cockpit(pk_home, 0.0)
+tx_g.calm = True
+tx_g.state, tx_g.v, tx_g.throttle = "ground", 0.0, 0.2
+tx_g.x, tx_g.z, tx_g.heading = ac.taxi_net(pk_home)["xt"], pk_zn - 200.0, math.pi
+for n_ in range(30 * 30):
+    tx_g.step(1.0 / 30.0, n_ / 30.0)
+check("off the runway two steps of throttle is a taxi, not a take-off",
+      6.0 < tx_g.v < 16.0, str(tx_g.v))
+tx_g.x = pk_rx - 20.0                  # between the runway and taxiway A: grass
+tx_g.z, tx_g.v = pk_zn - 300.0, 6.0
+tx_g.step(1.0 / 30.0, 40.0)
+check("on the grass the wheels dig in, and the panel says so",
+      "GRASS" in tx_g.warnings() and not ac.paved_at(tx_g.x, tx_g.z))
+tx_g.v = 25.0
+tx_g.step(1.0 / 30.0, 41.0)
+check("at speed that is a wreck", tx_g.state == "crashed")
 
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED

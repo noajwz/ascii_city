@@ -1247,7 +1247,26 @@ approaches run east and west into the next - **and returned the first corridor i
 lowest, so a cell far out under one airport's approach and close in under another's kept a tower
 the second needed gone. And a go-around turned for the entry point at a thousand feet, out of the
 corridor and into one: it climbs straight ahead (`climb_out`) like a departure now. The Chinatown
-lantern check was held to 60% by the luck of its first 250 buildings; the rate is 55%. `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
+lantern check was held to 60% by the luck of its first 250 buildings; the rate is 55%.
+
+**Taxiing, gate to gate.** `Cockpit(..., gate=n)` - which the desk and the menu use - starts at
+stand n (`taxi_net()["stands"]`, nose in, state `gate`); the checks and the robot still start on
+the runway. `+`, `r` or `p` starts `_push()`: `PUSH_BACK` back over `PUSH_TIME`, turned to face
+east, then state `ground` with `ck.taxi` (points still to go) from `_taxi_out()` to the hold and
+the line-up for the runway the wind gives (`ck.dep`). `_taxi_progress()` pops points, tells you
+at the hold and lined up (`lined`); landed and under 12, `_taxi_in()` picks the next turn-off
+ahead and a gate, and on the stand you are `parked` and `ended`. Enter or `x` while landed skips
+it (a tug). `p` on the ground is `_taxi_itself()`: `PILOT_TAXI`, slow for corners, stopping
+lined up or on the stand. **Lining up took three goes**: aiming at the line-up point turned it
+back round when it rolled past, aiming down the line converged too slowly; it steers on how far
+off the line it is now. Off the runways `PILOT_TAXI_DRAG` (one step of throttle used to settle
+at fifty knots), grass `PILOT_GRASS` and a wreck at speed, `GRASS`/`TAXI SPEED` warnings, and
+the wheels straighten up with the runway on the take-off roll too - **a line-up 8 degrees out
+drifted off the crosswind runway, whose field was a narrow strip, into a building**; the north
+field is wider now and starts inside the main one's wavy edge, where taxiway A ran over a gap.
+`draw_taxi_greens()` lights the way; the panel (`taxi_words()`), the outside strip and the map's
+ROUTE page show it; `ck.gate_on()` / `v.my_gate` keep the parked jet off your own stand. Flown
+from gate to gate with the autopilot: 50 of 50 parked, bar one blown off the runway by a storm. `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
 see-through, which is how the first titles came out `--MAP-6-km--`. The key hint has a short form
 (`PILOT_KEYS_SHORT`) for windows under 118 columns. About 2-3 ms a frame at 300x90.
 

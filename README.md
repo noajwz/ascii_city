@@ -94,7 +94,8 @@ In the cockpit:
   g          gear            f       flaps       b     brakes
   r          radio           p       autopilot   l     landing light
   m          map page        [ ]     map range   v     view from outside
-  enter      on to the terminal, after landing   x     hand it back
+  enter      a tug in, after landing             x     hand it back
+             (at the gate, + pushes back; p taxis for you)
 ```
 
 The cheat menu teleports you to anything worth looking at — it searches the city for what is
@@ -194,7 +195,8 @@ the city is infinite, identical every time you walk back to it, and held in no m
   headings and talks you down — and a flight director and an autopilot that fly its way.
 - **Flaps and gear** (forget the gear and it is a belly landing), **a crosswind** every night,
   and runways lit from a long way off — two at every airport, and the tower gives you the one
-  into the wind.
+  into the wind. You start at a gate: push back, taxi out along the yellow lines to the runway,
+  and after landing taxi in to a gate — or let the autopilot do it.
 - **A view from outside** the jet, and **a landing light** that picks out the runway's paint.
 - **A moving map** in the panel, one page at a time — the route and runways, the weather radar, or
   the other traffic — and a
