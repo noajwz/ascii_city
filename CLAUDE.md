@@ -1175,9 +1175,15 @@ so from cruise it lights nothing, which is right. Storms: `air_cells()` puts one
 an `AIR_CELL_TILE` grid each night, building and dying with it, drifting on `night_wind()` -
 **not** `air_wind(now) * t`, which went backwards whenever the gusts eased. `ck.weather()` is how
 far in you are (`PILOT_TOWN_STORM` everywhere when `storming()`): turbulence in `step()`, gusts in
-`wind()`, the murk, rain on the glass, the jolt; from outside one, `draw_air_storms()` draws the
-shaft of rain, the cloud lit from inside on a strike (`air_strike()`), the bolt, and puts the stars
-out. From the plane `v.air` stops the old by-bearing far storm, which was not anywhere. The guide
+`wind()`, the murk, rain on the glass, the jolt; from outside one, `draw_air_storms()`. **The
+first version looked silly** - a cylinder, so every strike filled a box with `:` from base to top
+and a ruler-straight curtain of `|` hung under it - and was redone the way a night storm is seen:
+`storm_profile()` gives each column across it (`u`, in radii) a billowing tower over a ragged base
+and an anvil leaning downwind (`_billow()` is the smooth per-storm noise); between strikes it only
+puts the stars out; a strike (`air_strike()`, now with a height and a ground-or-not) lights the
+cloud round where it went off, with faint speckle tracing the rest of the outline; one in three
+comes to the ground as a bolt with a branch; the rain is dots and short streaks, thick in the
+middle, slanting with the wind, not all of it reaching the ground. Cheaper than the box, too. From the plane `v.air` stops the old by-bearing far storm, which was not anywhere. The guide
 goes round a storm across the way (`_round_weather()`, one side per storm, not one you are in or one
 on the destination), so the tower warns you and the autopilot takes you round; flying in is yours
 to do by hand. Two things the weather showed: the director gave no bank under 12 so a gust on short
