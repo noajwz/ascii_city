@@ -2188,14 +2188,14 @@ def campus_solid(i, j):
             or (i == ci - QUAD_HI - 1 and abs(j - cj) <= QUAD_HJ))
 
 
-# What is in the library: two readers, copies of the ones in the TUI repo
-# (noajwz/TUI), kept in library/ so the city carries its own. They are run
+# What is in library/: the reading room's Wikipedia reader and the Pokemon
+# Center's type chart, copies of the ones in the TUI repo (noajwz/TUI), kept
+# so the city carries its own. They are run
 # as they are, in the whole terminal, the city waiting for you to come out;
 # nothing of theirs is imported.
 LIBRARY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "library")
 CENTER_PC = "pokemon_types_tui.py"    # what is on the Pokemon Center's PC
-LIBRARY_BOOKS = [("w", "Wikipedia", "the encyclopaedia", "wiki_tui.py"),
-                 ("p", "PsychonautWiki", "the restricted section", "psychonaut_tui.py")]
+LIBRARY_BOOKS = [("w", "Wikipedia", "the encyclopaedia", "wiki_tui.py")]
 
 
 def library_door(i, j):
@@ -2229,7 +2229,7 @@ def run_program(stdscr, app, back="back in the reading room"):
 
 def render_reading_room(width, height, now, note):
     """Inside the library: the stacks, the green lamps on the long tables,
-    and the two readers to choose between."""
+    and the reader on the shelf."""
     ch = [[" "] * width for _ in range(height)]
     co = [[0] * width for _ in range(height)]
     # The stacks, floor to ceiling, the spines of the books.

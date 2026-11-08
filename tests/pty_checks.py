@@ -218,24 +218,22 @@ def cases(run, report):
          (b"\t", .4), (b"\t", .4), (b"`", .4)], cols=80, rows=24))
     # Walking in is the reading room. w hands the terminal to the Wikipedia
     # reader, which opens on its search prompt: esc out of that, then q back to
-    # the room; p the same for PsychonautWiki; x out onto the quad. Not s after:
+    # the room; x out onto the quad. Not s after:
     # backing up is back through the doors. Up to walk in, not w: inside, w is
     # Wikipedia.
     lib_st, lib_out = run([(b"`", .5), (b'"', 1.5)] + [(b"\x1bOA", .3)] * 8   # up: in
                           + [(b"w", 2.5), (b"\x1b", 1.5), (b"q", 1.5),
-                             (b"p", 2.5), (b"\x1b", 1.5), (b"q", 1.5),
                              (b"x", .8)] + [(b"w", .3)] * 4,
                           cols=100, rows=30)
     lib_txt = ANSI.sub(b"", lib_out).decode("utf-8", "replace")
-    ok &= report("the library: the room, both readers, back out on the quad",
+    ok &= report("the library: the room, the reader, back out on the quad",
                  lib_st, lib_out)
     seen = ("THE READING ROOM" in lib_txt and "wiki_tui" in lib_txt
-            and "psychonaut_tui" in lib_txt
             # back on the street after it: its HUD. Not the library's hint -
         # on a fog night "the fog is in" has the hint line, and the night
         # follows the real clock.
-        and lib_txt.rfind("ws walk") > lib_txt.rfind("psychonaut_tui"))
-    print("%-34s %s" % ("  and both readers came up, and went",
+        and lib_txt.rfind("ws walk") > lib_txt.rfind("wiki_tui"))
+    print("%-34s %s" % ("  and the reader came up, and went",
                         "ok" if seen else "FAIL"))
     ok &= seen
     ok &= report("a flight: the gate, a seat, off, doze, land, out", *run(

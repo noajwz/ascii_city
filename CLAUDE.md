@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working in this
 
 An endless procedurally generated ASCII city, walked through in the terminal. Written for fun.
 **No package, no dependencies, no config files** — it is one stdlib-only Python script
-(`curses`, `math`, `random`, `unicodedata`) and nothing else — plus the library's two readers and
+(`curses`, `math`, `random`, `unicodedata`) and nothing else — plus the library's Wikipedia reader and
 the Pokemon Center's type chart, copied in under `library/` and run as programs of their own, stdlib-only too (see The
 university). Adding a third-party import would be a departure from the premise; prefer stdlib.
 
@@ -1494,11 +1494,11 @@ stands you at the south end of the quad looking at it.
 **The library's doors** are open, lit, in the middle of its quad side (`library_door()`, the
 cell with `libdoor`), and walking in — a venue in `venue_at()`, so the hurry rule applies — is
 **the reading room** (`render_reading_room()`, the `reading` flag in `main()`): the stacks, green
-lamps on the long tables, and `LIBRARY_BOOKS` to choose from — `w` Wikipedia, `p`
-PsychonautWiki (the restricted section), `x` back out onto the quad, three steps out and facing
-away, or the doorway would take you straight back in.
+lamps on the long tables, and `LIBRARY_BOOKS` on the shelf — `w` Wikipedia, `x` back out
+onto the quad, three steps out and facing away, or the doorway would take you straight back in.
+There was a second reader, PsychonautWiki on `p`; the owner had it taken out of the city.
 
-**The two readers are copies**, in `library/`: `wiki_tui.py` and `psychonaut_tui.py` from the TUI
+**The reader is a copy**, in `library/`: `wiki_tui.py` from the TUI
 repo (noajwz/TUI, as of its `b65ec95`), byte for byte, so the city carries its own and does not
 need that checkout beside it. They are **run, not imported** — `run_program()` hands one the
 terminal (`def_prog_mode` / `endwin`, a plain `subprocess.run` with the same Python), then takes it
