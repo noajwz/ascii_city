@@ -22294,7 +22294,7 @@ def render_game(game, hi, width, height, now):
 # ===========================================================================
 
 CHEAT_KEY = ord("`")
-CHEAT_GRAVES = {128, 136, 140, 146, 153, 160, 168, 172, 178, 185}   # A E I O U a e i o u
+CHEAT_GRAVES = {128, 136, 140, 146, 153, 160, 168, 172, 178, 185}  # AEIOU aeiou, graved
 
 
 def read_key(scr):
