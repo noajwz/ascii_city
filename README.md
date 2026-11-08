@@ -62,7 +62,7 @@ And two things outside the terminal:
   W S        run             + -     pace: normal, brisk, fast, very fast
   t          hail a taxi     e       lift a manhole cover, or take the metro
   tab        switch view     space   wander on its own
-  `          cheat menu      q       quit
+  ` or F1    cheat menu      q       quit
 ```
 
 In the cockpit:
