@@ -1274,7 +1274,18 @@ mast, and the radar going round once every `RADAR_TURN` - long, edge on, long ag
 what reads as turning; the beacon is on top of the mast now. `draw_airport()` draws it in the
 street; `draw_runway_lights()` from the plane, unless the street already has. **`TOWER_TOP` was
 taken** - the sky decks' height - and redefining it for this shrank every sky deck in town; four
-sky-deck checks caught it. `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
+sky-deck checks caught it.
+
+**Taxiing by hand never got the take-off**, reported, and the checks had only ever taxied with
+the autopilot. Three things: the route moved on only within 9 units of each point, so a corner cut
+by hand stuck it; lined up wanted 3 degrees and 2.5 units, which only the autopilot does; and `r`
+with the route not done always said "taxi to holding point". Now a point is passed once you are
+beyond it along the next leg (`_taxi_progress()`), `on_departure()` is lined up by hand at 11
+degrees and 8 units (the autopilot is held to the old figures, `tight`), and `r` on the runway
+you were given clears you whatever the route says - at the hold it is "line up and wait", on the
+wrong runway the tower tells you. And **the grass was a trap**: a fixed `PILOT_GRASS` drag
+bigger than a few steps of throttle held a jet still where it stood, power on; it is per unit of
+speed now. `ht_taxi()` in the checks taxis on the keys alone, corners cut, the way a person does. `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
 see-through, which is how the first titles came out `--MAP-6-km--`. The key hint has a short form
 (`PILOT_KEYS_SHORT`) for windows under 118 columns. About 2-3 ms a frame at 300x90.
 
