@@ -2881,8 +2881,40 @@ none left - and it needs none: `t` works on any street, so the way in is two key
   is redrawn `MIRROR_FPS` times a second and kept between (`cab.mirror`). That is where you see
   the police coming: the chase is behind you, and the camera cannot look back.
 
+- **The highway, by cab** (asked for). `ramp_at(i, j)` is the whole of the ramps: in the
+  outer column of each side of a highway avenue, every `HWY_RAMP_EVERY` blocks an on-ramp each
+  way just past a cross street, and half way between them an off-ramp each way, `HWY_RAMP_L`
+  cells long, only where the lane under it is dry road; `(kind, way, x0, x1, low, high)`, and
+  `ramp_height()` along it. The cab has `h` and `ramp`: on the street a ramp's cell is a wall
+  (`clear()` in `_move()`, so you slide along its side - stopping dead on it left the checks'
+  robot wedged for good) except at its foot, where you mount it; `_move_up()` keeps you in a
+  ramp's lane by its rails and sets `h` by how far along, and off the top you are on the deck,
+  held between the rail and the median on your own side (`hwy_deck()`); in the outside lane
+  over an off-ramp you go down it. Fares are only picked up or put down on the street, and no
+  police start a chase up there. **The deck's traffic** (`_deck_traffic()`): your lane, not a
+  circle round you - the lanes are 2.4 apart and `CAB_CAR` caught the car beside you - and
+  coming up gently behind a slower car you follow it at its `hwy_pace()` (BRAKE LIGHTS AHEAD)
+  till you change lanes; `CAB_HWY_DENT` faster, or into its side, is a crash. A chasing police
+  car's breadcrumbs carry the height, `_cars_lift` holds it by the car's seed, and
+  `draw_lifted_police()` draws it there. **The satnav** has deck nodes `(i, j, 1)`, one a side
+  in its outer column going that side's way (`cab_steps()`): on-ramps up from the cell short of
+  the foot, the deck on, off-ramps down; `CAB_DECK_COST` a cell against a street's 1, so a long
+  way along a highway takes it, and A* is quicker for it too (6 ms against 147 for 300 cells).
+  `cab_node()` is where the cab is in those terms, `route_point()` where to steer - the inside
+  lane on the deck, because the outside one goes down every exit, till yours is near - and
+  `directions()` says on-ramp, exit, keep left. **The view**: the eye is `h` up, and
+  `draw_deck()` paints the deck's surface (rails, median, dashed lane lines) over the street
+  below wherever a row's ray meets it first - solving each row's run of columns rather than
+  testing every cell, and asking `hidden()` only where a facade is nearer - then the
+  highway's cars and the police on it again. From the street `draw_ramps()` draws each ramp's
+  edges climbing to the deck and a board at the foot, HWY ^ or EXIT. About 33 ms a frame on
+  the deck at 300x90, the street from that height being 23 of it.
+- **Headlights** (`l`: on to start, high beam, off; `draw_headlights()`): a pool of light on
+  whatever you are driving on, the beam's columns solved per row, fading with distance and to
+  its edges, further and narrower on high beam - only the road ahead, never the dark beyond.
+
 `cab_robot()` in the checks drives six shifts of three fares on the keys alone, following the
-satnav, all delivered and paid. If you change the handling and it cannot, neither can anyone.
+satnav (`route_point()`), all delivered and paid. If you change the handling and it cannot, neither can anyone.
 
 ## Money
 

@@ -4893,18 +4893,19 @@ def cab_robot(c_, now):
     if tgt_ is not None:
         r_ = c_.route if c_.route and len(c_.route) > 1 else None
         if r_:
-            look_ = r_[min(2, len(r_) - 1)]
-            tx_, tz_ = (look_[0] + 0.5) * ac.CELL, (look_[1] + 0.5) * ac.CELL
+            tx_, tz_ = c_.route_point(2)        # the inside lane, up on the deck
         else:
             tx_, tz_ = tgt_
         err_ = ac._wrap(math.atan2(tx_ - c_.x, tz_ - c_.z) - c_.heading)
         aim_ = max(-1.0, min(1.0, err_ * 2.5))     # as far over as it needs
         if abs(aim_ - c_.steer) > 0.1:
             c_.key("left" if aim_ < c_.steer else "right", now)
-        bend_ = r_ and any((r_[k][0] - r_[k - 1][0], r_[k][1] - r_[k - 1][1])
-                           != (r_[1][0] - r_[0][0], r_[1][1] - r_[0][1])
-                           for k in range(2, min(7, len(r_))))
+        bend_ = r_ and any(len(r_[k]) != len(r_[k - 1]) or (
+            (r_[k][0] - r_[k - 1][0], r_[k][1] - r_[k - 1][1])
+            != (r_[1][0] - r_[0][0], r_[1][1] - r_[0][1])) for k in range(2, min(7, len(r_))))
         want_ = 3.0 if abs(err_) > 0.6 or not r_ else 5.0 if bend_ else 16.0
+        if c_.ramp is not None:
+            want_ = 10.0                        # up or down a ramp, steady
         d_ = math.hypot(tgt_[0] - c_.x, tgt_[1] - c_.z)
         if d_ < 16.0:
             want_ = 0.0 if d_ < 6.0 else 3.0
@@ -4971,6 +4972,128 @@ check("any size of window, and big ones get the speed in block letters",
       "MPH" in cab_big[(80, 24)] and "###" not in cab_big[(299, 87)]
       and "###" in cab_big[(300, 90)] and "###" in cab_big[(451, 133)]
       and "mph" in cab_big[(20, 8)])
+
+# --- the highway, by cab --------------------------------------------------------------
+hw_k = next(k_ for k_ in range(0, 60) if ac.hwy_span(k_))
+hw_sp = ac.hwy_span(hw_k)
+hw_x0, hw_x1 = hw_sp[0] * ac.CELL, (hw_sp[0] + hw_sp[1]) * ac.CELL
+hw_xm = (hw_x0 + hw_x1) * 0.5
+hw_iE, hw_iW = hw_sp[0] + hw_sp[1] - 1, hw_sp[0]
+hw_ramps = {}
+for i_ in (hw_iE, hw_iW):
+    for j_ in range(-300, 300):
+        r_ = ac.ramp_at(i_, j_)
+        if r_:
+            hw_ramps.setdefault((r_[0], r_[1]), r_)
+check("the highway has ramps: on and off, each way, in the outer lanes",
+      set(hw_ramps) == {("on", 1), ("on", -1), ("off", 1), ("off", -1)})
+hw_on = hw_ramps[("on", 1)]
+check("a ramp is the street at its foot and the deck at its top",
+      ac.ramp_height(hw_on, hw_on[4]) == 0.0
+      and abs(ac.ramp_height(hw_on, hw_on[5]) - ac.HWY_H) < 1e-9)
+hw_a = (hw_iE + 2, int(hw_on[4] // ac.CELL) - 12)
+hw_b = (hw_iE + 2, hw_a[1] + 300)
+hw_route = ac.cab_route(hw_a, hw_b)
+check("the satnav takes the highway for a long way along it: up, along, and off",
+      hw_route is not None and sum(len(c_) == 3 for c_ in hw_route) > 100
+      and len(hw_route[0]) == 2 and len(hw_route[-1]) == 2,
+      "%d deck nodes" % sum(len(c_) == 3 for c_ in hw_route or ()))
+hw_tkeep = ac.traffic_name()
+while ac.traffic_name() != "none":
+    ac.cycle_traffic()
+hw_c = ac.Cab((hw_a[0] + 0.5) * ac.CELL, (hw_a[1] + 0.5) * ac.CELL, math.pi / 2, 0.0, 1)
+hw_c.call_at = 1e9
+hw_c.goal, hw_c.route = hw_b, hw_route
+hw_c.fare = {"state": "riding", "kind": "plain", "mood": 1.0, "dents": 0, "x": 0.0,
+             "z": 0.0, "to": ((hw_b[0] + 0.5) * ac.CELL, (hw_b[1] + 0.5) * ac.CELL),
+             "driven": 0.0, "meter": 4.0, "t": 0.0, "eta": 1e9, "name": "x", "seed": 1}
+hw_t, hw_seen, hw_said = 0.0, set(), set()
+while hw_t < 200.0 and hw_c.fare is not None and hw_c.fare["state"] == "riding":
+    hw_t += 1.0 / 30.0
+    cab_robot(hw_c, hw_t)
+    hw_c.step(1.0 / 30.0, hw_t)
+    hw_seen.add(("ramp", hw_c.ramp[0]) if hw_c.ramp else ("deck" if hw_c.h > 8 else
+                                                          "street"))
+    hw_said.add(hw_c.directions().split(" in ")[0])
+while ac.traffic_name() != hw_tkeep:
+    ac.cycle_traffic()
+check("a fare by the highway: up the on-ramp, along the deck, down an exit, paid",
+      {("ramp", "on"), "deck", ("ramp", "off"), "street"} <= hw_seen
+      and hw_c.fares == 1 and hw_c.earned > 0, str(sorted(map(str, hw_seen))))
+check("and the satnav says so: the on-ramp, the exit, keep left",
+      {"on-ramp", "exit"} <= hw_said)
+hw_r = ac.Cab(hw_xm + 1.6, hw_on[5] + 40.0, 0.4, 0.0, 1)
+hw_r.call_at, hw_r.h, hw_r.speed, hw_r.want = 1e9, ac.HWY_H, 16.0, 16.0
+hw_xs = []
+for n_ in range(1, 120):
+    hw_r.key("right" if n_ < 60 else "left", n_ / 30.0)
+    hw_r.step(1.0 / 30.0, n_ / 30.0)
+    hw_xs.append(hw_r.x)
+check("on the deck the rails hold you, and the median keeps you your side",
+      max(hw_xs) <= hw_x1 - ac.PAVE - 0.2 + 1e-6 and min(hw_xs) >= hw_xm + 0.6 - 1e-6
+      and hw_r.h == ac.HWY_H)
+hw_now = 50.0
+hw_car = next((cz_, lx_, d_) for cz_, lx_, d_, _ in ac.hwy_cars(
+    hw_x0, hw_x1, 0.0, 400.0, hw_now) if d_ == 1)
+hw_pace = ac.hwy_pace(hw_x0, hw_car[1], 1)
+
+
+def hw_behind(speed_, gap_):
+    c_ = ac.Cab(hw_car[1], hw_car[0] - gap_, 0.0, hw_now - 0.01, 1)
+    c_.call_at, c_.h, c_.speed, c_.want = 1e9, ac.HWY_H, speed_, speed_
+    c_.step(1.0 / 30.0, hw_now)
+    return c_
+
+
+hw_gentle, hw_fast = hw_behind(hw_pace + 3.0, 3.5), hw_behind(hw_pace + 14.0, 3.5)
+check("come up gently behind a highway car and you follow it",
+      abs(hw_gentle.speed - hw_pace) < 0.01 and hw_gentle.said.startswith("brake"),
+      "%.1f at %.1f" % (hw_gentle.speed, hw_pace))
+check("come into it fast and it is a crash", hw_fast.speed == 0.0
+      and "CRUNCH" in hw_fast.said)
+hw_v = ac.View(hw_xm + 1.6, hw_on[5] + 40.0, 0.0, 120, 36, eye=2.4 + ac.HWY_H)
+hw_vc = ac.Cab(hw_xm + 1.6, hw_on[5] + 40.0, 0.0, 0.0, 1)
+hw_vc.h, hw_vc.call_at = ac.HWY_H, 1e9
+hw_ch, hw_co, _ = ac.render_street(hw_v, 5.0)
+ac.draw_deck(hw_ch, hw_co, hw_v, hw_v.walls, hw_vc, 5.0)
+hw_txt = "\n".join("".join(r_) for r_ in hw_ch[hw_v.horizon + 1:])
+check("up there the deck is under you: its rails, the median, the lane lines",
+      hw_txt.count("#") > 20 and hw_txt.count("=") > 5 and ":" in hw_txt)
+hw_sv = ac.View((hw_on[2] + hw_on[3]) * 0.5, hw_on[4] - 25.0, 0.0, 120, 36)
+hw_st = "\n".join("".join(r_) for r_ in ac.render_street(hw_sv, 5.0)[0])
+check("from the street, the board at an on-ramp's foot", "HWY ^" in hw_st)
+check("no police up on the highway", (lambda c_: (c_._police(5.0, 1 / 30.0),
+                                                   c_.cop)[1])(hw_r) is None)
+
+# --- headlights --------------------------------------------------------------------
+hl_c = ac.Cab(cb_x, cb_z, cb_y, 0.0, 1)
+hl_v = ac.View(cb_x, cb_z, cb_y, 120, 36, eye=2.4)
+hl_base, _, _ = ac.render_street(hl_v, 5.0)
+
+
+def hl_frame(lights_):
+    hl_c.lights = lights_
+    g_ = [r_[:] for r_ in hl_base]
+    o_ = [[0] * 120 for _ in range(36)]
+    ac.draw_headlights(g_, o_, hl_v, hl_v.walls, hl_c)
+    return g_, o_
+
+
+hl_off, hl_on, hl_hi = hl_frame(0), hl_frame(1), hl_frame(2)
+hl_lit = [(y_, x_) for y_ in range(36) for x_ in range(120) if hl_on[1][y_][x_]]
+check("headlights: off, nothing; on, a pool of light on the road ahead",
+      hl_off[0] == hl_base and len(hl_lit) > 50
+      and all(y_ > hl_v.horizon for y_, _ in hl_lit))
+check("in front of you, not off to the sides",
+      sum(1 for _, x_ in hl_lit if 30 < x_ < 90) > 0.8 * len(hl_lit))
+check("high beam reaches further down the road",
+      min(y_ for y_ in range(36) for x_ in range(120) if hl_hi[1][y_][x_])
+      < min(y_ for y_, _ in hl_lit))
+hl_k = ac.Cab(cb_x, cb_z, cb_y, 0.0, 1)
+hl_k.key("lights", 0.0)
+hl_k.key("lights", 0.0)
+check("l goes round them: on to start, high beam, off",
+      hl_k.lights == 0 and "l lights" in ac.CAB_KEYS)
 
 # --- the handbrake, and drifting ------------------------------------------------------
 def cab_spin(hb):
