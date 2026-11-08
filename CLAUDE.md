@@ -1344,6 +1344,19 @@ from each side, in step and mirrored, over and back every `WIPER_PERIOD` (`wiper
 in the last `WIPER_CLEAN`. Dry, they are parked and the frame is what it was; a check says so.
 Under half a millisecond at 300x90.
 
+ **Keys moved, and the wings got heavy** (asked for, 2026-11-08): the throttle is `W` and
+`S` - shift and the nose keys - and `+` `-` (with `=` `_`) zoom the map and the radar, in place
+of `[` `]`; at the gate `W` is the push back. a/d roll you in at `PILOT_ROLL_IN` and the wings
+come back level at `PILOT_ROLL_OUT`, about a third and two thirds of what they were, so a
+second of `d` is under half a full bank. That broke `pk_fly()`, the keys-only robot, three
+ways, and each was the robot's, not the plane's: it turned onto its next heading as late as
+before and overshot (it looks ahead by `PK_LEAD`, the time the wings take to come level, now);
+it circled a turn point for ever, the wider turns never coming within 90 of it (`PK_NEAR` is
+170); and it swung wide onto final and started down over the town's roofs (it holds its
+height till it is within 60 of the line). 25 airports of 25 landed, NICE or better. **The
+frequency you are on is in block letters** on a big window, the size of the altitude over it,
+with COM and its station over it and STBY at the end of that row, and the radio's lines under.
+
  **The runways' numbers are on the way's screen** (asked for): each end's name off its
 threshold, out along the approach - 18 at the north end, where you land heading south - in
 green for where you are going, red for a closed runway, gold for the rest. **What the radio

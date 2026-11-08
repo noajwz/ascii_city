@@ -6504,6 +6504,11 @@ def pk_wrap(a_):
     return (a_ + math.pi) % math.tau - math.pi
 
 
+PK_LEAD = 1.0 / ac.PILOT_ROLL_OUT       # seconds the wings take to come level
+PK_NEAR = 170.0         # near enough a turn point to turn for the next: the heavy
+                        # wings turn wider, and at 90 it went round one for ever
+
+
 def pk_fly(home_, dt_=1.0 / 30.0):
     """A robot pilot, on nothing but the keys you have: down the runway, a
     circuit at cruise, onto the slope from the north and down. If it can be flown
@@ -6526,21 +6531,28 @@ def pk_fly(home_, dt_=1.0 / 30.0):
         elif ck_.state == "landed":
             ck_.key("brake", t_)
         else:
-            if name_ != "land" and math.hypot(gx_ - ck_.x, gz_ - ck_.z) < 90.0:
+            if name_ != "land" and math.hypot(gx_ - ck_.x, gz_ - ck_.z) < PK_NEAR:
                 leg_ += 1
                 name_, gx_, gz_ = legs_[leg_]
             want_ = math.atan2(gx_ - ck_.x, gz_ - ck_.z)
             if name_ in ("final", "land"):
                 want_ = math.atan2(rx_ - ck_.x,
                                    -max(60.0, min(300.0, abs(ck_.z - zn_) / 2)))
-            bank_ = max(-0.5, min(0.5, pk_wrap(want_ - ck_.heading) * 1.4))
+            # The wings are heavy: look ahead by how long they take to come
+            # level, the turn still going on meanwhile, or it overshoots.
+            turning_ = ac.PILOT_TURN * math.tan(ck_.bank) / max(ck_.v, 25.0)
+            ahead_ = pk_wrap(want_ - ck_.heading - turning_ * PK_LEAD)
+            bank_ = max(-0.5, min(0.5, ahead_ * 1.4))
             bank_ = 0.0 if ck_.alt < 12.0 else bank_
             if bank_ > ck_.bank + 0.08:
                 ck_.key("right", t_)
             elif bank_ < ck_.bank - 0.08:
                 ck_.key("left", t_)
             high_ = 135.0
-            if name_ in ("final", "land"):
+            if name_ in ("final", "land") and (abs(ck_.x - rx_) < 60.0
+                                               or name_ == "land"):
+                # Down only once lined up: the heavy wings swing it wide of the
+                # line onto final, and out there are the town's roofs.
                 high_ = min(135.0, abs(ck_.z - (zn_ - 30.0)) * ac.PILOT_GLIDE + 2.0)
             nose_ = max(-0.12, min(0.2, (high_ - ck_.alt) * 0.02))
             fast_ = 70.0
@@ -6996,6 +7008,13 @@ rl_com = [(y_, r_.index("COM  ")) for y_, r_ in enumerate(rl_wide) if "COM  " in
 check("the radio's lines are on the right, under the frequencies",
       rl_at and rl_com and rl_at[0][0] > rl_com[0][0]
       and rl_at[0][1] > 4 * 300 // 5 - 2, "%s %s" % (rl_at, rl_com))
+rl_freq = [n_ for n_, r_ in enumerate(rl_wide) if "COM  " in r_][0]
+rl_x = rl_wide[rl_freq].index("COM  ")
+rl_dig = "".join("#" if rl_wide[rl_freq + 1 + r][rl_x + c * 2] == "#" else " "
+                 for r in range(5) for c in range(3))
+check("big, the frequency you are on is in block letters like the altitude",
+      rl_dig == "".join(ac.BIG_FONT[rl_c.tuned[0]]).replace(" ", " ")
+      and "STBY " + rl_c.standby in rl_wide[rl_freq], rl_c.tuned)
 rl_small = ["".join(r_) for r_ in ac.render_cockpit(110, 34, 5.0, rl_c)[0]]
 check("and where there is not the room for them, at the top of the windscreen",
       any(rl_said in r_ for r_ in rl_small[:6]))
@@ -8099,6 +8118,21 @@ check("i switches them off: parked, the windscreen is as it is with none",
       wp_off == wp_none and wp_c.said == "wipers off")
 check("they start on in the rain and off in the dry",
       wp_start is True and wp_dry is False)
+hv_c = ac.Cockpit(pk_home, 0.0)
+hv_c.state, hv_c.alt, hv_c.v, hv_c.calm = "air", 80.0, 60.0, True
+hv_t, hv_at1 = 0.0, None
+for n_ in range(150):
+    hv_t += 1.0 / 30.0
+    hv_c.key("right", hv_t)
+    hv_c.step(1.0 / 30.0, hv_t)
+    if n_ == 29:
+        hv_at1 = hv_c.bank
+check("the wings are heavy: a second of d is under half a full bank, five near all",
+      hv_at1 < 0.5 * ac.PILOT_MAX_BANK and hv_c.bank > 0.85 * ac.PILOT_MAX_BANK,
+      "%.2f after 1 s, %.2f after 5" % (hv_at1, hv_c.bank))
+check("W and S are the power, + and - the zoom, on the keys",
+      "W S power" in ac.PILOT_KEYS and "+ - zoom" in ac.PILOT_KEYS
+      and "WS:thr" in ac.PILOT_KEYS_SHORT and "+-:zoom" in ac.PILOT_KEYS_SHORT)
 check("and i is on the keys", "i wipers" in ac.PILOT_KEYS
       and "i:wipe" in ac.PILOT_KEYS_SHORT and "c freq" in ac.PILOT_KEYS
       and "c:freq" in ac.PILOT_KEYS_SHORT and len(ac.PILOT_KEYS_SHORT) <= 110)
