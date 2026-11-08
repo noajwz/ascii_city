@@ -321,7 +321,7 @@ def cases(run, report):
                                   (b"", 1.0), (b"x", .8), (b"w", .3)],
             cols=ck_size[0], rows=ck_size[1]))
     ok &= report("the desk: a check ride, and the autopilot pushes back", *run(
-        [(b"`", .5), (b".", 1.0)] + [(b"w", .25)] * 6 + [(b"t", .6), (b"p", 4.0),
+        [(b"`", .5), (b".", 1.0)] + [(b"w", .25)] * 6 + [(b"t", .6), (b"p", 4.0), (b"k", 2.0),
                                                        (b"v", 1.0), (b"x", .8)],
         cols=110, rows=34))
     ok &= report("the desk: the keys, and straight into a wall", *run(

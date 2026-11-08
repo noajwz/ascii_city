@@ -1311,6 +1311,26 @@ crosswinds; that is what the windscreen tells you. Landing gently on water is no
 (`_ditch()`, `DITCHED`), and getting it down after trouble pays `PILOT_SAVE_PAY`. `em_fly()` in
 the checks is fp_fly with trouble: engine, birds both ways and the truck all landed, 20 of 20
 each in five winds when measured.
+
+**Fuel, and the pad at every airport.** `ck.fuel` is the tank, of a full one: `_burn()` takes
+`PILOT_BURN` times (`PILOT_IDLE` + throttle) a second per pair of engines, `PILOT_TAXI_BURN` of
+that on the wheels - a long flight plan is about half a tank, a short one a quarter, taxiing two
+per cent. The gate and the menu start you with `gate_fuel()`, a quarter to three quarters, and
+say so when it will not reach the flight plan; checks and robots get a full tank (`fuel=None`),
+so nothing they fly changed. `fuel_range()` is the cruise range the panel shows (`FUEL 45% 39km`,
+gold when short of where you are going, red under `PILOT_LOW_FUEL`), and the tower warns once in
+the air. Dry, `_run_dry()` is both engines gone, as the birds do. **The pad**: `taxi_net()`'s
+`pad` and `padbox`, south of the stands on the line of the z0-150 turn-off, a lead-in to taxiway
+A, painted in `field_point()` as a yellow box; `draw_fuel_farm()` puts two tanks, a FUEL sign
+and the bowser by it (street and plane both), `draw_hose()` while filling, and the map an `F`.
+`k` (`_fuel_key()`) on the ground routes you there (`taxi_to` `("fuel", None)`), on it starts
+and stops the hose (`PILOT_FILL`, billed at `PILOT_FUEL_PRICE` a tank in `fuel_bill`, taken off
+the pay at the end), and full, `_fuelled()` makes it `ground` again with a route out - so a
+landing on the way is a fuel stop, and landings now add to `pay` (the destination's pay once,
+`dest_paid`). **Taxiing from the pad found a hole in the hand-taxi fix**: a point counted as
+passed by being beyond it along the next leg anywhere, and from off to one side of the route
+every point was, so it cut across the grass into a hangar on 09 - passed only counts within 45
+units now. Measured: from all four gates in five winds, to the pad and out, 20 of 20 lined up.
  `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
 see-through, which is how the first titles came out `--MAP-6-km--`. The key hint has a short form
 (`PILOT_KEYS_SHORT`) for windows under 118 columns. About 2-3 ms a frame at 300x90.

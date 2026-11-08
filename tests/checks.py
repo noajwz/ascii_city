@@ -7363,6 +7363,100 @@ em_gate = "\n".join("".join(r_) for r_ in ac.render_gate(
     110, 34, 2.0, {"home": pk_home})[0])
 check("and the desk sells a check ride", "check ride" in em_gate)
 
+# --- the fuel, and the pad to fill up at --------------------------------------------
+
+
+def fu_stop(c_, limit_=400.0):
+    """To the pad by the autopilot, filled up, and out to line up."""
+    t_ = 0.0
+    c_.key("fuel", t_)
+    while t_ < limit_ and not c_.lined and c_.state != "crashed":
+        if (c_.state in ("ground", "landed") and c_.taxi and not c_.ap
+                and not c_.lined):
+            c_.key("autopilot", t_)
+        if (c_.on_pad() and not c_.taxi and not c_.fuelling and c_.fuel < 0.99
+                and c_.v < 1.5):
+            c_.key("fuel", t_)
+        c_.step(1.0 / 30.0, t_)
+        t_ += 1.0 / 30.0
+    return c_
+
+
+fu_net = ac.taxi_net(pk_home)
+check("every airport has a fuel pad, paved and boxed in yellow, on taxiway A's way",
+      ac.paved_at(*fu_net["pad"]) and any(
+          ac.field_point(ac.field_cell(int(x_ // ac.CELL), int(fu_net["padbox"][2]
+                                                               // ac.CELL)),
+                         x_, fu_net["padbox"][2] + 0.3) == ("=", ac.GOLD)
+          for x_ in range(int(fu_net["padbox"][0]) + 2, int(fu_net["padbox"][1]))))
+fu_c = pk_at(alt_=120.0, v_=70.0, x_=pk_rx - 3000.0)
+fu_c.throttle = 0.6
+for n_ in range(30 * 30):
+    fu_c.step(1.0 / 30.0, n_ / 30.0)
+check("the engines drink in the air: half a minute at cruise power is a few per cent",
+      0.85 < fu_c.fuel < 0.95, str(fu_c.fuel))
+fu_g = ac.Cockpit(pk_home, 0.0, gate=1, fuel=0.3)
+fu_g.calm = True
+fu_g.key("more", 0.0)
+for n_ in range(int(ac.PUSH_TIME * 30) + 5):
+    fu_g.step(1.0 / 30.0, n_ / 30.0)
+fu_stop(fu_g)
+check("from the gate, k to the pad, filled up there, and out to the runway lined up",
+      fu_g.lined and fu_g.fuel > 0.95 and 25 < fu_g.fuel_bill < ac.PILOT_FUEL_PRICE,
+      str((fu_g.lined, fu_g.fuel, fu_g.fuel_bill)))
+fu_l = ac.Cockpit(pk_home, 0.0, fuel=0.2)
+fu_l.calm = True
+fu_l.state, fu_l.grade, fu_l.pay, fu_l.v = "landed", "NICE", 100, 10.0
+fu_l.x, fu_l.z = pk_rx, (pk_zn + pk_zs) / 2 + 60.0
+fu_stop(fu_l)
+check("landed somewhere on the way: to the pad, filled, and out to go again, the "
+      "landing's pay kept", fu_l.lined and fu_l.state == "ground" and fu_l.pay == 100
+      and fu_l.fuel > 0.95, str((fu_l.lined, fu_l.state, fu_l.pay)))
+fu_m = ac.Cockpit(pk_home, 0.0, fuel=0.5)
+fu_m.state, fu_m.v = "ground", 0.0
+fu_m.x, fu_m.z = fu_net["pad"]
+fu_m.key("fuel", 1.0)
+fu_m.key("more", 1.1)
+for n_ in range(60):
+    fu_m.step(1.0 / 30.0, 1.2 + n_ / 30.0)
+check("power on while filling: the hose comes off, and the bill is what went in",
+      not fu_m.fuelling or fu_m.v < 1.5)
+fu_d = pk_at(alt_=120.0, v_=70.0, x_=pk_rx - 3000.0)
+fu_d.fuel, fu_d.ap, fu_d.throttle = 0.002, True, 0.6
+for n_ in range(90):
+    fu_d.step(1.0 / 30.0, n_ / 30.0)
+fu_d.key("autopilot", 4.0)
+check("run it dry and both stop: the mayday, NO FUEL, and the autopilot will not "
+      "fly it", fu_d.dry and fu_d.engines == 0 and not fu_d.ap
+      and "NO FUEL" in fu_d.warnings()
+      and any("out of fuel" in r_[2] for r_ in fu_d.radio))
+fu_far = ac.flight_plan(pk_home, 5)
+fu_w = pk_at(alt_=135.0, v_=70.0, x_=pk_rx, z_=pk_zs - 200.0)
+fu_w.dest, fu_w.fuel, fu_w.radio_on = fu_far, 0.08, True
+fu_w.step(1.0 / 30.0, 30.0)
+check("short of fuel for where you are going, the tower tells you, once",
+      any("will not make" in r_[2] for r_ in fu_w.radio) and fu_w.fuel_told)
+fu_gate = ac.Cockpit(pk_home, 0.0, fu_far, gate=1, fuel=0.25)
+check("and so does the gate, when the tanks are short for the flight plan",
+      "fuel pad" in fu_gate.said and "fuel pad" not in ac.Cockpit(
+          pk_home, 0.0, fu_far, gate=1, fuel=1.0).said)
+fu_p = ac.Cockpit(pk_home, 0.0, fuel=0.4)
+fu_p.state, fu_p.v = "ground", 0.0
+fu_p.x, fu_p.z = fu_net["pad"]
+fu_p.heading = 1.5 * math.pi
+fu_p.key("fuel", 1.0)
+fu_p.step(1.0 / 30.0, 1.0)
+fu_txt = "\n".join("".join(r_) for r_ in ac.render_cockpit(160, 48, 2.0, fu_p)[0])
+fu_p.outside = True
+fu_out = ac.render_cockpit(300, 90, 2.0, fu_p)[1]
+fu_v = ac.View(fu_p.x - 70.0, fu_p.z - 50.0, math.atan2(70.0, 50.0), 160, 48)
+fu_st = "\n".join("".join(r_) for r_ in ac.render_street(fu_v, 2.0)[0])
+check("the panel has the gauge and the filling, the station shows from the apron",
+      "FUEL 4" in fu_txt and "FUELLING" in fu_txt and "FUEL" in fu_st
+      and fu_out is not None)
+check("and k is on the keys", "k fuel" in ac.PILOT_KEYS and "k fuel" in
+      ac.PILOT_KEYS_SHORT)
+
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
 ac.FLASH, ac.ROU_RED = 901, 902
