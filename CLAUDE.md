@@ -2645,6 +2645,14 @@ none left - and it needs none: `t` works on any street, so the way in is two key
   keeps repeating (`TURN_FIRST` for a fresh press, then `CAB_GRACE`) and it comes back by itself.
   The wheel turns you by how fast you are going (`CAB_R` plus `CAB_R_FAST` a unit of speed), so
   standing still it turns nothing. Wet roads (rain or lying snow) brake at `CAB_WET_GRIP`.
+  **The steering was "way too sharp"** at first, reported after the first drive: the wheel
+  went to full lock in a quarter of a second, so one tap was full lock, and the circle widened
+  so little with speed that the faster you went the faster you turned - 2.8 rad/s flat out. Now
+  `CAB_STEER` takes the wheel over in most of a second (a tap is about a third of lock, five
+  degrees of heading at speed) and `CAB_R_FAST` widens the circle enough that it turns at about
+  1.1 to 1.3 rad/s from 16 up; a check holds it there. Slower steering needs feeding in rather
+  than banging from lock to lock - the robot below weaved off the walls until it steered by how
+  far the bend needed - and it wants corners taken slowly, which is what a cab does anyway.
 - **Walls and cars.** `_move()` steps the way `main()` walks, with `can_stand()`: into a wall at
   an angle it slides along it, and only if the wall took more than `0.45` of the step is that a
   bump - the first version called every graze one, and the robot driver was bumping three times
