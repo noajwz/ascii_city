@@ -6913,18 +6913,28 @@ mp_c = pk_at(alt_=70.0, v_=60.0, z_=pk_zn + 900.0)
 mp_c.leg, mp_c.end, mp_c.target = "final", pk_zn, pk_home
 mp_w = "\n".join("".join(r_) for r_ in ac.render_cockpit(190, 50, 2.0, mp_c)[0])
 check("a wide panel has the moving map in it, as well as the words",
-      "MAP 6 km" in mp_w and "LINE" in mp_w and "-^-" in mp_w)
+      "ROUTE 6 km" in mp_w and "LINE" in mp_w and "-^-" in mp_w)
 mp_c.key("zoom out", 2.0)
 mp_c.key("zoom out", 2.0)
 mp_z = "\n".join("".join(r_) for r_ in ac.render_cockpit(190, 50, 2.0, mp_c)[0])
 mp_c.key("zoom in", 2.0)
-check("[ and ] for its range", "MAP 24 km" in mp_z and mp_c.map_range == 2)
-mp_n = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, mp_c)[0])
-mp_c.key("map", 2.0)
-mp_m = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, mp_c)[0])
-check("a narrow one: the words, and m swaps the map in for them",
-      "MAP" not in mp_n and "LINE" in mp_n and "MAP" in mp_m and "LINE" not in mp_m
-      and "m map" in mp_m)
+check("[ and ] for its range", "24 km" in mp_z and mp_c.map_range == 2)
+mp_pages = []
+for n_ in range(3):
+    mp_pages.append("\n".join("".join(r_) for r_ in ac.render_cockpit(
+        190, 50, 2.0, mp_c)[0]))
+    mp_c.key("map", 2.0)
+check("m goes round the map's pages: the route, the weather, the traffic",
+      "ROUTE" in mp_pages[0] and "WX" in mp_pages[1] and "TFC" in mp_pages[2]
+      and mp_c.map_page == 0)
+mp_seen = []
+for n_ in range(5):
+    t_ = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, mp_c)[0])
+    mp_seen.append("words" if "LINE" in t_ else "ROUTE" if " ROUTE " in t_ else
+                   "WX" if " WX " in t_ else "TFC" if " TFC " in t_ else "?")
+    mp_c.key("map", 2.0)
+check("narrow: the words, then each page in their place, then the words again",
+      mp_seen == ["words", "ROUTE", "WX", "TFC", "words"], str(mp_seen))
 mp_real = ac.ROU_GREEN, ac.ROU_RED, ac.air_cells
 ac.ROU_GREEN, ac.ROU_RED = 995, 996
 mp_d = pk_at(alt_=135.0, v_=70.0, x_=pk_rx, z_=pk_zn + 3000.0)
@@ -6932,13 +6942,18 @@ mp_d.target, mp_d.end, mp_d.map_range = pk_home, pk_zn, 2
 mp_d.calm = False
 ac.air_cells = lambda x_, z_, now_, reach_=0.0: [(pk_rx + 900.0, pk_zn + 1500.0,
                                                   700.0, 1.0, 77)]
-mp_co = ac.render_cockpit(190, 50, 2.0, mp_d)[1]
-ac.ROU_GREEN, ac.ROU_RED, ac.air_cells = mp_real
 mp_top = 50 - ac.cockpit_rows(50, 1)
-mp_box = [r_[39:75] for r_ in mp_co[mp_top + 1:49]]
-check("on it, the runway you are going to in green, and a storm ahead in red",
-      sum(1 for r_ in mp_box for a_ in r_ if a_ == 995) >= 4
-      and sum(1 for r_ in mp_box for a_ in r_ if a_ == 996) >= 2)
+mp_got = []
+for page_ in range(3):
+    mp_d.map_page = page_
+    mp_co = ac.render_cockpit(190, 50, 2.0, mp_d)[1]
+    mp_box = [r_[39:75] for r_ in mp_co[mp_top + 1:49]]
+    mp_got.append((sum(1 for r_ in mp_box for a_ in r_ if a_ == 995),
+                   sum(1 for r_ in mp_box for a_ in r_ if a_ == 996)))
+ac.ROU_GREEN, ac.ROU_RED, ac.air_cells = mp_real
+check("the route page has your runway in green and no storm; the weather page "
+      "the storm in red and no runway", mp_got[0][0] >= 4 and mp_got[0][1] == 0
+      and mp_got[1][1] >= 2 and mp_got[1][0] == 0, str(mp_got))
 
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
