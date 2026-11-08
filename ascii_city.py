@@ -8114,22 +8114,56 @@ def draw_cockpit(ch, co, ck, now):
     warn = ck.warnings()
     _text(ch, co, y0, 2, "AIRSPEED  kt", HUD)
     big_number(str(knots), 2, y0 + 1, ROU_RED if "STALL" in warn else ROU_GREEN)
+    wide_map = ck.map_wide = w >= MAP_WIDE
+    edge_ = sec - 1 if wide_map else cx - sec // 2
+    # The fuel: a red bar standing at the right of the first section, the
+    # height of the panel, emptying from the top, blinking when nearly dry.
+    fw_ = 2 * k                                  # its width inside the frame
+    fx_ = edge_ - fw_ - 3
+    edge_ = fx_ - 2                              # the words wrap short of it
+    fy0_, fy1_ = y0 + 1, h - 3
+    if fy1_ - fy0_ >= 2:
+        _text(ch, co, y0, fx_ - 1, "FUEL", HUD)
+        fill_ = int(round(ck.fuel * (fy1_ - fy0_ + 1)))
+        low_ = ck.fuel < PILOT_LOW_FUEL and int(now * 3.0) % 2
+        for y in range(fy0_, fy1_ + 1):
+            full_ = y > fy1_ - fill_
+            ch[y][fx_], co[y][fx_] = "|", CONCRETE
+            ch[y][fx_ + fw_ + 1], co[y][fx_ + fw_ + 1] = "|", CONCRETE
+            for x in range(fx_ + 1, fx_ + fw_ + 1):
+                ch[y][x], co[y][x] = (("#", ROU_RED) if full_ and not low_
+                                      else (".", CONCRETE))
+        _text(ch, co, fy1_ + 1, fx_ - 1, ("%d%%" % round(ck.fuel * 100)).rjust(4),
+              ROU_RED)
+    # The flaps, as big as the speed beside it on a big window.
+    if k > 1:
+        flx_ = 2 + blocks_width("888", 2 * (k - 1)) + 3 * k
+        if flx_ + 6 < fx_ - 1:
+            _text(ch, co, y0, flx_, "FLAPS", HUD)
+            big_number(str(ck.flaps), flx_, y0 + 1,
+                       ROU_GREEN if ck.flaps else CONCRETE)
     y_ = y0 + (2 if k == 1 else 1 + 5 * (k - 1) + 1)
-    wide_ = min(sec - 8, 22)
-    _text(ch, co, y_, 2, "THR [" + "#" * int(ck.throttle * wide_ + 0.5)
-          + "-" * (wide_ - int(ck.throttle * wide_ + 0.5)) + "]", GOLD_DIM)
+    # The thrust: a bar that grows with the window, as tall as k rows.
+    thr_rows = k
+    wide_ = max(6, min(edge_ - 9, 22 * k))
+    lit_ = int(ck.throttle * wide_ + 0.5)
+    for r_ in range(thr_rows):
+        if y_ + r_ < h - 1:
+            _text(ch, co, y_ + r_, 2, ("THR [" if r_ == thr_rows // 2 else "    [")
+                  + "#" * lit_ + "-" * (wide_ - lit_) + "]", GOLD_DIM)
+    y_ += thr_rows - 1
     if y_ + 1 < h - 1:
         _text(ch, co, y_ + 1, 2, "NOSE %+3d  BANK %+3d" % (
             math.degrees(ck.pitch), math.degrees(ck.bank)), HUD)
-    wide_map = ck.map_wide = w >= MAP_WIDE
-    edge_ = sec - 1 if wide_map else cx - sec // 2
     if y_ + 2 < h - 1:
         # What is switched on, lit when it is, on as many rows as it takes.
         x_, row_ = 2, y_ + 2
         gear_ = ("GEAR DN" if ck.gear > 0.99 else "GEAR UP" if ck.gear < 0.01
                  else "GEAR ..")
-        words_ = [(gear_, ck.gear > 0.99), ("FLAPS %d" % ck.flaps, ck.flaps > 0),
-                  ("AP", ck.ap), ("LIGHT", ck.light), ("RADIO", ck.radio_on)]
+        words_ = [(gear_, ck.gear > 0.99)]
+        if k == 1:
+            words_.append(("FLAPS %d" % ck.flaps, ck.flaps > 0))
+        words_ += [("AP", ck.ap), ("LIGHT", ck.light), ("RADIO", ck.radio_on)]
         if ck.engines < 2 and not ck.dry:
             words_.append(("ENG 1+2 OUT" if ck.engines == 0 else "ENG %d OUT" % (
                 2 if ck.dead_side > 0 else 1), None))
@@ -8138,7 +8172,7 @@ def draw_cockpit(ch, co, ck, now):
         far_ = ck.fuel_range() / 200.0
         need_ = (ck.nav()[1] / 200.0 if ck.state not in ("landed", "crashed")
                  else 0.0)
-        words_.append(("FUEL %d%% %dkm" % (round(ck.fuel * 100), far_),
+        words_.append(("RANGE %dkm" % far_,
                        None if ck.fuel < PILOT_LOW_FUEL else
                        "gold" if ck.fuel < 0.25 or far_ < need_ * 1.1 else True))
         for word, on in words_:
@@ -9101,10 +9135,65 @@ def draw_murk(ch, co, v, walls, amount, now):
                 row[sx], rowc[sx] = " ", 0
 
 
-def draw_glass_rain(ch, co, amount, now, flash, speed, focus, beam, upto):
+WIPER_ON = 0.05        # this much water on the glass and the wipers go
+WIPER_PERIOD = 1.3     # seconds a wiper takes over and back
+WIPER_SWEEP = 1.15     # radians either side of the middle of its arc
+WIPER_CLEAN = 0.45     # seconds the glass it has wiped stays clear
+
+
+def wiper_arms(w, upto, now, k=1):
+    """The two wipers: (pivot x, pivot y, angle, length) - pivots at the foot of
+    the windscreen a third of the way in from each side, each sweeping an arc
+    over its own half, the two in step the way an airliner's run. An angle is
+    up from flat, pointing in; lengths are in rows, and a row is two columns."""
+    py = upto - 1 - k
+    reach = max(3.0, upto * 0.62)
+    a = math.pi / 2 + WIPER_SWEEP * math.sin(now * math.tau / WIPER_PERIOD)
+    return [(int(w * 0.3), py, a, reach), (int(w * 0.7), py, math.pi - a, reach)]
+
+
+def wiped(arms, x, y, now, k=1):
+    """Has a wiper just been over this cell of the glass?"""
+    for px, py, _, reach in arms:
+        dx, dy = (x - px) * 0.5, py - y
+        if dy < -1 or dx * dx + dy * dy > reach * reach:
+            continue
+        ang = math.atan2(dy, dx if px < arms[1][0] else -dx)
+        for back in (0.0, WIPER_CLEAN * 0.5, WIPER_CLEAN):
+            a = math.pi / 2 + WIPER_SWEEP * math.sin((now - back) * math.tau
+                                                     / WIPER_PERIOD)
+            if abs(ang - a) < 0.25:
+                return True
+    return False
+
+
+def draw_wipers(ch, co, arms, k=1):
+    """The blades, black with a pale edge, from each pivot out along its angle;
+    thicker on a big window."""
+    h, w = len(ch), len(ch[0])
+    for px, py, a, reach in arms:
+        ca, sa = math.cos(a), math.sin(a)
+        g = _plane_glyph(ca, -sa)
+        steps = int(reach * 2.5) + 1
+        for s_ in range(steps):
+            r = reach * s_ / max(1, steps - 1)
+            for t in range(k):
+                x = int(round(px + ca * r * 2.0)) + t
+                y = int(round(py - sa * r))
+                if 0 <= x < w and 0 <= y < h:
+                    ch[y][x], co[y][x] = g, (CONCRETE if r > reach * 0.25 else BARK)
+        if 0 <= py < h:
+            for t in range(-1, k + 1):
+                if 0 <= px + t < w:
+                    ch[py][px + t], co[py][px + t] = "o", CONCRETE
+
+
+def draw_glass_rain(ch, co, amount, now, flash, speed, focus, beam, upto,
+                    wipers=None, k=1):
     """Rain on the windscreen, or rushing past the camera outside: streaks out
     from the point you are flying at, faster the faster you go. Screen space -
-    it is on the glass, so it does not tilt with the wings."""
+    it is on the glass, so it does not tilt with the wings. With wipers going,
+    the glass they have just been over is clear."""
     if amount <= 0.02:
         return
     h, w = len(ch), len(ch[0])
@@ -9123,6 +9212,8 @@ def draw_glass_rain(ch, co, amount, now, flash, speed, focus, beam, upto):
             x = int(round(fx + ca * (rr - back * 1.6)))
             y = int(round(fy + sa * (rr - back * 1.6)))
             if 0 <= x < w and 0 <= y < upto:
+                if wipers and wiped(wipers, x, y, now, k):
+                    continue
                 lit = beam and abs(x - fx) < w * 0.2 and abs(y - fy) < h * 0.25
                 ch[y][x] = g
                 co[y][x] = FLASH if flash > 0.35 or (lit and back == 0) else (
@@ -9132,7 +9223,7 @@ def draw_glass_rain(ch, co, amount, now, flash, speed, focus, beam, upto):
         m = _mix(n, int(now / 1.5), 6053)
         x = m % w
         y = int((m >> 12) % max(1, upto) - ((now % 1.5) * 2.0))
-        if 0 <= y < upto:
+        if 0 <= y < upto and not (wipers and wiped(wipers, x, y, now, k)):
             ch[y][x], co[y][x] = ("," if (m >> 20) & 1 else "."), RAIN_FAR
 
 
@@ -9420,9 +9511,15 @@ def render_cockpit(width, height, now, ck):
         # A jolt: the whole picture jumps a row.
         ch = [[" "] * width] + ch[:-1]
         co = [[0] * width] + co[:-1]
-    draw_glass_rain(ch, co, max(inside, wet * 0.4) if ck.state != "crashed" else 0.0,
-                    now, flash, ck.v, (width // 2, v.horizon), ck.light,
-                    height - rows)
+    glass = max(inside, wet * 0.4) if ck.state != "crashed" else 0.0
+    # The wipers come on by themselves in the rain, and are parked out of the
+    # way when it is dry.
+    arms = (wiper_arms(width, height - rows, now, k) if glass > WIPER_ON
+            and height - rows > 6 else None)
+    draw_glass_rain(ch, co, glass, now, flash, ck.v, (width // 2, v.horizon),
+                    ck.light, height - rows, arms, k)
+    if arms:
+        draw_wipers(ch, co, arms, k)
     draw_cockpit(ch, co, ck, now)
     if ck.state == "crashed":
         draw_wreck(ch, co, ck, now)
@@ -22264,7 +22361,8 @@ CHEAT_PLACES = [
 # the casino, sit at the ramen counter and climb the fire escapes from a jump,
 # and a taxi there would cost them a minute a case. Nobody playing sees them.
 CHEAT_HIDDEN = [
-    ("c", "casino", "casino"), ("k", "club", "club"), ("p", "roof party", "roofparty"),
+    ("c", "casino", "casino"), ("k", "club", "club"),
+    ("p", "roof party", "roofparty"),
     ("g", "arcade", "arcade"), ("m", "cinema", "cinema"), ("f", "carnival", "carnival"),
     ("j", "claw machine", "claw"), ("h", "strength test", "striker"),
     ("x", "a manhole", "manhole"), ("r", "ramen", "ramen"), ("d", "diner", "diner"),

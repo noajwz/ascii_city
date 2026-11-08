@@ -1331,6 +1331,19 @@ landing on the way is a fuel stop, and landings now add to `pay` (the destinatio
 passed by being beyond it along the next leg anywhere, and from off to one side of the route
 every point was, so it cut across the grass into a hangar on 09 - passed only counts within 45
 units now. Measured: from all four gates in five winds, to the pad and out, 20 of 20 lined up.
+ **The panel's gauges, asked for on 2026-11-08**: the fuel is a vertical red bar at the right
+of the first section (`2 * k` wide inside its rails, from under the compass row to the foot,
+emptying from the top, blinking under `PILOT_LOW_FUEL`, the % under it), and the words wrap
+short of it; the range it gives is still a word, `[RANGE 39km]`, gold or red as the gauge's
+word was. The thrust bar is `k` rows deep and up to `22 * k` wide, and on a big window the
+flaps are a block-letter 0, 1 or 2 beside the airspeed, under FLAPS, and leave the words. At
+scale 1 the bar and the flaps word are as they were. **Wipers**: with water on the glass
+(`WIPER_ON`) two blades sweep it from pivots at the foot of the windscreen a third of the way in
+from each side, in step and mirrored, over and back every `WIPER_PERIOD` (`wiper_arms()`,
+`draw_wipers()`), and `wiped()` keeps the drops and streaks off the glass a blade has been over
+in the last `WIPER_CLEAN`. Dry, they are parked and the frame is what it was; a check says so.
+Under half a millisecond at 300x90.
+
  `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
 see-through, which is how the first titles came out `--MAP-6-km--`. The key hint has a short form
 (`PILOT_KEYS_SHORT`) for windows under 118 columns. About 2-3 ms a frame at 300x90.

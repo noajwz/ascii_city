@@ -7871,10 +7871,99 @@ fu_out = ac.render_cockpit(300, 90, 2.0, fu_p)[1]
 fu_v = ac.View(fu_p.x - 70.0, fu_p.z - 50.0, math.atan2(70.0, 50.0), 160, 48)
 fu_st = "\n".join("".join(r_) for r_ in ac.render_street(fu_v, 2.0)[0])
 check("the panel has the gauge and the filling, the station shows from the apron",
-      "FUEL 4" in fu_txt and "FUELLING" in fu_txt and "FUEL" in fu_st
+      "FUEL" in fu_txt and "40%" in fu_txt and "FUELLING" in fu_txt and "FUEL" in fu_st
       and fu_out is not None)
 check("and k is on the keys", "k fuel" in ac.PILOT_KEYS and "k fuel" in
       ac.PILOT_KEYS_SHORT)
+
+
+# --- the panel's gauges: fuel a red bar, thrust and flaps that scale -------------
+def ck_panel(w_, h_, fuel_, thr_, flaps_):
+    c_ = ac.Cockpit(pk_home, 0.0, fuel=fuel_)
+    c_.throttle, c_.flaps = thr_, flaps_
+    g_ = [[" "] * w_ for _ in range(h_)]
+    o_ = [[0] * w_ for _ in range(h_)]
+    ac.draw_cockpit(g_, o_, c_, 1.0)
+    return ["".join(r_) for r_ in g_]
+
+
+def fuel_cells(rows_):
+    """How much of the fuel bar is full: the #s between its two | rails."""
+    top_ = next(n_ for n_, r_ in enumerate(rows_) if "FUEL" in r_ and "RANGE" not in r_)
+    x_ = rows_[top_].index("FUEL") + 1
+    return sum(r_[x_ + 1:x_ + 1 + 2 * ac.big_scale(len(rows_[0]), len(rows_))].count("#")
+               for r_ in rows_[top_ + 1:])
+
+
+def flaps_digit(rows_):
+    """Read back the block-letter digit under FLAPS, by matching it against
+    the font at the panel's scale."""
+    y_ = next(n_ for n_, r_ in enumerate(rows_) if "FLAPS" in r_)
+    x_ = rows_[y_].index("FLAPS")
+    k_ = ac.big_scale(len(rows_[0]), len(rows_))
+    sx_, sy_ = 2 * (k_ - 1), k_ - 1
+    shape_ = tuple("".join("#" if rows_[y_ + 1 + r * sy_][x_ + c * sx_] == "#" else " "
+                           for c in range(3)) for r in range(5))
+    return next((d_ for d_ in "0123456789"
+                 if tuple(ac.BIG_FONT[d_]) == shape_), None)
+
+
+fp_lo, fp_hi = ck_panel(120, 36, 0.25, 0.5, 0), ck_panel(120, 36, 0.75, 0.5, 0)
+check("the fuel is a bar, fuller the more there is, its % under it",
+      0 < fuel_cells(fp_lo) < fuel_cells(fp_hi) and "75%" in "".join(fp_hi)
+      and "FUEL 75" not in "".join(fp_hi), "%d / %d" % (fuel_cells(fp_lo),
+                                                      fuel_cells(fp_hi)))
+check("and the range is still on the panel, as a word",
+      any("[RANGE " in r_ for r_ in fp_hi))
+fp_big = ck_panel(300, 90, 0.75, 0.5, 2)
+fp_big3 = ck_panel(450, 132, 0.75, 0.5, 2)
+check("on a big window the fuel bar is wider and as tall as the panel",
+      fuel_cells(fp_big) > 3 * fuel_cells(fp_hi) and fuel_cells(fp_big3)
+      > fuel_cells(fp_big))
+thr_small = sum(r_.count("#") for r_ in fp_hi if "[" in r_ and "THR" in r_)
+thr_big = sum(r_[:60].count("#") for r_ in fp_big if r_.lstrip().startswith(
+    ("THR [", "[#")))
+check("the thrust bar grows with the window: wider and taller",
+      thr_big >= 3 * thr_small > 0, "%d against %d" % (thr_big, thr_small))
+check("the flaps: a word on an ordinary window, a block-letter 2 on a big one",
+      any("[FLAPS 2]" in r_ for r_ in ck_panel(120, 36, 0.5, 0.5, 2))
+      and not any("[FLAPS" in r_ for r_ in fp_big)
+      and flaps_digit(fp_big) == "2"
+      and flaps_digit(ck_panel(300, 90, 0.75, 0.5, 0)) == "0")
+for w_, h_ in ((50, 12), (80, 24), (160, 48), (299, 87), (301, 91), (451, 133)):
+    for f_ in (0.0, 0.05, 1.0):
+        ck_panel(w_, h_, f_, 1.0, 1)
+check("and every size of window draws them", True)
+
+# --- the wipers ------------------------------------------------------------------
+wp_c = ac.Cockpit(pk_home, 0.0, fuel=1.0)
+wp_c.state, wp_c.alt, wp_c.v = "air", 60.0, 40.0
+wp_keep = ac.weather_name()
+while ac.weather_name() != "rain":
+    ac.cycle_weather()
+wp_on = ac.render_cockpit(160, 48, 5.0, wp_c)[0]
+wp_arms_ = ac.wiper_arms
+ac.wiper_arms = lambda *a_: None
+wp_off = ac.render_cockpit(160, 48, 5.0, wp_c)[0]
+ac.wiper_arms = wp_arms_
+while ac.weather_name() != "dry":
+    ac.cycle_weather()
+wp_dry = ac.render_cockpit(160, 48, 5.0, wp_c)[0]
+ac.wiper_arms = lambda *a_: None
+wp_dry2 = ac.render_cockpit(160, 48, 5.0, wp_c)[0]
+ac.wiper_arms = wp_arms_
+while ac.weather_name() != wp_keep:
+    ac.cycle_weather()
+check("in the rain the wipers go, and the glass behind them is clear",
+      wp_on != wp_off and sum(a_ != b_ for ra_, rb_ in zip(wp_on, wp_off)
+                              for a_, b_ in zip(ra_, rb_)) > 20)
+check("and dry, there are none: the windscreen is as it was",
+      wp_dry == wp_dry2)
+wp_a = ac.wiper_arms(160, 36, 0.0)
+wp_b = ac.wiper_arms(160, 36, ac.WIPER_PERIOD / 4.0)
+check("two of them, sweeping in step, mirrored, each over its own half",
+      len(wp_a) == 2 and abs(wp_a[0][2] - (math.pi - wp_a[1][2])) < 1e-9
+      and abs(wp_b[0][2] - wp_a[0][2]) > 1.0 and wp_a[0][0] < 80 < wp_a[1][0])
 
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
