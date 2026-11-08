@@ -4926,6 +4926,215 @@ check("any size of window, and big ones get the speed in block letters",
       and "###" in cab_big[(300, 90)] and "###" in cab_big[(451, 133)]
       and "mph" in cab_big[(20, 8)])
 
+# --- the handbrake, and drifting ------------------------------------------------------
+def cab_spin(hb):
+    """Full right lock at 20 for a second and a bit, with the handbrake or
+    without, on open ground (can_stand stood in for): how far round it came,
+    how sideways it got, and what it left."""
+    stand_ = ac.can_stand
+    ac.can_stand = lambda x_, z_: True
+    try:
+        c_ = ac.Cab(cb_x, cb_z, cb_y, 1000.0, 1)
+        c_.call_at, c_.speed, c_.want = 1e9, 20.0, 20.0
+        t_, h0_, most_ = 1000.0, c_.heading, 0.0
+        for _ in range(36):
+            t_ += 1.0 / 30.0
+            c_.key("right", t_)
+            if hb:
+                c_.key("handbrake", t_)
+            c_.step(1.0 / 30.0, t_)
+            most_ = max(most_, abs(c_.slip))
+        turned_ = ac._wrap(c_.heading - h0_)
+        for _ in range(45):
+            t_ += 1.0 / 30.0
+            c_.step(1.0 / 30.0, t_)
+    finally:
+        ac.can_stand = stand_
+    return c_, turned_, most_
+
+
+hb0_, hb0_turn, hb0_slip = cab_spin(False)
+hb1_, hb1_turn, hb1_slip = cab_spin(True)
+check("no handbrake: it goes where it points, near enough",
+      hb0_slip < 0.15 and not hb0_.skids, "slip %.2f" % hb0_slip)
+check("the handbrake swings the back out: round further, and sideways",
+      hb1_turn > hb0_turn * 1.3 and hb1_slip > 0.6,
+      "%.2f against %.2f, slip %.2f" % (hb1_turn, hb0_turn, hb1_slip))
+check("it leaves marks on the road, screeches, and comes straight again",
+      len(hb1_.skids) > 8 and abs(hb1_.slip) < 0.02 and "drift" in hb1_.said,
+      "%d marks" % len(hb1_.skids))
+check("and it costs you speed, which the throttle gives back after",
+      hb1_.speed > 15.0, "%.1f" % hb1_.speed)
+sk_c = ac.Cab(cb_x, cb_z, cb_y, 1000.0, 1)
+sk_c.skids = [(cb_x + math.sin(cb_y) * d_ + math.cos(cb_y) * 0.3 * math.sin(d_),
+               cb_z + math.cos(cb_y) * d_) for d_ in range(6, 20)]
+sk_v = ac.View(cb_x, cb_z, cb_y, 100, 30, eye=2.4)
+sk_ch, sk_co, _ = ac.render_street(sk_v, 1000.0)
+sk_before = ["".join(r_) for r_ in sk_ch]
+ac.draw_cab_world(sk_ch, sk_co, sk_v, sk_c, 1000.0)
+check("skid marks are drawn on the road where they were left",
+      sum(a_ != b_ for ra_, rb_ in zip(sk_before, sk_ch) for a_, b_ in zip(ra_, rb_)
+          ) > 5)
+
+# --- the police -------------------------------------------------------------------
+cop_at = None
+for n_ in range(60):
+    sp_ = ac.find_place(sx_ + n_ * 300.0, sz_ - n_ * 170.0, "street")
+    for t_ in range(0, 600, 3):
+        v_ = ac.View(sp_[0], sp_[1], sp_[2], 3, 3)
+        if any(k_ == "police" and ac.cab_sight(x_, z_, sp_[0], sp_[1])
+               for _, x_, z_, _, k_, _ in ac.near_cars(v_, float(t_), 40.0,
+                                                      every=True)):
+            cop_at = (sp_, float(t_))
+            break
+    if cop_at:
+        break
+check("there is a police car about to be seen by", cop_at is not None)
+
+
+def cop_cab(speed):
+    c_ = ac.Cab(cop_at[0][0], cop_at[0][1], cop_at[0][2], cop_at[1] - 0.01, 5)
+    c_.call_at, c_.speed, c_.want = 1e9, speed, speed
+    t_ = cop_at[1]
+    for _ in range(9):
+        t_ += 1.0 / 30.0
+        c_.step(1.0 / 30.0, t_)
+    return c_, t_
+
+
+cop_slow, _ = cop_cab(ac.COP_LIMIT - 3.0)
+check("under the limit in front of one, nothing", cop_slow.cop is None)
+ac._cars_off.clear()
+ac._cars_extra[:] = []
+cop_c, cop_t = cop_cab(ac.COP_LIMIT + 4.0)
+cop_g = cop_c.cop["g"] if cop_c.cop else None
+check("over it, its lights go on and it comes after you",
+      cop_c.cop is not None and cop_c.cop["state"] == "chase"
+      and "WEE-OO" in cop_c.radio)
+cop_v = ac.View(cop_c.x, cop_c.z, cop_c.heading, 3, 3)
+cop_seen = [g_ for *_, g_ in ac.near_cars(cop_v, cop_t, 120.0, every=True)
+            if g_ == cop_g]
+check("the same car: out of the traffic, and drawn where it is now",
+      cop_g in ac._cars_off and len(cop_seen) == 1)
+cop_c.key("brake", cop_t)
+cop_fine0 = cop_c.fine
+for _ in range(30 * 30):
+    cop_t += 1.0 / 30.0
+    cop_c.step(1.0 / 30.0, cop_t)
+    if cop_c.cop is None:
+        break
+cop_due = (ac.COP_FINE + ac.COP_PER_MPH
+           * (int((ac.COP_LIMIT + 4.0) * ac.MPH) - ac.COP_LIMIT_MPH))
+check("stop, and it pulls up behind: a ticket, by how fast you were going",
+      cop_c.fine - cop_fine0 == cop_due, "$%d, due $%d" % (cop_c.fine, cop_due))
+check("and then it is gone, and leaves you be a while",
+      cop_c.cop is None and not ac._cars_off and not ac._cars_extra
+      and cop_c.cop_rest > cop_t)
+cop_r, cop_rt = cop_cab(ac.COP_LIMIT + 4.0)
+cop_r.fare = {"state": "riding", "kind": "hurry", "mood": 1.0, "dents": 0,
+              "x": 0.0, "z": 0.0, "to": (1e6, 1e6), "driven": 0.0, "meter": 4.0,
+              "t": cop_rt, "eta": 1e9, "name": "the casino", "seed": 1}
+cop_r.x += 400.0                        # away and gone, the road behind it all yours
+for _ in range(10):
+    cop_rt += 1.0 / 30.0
+    cop_r.step(1.0 / 30.0, cop_rt)
+check("get far enough ahead and you have lost it; a hurried fare loves it",
+      cop_r.cop is None and cop_r.fine == 0 and cop_r.fare["mood"] > 1.0
+      and cop_r.heat_until > cop_rt and "lost them" in cop_r.radio)
+ac._cars_off.clear()
+ac._cars_extra[:] = []
+
+
+def cop_getaway(n_):
+    """Flat out along a long way, chased from the start: how it ends."""
+    sp_ = ac.find_place(sx_ + n_ * 900.0, sz_ - n_ * 500.0, "street")
+    c_ = ac.Cab(sp_[0], sp_[1], sp_[2], 0.0, 300 + n_)
+    c_.call_at = 1e9
+    here_ = ac._cell_of(sp_[0], sp_[1])
+    way_ = None
+    for a_ in range(16):
+        goal_ = (here_[0] + int(300 * math.cos(a_)), here_[1] + int(300 * math.sin(a_)))
+        if ac.cab_ground(*goal_) == "road":
+            way_ = ac.cab_route(here_, goal_)
+            if way_:
+                break
+    t_, began_ = 0.0, None
+    while t_ < 400.0 and way_ and len(way_) > 2:
+        t_ += 1.0 / 30.0
+        c_.goal, c_.route = way_[-1], way_
+        cab_robot_way(c_, t_, 32.0, 11.0)
+        way_ = c_.route
+        if t_ > 5.0 and began_ is None:
+            c_.heat_until = t_ + 1.0      # every police car knows the cab
+        c_.step(1.0 / 30.0, t_)
+        here_ = ac._cell_of(c_.x, c_.z)
+        for k_, rc_ in enumerate(way_[:14]):
+            if abs(rc_[0] - here_[0]) + abs(rc_[1] - here_[1]) <= 1:
+                way_ = way_[k_:]
+                break
+        else:
+            way_ = ac.cab_route(here_, way_[-1]) or way_
+        if c_.cop is not None and began_ is None:
+            began_ = t_
+        if began_ is not None and c_.cop is None:
+            return "lost"
+        if c_.cop is not None and c_.cop["state"] == "stopped":
+            return "caught"
+    ac._cars_off.clear()
+    ac._cars_extra[:] = []
+    return None
+
+
+def cab_robot_way(c_, now, fast_, bend_):
+    r_ = c_.route
+    look_ = r_[min(2, len(r_) - 1)]
+    tx_, tz_ = (look_[0] + 0.5) * ac.CELL, (look_[1] + 0.5) * ac.CELL
+    err_ = ac._wrap(math.atan2(tx_ - c_.x, tz_ - c_.z) - c_.heading)
+    aim_ = max(-1.0, min(1.0, err_ * 2.5))
+    if abs(aim_ - c_.steer) > 0.1:
+        c_.key("left" if aim_ < c_.steer else "right", now)
+    bent_ = len(r_) < 3 or any((r_[k][0] - r_[k - 1][0], r_[k][1] - r_[k - 1][1])
+                               != (r_[1][0] - r_[0][0], r_[1][1] - r_[0][1])
+                               for k in range(2, min(7, len(r_))))
+    want_ = 3.0 if abs(err_) > 0.6 else bend_ if bent_ else fast_
+    if c_.want < want_ - 1:
+        c_.key("faster", now)
+    elif c_.want > want_ + 1:
+        c_.key("slower", now)
+
+
+cop_ends = [cop_getaway(n_) for n_ in range(12)]
+ac._cars_off.clear()
+ac._cars_extra[:] = []
+check("a getaway flat out: some lose them, and some get caught",
+      cop_ends.count("lost") >= 2 and cop_ends.count("caught") >= 1,
+      "%d lost, %d caught" % (cop_ends.count("lost"), cop_ends.count("caught")))
+
+mr_c, mr_t = cop_cab(ac.COP_LIMIT + 4.0)
+for _ in range(150):
+    mr_t += 1.0 / 30.0
+    mr_c.step(1.0 / 30.0, mr_t)
+mr_a = [[" "] * 80 for _ in range(20)]
+ac.draw_mirror(mr_a, [[0] * 80 for _ in range(20)], mr_c, mr_t, 2, 1, 60, 14)
+mr_keep = list(ac._cars_extra)
+ac._cars_extra[:] = []
+mr_c.mirror = None                      # or it hands back the picture it kept
+mr_b = [[" "] * 80 for _ in range(20)]
+ac.draw_mirror(mr_b, [[0] * 80 for _ in range(20)], mr_c, mr_t, 2, 1, 60, 14)
+ac._cars_extra[:] = mr_keep
+check("and in the mirror, there it is behind you",
+      mr_c.cop is not None and sum(a_ != b_ for ra_, rb_ in zip(mr_a, mr_b)
+                                   for a_, b_ in zip(ra_, rb_)) > 4,
+      "%.0f back" % mr_c._cop_gap() if mr_c.cop else "")
+mr_g = [[" "] * 120 for _ in range(36)]
+ac.draw_driver(mr_g, [[0] * 120 for _ in range(36)], mr_c, mr_t, 0.0)
+mr_tx = "\n".join("".join(r_) for r_ in mr_g)
+check("from the seat: the mirror over the windscreen, and the siren",
+      "WEE-OO" in mr_tx and "[" in mr_tx.splitlines()[1]
+      and "POLICE" in mr_c.status())
+ac._cars_off.clear()
+ac._cars_extra[:] = []
+
 # --- fog nights --------------------------------------------------------------------
 fog_n = sum(1 for k in range(2000) if ac.night(k * ac.NIGHT_LENGTH + 1.0)["fog"])
 check("fog comes in one night in a while", 2000 / 20.0 < fog_n < 2000 / 5.0,

@@ -2687,7 +2687,46 @@ none left - and it needs none: `t` works on any street, so the way in is two key
   HIRED / FOR HIRE, the wheel (`draw_wheel()`, in front of the dash, turning with `steer`), and
   dispatch and the fare along the dash. On the big-window system the speed and the fare go in
   block letters and the satnav and the wheel are worked out from the window's size anyway.
-  About 16 ms a frame at 120x36 and 27 at 300x90.
+  About 16 ms a frame at 120x36 and 20 to 26 at 300x90, the mirror included.
+
+- **The handbrake and drifting** (`e`, held while it repeats, like the wheel). The cab has a
+  `slip`: the way it goes, less the way it points. The nose turns with the wheel; the way it is
+  going does not, and the tyres pull it round after the nose at `CAB_GRIP` (times the wet grip)
+  - so in ordinary driving slip is a tenth of a radian at full lock, and nothing changed for the
+  robot. With the handbrake on the grip is `CAB_HB_GRIP`, the wheel turns you `CAB_HB_YAW`
+  more, the power is off and it slows at `CAB_HB_DRAG`; going sideways slows you too
+  (`CAB_SLIDE_DRAG`, by the sine of the slip), and the slip stops at `CAB_SLIP_MOST`. Let go
+  and the grip straightens it in a few tenths and the speed held pulls you out. `_drift()`:
+  past `CAB_DRIFT` and moving is a drift - a screech, marks on the road behind the back wheels
+  (`skids`, `CAB_SKIDS` of them, drawn by `draw_cab_world()` with `put_cell()`, so buildings
+  hide them), and the fare's say at the end (hurried ones like it, nervous ones do not).
+  `_move()` goes along `heading + slip`, so a slide into a wall is still a wall. Measured on
+  open ground, full lock at 20 for 1.2 s: 0.97 rad round without, 1.63 with, slip 0.92.
+- **The police** (`_police()`). The traffic's police cars are where they always were; one
+  within `COP_SEES` that can see you (`cab_sight()`, nothing built between) while you are over
+  `COP_LIMIT_MPH`, or just after you hit a car, or while you are known (`heat_until`), puts its
+  lights on and comes after you. **It follows the road you drove**, a breadcrumb a unit with
+  your speed at each (`cop["path"]`), so it can never go through a building, needs no route of
+  its own and takes a corner as fast as you took it, a little more (`* 1.1 + 3`) - and on a
+  straight it is held to `COP_TOP`, under your top speed, so the straights are yours and the
+  corners are its. Its traffic slot is put out (`_cars_off`, which `near_cars()` skips) and the
+  car is handed back through `_cars_extra`, so `draw_traffic()` and `collect_glow()` draw it and
+  light the street round it with no new code - and `_traffic()` does not count it as a car hit.
+  Stopped with it within `COP_CATCH` for a second (a bump is not pulling over) is a ticket:
+  the officer's lines in the dash, `COP_FINE` and `COP_PER_MPH` over at your fastest in the
+  chase, `COP_RAN` if it went on 20 s, taken from the wallet through `cab.fine`; then
+  `COP_REST` of peace. `COP_LOSE` behind along your road, or out of its sight `COP_HIDE` and
+  35 back, and you have lost it - and every police car knows the cab for `COP_HEAT`. On your
+  bumper `COP_BOX` and it boxes you in. While it chases, the roof and the pillars take its
+  lights and the dash says WEE-OO; `x` will not get you out. A robot getting away flat out on
+  the satnav's way, chased from the start, lost it five times in twelve and was caught once;
+  the robot corners worse than a person, and a person has the handbrake.
+- **The mirror** (`draw_mirror()`, `mirror_size()`, from 60 by 24 up) is a second
+  `render_street()` looking back, every row turned round, at half the field of view and twice
+  the size (a police car twenty back was a row of it otherwise) and the horizon high so it
+  looks down the road. It is about 5 ms whatever its size - the fixed cost of a frame - so it
+  is redrawn `MIRROR_FPS` times a second and kept between (`cab.mirror`). That is where you see
+  the police coming: the chase is behind you, and the camera cannot look back.
 
 `cab_robot()` in the checks drives six shifts of three fares on the keys alone, following the
 satnav, all delivered and paid. If you change the handling and it cannot, neither can anyone.

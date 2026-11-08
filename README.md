@@ -102,7 +102,8 @@ At the wheel of a cab (`t` on any street, then `d` when it pulls up):
 
 ```
   w s        speed up, down  a d     steer       space brakes
-  m          the satnav      h       horn        x     pull over and get out
+  e          handbrake       m       the satnav  h     horn
+  x          pull over and get out
 ```
 
 The cheat menu teleports you to anything worth looking at — it searches the city for what is
@@ -149,7 +150,9 @@ the city is infinite, identical every time you walk back to it, and held in no m
 - **Drive the cab yourself.** The driver hands you the keys and goes for a coffee: dispatch
   finds you fares waving at the kerb, the satnav shows the way, and they pay on the meter and
   tip on the ride - the one honest way to earn money in town. Some are in a hurry, some want it
-  gentle, and nobody likes the kerb.
+  gentle, and nobody likes the kerb. Hold the handbrake into a corner and the back steps out:
+  drift it, and leave the marks on the road. Speed past a police car and its lights go on in
+  your mirror - pull over for a ticket, or lose them.
 - **Billboards** hung out over the wide streets, selling soda in neon.
 - **Car parks** under orange sodium lamps, and **tunnels** under the road decks — under the short
   ones, a fire in a can.
