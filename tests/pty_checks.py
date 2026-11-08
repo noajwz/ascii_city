@@ -322,12 +322,13 @@ def cases(run, report):
          (b"`", .3), (b"c", 1.5)], cols=110, rows=34))
     for ck_size in ((110, 34), (300, 90)):
         ok &= report("flying the plane, %dx%d" % ck_size, *run(
-            [(b"`", .5), (b"f", 1.0)] + [(b"+", .1)] * 10 + [(b"", 5.0)]
+            [(b"`", .5), (b"f", 1.0)] + [(b"W", .1)] * 10 + [(b"", 5.0)]
             + [(b"s", .1)] * 4 + [(b"", 3.0), (b"d", .1), (b"d", .1), (b"d", .1),
                                   (b"", 2.0), (b"a", .1), (b"w", .1), (b"-", .1),
                                   (b"r", 1.5), (b"f", .2), (b"g", .3), (b"p", 2.0),
-                                  (b"g", .3), (b"z", .3), (b"m", .5), (b"]", .3),
-                                  (b"[", .3), (b"v", 1.5), (b"l", .5),
+                                  (b"g", .3), (b"z", .3), (b"m", .5), (b"-", .3),
+                                  (b"+", .3), (b"S", .2), (b"W", .2), (b"i", .3),
+                                  (b"c", .3), (b"v", 1.5), (b"l", .5),
                                   (b"a", .3), (b"v", 1.0), (b"l", .3),
                                   (b"", 1.0), (b"x", .8), (b"w", .3)],
             cols=ck_size[0], rows=ck_size[1]))
@@ -337,7 +338,7 @@ def cases(run, report):
         cols=110, rows=34))
     ok &= report("the desk: the keys, and straight into a wall", *run(
         [(b"`", .5), (b".", 1.0)] + [(b"w", .25)] * 6 + [(b"c", .6)]
-        + [(b"+", .1)] * 10 + [(b"d", .1)] * 12 + [(b"", 8.0)], cols=110, rows=34))
+        + [(b"W", .1)] * 10 + [(b"d", .1)] * 12 + [(b"", 8.0)], cols=110, rows=34))
     for rb_size in ((110, 34), (300, 90)):
         ok &= report("a drink at the rooftop bar, %dx%d" % rb_size, *run(
             [(b"`", .5), (b"b", 1.5)] + [(b"\x1bOA", .3)] * 6

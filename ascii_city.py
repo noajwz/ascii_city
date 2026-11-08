@@ -6201,6 +6201,8 @@ PILOT_BRAKES = 11.0
 PILOT_GRAVITY = 9.0    # what a climb costs in speed
 PILOT_TURN = 30.0      # how hard a bank turns you: 40 degrees at 70 is 20 a second
 PILOT_MAX_BANK = 0.7   # radians
+PILOT_ROLL_IN = 0.55   # how fast a/d roll you in, a second: heavy, asked for (was 1.6)
+PILOT_ROLL_OUT = 0.45  # and how fast it comes back level by itself (was 0.7)
 PILOT_MAX_PITCH = 0.31
 PILOT_PITCH_STEP = 0.035  # a press of w or s
 PILOT_GRACE = 0.3      # seconds a key keeps a wing down: curses sees no key go up
@@ -6214,11 +6216,11 @@ PILOT_GRASS = 0.35         # on the grass the wheels dig in, the harder the fast
 PUSH_TIME = 10.0           # the tug: how long the push back from the stand takes
 PUSH_BACK = 34.0           # and how far
 PILOT_READ = 20.0          # stopped: how long the report waits for you to read it
-PILOT_KEYS = ("s w nose  a d wings  + - power  g gear  f flaps  l light  p auto  "
+PILOT_KEYS = ("s w nose  a d wings  W S power  g gear  f flaps  l light  p auto  "
               "k fuel  i wipers  "
-              "r radio  c freq  m map  [ ] zoom  v outside  b brakes  x out")
-PILOT_KEYS_SHORT = ("sw:nose ad:bank +-:thr g:gear f:flap l:light p:auto k:fuel "
-                    "i:wipe r:radio c:freq m:map v:view b:brake x:out")
+              "r radio  c freq  m map  + - zoom  v outside  b brakes  x out")
+PILOT_KEYS_SHORT = ("sw:nose ad:bank WS:thr g:gear f:flap l:lite p:auto k:fuel "
+                    "i:wipe r:atc c:freq m:map +-:zoom v:view b:brk x:out")
 PILOT_CENTER = 110.0   # climbing past this (2,750 ft) the tower hands you to the center
 PILOT_TOWER = 100.0    # and coming down past this, the center to the tower - not the
                        # same height, or flying along it the radio would flip for ever
@@ -6558,10 +6560,10 @@ class Cockpit:
         self.throttle = 0.0
         self.brake_until = 0.0
         self.state = "ground"           # gate, push, ground, air, landed, crashed
-        self.said = "brakes off: + for the throttle, s to lift the nose"
+        self.said = "brakes off: W (shift w) for the throttle, s to lift the nose"
         if gate is not None:
             self.state = "gate"
-            self.said = ("at gate %d: + or r for the push back - or p, and it is all "
+            self.said = ("at gate %d: W or r for the push back - or p, and it is all "
                          "done for you" % (gate + 1))
         if dest is not None:
             self.said = "flight plan: %s. %s" % (airport_name(dest).title(), self.said)
@@ -6657,7 +6659,7 @@ class Cockpit:
             # Round the pages; narrow, the words come back after the last of them.
             if self.map_wide:
                 # Both screens are up on a wide panel; nothing to turn.
-                self.said = "the map and the radar are both up - [ ] for the range"
+                self.said = "the map and the radar are both up - + - for the range"
                 return
             if not self.map_on:
                 self.map_on, self.map_page = True, 0
@@ -7749,9 +7751,9 @@ class Cockpit:
                 pass                            # it has the wings
             elif steering:
                 self.bank += ((steering * PILOT_MAX_BANK - self.bank)
-                              * min(1.0, dt * 1.6))
+                              * min(1.0, dt * PILOT_ROLL_IN))
             else:
-                self.bank -= self.bank * min(1.0, dt * 0.7)
+                self.bank -= self.bank * min(1.0, dt * PILOT_ROLL_OUT)
             set_ = self.pitch_set
             if self.v < self.stall():
                 set_ = -0.18                    # the nose drops, whatever you want
@@ -8291,17 +8293,34 @@ def draw_cockpit(ch, co, ck, now):
               else GOLD_DIM)
     # The radios: the frequency you are on and the one waiting (c swaps them),
     # green when you are on the station that has you.
-    if y_ + 4 < h - 1:
-        right_ = ck.tuned == ck.station[2]
-        _text(ch, co, y_ + 3, ax, "COM  %s  %s" % (ck.tuned, (
-            ck.station[1] if right_ else "")), ROU_GREEN if right_ else GOLD)
-        _text(ch, co, y_ + 4, ax, "STBY %s  %s" % (ck.standby, (
-            ck.station[1] if ck.standby == ck.station[2] and not right_ else "")),
-              GOLD if ck.standby == ck.station[2] and not right_ else CONCRETE)
+    # On a big window the one you are on is in block letters the size of the
+    # altitude over it, asked for, with its station's name over that.
+    right_ = ck.tuned == ck.station[2]
+    sx_ = 2 * (k - 1)
+    big_com = (k > 1 and blocks_width(ck.tuned, sx_) <= w - ax - 2
+               and y_ + 5 * (k - 1) + 4 < h - 1)
+    stby_ = "STBY %s  %s" % (ck.standby, (
+        ck.station[1] if ck.standby == ck.station[2] and not right_ else ""))
+    stby_attr = GOLD if ck.standby == ck.station[2] and not right_ else CONCRETE
+    if big_com:
+        # COM and its station, the waiting one at the end of the same row, and
+        # the big figures under them.
+        _text(ch, co, y_ + 3, ax, "COM  " + (ck.station[1] if right_ else ""),
+              ROU_GREEN if right_ else GOLD)
+        stby_ = stby_.rstrip()
+        _text(ch, co, y_ + 3, max(ax + 24, w - 2 - len(stby_)), stby_, stby_attr)
+        big_number(ck.tuned, ax, y_ + 4, ROU_GREEN if right_ else GOLD)
+        log_y = y_ + 4 + 5 * (k - 1) + 1
+    else:
+        if y_ + 4 < h - 1:
+            _text(ch, co, y_ + 3, ax, "COM  %s  %s" % (ck.tuned, (
+                ck.station[1] if right_ else "")), ROU_GREEN if right_ else GOLD)
+            _text(ch, co, y_ + 4, ax, stby_, stby_attr)
+        log_y = y_ + 6
     # And what has been said on it, under the frequencies, when there is room
     # for it; otherwise it stays at the top left of the windscreen.
-    ck.radio_right = draw_radio_log(ch, co, ck, now, ax, y_ + 6, w - ax - 2,
-                                    h - 2 - (y_ + 6) + 1)
+    ck.radio_right = draw_radio_log(ch, co, ck, now, ax, log_y, w - ax - 2,
+                                    h - 2 - log_y + 1)
     # The artificial horizon: sky over ground, tilted with you, a wing marker on it.
     bx0, bx1 = cx - sec // 2 + 2, cx + sec // 2 - 2
     by0, by1 = y0 + 1, h - 2
@@ -27470,13 +27489,14 @@ def main(stdscr):
                     else:
                         # A stick: back on it, s or the down arrow, is the nose up.
                         flight["ck"].key({
-                            curses.KEY_UP: "down", ord("w"): "down", ord("W"): "down",
+                            curses.KEY_UP: "down", ord("w"): "down", ord("W"): "more",
                             curses.KEY_DOWN: "up", ord("s"): "up",
-                            ord("S"): "up", curses.KEY_LEFT: "left",
+                            ord("S"): "less", curses.KEY_LEFT: "left",
                             ord("a"): "left", ord("A"): "left",
                             curses.KEY_RIGHT: "right", ord("d"): "right",
-                            ord("D"): "right", ord("+"): "more", ord("="): "more",
-                            ord("-"): "less", ord("_"): "less", ord("b"): "brake",
+                            ord("D"): "right", ord("+"): "zoom in",
+                            ord("="): "zoom in", ord("-"): "zoom out",
+                            ord("_"): "zoom out", ord("b"): "brake",
                             ord("B"): "brake", ord("f"): "flaps", ord("F"): "flaps",
                             ord("p"): "autopilot", ord("P"): "autopilot",
                             ord("r"): "radio", ord("R"): "radio", ord("g"): "gear",

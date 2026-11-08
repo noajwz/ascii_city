@@ -68,13 +68,13 @@ And two things outside the terminal:
 In the cockpit:
 
 ```
-  s w        nose up, down   a d     bank        + -   throttle
+  s w        nose up, down   a d     bank        W S   throttle (shift w, s)
   g          gear            f       flaps       b     brakes
   r          radio           p       autopilot   l     landing light
   c          swap frequency  i       wipers      k     fuel pad
   m          map page        [ ]     map range   v     view from outside
   enter      a tug in, after landing             x     hand it back
-             (at the gate, + pushes back; p taxis for you)
+             (at the gate, W pushes back; p taxis for you)
 ```
 
 At the wheel of a cab (`t` on any street, then `d` when it pulls up):
