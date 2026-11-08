@@ -6648,12 +6648,12 @@ c_ = pk_at(alt_=400.0, v_=ac.PILOT_STALL - 2.0, x_=pk_rx - 4000.0)
 check("and the panel says so", "STALL" in c_.warnings())
 c_ = pk_at(alt_=300.0, v_=70.0, x_=pk_rx - 4000.0, heading_=0.0)
 h0_ = c_.heading
-for n_ in range(45):
+for n_ in range(90):
     c_.key("right", n_ / 30.0)
     c_.step(1.0 / 30.0, n_ / 30.0)
 pk_banked = c_.bank
-check("a right wing down turns you right", pk_banked > 0.3 and c_.heading > h0_)
-for n_ in range(45, 300):
+check("a right wing down turns you right", pk_banked > 0.45 and c_.heading > h0_)
+for n_ in range(90, 450):
     c_.step(1.0 / 30.0, n_ / 30.0)
 check("and let go, the wings come level", abs(c_.bank) < 0.05)
 c_ = ac.Cockpit(pk_home, 0.0)
@@ -7096,6 +7096,7 @@ wd_c = pk_at(alt_=300.0, v_=70.0, x_=pk_rx - 9000.0, heading_=0.0)
 wd_c.calm = False
 x0_ = wd_c.x
 for n_ in range(300):
+    wd_c.bank = 0.0                     # the wings held level: the gusts roll them
     wd_c.step(1.0 / 30.0, n_ / 30.0)
 check("in the air it carries you sideways", wd_c.x < x0_ - 70.0)
 wd_c = pk_at(alt_=0.01, v_=45.0, pitch_=-0.05, heading_=math.pi + 0.25)
@@ -8127,11 +8128,66 @@ for n_ in range(150):
     hv_c.step(1.0 / 30.0, hv_t)
     if n_ == 29:
         hv_at1 = hv_c.bank
-check("the wings are heavy: a second of d is under half a full bank, five near all",
-      hv_at1 < 0.5 * ac.PILOT_MAX_BANK and hv_c.bank > 0.85 * ac.PILOT_MAX_BANK,
+check("the wings are heavy: a second of d is a few degrees, held it does not stop",
+      hv_at1 < 0.25 and hv_c.bank > ac.PILOT_BANK_WARN,
       "%.2f after 1 s, %.2f after 5" % (hv_at1, hv_c.bank))
-check("W and S are the power, + and - the zoom, on the keys",
+check("over 35 degrees it says BANK ANGLE, and the panel goes red",
+      "BANK ANGLE" in hv_c.warnings())
+bk_lv = ac.Cockpit(pk_home, 0.0)
+bk_lv.state, bk_lv.alt, bk_lv.v, bk_lv.calm = "air", 200.0, 70.0, True
+bk_st = ac.Cockpit(pk_home, 0.0)
+bk_st.state, bk_st.alt, bk_st.v, bk_st.calm, bk_st.bank = "air", 200.0, 70.0, True, 1.0
+check("a steep bank costs lift: it sinks, and it stalls faster",
+      bk_st.stall() > bk_lv.stall() * 1.3
+      and all((bk_lv.step(1.0 / 30.0, n_ / 30.0), bk_st.step(1.0 / 30.0, n_ / 30.0))
+              for n_ in range(1, 60)) and bk_st.alt < bk_lv.alt - 3.0,
+      "%.0f against %.0f" % (bk_st.alt, bk_lv.alt))
+bk_up = ac.Cockpit(pk_home, 0.0)
+bk_up.state, bk_up.alt, bk_up.v, bk_up.calm, bk_up.bank = "air", 300.0, 70.0, True, 1.3
+for n_ in range(1, 90):
+    bk_up.step(1.0 / 30.0, n_ / 30.0)
+check("past 70 degrees it rolls on over and the nose goes down",
+      bk_up.bank > 1.3 and bk_up.pitch < -0.2)
+for n_ in range(90, 400):
+    bk_up.key("left", n_ / 30.0)
+    bk_up.step(1.0 / 30.0, n_ / 30.0)
+check("and holding the other way, with height in hand, gets it back",
+      abs(bk_up.bank) < ac.PILOT_BANK_WARN and bk_up.state == "air",
+      "%.2f %s" % (bk_up.bank, bk_up.state))
+bk_g = ac.Cockpit(pk_home, 0.0)
+bk_g.state, bk_g.alt, bk_g.v = "air", 300.0, 70.0
+bk_gw = ac.air_wind
+ac.air_wind = lambda now_: (-8.0, 0.0)
+bk_most = 0.0
+for n_ in range(1, 600):
+    bk_g.step(1.0 / 30.0, n_ / 30.0)
+    bk_most = max(bk_most, abs(bk_g.bank))
+ac.air_wind = bk_gw
+check("and the wind knocks a wing up on its own", 0.02 < bk_most < 0.6,
+      "%.2f at the most" % bk_most)
+rd_c = ac.Cockpit(pk_home, 0.0)
+rd_c.state, rd_c.alt, rd_c.v, rd_c.calm = "air", 200.0, 70.0, True
+rd_h0 = rd_c.heading
+for n_ in range(1, 90):
+    rd_c.key("rudder right", n_ / 30.0)
+    rd_c.step(1.0 / 30.0, n_ / 30.0)
+check("the rudder, D: the nose comes round gently, the wings stay level",
+      0.05 < ac._wrap(rd_c.heading - rd_h0) < 0.4 and abs(rd_c.bank) < 0.05
+      and rd_c.rudder > 0.9, "%.2f" % ac._wrap(rd_c.heading - rd_h0))
+rd_g = ac.Cockpit(pk_home, 0.0)
+rd_g.state, rd_g.v, rd_g.throttle = "ground", 8.0, 0.1
+rd_gh = rd_g.heading
+for n_ in range(1, 45):
+    rd_g.key("rudder left", n_ / 30.0)
+    rd_g.step(1.0 / 30.0, n_ / 30.0)
+check("and on the wheels it turns the nose wheel, the other way for A",
+      ac._wrap(rd_g.heading - rd_gh) < -0.05)
+rd_rows = "\n".join("".join(r_) for r_ in ac.render_cockpit(160, 48, 3.0, rd_c)[0])
+check("the panel has the rudder's gauge beside the bank", "RUD ---|--O" in rd_rows
+      or "RUD ---|-O" in rd_rows or "RUD ---|" in rd_rows)
+check("W and S are the power, + and - the zoom, A and D the rudder, on the keys",
       "W S power" in ac.PILOT_KEYS and "+ - zoom" in ac.PILOT_KEYS
+      and "A D rudder" in ac.PILOT_KEYS and "AD:rud" in ac.PILOT_KEYS_SHORT
       and "WS:thr" in ac.PILOT_KEYS_SHORT and "+-:zoom" in ac.PILOT_KEYS_SHORT)
 check("and i is on the keys", "i wipers" in ac.PILOT_KEYS
       and "i:wipe" in ac.PILOT_KEYS_SHORT and "c freq" in ac.PILOT_KEYS
