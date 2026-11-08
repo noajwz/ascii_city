@@ -1344,6 +1344,35 @@ from each side, in step and mirrored, over and back every `WIPER_PERIOD` (`wiper
 in the last `WIPER_CLEAN`. Dry, they are parked and the frame is what it was; a check says so.
 Under half a millisecond at 300x90.
 
+ **Two radios, and the tower is not the only one talking** (asked for, 2026-11-08). Every
+call goes through `call()`, and "TWR" there means whichever station has you
+(`ck.station`, `_station_at()`): the tower of the nearest airport down low, and up at the cruise
+the center of the `CENTER_SECTOR` square you are in (`center_of()`, six made-up names, 124.00
+to 135.95; towers 118.00 to 121.95, `tower_freq()`). **By height, not distance** - airports are
+only a tile apart, so nowhere is far from one, and the first version, which went by distance,
+never reached the center and swapped towers whenever the nearest airport changed: climbing past
+`PILOT_CENTER` the tower hands you on, coming down past `PILOT_TOWER` the center gives you to the
+tower where you are landing (`goal()`), and in the air a tower keeps you till the center has you.
+`_handover()` (every step) has the old station say "contact ... on 132.45" and puts it in
+`ck.standby`; `c` (`flip_radio()`) swaps `tuned` and `standby`, and on the right one you check in
+("with you") and it starts afresh. `ck.radio` keeps everything said, with its frequency, as
+`(t, who, text, freq)` - read `r_[2]`, the checks do - and `heard()` only what was said on the
+frequency you are on; on the wrong one the radio corner says "...nothing on 119.15. Night Center
+is on 130.65 - c" for a while (`missed_at`). The old en-route to tower "contact X. Good night."
+in `_radio_tick()` is the handover's now. The two frequencies are under the altitude, COM and
+STBY, green when you are on the right one, the waiting one gold when it is. Flown with the
+checks' `fp_fly()`, flipping as soon as told: Night Center at 111, Harbour Center at the next
+square, Uptown Tower at 100, landed.
+
+**`i` is the wipers' switch** (`ck.wipers`, `[WIPERS]` on the panel): on to start with if it is
+raining, and they sweep whether there is water on the glass or not, the way a switch does.
+
+**The map and the horizon swapped places** on a wide panel (`MAP_WIDE` up): the horizon, its
+compass and the flight director in the second section, the map in the middle. On a narrow one
+the horizon stays in the middle and `m` puts the map over the words at the right, as before.
+The narrow key hint is `key:word` now (`PILOT_KEYS_SHORT`), held to 110 columns by a check: with
+the frequencies and the wipers added the old spacing ran off a 110-column window.
+
  `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
 see-through, which is how the first titles came out `--MAP-6-km--`. The key hint has a short form
 (`PILOT_KEYS_SHORT`) for windows under 118 columns. About 2-3 ms a frame at 300x90.

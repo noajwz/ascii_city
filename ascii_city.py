@@ -6215,11 +6215,14 @@ PUSH_TIME = 10.0           # the tug: how long the push back from the stand take
 PUSH_BACK = 34.0           # and how far
 PILOT_READ = 20.0          # stopped: how long the report waits for you to read it
 PILOT_KEYS = ("s w nose  a d wings  + - power  g gear  f flaps  l light  p auto  "
-              "k fuel  "
-              "r radio  m map  [ ] zoom  v outside  b brakes  x out")
-PILOT_KEYS_SHORT = ("s w nose  a d bank  +- thr  g gear  f flaps  l light  p auto  "
-                    "k fuel  "
-                    "r radio  m map  v view  b brakes  x out")
+              "k fuel  i wipers  "
+              "r radio  c freq  m map  [ ] zoom  v outside  b brakes  x out")
+PILOT_KEYS_SHORT = ("sw:nose ad:bank +-:thr g:gear f:flap l:light p:auto k:fuel "
+                    "i:wipe r:radio c:freq m:map v:view b:brake x:out")
+PILOT_CENTER = 110.0   # climbing past this (2,750 ft) the tower hands you to the center
+PILOT_TOWER = 100.0    # and coming down past this, the center to the tower - not the
+                       # same height, or flying along it the radio would flip for ever
+CENTER_SECTOR = 9600.0  # each center has a square of sky this wide
 PILOT_SHEAR = 0.32     # how far the picture tilts, rows a column, at a bank of 1
 PILOT_LOOK = 3.0       # seconds ahead the terrain warning looks
 PILOT_LIGHTS = 9000.0  # how far off an airport's lights and its beacon are seen
@@ -6304,6 +6307,22 @@ def tower_name(home):
     """What its tower answers to on the radio."""
     words = airport_name(home).replace("THE ", "").split()
     return words[0].title() + " Tower"
+
+
+def tower_freq(home):
+    """Its tower's frequency, in the band towers use: 118.00 to 121.95."""
+    return "%.2f" % (118.0 + _mix(home[0], home[1], 5911) % 80 * 0.05)
+
+
+def center_of(x, z):
+    """Who has the sky up here, between the airports: (name, frequency). A
+    center has a square CENTER_SECTOR on a side; flying out of it, it hands you
+    to the next."""
+    a, b = int(x // CENTER_SECTOR), int(z // CENTER_SECTOR)
+    m = _mix(a, b, 5913)
+    names = ("Ascii", "Neon", "Harbour", "Skyline", "Night", "Lantern")
+    return (names[m % len(names)] + " Center",
+            "%.2f" % (124.0 + (m >> 8) % 240 * 0.05))
 
 
 def flight_plan(home, seed):
@@ -6554,6 +6573,14 @@ class Cockpit:
         self.flaps = 0                  # 0, 1 or 2
         self.ap = False                 # the autopilot
         self.radio, self.radio_on = [], False
+        # Two frequencies: the one you are listening to and the one waiting,
+        # c to swap them. Each station tells you the next one when it hands
+        # you over, and that goes in the waiting one.
+        self.station = self._station_at()
+        self.tuned = self.station[2]
+        self.standby = center_of(self.x, self.z)[1]
+        self.missed_at = -99.0          # something said on a frequency you were not on
+        self.wipers = rain_intensity(now) > 0.1    # i: on in the rain to start with
         self.atc_key, self.atc_at, self.cleared = None, -99.0, False
         self.leg = None                 # where the guide has you: entry, fix, final
         self.target = None              # and the airport it is
@@ -6679,6 +6706,11 @@ class Cockpit:
                 self.said = "the autopilot is for the air, or for taxiing"
         elif what == "radio":
             self.radio_key(now)
+        elif what == "freq":
+            self.flip_radio(now)
+        elif what == "wipers":
+            self.wipers = not self.wipers
+            self.said = "wipers on" if self.wipers else "wipers off"
         elif what == "up":
             self.pitch_set = min(PILOT_MAX_PITCH, self.pitch_set + PILOT_PITCH_STEP)
         elif what == "down":
@@ -7196,14 +7228,66 @@ class Cockpit:
         self.pitch_set = nose
         self.throttle = max(0.0, min(1.0, 0.55 + (g["speed"] - self.v) * 0.05))
 
-    def call(self, now, who, text, delay=0.0):
-        """Something said on the radio, now or in a moment."""
-        self.radio.append((now + delay, who, text))
-        del self.radio[:-6]
+    def call(self, now, who, text, delay=0.0, freq=None):
+        """Something said on the radio, now or in a moment. Whatever the code
+        calls the tower is whichever station has you: the tower, or the center
+        when you are up between airports."""
+        if who == "TWR":
+            who = self.station[0]
+            freq = freq or self.station[2]
+        elif who == "YOU":
+            freq = self.tuned
+        if who != "YOU" and freq != self.tuned:
+            self.missed_at = now + delay
+        self.radio.append((now + delay, who, text, freq))
+        del self.radio[:-12]
 
     def heard(self, now):
-        """What has been said so far, the newest last."""
-        return [(t, who, text) for t, who, text in self.radio if t <= now]
+        """What you have heard so far, the newest last: only what was said on
+        the frequency you were on."""
+        return [(t, who, text) for t, who, text, f in self.radio
+                if t <= now and (who == "YOU" or f == self.tuned)]
+
+    def _station_at(self):
+        """Who you should be talking to here: ("TWR" or "CTR", name, frequency).
+        Low down, the tower of the nearest airport; up at the cruise, the
+        center whose square of sky you are in. By height, not distance:
+        airports are only a tile apart, so nowhere is far from one."""
+        was = getattr(self, "station", None)
+        limit = PILOT_TOWER if was is not None and was[0] == "CTR" else PILOT_CENTER
+        if self.state == "air" and self.alt > limit:
+            name, freq = center_of(self.x, self.z)
+            return ("CTR", name, freq)
+        if self.state == "air" and was is not None:
+            if was[0] == "TWR":
+                return was                  # a tower keeps you till the center has you
+            home = self.goal()              # coming down: where you are landing
+        else:
+            home = nearest_airport(self.x, self.z)
+        return ("TWR", tower_name(home), tower_freq(home))
+
+    def _handover(self, now):
+        """When the station that has you changes, the old one says so, and the
+        new frequency goes in the waiting one: c and you are on it."""
+        new = self._station_at()
+        if new == self.station:
+            return
+        old, self.station = self.station, new
+        if self.radio_on and self.state == "air":
+            self.call(now, old[0], "AC 101, contact %s on %s. %s" % (
+                new[1], new[2], "Good day." if new[0] == "CTR" else "Good night."),
+                freq=old[2])
+            self.standby = new[2]
+            self.atc_key = None             # the new one starts afresh
+
+    def flip_radio(self, now):
+        """c: swap the frequencies, and check in if it is the right one."""
+        self.tuned, self.standby = self.standby, self.tuned
+        right = self.tuned == self.station[2]
+        self.said = "COM %s%s" % (self.tuned, " - " + self.station[1] if right else "")
+        if right and self.radio_on:
+            self.call(now, "YOU", "%s, AC 101, with you." % self.station[1])
+            self.atc_key, self.atc_at = None, now - 20.0
 
     def atc_line(self, g):
         """What the tower says about where you are, and a key for it, so it only
@@ -7276,7 +7360,8 @@ class Cockpit:
                       PILOT_RADIO_LAG)
         elif self.taxi and self.taxi_to[0] == "fuel":
             self.call(now, "YOU", "%s, AC 101, request taxi to the fuel pad." % ground)
-            self.call(now, "TWR", "AC 101, taxi to the fuel pad via A.", PILOT_RADIO_LAG)
+            self.call(now, "TWR", "AC 101, taxi to the fuel pad via A.",
+                      PILOT_RADIO_LAG)
         elif (self.state == "ground" and self.taxi and self.taxi_to[0] == "runway"
               and self.on_departure(here)):
             # On the runway you were given, near enough lined up: whatever the
@@ -7386,13 +7471,6 @@ class Cockpit:
             
         key, line = self.atc_line(g)
         if key != self.atc_key or now - self.atc_at > 25.0:
-            if self.atc_key and self.atc_key[0] == "enroute" and key[0] != "enroute":
-                # Over to the tower where you are going.
-                self.call(now, "TWR", "AC 101, contact %s. Good night." % tower_name(
-                    g["home"]))
-                self.call(now, "YOU", "%s, AC 101, with you." % tower_name(g["home"]),
-                          1.0)
-                now += 2.0
             self.atc_key, self.atc_at = key, now
             self.call(now, "TWR", line)
 
@@ -7638,6 +7716,7 @@ class Cockpit:
         self.clock = now
         if self.state == "crashed" or self.ditched:
             return
+        self._handover(now)
         if self.state == "gate":
             self.v = 0.0
             return
@@ -8163,7 +8242,8 @@ def draw_cockpit(ch, co, ck, now):
         words_ = [(gear_, ck.gear > 0.99)]
         if k == 1:
             words_.append(("FLAPS %d" % ck.flaps, ck.flaps > 0))
-        words_ += [("AP", ck.ap), ("LIGHT", ck.light), ("RADIO", ck.radio_on)]
+        words_ += [("AP", ck.ap), ("LIGHT", ck.light), ("RADIO", ck.radio_on),
+                   ("WIPERS", ck.wipers)]
         if ck.engines < 2 and not ck.dry:
             words_.append(("ENG 1+2 OUT" if ck.engines == 0 else "ENG %d OUT" % (
                 2 if ck.dead_side > 0 else 1), None))
@@ -8206,8 +8286,22 @@ def draw_cockpit(ch, co, ck, now):
         bar[at] = "O"
         _text(ch, co, y_ + 1, ax, "VS " + "".join(bar), ROU_GREEN if abs(ck.vy) < 4.5
               else GOLD_DIM)
+    # The radios: the frequency you are on and the one waiting (c swaps them),
+    # green when you are on the station that has you.
+    if y_ + 4 < h - 1:
+        right_ = ck.tuned == ck.station[2]
+        _text(ch, co, y_ + 3, ax, "COM  %s  %s" % (ck.tuned, (
+            ck.station[1] if right_ else "")), ROU_GREEN if right_ else GOLD)
+        _text(ch, co, y_ + 4, ax, "STBY %s  %s" % (ck.standby, (
+            ck.station[1] if ck.standby == ck.station[2] and not right_ else "")),
+              GOLD if ck.standby == ck.station[2] and not right_ else CONCRETE)
     # The artificial horizon: sky over ground, tilted with you, a wing marker on it.
-    bx0, bx1 = cx - sec // 2 + 2, cx + sec // 2 - 2
+    # The map and the horizon swapped places, asked for: on a wide panel the
+    # horizon is in the second section and the map in the middle.
+    if wide_map:
+        bx0, bx1 = sec + 2, 2 * sec - 3
+    else:
+        bx0, bx1 = cx - sec // 2 + 2, cx + sec // 2 - 2
     by0, by1 = y0 + 1, h - 2
     midx, midy = (bx0 + bx1) // 2, (by0 + by1) // 2
     tilt = math.tan(max(-1.2, min(1.2, ck.bank)))
@@ -8249,7 +8343,7 @@ def draw_cockpit(ch, co, ck, now):
     # The moving map: a place of its own on a wide panel; on a narrow one, in
     # place of the words about the way there when you ask for it (m).
     if wide_map:
-        draw_nav_map(ch, co, ck, now, sec + 1, y0, sec - 2, h - 1 - y0)
+        draw_nav_map(ch, co, ck, now, cx - sec // 2 + 1, y0, sec - 2, h - 1 - y0)
     elif ck.map_on:
         draw_nav_map(ch, co, ck, now, w - 2 * sec + 1, y0, sec - 1, h - 1 - y0)
         keys = PILOT_KEYS if len(PILOT_KEYS) <= w else PILOT_KEYS_SHORT
@@ -9135,7 +9229,6 @@ def draw_murk(ch, co, v, walls, amount, now):
                 row[sx], rowc[sx] = " ", 0
 
 
-WIPER_ON = 0.05        # this much water on the glass and the wipers go
 WIPER_PERIOD = 1.3     # seconds a wiper takes over and back
 WIPER_SWEEP = 1.15     # radians either side of the middle of its arc
 WIPER_CLEAN = 0.45     # seconds the glass it has wiped stays clear
@@ -9283,9 +9376,19 @@ def draw_flight_words(ch, co, ck, now, top, k):
                     break
                 for xx in range(2, min(w, room + 4)):
                     ch[y][xx], co[y][xx] = " ", 0
-                label = ("TWR  " if who == "TWR" else "YOU  ") if n == 0 else "     "
-                _text(ch, co, y, 3, label + line, GOLD if who == "TWR" else HUD)
+                label = (who + "  ") if n == 0 else "     "
+                _text(ch, co, y, 3, label + line, HUD if who == "YOU" else GOLD)
                 y += 1
+    if (0.0 <= now - ck.missed_at < 8.0 and ck.tuned != ck.station[2]
+            and ck.state != "crashed"):
+        # Somebody is calling and it is not on the frequency you are on.
+        line = "...nothing on %s. %s is on %s%s" % (
+            ck.tuned, ck.station[1], ck.station[2],
+            " - c" if ck.standby == ck.station[2] else "")
+        y = (1 if k == 1 else 2) + sum(len(bar_lines(t_, min(w // 2 - 4, 60) - 5))
+                                       for _, _, t_ in said)     # under what was said
+        if y < top - 1:
+            _label(ch, co, y, 3, line[:w - 6], ROU_RED if int(now * 2) % 2 else GOLD)
 
 
 def wx_words(ck, now):
@@ -9349,7 +9452,8 @@ def draw_outside_hud(ch, co, ck, now):
         _text(ch, co, h - 2, x, text, attr)
         x += len(text) + 3
     keys = PILOT_KEYS if len(PILOT_KEYS) <= w else PILOT_KEYS_SHORT
-    keys = keys.replace("v outside", "v cockpit").replace("v view", "v cockpit")
+    keys = (keys.replace("v outside", "v cockpit").replace("v view", "v cockpit")
+            .replace("v:view", "v:cockpit"))
     _text(ch, co, h - 1, max(0, w // 2 - len(keys) // 2), keys[:w], CONCRETE)
 
 
@@ -9512,10 +9616,9 @@ def render_cockpit(width, height, now, ck):
         ch = [[" "] * width] + ch[:-1]
         co = [[0] * width] + co[:-1]
     glass = max(inside, wet * 0.4) if ck.state != "crashed" else 0.0
-    # The wipers come on by themselves in the rain, and are parked out of the
-    # way when it is dry.
-    arms = (wiper_arms(width, height - rows, now, k) if glass > WIPER_ON
-            and height - rows > 6 else None)
+    # The wipers are a switch, i: they start on if it is raining.
+    arms = (wiper_arms(width, height - rows, now, k) if ck.wipers
+            and ck.state != "crashed" and height - rows > 6 else None)
     draw_glass_rain(ch, co, glass, now, flash, ck.v, (width // 2, v.horizon),
                     ck.light, height - rows, arms, k)
     if arms:
@@ -27289,6 +27392,8 @@ def main(stdscr):
                             ord("v"): "view", ord("V"): "view", ord("m"): "map",
                             ord("M"): "map", ord("["): "zoom in",
                             ord("k"): "fuel", ord("K"): "fuel",
+                            ord("c"): "freq", ord("C"): "freq",
+                            ord("i"): "wipers", ord("I"): "wipers",
                             ord("]"): "zoom out"}.get(key, ""), now)
                 else:
                     if key in (curses.KEY_LEFT, ord("a")):
