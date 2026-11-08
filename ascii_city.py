@@ -6095,8 +6095,9 @@ def air_cells(x, z, now, reach=AIR_CELL_SEEN):
 
 
 def air_strike(cell, now):
-    """A storm's own lightning, as (brightness, x, z) or None: a strike in most
-    of its slots, somewhere inside it, the same flicker as the street's."""
+    """A storm's own lightning, as (brightness, x, z, height as a fraction of
+    the cloud's, down to the ground or not), or None: a strike in most of its
+    slots, somewhere inside it, the same flicker as the street's."""
     cx, cz, r, power, cid = cell
     k = int(now // AIR_STRIKE_EVERY)
     m = _mix(cid, k, 6013)
@@ -6109,7 +6110,10 @@ def air_strike(cell, now):
     a = ((m >> 13) & 1023) / 1023.0 * math.tau
     d = ((m >> 23) & 255) / 255.0 * r * 0.7
     power *= 0.6 + ((m >> 2) & 3) / 7.5
-    return b * power, cx + math.sin(a) * d, cz + math.cos(a) * d
+    m2 = _mix(cid, k, 6015)
+    # And how high, and whether it stays in the cloud - most do - or comes down.
+    return (b * power, cx + math.sin(a) * d, cz + math.cos(a) * d,
+            0.35 + (m2 & 255) / 255.0 * 0.45, (m2 >> 8) % 3 == 0)
 
 
 def nearest_airport(x, z):
@@ -7255,14 +7259,54 @@ def draw_landing_light(ch, co, v, walls, ck, now, runways):
             ch[y][sx], co[y][sx] = g, attr
 
 
+def _billow(u, seed):
+    """A lumpy outline, -1 to 1: smooth, and different for every storm."""
+    a = (seed & 1023) / 163.0
+    b = ((seed >> 10) & 1023) / 163.0
+    return (0.55 * math.sin(u * 7.3 + a) + 0.3 * math.sin(u * 13.1 + b)
+            + 0.15 * math.sin(u * 23.0 + a * 2.0))
+
+
+def storm_profile(u, lean, seed):
+    """How high a thunderstorm's cloud goes, from its underside to its top, a
+    fraction u of its radius across it as you look at it: a billowing tower in
+    the middle over a ragged base, spreading at the top into a flat anvil that
+    leans away downwind. None where there is no cloud at all."""
+    top = AIR_CELL_TOP
+    lo = hi = None
+    if abs(u) < 0.62:
+        hi = top * (0.72 + 0.22 * math.sqrt(1.0 - (u / 0.62) ** 2)) + 55.0 * _billow(
+            u * 1.3, seed)
+        lo = AIR_CELL_BASE + 18.0 * _billow(u * 3.0 + 5.0, seed)
+    q = (u - 0.25 * lean) / 1.05
+    if abs(q) < 1.0:
+        a_hi = (top * (0.80 + 0.17 * (1.0 - q ** 4))
+                + 12.0 * _billow(u * 2.0 + 9.0, seed))
+        a_lo = top * (0.80 + 0.12 * q * q)
+        if hi is None:
+            if a_hi - a_lo < 15.0:
+                return None
+            lo, hi = a_lo, a_hi
+        else:
+            hi = max(hi, a_hi)
+    if hi is None:
+        return None
+    return lo, hi
+
+
 def draw_air_storms(ch, co, v, walls, cells, now):
-    """The thunderstorms from the air: a dark mass where the stars go out, a
-    shaft of rain under it hiding the town behind, the cloud lit up from inside
-    when it strikes, and the bolt. Returns how bright it is here this instant -
-    a strike in the storm you are in, or one close by."""
+    """The thunderstorms from the air, as a night storm is seen: hardly at all
+    until it strikes. The shape of it is where the stars go out - a tower with
+    an anvil on it, not a box - and each flash lights the cloud round where it
+    went off, most of them inside it and one in three down to the ground. Under
+    it the rain, thick in the middle and thin at the sides, not all of it
+    reaching the ground. Returns how bright it is here this instant - a strike
+    in the storm you are in, or one close by."""
     tops = walls[3]
     flash = 0.0
     w, h = v.width, v.height
+    wind_x, wind_z = air_wind(now)
+    fall = int(now * 14.0)
     for cell in cells:
         cx, cz, r, power, cid = cell
         relx, relz = cx - v.x, cz - v.z
@@ -7273,52 +7317,87 @@ def draw_air_storms(ch, co, v, walls, cells, now):
             flash = max(flash, strike[0] * near)
         if dist < r + 30.0:
             continue                        # in it: the murk does the rest
+        ux, uz = relx / dist, relz / dist
+        lean = max(-1.0, min(1.0, (wind_x * uz - wind_z * ux) / PILOT_WIND_MOST))
+        fade = power * max(0.3, min(1.0, 1.3 - dist / 14000.0))
         lit = strike[0] if strike is not None else 0.0
-        bolt_x = None
-        if strike is not None and _strike_flash(0.0, False) and lit > 0.35:
+        if lit:
+            # Where in the cloud it went off: across it, and how high.
+            us = ((strike[1] - cx) * uz - (strike[2] - cz) * ux) / r
+            hs = strike[3] * AIR_CELL_TOP
+        bolt = None
+        if lit > 0.45 and strike[4]:
             pr = v.project(strike[1], AIR_CELL_BASE, strike[2])
             if pr is not None:
-                bolt_x = int(round(pr[0]))
+                bolt = pr
         for sx in range(w):
             rdx, rdz = v.ray(sx)
             a = rdx * rdx + rdz * rdz
-            b = -2.0 * (relx * rdx + relz * rdz)
-            c = dist * dist - r * r
-            disc = b * b - 4.0 * a * c
-            if disc <= 0.0:
+            s = (relx * rdx + relz * rdz) / a       # how far off, along the view
+            if s < r * 0.5:
                 continue
-            t0 = (-b - math.sqrt(disc)) / (2.0 * a)
-            if t0 < NEAR_Z:
+            u = ((s * rdx - relx) * uz - (s * rdz - relz) * ux) / r
+            if abs(u) > 1.4:
                 continue
-            thick = min(1.0, math.sqrt(disc) / a / r) * power
-            y_top = int(v.horizon - (AIR_CELL_TOP - v.eye) * v.fy / t0)
-            y_base = int(v.horizon - (AIR_CELL_BASE - v.eye) * v.fy / t0)
-            y_floor = int(v.horizon + v.eye * v.fy / t0)
-            # Over the skyline nothing can be in front of it, so no test for it.
-            for y in range(max(0, y_top), min(h, y_base, tops[sx])):
-                if lit and _mix(sx, y, cid + int(now * 9.0)) % 100 < lit * thick * 90:
-                    ch[y][sx] = ":" if lit > 0.5 else "."
-                    co[y][sx] = FLASH if lit > 0.6 else FOG
-                elif ch[y][sx] != " ":
-                    ch[y][sx], co[y][sx] = " ", 0     # the stars go out
-            fall = int(now * 14.0)
-            rain_ = thick * 260
-            dark_ = thick * 700
-            for y in range(max(0, y_base), min(h, y_floor + 1)):
-                m = _mix(sx, y - fall, cid) % 1000
-                if m >= dark_ or hidden(walls, sx, y, t0):
+            span = storm_profile(u, lean, cid)
+            if span is None:
+                continue
+            lo, hi = span
+            k = v.fy / s
+            y_hi = int(v.horizon - (hi - v.eye) * k)
+            y_lo = int(v.horizon - (lo - v.eye) * k)
+            for y in range(max(0, y_hi), min(h, y_lo + 1)):
+                sky = y < tops[sx]
+                if not sky and hidden(walls, sx, y, s):
                     continue
-                if m < rain_:
-                    ch[y][sx], co[y][sx] = "|" if m % 3 else "/", (
-                        FOG if lit > 0.4 else RAIN_FAR)
-                elif m < thick * 700:
-                    ch[y][sx], co[y][sx] = " ", 0     # the town behind, hidden
-            if bolt_x is not None and abs(sx - bolt_x) < 1 and lit > 0.35:
-                x_ = sx
-                for y in range(max(0, y_base), min(h, y_floor + 1)):
-                    x_ += _mix(cid, y, int(now // AIR_STRIKE_EVERY)) % 3 - 1
-                    put_cell(ch, co, v, walls, x_, y, t0, "/|\\"[(x_ - sx + 1) % 3],
-                             FLASH)
+                if lit:
+                    up = v.eye + (v.horizon - y) / k
+                    d = math.hypot((u - us) / 0.55, (up - hs) / (0.35 * AIR_CELL_TOP))
+                    glow = lit * (max(0.0, 1.0 - d * 0.8) ** 1.5 * 0.9 + 0.1)
+                    if y <= y_hi + 1:
+                        glow = max(glow, lit * 0.4)     # the outline, crisp
+                    if _mix(sx, y, cid + int(now * 9.0)) % 100 < glow * 110.0:
+                        ch[y][sx] = ":" if glow > 0.5 else "."
+                        co[y][sx] = (FLASH if glow > 0.65 else FOG if glow > 0.3
+                                     else FOG_DIM)
+                        continue
+                if sky and ch[y][sx] != " ":
+                    ch[y][sx], co[y][sx] = " ", 0       # the stars go out
+            # The rain, from the underside of the tower only, thinning to the
+            # sides, and some of it gone before it gets down.
+            if abs(u) >= 0.58 or s > 9000.0:
+                continue
+            thick = fade * 0.42 * (1.0 - (u / 0.58) ** 2)
+            reach = 0.55 + 0.45 * (0.5 + 0.5 * _billow(u * 4.0 + 2.0, cid))
+            y_floor = int(v.horizon + v.eye * k)
+            y_end = y_lo + int((y_floor - y_lo) * (1.0 if reach > 0.85 else reach))
+            streak = "/" if lean > 0.3 else "\\" if lean < -0.3 else "|"
+            for y in range(max(0, y_lo + 1), min(h, y_end + 1)):
+                if hidden(walls, sx, y, s):
+                    continue
+                left = 1.0 - 0.5 * (y - y_lo) / max(1.0, y_end - y_lo)
+                m = _mix(sx, y - fall, cid) % 1000
+                if m < thick * left * 330:
+                    ch[y][sx] = streak if m % 4 == 0 else "."
+                    co[y][sx] = FOG if lit > 0.4 else RAIN_FAR
+                elif m < thick * left * 480:
+                    ch[y][sx], co[y][sx] = " ", 0     # the town behind, dimmed
+        if bolt is not None:
+            # Down to the ground, jagged, with a branch off it.
+            bx, by, bd = int(round(bolt[0])), int(round(bolt[1])), bolt[2]
+            y_floor = int(v.horizon + v.eye * v.fy / bd)
+            seed = int(now // AIR_STRIKE_EVERY)
+            x_, fork = bx, by + max(2, (y_floor - by) // 3)
+            for y in range(max(0, by), min(h, y_floor + 1)):
+                step = _mix(cid, y, seed) % 3 - 1
+                x_ += step
+                put_cell(ch, co, v, walls, x_, y, bd, "/|\\"[step + 1], FLASH)
+                if y == fork:
+                    bx_, way = x_, 1 if _mix(cid, seed, 7) & 1 else -1
+                    for n in range(1, max(3, (y_floor - by) // 3)):
+                        bx_ += way * (1 + _mix(cid, y + n, seed) % 2)
+                        put_cell(ch, co, v, walls, bx_, y + n, bd,
+                                 "\\" if way > 0 else "/", FOG)
     return flash
 
 
