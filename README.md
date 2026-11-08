@@ -201,6 +201,10 @@ the city is infinite, identical every time you walk back to it, and held in no m
 - **A moving map** in the panel, one page at a time — the way, with the runways and the other
   traffic, or the weather radar — and a
   **landing report** after every touchdown: how hard, how straight, where, and what to fix.
+- **Height callouts** on the way down — 1000, 500, 100, then every ten feet from 50 — and, one
+  flight in eight, **something goes wrong**: an engine in the cruise, birds on the climb out (one
+  engine, or now and then both), or a truck on the runway on short final. Book a **check ride**
+  at the desk (`t`) and the instructor makes sure of it.
 - **Thunderstorms** out over the country that you can see from far off and fly into — or let the
   tower take you round.
 - **Other traffic** — airways full of flights at their own heights and every airport busy with
