@@ -6491,6 +6491,7 @@ gr_t = ac.Cockpit(pk_home, 0.0)
 gr_t.state, gr_t.alt, gr_t.v, gr_t.gear = "air", 60.0, 50.0, 0.0
 gr_t.x, gr_t.z, gr_t.heading = pk_rx, pk_zn + 1200.0, math.pi
 gr_t.leg, gr_t.target, gr_t.end = "final", pk_home, pk_zn
+gr_t.runway_busy = lambda *a_: False     # no departure on it, this time
 check("the tower says so too, when it clears you to land",
       "gear" in gr_t.atc_line(gr_t.guide())[1])
 # The wind.
@@ -6767,6 +6768,114 @@ check("from in it: rain all over the glass, not a star",
       sum(1 for r_ in st_ch[:20] for g_ in r_ if g_ in "/\\|-")
       > sum(1 for r_ in st_ch2[:20] for g_ in r_ if g_ in "/\\|-") + 40)
 ac.air_cells, ac.storming = st_real
+
+# --- other traffic -----------------------------------------------------------
+tf_T = 600.0
+tf_all = ac.airway_traffic(0.0, 0.0, tf_T, 30000.0)
+check("airways full of flights, none at your cruising height, east-west and "
+      "north-south never at the same one", len(tf_all) > 40
+      and all(t_[1] != ac.PILOT_CRUISE for t_ in tf_all)
+      and not ({t_[1] for t_ in tf_all if t_[3]} & {t_[1] for t_ in tf_all if t_[4]}),
+      str(len(tf_all)))
+tf_a = {t_[6]: t_ for t_ in ac.airway_traffic(0.0, 0.0, tf_T, 30000.0)}
+tf_b = {t_[6]: t_ for t_ in ac.airway_traffic(0.0, 0.0, tf_T + 10.0, 30000.0)}
+tf_same = [k_ for k_ in tf_a if k_ in tf_b]
+check("each one flying along its airway at its speed", tf_same and all(
+    abs(math.hypot(tf_b[k_][0] - tf_a[k_][0], tf_b[k_][2] - tf_a[k_][2])
+        - ac.AIRWAY_SPEED * 10.0) < 1.0 for k_ in tf_same))
+tf_g = ac.Cockpit(pk_home, 0.0)
+check("on the runway, the tower holds that airport's own traffic for you",
+      tf_g.held() == {pk_home: (False, False)}
+      and all(ac.plane_states(pk_home[0], pk_home[1], t_, False, False) == []
+              for t_ in range(0, 60, 2)))
+tf_real = ac.ROU_RED, ac.ROU_GREEN
+ac.ROU_RED, ac.ROU_GREEN = 991, 992
+tf_v = ac.View(pk_rx, pk_zn + 60.0, math.pi, 190, 50, eye=30.0)
+tf_v.horizon = 25
+tf_ch = [[" "] * 190 for _ in range(50)]
+tf_co = [[0] * 190 for _ in range(50)]
+tf_w = ([None] * 190, [0] * 190, [0] * 190, [0] * 190, [[] for _ in range(190)])
+ac.draw_plane(tf_ch, tf_co, tf_v, tf_w, pk_rx, 30.0, pk_zn - 60.0, 0.0, 1.0, False,
+              0.5, 0.0)
+tf_at = {a_: x_ for r_ in tf_co for x_, a_ in enumerate(r_) if a_ in (991, 992)}
+check("an airliner coming at you: its green on your left, its red on your right",
+      992 in tf_at and 991 in tf_at and tf_at[992] < tf_at[991], str(tf_at))
+
+
+def tf_meet(up_, back_, side_=0.0):
+    """You, head on to the nearest airway flight at 175, back_ units off."""
+    c_ = ac.Cockpit(pk_home, 0.0)
+    c_.state, c_.v, c_.throttle = "air", 70.0, 0.6
+    near_ = min((t_ for t_ in ac.airway_traffic(pk_rx - 6000.0, pk_zn, tf_T, 12000.0)
+                 if t_[1] == 175.0), key=lambda t_: math.hypot(
+                     t_[0] - pk_rx + 6000.0, t_[2] - pk_zn))
+    x_, y_, z_, hx_, hz_ = near_[:5]
+    c_.alt = y_ + up_
+    c_.x, c_.z = x_ + hx_ * back_ - hz_ * side_, z_ + hz_ * back_ + hx_ * side_
+    c_.heading = math.atan2(-hx_, -hz_)
+    return c_
+
+
+ac.air_cells, tf_cells = (lambda x_, z_, now_, reach_=0.0: []), ac.air_cells
+tf_c = tf_meet(0.0, 700.0, 30.0)
+tf_c.key("radio", tf_T - 10.0)
+tf_c.atc_at = tf_T - 20.0
+tf_c.step(1.0 / 30.0, tf_T)
+tf_far = ac.render_cockpit(190, 50, tf_T, tf_meet(0.0, 6000.0))[1]
+ac.ROU_RED, ac.ROU_GREEN = tf_real
+check("head on at your height: TRAFFIC on the panel, and the tower calls it",
+      "TRAFFIC" in tf_c.warnings() and any("traffic, 12 o'clock" in t_
+                                           for _, _, t_ in tf_c.radio),
+      str((tf_c.warnings(), tf_c.radio[-1:])))
+check("a long way off, all you see of them is their lights",
+      sum(1 for r_ in tf_far for a_ in r_ if a_ in (991, 992)) >= 3)
+check("and the panel says where", ac.tfc_words(tf_c, tf_T)[0].startswith("TFC 12"))
+tf_q = tf_meet(1000.0, 700.0)
+tf_q.step(1.0 / 30.0, tf_T)
+check("a thousand feet clear of it, no warning", "TRAFFIC" not in tf_q.warnings())
+tf_h = tf_meet(0.0, 3.0)
+tf_h.step(1.0 / 30.0, tf_T)
+check("fly into one and that is that", tf_h.state == "crashed"
+      and "another flight" in tf_h.said)
+
+
+def tf_final(at_):
+    """On final for runway 18 at the first airport, the autopilot flying, at a
+    time chosen against the departures."""
+    c_ = ac.Cockpit(pk_home, 0.0)
+    c_.state, c_.v, c_.throttle, c_.flaps = "air", 48.0, 0.4, 1
+    c_.x, c_.z, c_.heading = pk_rx, pk_zn + 700.0, math.pi
+    c_.alt = 700.0 * ac.PILOT_GLIDE + 2.0
+    c_.target, c_.end, c_.leg = pk_home, pk_zn, "final"
+    said_ = []
+    call_ = c_.call
+    c_.call = lambda now_, who_, text_, delay_=0.0: (said_.append(text_),
+                                                     call_(now_, who_, text_, delay_))
+    c_.key("radio", at_)
+    c_.key("autopilot", at_)
+    t_ = at_
+    while c_.state == "air" and t_ < at_ + 500.0:
+        if not c_.ap and c_.leg == "final":
+            c_.bank = c_.commands()[0]
+        c_.step(1.0 / 30.0, t_)
+        t_ += 1.0 / 30.0
+    return c_, " ".join(said_)
+
+
+tf_busy = [t_ for t_ in (tf_T + k_ for k_ in range(60))
+           if ac.Cockpit.runway_busy(type("c", (), {
+               "target": pk_home, "clock": t_,
+               "held": lambda self_: {pk_home: (False, True)}})(), 15.0)]
+tf_c, tf_w = tf_final(tf_busy[len(tf_busy) // 2] - 1.0)
+check("a departure rolling as you come in: number two, then round again, then down",
+      "number two" in tf_w and "go around" in tf_w and tf_c.went_round
+      and tf_c.state == "landed", tf_w[:240])
+tf_free = [t_ for t_ in (tf_T + k_ for k_ in range(60)) if t_ - 1.0 not in tf_busy
+           and t_ + 3.0 not in tf_busy and t_ - 6.0 not in tf_busy]
+tf_c, tf_w = tf_final(tf_free[len(tf_free) // 2])
+check("and with the runway clear, just cleared to land", "cleared to land" in tf_w
+      and "go around" not in tf_w and tf_c.state == "landed", tf_w[:200])
+ac.air_cells = tf_cells
 
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED

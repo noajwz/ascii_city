@@ -3479,6 +3479,7 @@ class View:
         self.ticker_anchor = {}  # the exchange's walls: where each one's middle is
         self.roof_edge = None   # the parapet's top row per column, on an alley roof
         self.air = False        # seen from the plane: its own storms, not the far one
+        self.held = {}          # airports whose arrivals and departures are held
 
     def ray(self, sx):
         cam = 2.0 * sx / (self.width - 1) - 1.0
@@ -6116,6 +6117,75 @@ def air_strike(cell, now):
             0.35 + (m2 & 255) / 255.0 * 0.45, (m2 >> 8) % 3 == 0)
 
 
+AIRWAY_GAP = 5200.0        # the airways: one every this many units, each way
+AIRWAY_EVERY = 5600.0      # a flight every this many along one, about
+AIRWAY_SPEED = 72.0
+AIRWAY_LEVELS = ((95.0, 215.0), (175.0, 255.0))   # east-west, north-south: never
+                                                  # the same, and never your 135
+TRAFFIC_SEEN = 12000.0     # how far off another flight's lights show
+TRAFFIC_CALL = 1200.0      # the tower tells you of one this close, near your height
+TRAFFIC_HIT = (14.0, 5.0)  # and this close across and up and down, you have met it
+
+
+def airway_traffic(x, z, now, reach):
+    """The flights going over, from somewhere to somewhere else: straight along
+    airways at their own heights, east-west at two levels and north-south at
+    two others, so they never meet each other. Stateless: a flight is its
+    airway and its place in the line, and where it is a function of the clock.
+    As (x, y, z, hx, hz, landing lights, id)."""
+    out = []
+    for axis in (0, 1):
+        across = z if axis == 0 else x
+        down = x if axis == 0 else z
+        for lane in range(int((across - reach) // AIRWAY_GAP) - 1,
+                          int((across + reach) // AIRWAY_GAP) + 1):
+            m = _mix(lane, axis, 6101)
+            at = (lane + 0.5) * AIRWAY_GAP + ((m >> 4) & 255) / 255.0 * 600.0 - 300.0
+            if abs(at - across) > reach:
+                continue
+            way = 1.0 if m & 1 else -1.0
+            high = AIRWAY_LEVELS[axis][(m >> 1) & 1]
+            s0 = now * AIRWAY_SPEED * way + ((m >> 12) & 1023) / 1023.0 * AIRWAY_EVERY
+            for k in range(int(math.floor((down - reach - s0) / AIRWAY_EVERY)),
+                           int(math.ceil((down + reach - s0) / AIRWAY_EVERY)) + 1):
+                if _mix(lane * 7919 + k, axis, 6103) % 4 == 0:
+                    continue                    # a gap in the line
+                s = s0 + k * AIRWAY_EVERY
+                if abs(s - down) > reach:
+                    continue
+                if axis == 0:
+                    out.append((s, high, at, way, 0.0, False, ("way", axis, lane, k)))
+                else:
+                    out.append((at, high, s, 0.0, way, False, ("way", axis, lane, k)))
+    return out
+
+
+def traffic_about(x, z, now, reach, held):
+    """Every other flight in reach: the airways', and every airport's arrivals
+    and departures - but not those the tower is holding for you. Each as
+    (x, y, z, hx, hz, landing lights, id)."""
+    out = airway_traffic(x, z, now, reach)
+    for home in airports_about(x, z, reach):
+        arrive, depart = held.get(home, (True, True))
+        slot = int(now // APT_CYCLE)
+        for n, st in enumerate(plane_states(home[0], home[1], now, arrive, depart)):
+            out.append(st + (("apt", home, n, slot),))
+    return out
+
+
+def traffic_key(tid):
+    """Two numbers for a flight's id, to hash: the same every run."""
+    if tid[0] == "way":
+        return tid[1] * 100003 + tid[2], tid[3]
+    return tid[1][0] * 7919 + tid[1][1], tid[2] * 977 + tid[3]
+
+
+def clock_words(turn):
+    """A bearing off the nose, the way a tower says it: 2 o'clock."""
+    hour = int(round(math.degrees(turn) % 360.0 / 30.0)) % 12
+    return "%d o'clock" % (hour or 12)
+
+
 def nearest_airport(x, z):
     """The home cell of the airport nearest to here: there is one to a tile, and
     the nearest may be in the tile next door."""
@@ -6182,10 +6252,14 @@ class Cockpit:
         self.in_storm = False
         self._wx_at = self._cells_at = None
         self.climb_out = None           # the runway's way, until high enough to turn
+        self.late = False               # told to expect a late landing clearance
+        self.tfc_told = set()           # the flights the tower has told you about
+        self._tfc_at = None
         self.enroute = False
         self.end, self.side, self.went_round = None, 1.0, False
 
     def key(self, what, now):
+        self.clock = now
         if self.state == "crashed":
             return
         if what in ("up", "down", "left", "right") and self.ap:
@@ -6241,6 +6315,90 @@ class Cockpit:
             wx += rough * 5.0 * math.sin(now * 0.9 + 1.3)
             wz += rough * 5.0 * math.cos(now * 0.7)
         return wx, wz
+
+    def held(self):
+        """The airports whose own traffic the tower is keeping out of your way:
+        the one you are on, any you are flying low over, and the one you are
+        coming in to - where, landing the same way they take off, the
+        departures carry on and you are fitted in behind them."""
+        if self.state != "air":
+            return {nearest_airport(self.x, self.z): (False, False)}
+        out = {home: (False, False)
+               for home in airports_about(self.x, self.z, 2600.0)}
+        goal = self.target
+        if goal is not None:
+            rx, zn, zs = runway(*goal)
+            far = math.hypot(rx - self.x, (zn + zs) * 0.5 - self.z)
+            if far < PILOT_ENROUTE + 1500.0:
+                out[goal] = (False, self.end == zn)
+        return out
+
+    def traffic(self, now):
+        """The other flights about, once a frame."""
+        if self._tfc_at != (now, self.x, self.z):
+            self._tfc_at = (now, self.x, self.z)
+            self._tfc = [] if self.calm else traffic_about(
+                self.x, self.z, now, TRAFFIC_SEEN, self.held())
+        return self._tfc
+
+    def nearest_traffic(self, now):
+        """The other flight that matters most: the nearest near your height, or
+        failing that the nearest at all, as (distance, bearing off the nose,
+        how far above you, closing or not, a conflict or not, its id, its way).
+        None if there is nothing in sight."""
+        best = None
+        mvx = math.sin(self.heading) * self.v
+        mvz = math.cos(self.heading) * self.v
+        for x, y, z, hx, hz, lights, tid in self.traffic(now):
+            if y < 3.0 and self.alt > 30.0:
+                continue                    # on the ground, far below
+            dx, dz, dy = x - self.x, z - self.z, y - self.alt
+            d = math.hypot(dx, dz)
+            rank = d + (0.0 if abs(dy) < 45.0 else 20000.0)
+            if best is None or rank < best[0]:
+                speed = AIRWAY_SPEED if tid[0] == "way" else 40.0
+                wx, wz = hx * speed - mvx, hz * speed - mvz
+                closing = dx * wx + dz * wz < 0.0
+                # Where the two of you come closest, and when.
+                w2 = wx * wx + wz * wz
+                tca = max(0.0, -(dx * wx + dz * wz) / w2) if w2 > 1e-6 else 0.0
+                miss = math.hypot(dx + wx * tca, dz + wz * tca)
+                conflict = abs(dy) < 20.0 and (d < 400.0 or (
+                    closing and tca < 25.0 and miss < 300.0))
+                turn = _wrap_pi(math.atan2(dx, dz) - self.heading)
+                best = (rank, (d, turn, dy, closing, conflict, tid, hx, hz))
+        return None if best is None else best[1]
+
+    def runway_busy(self, eta, spare=0.0):
+        """Whether the runway you are coming in to will have a departure on it
+        when you get there, eta seconds from now - give or take spare."""
+        goal = self.target
+        if goal is None or not self.held().get(goal, (True, True))[1]:
+            return False
+        t2 = (self.clock + eta + APT_CYCLE * 0.5) % APT_CYCLE
+        return t2 < 16.0 + spare or t2 > APT_CYCLE - 1.5 - spare
+
+    def eta(self, along):
+        """Seconds to the end of the runway, at the speed over the ground: a
+        headwind on final makes you late, and the tower has to know."""
+        wx, wz = self.wind(self.clock)
+        ground = self.v + wx * math.sin(self.heading) + wz * math.cos(self.heading)
+        return max(0.0, along + 30.0) / max(ground, 20.0)
+
+    def _sequence(self, now):
+        """Short final with a departure still rolling: round again, radio or
+        not - the tower would have sent you, and the go-around is the same."""
+        g = self.guide()
+        if g["mode"] != "final" or g["along"] > 450.0 or self.alt < 3.0:
+            return
+        if self.runway_busy(self.eta(g["along"])):
+            self.leg, self.went_round = "entry", True
+            self.cleared = self.late = False
+            self.side = 1.0 if g["lat"] >= 0.0 else -1.0
+            self.said = "go around: traffic on the runway"
+            if self.radio_on:
+                self.call(now, "TWR", "AC 101, go around, traffic on the runway. Climb "
+                          "to 3,500, I will bring you round again.")
 
     def cells(self, now):
         """The thunderstorms about, once a frame."""
@@ -6446,6 +6604,15 @@ class Cockpit:
             return ("intercept", hdg), line
         over = self.alt - g["alt"]
         if g["along"] < 2600.0 and not self.cleared:
+            # Only cleared with time in hand either side, so a clearance never
+            # turns into a go-around when you are a second slower than it thought.
+            if self.runway_busy(self.eta(g["along"]), 4.0):
+                if not self.late:
+                    self.late = True
+                    return ("late",), ("AC 101, number two, traffic departing ahead. "
+                                       "Continue, expect a late landing clearance.")
+                return ("late",), ("AC 101, continue approach, the runway is not "
+                                   "clear yet.")
             self.cleared = True
             line = "AC 101, %s, runway %s, cleared to land." % (
                 wind_words(*self.wind(self.clock)), g["runway"])
@@ -6501,6 +6668,23 @@ class Cockpit:
         elif inside < 0.05 and self.in_storm:
             self.in_storm = False
             self.call(now, "TWR", "AC 101, you are out of the weather.")
+        near = self.nearest_traffic(now)
+        if (near is not None and near[0] < TRAFFIC_CALL and abs(near[2]) < 45.0
+                and near[3] and near[5] not in self.tfc_told
+                and now - self.atc_at > 3.0):
+            d, turn, dy, closing, conflict, tid, hx, hz = near
+            self.tfc_told.add(tid)
+            way = _wrap_pi(math.atan2(hx, hz) - self.heading)
+            going = ("same direction" if abs(way) < 0.5 else "opposite direction"
+                     if abs(way) > 2.6 else "crossing left to right" if way > 0.0
+                     else "crossing right to left")
+            feet = int(round(dy * 25.0 / 100.0)) * 100
+            level = "same height" if abs(feet) < 300 else "%s ft %s" % (
+                format(abs(feet), ","), "above" if feet > 0 else "below")
+            self.call(now, "TWR", "AC 101, traffic, %s, %.1f km, %s, %s." % (
+                clock_words(turn), d / 200.0, level, going))
+            self.atc_at = now
+            return
         g = self.guide()
         fresh = g["wx"] is not None and g["wx"] not in self.wx_told
         if not fresh and now - self.atc_at < 7.0:
@@ -6626,6 +6810,14 @@ class Cockpit:
                              ) * min(1.0, dt * 2.0)
             if self.belly:
                 self.v = max(0.0, self.v - 9.0 * dt)
+        for x, y, z, hx, hz, lights, tid in self.traffic(now):
+            if (abs(y - self.alt) < TRAFFIC_HIT[1]
+                    and math.hypot(x - self.x, z - self.z) < TRAFFIC_HIT[0]):
+                self.crash(now, "You flew into another flight. Neither of you is "
+                           "going anywhere now.")
+                return
+        if self.state == "air" and self.leg == "final":
+            self._sequence(now)
         top = self._solid_here()
         if top is not None and self.alt <= top:
             self._wreck(now, PILOT_ROOF_WRECK, place_below(self.x, self.z))
@@ -6686,6 +6878,9 @@ class Cockpit:
             out.append("STALL")
         if self.gear < 0.99 and self.alt < 25.0 and self.vy < -1.0:
             out.append("GEAR")
+        near = self.nearest_traffic(self.clock)
+        if near is not None and near[4]:
+            out.append("TRAFFIC")
         for t in (1.0, 2.0, PILOT_LOOK):
             d = self.v * t
             px = self.x + math.sin(self.heading) * d
@@ -6959,6 +7154,9 @@ def draw_cockpit(ch, co, ck, now):
     if y0 + 5 < h - 1:
         wx_text, wx_attr = wx_words(ck, now)
         _text(ch, co, y0 + 5, nx, wx_text[:sec * 2 - 4], wx_attr)
+    if y0 + 6 < h - 1:
+        tfc_text, tfc_attr = tfc_words(ck, now)
+        _text(ch, co, y0 + 6, nx, tfc_text[:sec * 2 - 4], tfc_attr)
     if dist < 2500.0 and y0 + 3 < h - 1 and not here:
         room = max(9, sec - 12) | 1
         mid_ = room // 2
@@ -7294,6 +7492,55 @@ def storm_profile(u, lean, seed):
     return lo, hi
 
 
+def draw_air_traffic(ch, co, v, walls, ck, now, wet):
+    """The other flights, from the air: up close the whole airliner, further off
+    its lights - red on its left and green on its right, whichever you can see,
+    white at the tail, the landing lights blazing if it is coming at you with
+    them on, and the strobe and the beacon going over the top of it all."""
+    near = near_airport(v, 500.0)
+    for x, y, z, hx, hz, lights, tid in ck.traffic(now):
+        if tid[0] == "apt" and tid[1] == near:
+            continue                        # the airport is drawing its own
+        dx, dz = v.x - x, v.z - z
+        d = math.hypot(dx, dz)
+        if d < 900.0:
+            draw_plane(ch, co, v, walls, x, y, z, hx, hz, lights, now, wet)
+            continue
+        pr = v.project(x, y, z)
+        if pr is None:
+            continue
+        sx, sy = int(round(pr[0])), int(round(pr[1]))
+        tx, tz = dx / d, dz / d
+        ahead = hx * tx + hz * tz             # how much it is coming at you
+        right = hz * tx - hx * tz             # and how much you see its right side
+        phase = _mix(*traffic_key(tid), 6105) % 1000 / 1000.0
+        if (now + phase * 1.3) % 1.3 < 0.1:
+            g, attr = "*", FLASH              # the strobe
+        elif lights and ahead > 0.3:
+            g, attr = "@", FLASH
+        elif ahead < -0.6:
+            g, attr = ".", FLASH              # the tail light, going away
+        else:
+            g, attr = "*", ROU_GREEN if right > 0.0 else ROU_RED
+        put_cell(ch, co, v, walls, sx, sy, pr[2], g, attr)
+        if d < 4000.0 and int(now * 1.4 + phase * 2.0) % 2:
+            put_cell(ch, co, v, walls, sx, sy - 1, pr[2], ".", ROU_RED)   # the beacon
+
+
+def tfc_words(ck, now):
+    """The nearest other flight, for the panel: where, how far and how high,
+    or nothing about."""
+    t = ck.nearest_traffic(now)
+    if t is None:
+        return "TFC none near", CONCRETE
+    d, turn, dy, closing, conflict = t[:5]
+    feet = int(round(dy * 25.0 / 100.0)) * 100
+    level = "level" if abs(feet) < 300 else "%s ft %s" % (
+        format(abs(feet), ","), "above" if feet > 0 else "below")
+    return "TFC %s %.1f km %s" % (clock_words(turn), d / 200.0, level), (
+        ROU_RED if conflict else GOLD if d < TRAFFIC_CALL else GOLD_DIM)
+
+
 def draw_air_storms(ch, co, v, walls, cells, now):
     """The thunderstorms from the air, as a night storm is seen: hardly at all
     until it strikes. The shape of it is where the stars go out - a tower with
@@ -7564,6 +7811,7 @@ def draw_outside_hud(ch, co, ck, now):
               + ("on the runway" if ck.on_runway()[0] else "%.1f km %s" % (
                   dist / 200.0, way)), GOLD),
              (wx_text, wx_attr),
+             tfc_words(ck, now),
              ("WIND " + wind_words(*ck.wind(now))[5:], GOLD_DIM)]
     x = 2
     for text, attr in parts:
@@ -7594,6 +7842,7 @@ def render_outside(width, height, now, ck):
              reach=ROOF_REACH if eye > 12.0 else MAX_VIEW)
     v.high_walls = WALL_REACH_PLANE
     v.air = True
+    v.held = ck.held()
     # The plane two thirds of the way down, the town spread out beyond it.
     v.horizon = max(2, min(height - 6,
                            int(height * 0.6 - CHASE_UP * v.fy / CHASE_BACK)))
@@ -7607,6 +7856,7 @@ def render_outside(width, height, now, ck):
         draw_flash(ch, co, v, walls, flash)
         if inside > 0.2:
             draw_flash_sky(ch, co, v.horizon, flash)
+    draw_air_traffic(ch, co, v, walls, ck, now, wet)
     runways = [runway(*home) for home in airports_about(ck.x, ck.z, PILOT_LIGHTS)]
     draw_landing_light(ch, co, v, walls, ck, now, runways)
     for home in airports_about(ck.x, ck.z, PILOT_LIGHTS):
@@ -7635,6 +7885,7 @@ def render_cockpit(width, height, now, ck):
              reach=ROOF_REACH if ck.alt > 8.0 else MAX_VIEW)
     v.high_walls = WALL_REACH_PLANE
     v.air = True
+    v.held = ck.held()
     base = int((height - rows) * 0.5)
     v.horizon = max(2, min(height - 6, base + int(math.tan(ck.pitch) * v.fy)))
     ch, co, wet = render_street(v, now)
@@ -7646,6 +7897,7 @@ def render_cockpit(width, height, now, ck):
         draw_flash(ch, co, v, walls, flash)
         if inside > 0.2:
             draw_flash_sky(ch, co, v.horizon, flash)
+    draw_air_traffic(ch, co, v, walls, ck, now, wet)
     homes = airports_about(ck.x, ck.z, PILOT_LIGHTS)
     draw_landing_light(ch, co, v, walls, ck, now, [runway(*h_) for h_ in homes])
     for home in homes:
@@ -7707,19 +7959,22 @@ def render_gate(width, height, now, flight):
     return ch, co
 
 
-def plane_states(ci, cj, now):
+def plane_states(ci, cj, now, arrive=True, depart=True):
     """Where the moving planes are this instant, as (x, y, z, hx, hz, lights):
     one coming in to land - down the glide slope from the north, touching
     down, braking, turning off for the gate - and, half a cycle on, one
     lining up, rolling, rotating and climbing away south. A function of
-    time, like everything else that moves."""
+    time, like everything else that moves. The tower can hold either: the
+    arrivals or the departures it is keeping out of your way."""
     rx = (ci + RUNWAY_DI) * CELL
     zn = (cj + RUNWAY_HALF) * CELL
     zs = (cj - RUNWAY_HALF) * CELL
     out = []
     t = now % APT_CYCLE
     # The landing.
-    if t < 14.0:
+    if not arrive:
+        t = -1.0                            # held, out of sight
+    elif t < 14.0:
         u = t / 14.0
         out.append((rx, 70.0 * (1.0 - u) ** 1.3 + 1.2,
                     zn + 520.0 * (1.0 - u) - 30.0 * u, 0.0, -1.0, True))
@@ -7737,7 +7992,7 @@ def plane_states(ci, cj, now):
         out.append((x, 1.2, z, (gx - rx) / n, (gz - z0) / n, False))
     # The next one, already out there: a long way off down the approach,
     # lights only to look at, while this one is on the ground.
-    if t >= 14.0:
+    if arrive and t >= 14.0:
         u = (t - 14.0) / (APT_CYCLE - 14.0)
         # High, the way they come in to join the approach: low down out there
         # the far city's towers stand in front of it.
@@ -7745,7 +8000,9 @@ def plane_states(ci, cj, now):
                     0.0, -1.0, True))
     # The take-off, half a cycle on.
     t2 = (now + APT_CYCLE * 0.5) % APT_CYCLE
-    if t2 < 4.0:
+    if not depart:
+        pass
+    elif t2 < 4.0:
         out.append((rx, 1.2, zn - 12.0, 0.0, -1.0, True))
     elif t2 < 16.0:
         k = t2 - 4.0
@@ -7762,7 +8019,7 @@ def draw_plane(ch, co, v, walls, x, y, z, hx, hz, lights, now, wet):
     wings and engines, the fin and tailplane; red on the left wingtip, green
     on the right, the strobe on the tail, the beacon on top - and with its
     landing lights on, two white lights blazing at the nose."""
-    px, pz = -hz, hx                                  # its right
+    px, pz = hz, -hx            # its right (it was its left: red sat on the right)
     sc = PLANE_SCALE
 
     def at(t, side, h):
@@ -7859,7 +8116,8 @@ def draw_airport(ch, co, v, walls, home, now, wet):
         for k in range(8):
             put_point(ch, co, v, walls, fx + 1.0 + k * 0.9, 3.4, gz + 2.0, "=", CURB)
         draw_plane(ch, co, v, walls, fx + 16.0, 1.2, gz, -1.0, 0.0, False, now + g, wet)
-    for x, y, z_, hx, hz, lights in plane_states(ci, cj, now):
+    for x, y, z_, hx, hz, lights in plane_states(ci, cj, now,
+                                                  *v.held.get((ci, cj), (True, True))):
         d2 = (x - v.x) ** 2 + (z_ - v.z) ** 2
         if d2 < 700.0 ** 2:
             draw_plane(ch, co, v, walls, x, y, z_, hx, hz, lights, now, wet)
@@ -12989,7 +13247,7 @@ def draw_far_sky(ch, co, v, walls, wet, now):
                 if 0 <= sx < width and y < tops[sx]:
                     ch[y][sx], co[y][sx] = "/|\\"[step + 1], FLASH
     for k in range(int((now - FAR_PLANE_LIFE) // FAR_PLANE_EVERY) + 1,
-                   int(now // FAR_PLANE_EVERY) + 1):
+                   0 if v.air else int(now // FAR_PLANE_EVERY) + 1):
         t = now - k * FAR_PLANE_EVERY
         m = _mix(k, 0, 4911)
         rate = (0.012 + ((m >> 13) & 31) * 0.0008) * (1 if (m >> 18) & 1 else -1)

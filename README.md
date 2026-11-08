@@ -196,6 +196,9 @@ the city is infinite, identical every time you walk back to it, and held in no m
 - **A view from outside** the jet, and **a landing light** that picks out the runway's paint.
 - **Thunderstorms** out over the country that you can see from far off and fly into — or let the
   tower take you round.
+- **Other traffic** — airways full of flights at their own heights and every airport busy with
+  arrivals and departures; the tower calls the ones near you, a TRAFFIC warning when one is close,
+  and if a departure is still rolling when you come in, you are number two or sent round.
 
 ### On the water
 
