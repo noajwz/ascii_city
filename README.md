@@ -198,8 +198,8 @@ the city is infinite, identical every time you walk back to it, and held in no m
   into the wind. You start at a gate: push back, taxi out along the yellow lines to the runway,
   and after landing taxi in to a gate — or let the autopilot do it.
 - **A view from outside** the jet, and **a landing light** that picks out the runway's paint.
-- **A moving map** in the panel, one page at a time — the route and runways, the weather radar, or
-  the other traffic — and a
+- **A moving map** in the panel, one page at a time — the way, with the runways and the other
+  traffic, or the weather radar — and a
   **landing report** after every touchdown: how hard, how straight, where, and what to fix.
 - **Thunderstorms** out over the country that you can see from far off and fly into — or let the
   tower take you round.
