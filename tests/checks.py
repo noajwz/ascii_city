@@ -150,7 +150,7 @@ def census():
 before = census()
 x, z = ac.start_position()
 for _ in range(3):
-    for _, _, kind in ac.CHEAT_PLACES:
+    for _, _, kind in ac.CHEAT_PLACES + ac.CHEAT_HIDDEN:
         spot = ac.find_place(x, z, kind)
         if spot: x, z, _ = spot
 ac._open_cache.clear(); ac._lots.clear(); ac._road_cache.clear()
@@ -161,14 +161,14 @@ check("teleporting does not change what is rare", census() == before,
 
 x0, z0 = ac.start_position()
 bad = []
-for _, name, kind in ac.CHEAT_PLACES:
+for _, name, kind in ac.CHEAT_PLACES + ac.CHEAT_HIDDEN:
     spot = ac.find_place(x0, z0, kind)
     if spot is None or not ac.can_stand(spot[0], spot[1]):
         bad.append(name)
 check("every destination lands somewhere you can stand", not bad, ",".join(bad))
 
 blind = []
-for _, name, kind in ac.CHEAT_PLACES:
+for _, name, kind in ac.CHEAT_PLACES + ac.CHEAT_HIDDEN:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
                 "diner", "billboard", "highway", "arcade", "claw", "roofparty",
                 "exchange", "metro", "bar", "lowroof", "bowling", "lair", "pilot"):
@@ -203,7 +203,7 @@ for k in range(12):
     m = ac._mix(k, 7, 31)
     sx = ((m & 0xFFFF)/65535.0 - 0.5) * 12000
     sz = ((m >> 16)/65535.0 - 0.5) * 12000
-    for _, _, kind in ac.CHEAT_PLACES:
+    for _, _, kind in ac.CHEAT_PLACES + ac.CHEAT_HIDDEN:
         fails += ac.find_place(sx, sz, kind) is None
 check("nothing is unfindable from anywhere", fails == 0, "%d misses in 96" % fails)
 
@@ -1614,6 +1614,18 @@ check("the panel lists everything it does",
       all(n in text for _, n, _ in ac.CHEAT_PLACES)
       and ac.weather_name() in text and "strike now" in text and "people" in text
       and "sky " in text and "dawn" in text and "traffic" in text)
+taxi_kinds_ = {k_ for _, k_ in ac.TAXI_DESTS}
+check("nowhere a taxi goes is on the panel, nor its FUN, EAT, AROUND TOWN",
+      not taxi_kinds_ & {k_ for _, _, k_ in ac.CHEAT_PLACES}
+      and not {"FUN", "EAT", "AROUND TOWN", "OUT OF TOWN"}
+      & {g_ for g_, _ in ac.CHEAT_GROUPS} and "AROUND TOWN" not in text)
+panel_keys_ = ([k_ for k_, _, _ in ac.CHEAT_PLACES] + [d_["key"] for d_ in ac.DISTRICTS]
+               + list("wLsa>nuz!@&#/+%\\mc`"))
+check("every key on the panel does one thing: no place hides a part of town",
+      len(panel_keys_) == len(set(panel_keys_)),
+      " ".join(sorted({k_ for k_ in panel_keys_ if panel_keys_.count(k_) > 1})))
+case_twins_ = {k_ for k_ in panel_keys_ if k_.isalpha() and k_.swapcase() in panel_keys_}
+check("and no two differ only by case", not case_twins_, " ".join(sorted(case_twins_)))
 std = ([[" "] * 80 for _ in range(24)], [[0] * 80 for _ in range(24)])
 ac.draw_cheats(std[0], std[1], "-> somewhere")
 check("and it opens on an 80x24 terminal", any("close" in "".join(r) for r in std[0]))

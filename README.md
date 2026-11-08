@@ -84,8 +84,9 @@ At the wheel of a cab (`t` on any street, then `d` when it pulls up):
   x          pull over and get out
 ```
 
-The cheat menu teleports you to anything worth looking at — it searches the city for what is
-already there rather than spawning it, so the rare things stay exactly as rare as they are.
+The cheat menu teleports you to anything worth looking at that a taxi will not take you to —
+it searches the city for what is already there rather than spawning it, so the rare things stay
+exactly as rare as they are. For the casino, the club, the diner and the rest, hail a cab.
 
 ## What is in it
 
