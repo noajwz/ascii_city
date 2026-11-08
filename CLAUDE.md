@@ -1266,7 +1266,15 @@ drifted off the crosswind runway, whose field was a narrow strip, into a buildin
 field is wider now and starts inside the main one's wavy edge, where taxiway A ran over a gap.
 `draw_taxi_greens()` lights the way; the panel (`taxi_words()`), the outside strip and the map's
 ROUTE page show it; `ck.gate_on()` / `v.my_gate` keep the parked jet off your own stand. Flown
-from gate to gate with the autopilot: 50 of 50 parked, bar one blown off the runway by a storm. `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
+from gate to gate with the autopilot: 50 of 50 parked, bar one blown off the runway by a storm.
+
+**The control tower, with its radar.** `draw_atc_tower()` draws over the one-cell shaft `lot()`
+builds (`ATC_TOP` tall): a cab wider than it, a ring of lit glass with a catwalk and a roof, a
+mast, and the radar going round once every `RADAR_TURN` - long, edge on, long again, which is
+what reads as turning; the beacon is on top of the mast now. `draw_airport()` draws it in the
+street; `draw_runway_lights()` from the plane, unless the street already has. **`TOWER_TOP` was
+taken** - the sky decks' height - and redefining it for this shrank every sky deck in town; four
+sky-deck checks caught it. `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
 see-through, which is how the first titles came out `--MAP-6-km--`. The key hint has a short form
 (`PILOT_KEYS_SHORT`) for windows under 118 columns. About 2-3 ms a frame at 300x90.
 
