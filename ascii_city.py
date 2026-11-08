@@ -21,6 +21,7 @@ On Windows:  pip install windows-curses
 """
 
 import curses
+import heapq
 import math
 import os
 import random
@@ -24931,11 +24932,756 @@ def draw_taxi_menu(ch, co, dests, sel, money):
         for x in range(x0, min(width, x0 + w)):
             ch[y][x], co[y][x] = " ", 0
     _text(ch, co, y0, x0 + 2, "WHERE TO?    ($%d on you)" % int(money), GOLD)
+    _text(ch, co, y0 + len(rows) + 2, x0 + 2, "d  or drive it yourself", GOLD_DIM)
     for r, (name, _, fare) in enumerate(rows):
         k = first + r
         line = "%s %-20s $%3d" % (">" if k == sel else " ", name[:20], fare)
         _text(ch, co, y0 + 2 + r, x0 + 2, line,
               FLASH if k == sel else (HUD if fare <= money else CONCRETE))
+
+
+# --- driving the cab yourself -----------------------------------------------
+# `d` in the cab's WHERE TO? and the driver gets out: the night shift is yours.
+# Curses sees no key go up, so the controls are the kind that stay put, the
+# plane's way: w and s set the speed you hold, like a cruise control, and the
+# wheel stays over only while a steering key keeps repeating.
+CAB_STEP = 4.0         # w and s step the speed held by this, units a second
+CAB_TOP = 32.0         # the most w will hold: a little over seventy
+CAB_BACK = -6.0        # and in reverse
+CAB_ACCEL = 7.0        # getting up to it, units a second every second
+CAB_BRAKE = 16.0       # slowing down to it
+CAB_WET_GRIP = 0.6     # on a wet road the brakes have this much of that
+CAB_R = 3.5            # the tightest circle it turns, all but standing
+CAB_R_FAST = 0.25      # and how much wider that gets a unit of speed
+CAB_STEER = 4.0        # how fast the wheel goes over, a second
+CAB_CENTRE = 6.0       # and comes back by itself
+CAB_GRACE = 0.16       # a steering key holds the wheel over this long after it
+CAB_DENT = 9.0         # hit something faster than this: a crash, not a bump
+CAB_CAR = 2.6          # a car this near is a car hit
+CAB_FLAG = 4.0         # the meter starts at this
+CAB_PER = 0.03         # and a dollar every thirty-odd units driven
+CAB_TIP = 0.25         # what a perfect ride tips, of the meter
+CAB_PICKUP = 9.0       # stop this near a fare to pick them up
+CAB_DROP = 12.0        # and this near where they are going
+CAB_STOPPED = 1.2      # what counts as stopped
+CAB_BOARD = 1.5        # seconds to get in, or out
+CAB_LIMIT = 20.0       # over this the nervous ones say so: about forty-five
+CAB_PACE = 11.0        # what a fare thinks a fair speed through town is
+CAB_WAIT = (3.0, 8.0)  # seconds before dispatch has the next one for you
+CAB_NEAR = (18, 50)    # how far off, in cells, dispatch finds them
+CAB_DEST = (110.0, 1300.0)      # and how far they want to go, in units
+CAB_ROUTE_MAX = 60000  # cells the satnav looks at before it gives up
+CAB_GREED = 1.3        # how much it trusts the straight line: quick, nearly the best
+MPH = 2.24             # a unit a second, in miles an hour: a unit is a metre
+CAB_KINDS = [("the casino", "casino"), ("the club", "club"),
+             ("the pictures", "cinema"), ("the arcade", "arcade"),
+             ("a ramen counter", "ramen"), ("the diner", "diner"),
+             ("the temple", "temple"), ("the stock exchange", "exchange"),
+             ("a sky deck", "tower"), ("the roof party", "roofparty"),
+             ("the carnival", "carnival"), ("the riverbank", "bank"),
+             ("the airport", "flight"), ("the bowling alley", "bowling")]
+CAB_SAYS = {
+    "plain": ["%s, please.", "Evening. %s.", "%s. Do you know it?",
+              "Take me to %s.", "%s, thanks."],
+    "hurry": ["%s - and step on it, I'm late!", "%s, fast as you can!",
+              "%s. I'll tip if you're quick."],
+    "nervous": ["%s. Gently, please - I get carsick.",
+                "%s. No rush. Really, no rush.", "%s. And slowly, I've had a night."],
+    "bump": ["Ow!", "Watch it!", "Was that the kerb?", "Easy!"],
+    "crash": ["Are you trying to kill me?!", "My neck!", "You hit a building!",
+              "Who gave you a licence?"],
+    "car": ["You hit a car!", "Did you even look?", "Oh, great. Insurance."],
+    "grass": ["That's not a road.", "Why are we on the grass?",
+              "Is this a short cut?"],
+    "fast": ["Slow down, please!", "This is too fast!", "I want to live!"],
+    "slow": ["Can't this thing go any faster?", "I could walk quicker.",
+             "Any time tonight."],
+    "lost": ["Are we lost?", "I don't think this is the way.",
+             "Do you even know where you're going?"],
+    "good": ["Smooth. Keep the change.", "Best ride I've had all week.",
+             "Thanks - here, for you."],
+    "ok": ["Thanks.", "Here.", "Cheers."],
+    "bad": ["Never again.", "You're lucky I'm paying at all.",
+            "I'm leaving a review."],
+    "walk": ["Let me out. I'll walk.", "Stop the car. I'm getting out.",
+             "That's it - I'm walking from here."],
+}
+CAB_HUD = " driving the cab  -  %s "
+CAB_KEYS = "w s speed  a d steer  space brakes  m map  h horn  x pull over"
+CAB_KEYS_SHORT = "ws speed  ad steer  spc brake  m h x"
+_cab_seen = {}
+
+
+def cab_ground(i, j):
+    """What a cell is to a car: "road" - a street, an alley, a car park, a
+    bridge - "rough" - open ground with nothing built on it, the park and the
+    quad and the tarmac - or None, which it cannot go on at all."""
+    key = i * 1048576 + j
+    hit = _cab_seen.get(key, 0)
+    if hit == 0:
+        _evict(_cab_seen, 60000)
+        if not is_open(i, j) or (water_at(i, j) and not deck_at(i, j)):
+            hit = None
+        elif (road_at(i, j) or car_park_at(i, j) or bridge_at(i, j)
+              or (not DISTRICTS[district_at(i, j)]["park"] and not woods_at(i, j)
+                  and (_is_alley(i, j, XP, 91, 211) or _is_alley(j, i, ZP, 137, 223)))):
+            hit = "road"
+        else:
+            hit = "rough"
+        _cab_seen[key] = hit
+    return hit
+
+
+def cab_route(start, goal, limit=CAB_ROUTE_MAX):
+    """The satnav's way from one cell to another along roads, a list of cells,
+    or None. A* over the street grid, a turn costing a little, so the way it
+    gives is the one you would drive and not a staircase across the junctions;
+    an alley costs more than a street, the way a cabbie would take one."""
+    if start == goal:
+        return [start]
+    gi, gj = goal
+    dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+    best = {}
+    came = {}
+    heap = [(0.0, 0.0, start, -1)]
+    seen = 0
+    while heap:
+        _, g, cell, d = heapq.heappop(heap)
+        if cell == goal:
+            path = [cell]
+            state = (cell, d)
+            while state in came:
+                state = came[state]
+                path.append(state[0])
+            path.reverse()
+            return path
+        if best.get((cell, d), 1e18) < g:
+            continue
+        seen += 1
+        if seen > limit:
+            return None
+        i, j = cell
+        for nd, (di, dj) in enumerate(dirs):
+            if d >= 0 and nd == d ^ 1:
+                continue                    # no turning round in the road
+            nxt = (i + di, j + dj)
+            if nxt != goal and cab_ground(*nxt) != "road":
+                continue
+            step = 1.0 if road_at(*nxt) or nxt == goal else 2.5
+            ng = g + step + (0.6 if d >= 0 and nd != d else 0.0)
+            if ng < best.get((nxt, nd), 1e18):
+                best[(nxt, nd)] = ng
+                came[(nxt, nd)] = (cell, d)
+                h = abs(nxt[0] - gi) + abs(nxt[1] - gj)
+                heapq.heappush(heap, (ng + h * CAB_GREED, ng, nxt, nd))
+    return None
+
+
+def _cell_of(x, z):
+    return int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+
+
+def _kerb_spot(i, j):
+    """Where somebody waits for a cab in this road cell: against a building
+    beside it, a step out from the wall. None if no building is beside it."""
+    for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        if not is_open(i + di, j + dj):
+            cx, cz = (i + 0.5) * CELL, (j + 0.5) * CELL
+            x, z = cx + di * (CELL * 0.5 - 1.2), cz + dj * (CELL * 0.5 - 1.2)
+            if can_stand(x, z):
+                return x, z
+    return None
+
+
+def _drop_cell(x, z):
+    """The road cell nearest a place, to pull up in."""
+    ci, cj = _cell_of(x, z)
+    best = None
+    for di in range(-4, 5):
+        for dj in range(-4, 5):
+            i, j = ci + di, cj + dj
+            if road_at(i, j) and cab_ground(i, j) == "road":
+                d = math.hypot((i + 0.5) * CELL - x, (j + 0.5) * CELL - z)
+                if best is None or d < best[0]:
+                    best = (d, (i, j))
+    return None if best is None else best[1]
+
+
+class Cab:
+    """The cab, with you at the wheel: where it is, which way it points, how
+    fast it goes, the fare in the back or waiting at the kerb, and what the
+    satnav says. `step()` is a car - the speed eases to what you hold, the
+    wheel turns you by how fast you are going, walls and cars stop you - and
+    the fares are a little round of their own: dispatch finds one, you pull
+    up by them, they say where, and they pay on the meter and tip on the
+    ride. Everything they pay goes in `pay` for main() to put in the wallet."""
+
+    def __init__(self, x, z, heading, now, seed):
+        self.x, self.z, self.heading = x, z, heading
+        self.speed = self.want = 0.0
+        self.steer = self.steer_in = 0.0
+        self.steer_until = self.brake_until = 0.0
+        self.rng = random.Random(seed)
+        self.clock = now
+        self.fare = None            # who you have, waiting or in the back
+        self.call_at = now + 1.5    # when dispatch next has somebody
+        self.route = None           # the satnav's cells, from near you on
+        self.route_at = -1e9
+        self.goal = None            # the cell it is taking you to
+        self.said, self.said_at = "", -1e9      # the last thing said in the cab
+        self.radio = ""             # what dispatch said last
+        self.pay = 0                # money for main() to put in the wallet
+        self.earned = self.fares = 0
+        self.hit_at = self.grass_at = self.moan_at = -1e9
+        self.off_route = 0.0        # seconds you have been off the satnav's way
+        self.map_on = True
+        self.horn_at = -1e9
+        self.blocked = False
+
+    # --- the controls ----------------------------------------------------
+    def key(self, what, now):
+        if what == "faster":
+            self.want = min(CAB_TOP, self.want + CAB_STEP)
+        elif what == "slower":
+            self.want = max(CAB_BACK, self.want - CAB_STEP)
+        elif what == "brake":
+            self.want, self.brake_until = 0.0, now + 0.5
+        elif what in ("left", "right"):
+            d = -1.0 if what == "left" else 1.0
+            if d != self.steer_in or now > self.steer_until:
+                # A fresh press holds long enough to bridge the wait before
+                # the keyboard starts repeating, as the walking turn does.
+                self.steer_until = now + TURN_FIRST
+            else:
+                self.steer_until = max(self.steer_until, now + CAB_GRACE)
+            self.steer_in = d
+        elif what == "map":
+            self.map_on = not self.map_on
+        elif what == "horn":
+            self.horn_at = now
+
+    def say(self, what, now, name=None):
+        lines = CAB_SAYS[what]
+        line = lines[self.rng.randrange(len(lines))]
+        self.said, self.said_at = (line % name if name else line), now
+
+    # --- a frame -----------------------------------------------------------
+    def step(self, dt, now):
+        dt = max(0.0, min(0.1, dt))
+        self.clock = now
+        if now > self.steer_until:
+            self.steer_in = 0.0
+        if self.steer_in:
+            self.steer += max(-CAB_STEER * dt, min(CAB_STEER * dt,
+                                                   self.steer_in - self.steer))
+        else:
+            self.steer += max(-CAB_CENTRE * dt, min(CAB_CENTRE * dt, -self.steer))
+        wet = max(rain_intensity(now), snow_cover(now))
+        grip = 1.0 - (1.0 - CAB_WET_GRIP) * min(1.0, wet * 1.5)
+        want = 0.0 if now < self.brake_until else self.want
+        if now < self.brake_until:
+            rate = CAB_BRAKE * grip * 1.4
+        elif self.speed * (want - self.speed) < 0.0 or abs(want) < abs(self.speed):
+            rate = CAB_BRAKE * grip
+        else:
+            rate = CAB_ACCEL * (1.0 if want >= 0.0 else 0.5)
+        self.speed += max(-rate * dt, min(rate * dt, want - self.speed))
+        if abs(self.speed) > 0.05:
+            r = CAB_R + CAB_R_FAST * abs(self.speed)
+            self.heading = _wrap(self.heading + self.steer * self.speed / r * dt)
+        self._move(self.speed * dt, now)
+        self._traffic(now)
+        self._fares(now, dt)
+
+    def _move(self, dist, now):
+        """Along the heading, a step at a time so nothing is driven through;
+        into a wall at an angle it slides along it, head on it stops you."""
+        self.blocked = False
+        n = 1 + int(abs(dist) / (STEP_MAX * 0.5))
+        sx, sz = math.sin(self.heading) * dist / n, math.cos(self.heading) * dist / n
+        for _ in range(n):
+            if can_stand(self.x + sx, self.z + sz):
+                self.x, self.z = self.x + sx, self.z + sz
+                continue
+            slid = None
+            for ax, az, lost in ((sx, 0.0, sz), (0.0, sz, sx)):
+                if abs(ax) + abs(az) > 1e-6 and can_stand(self.x + ax, self.z + az):
+                    self.x, self.z, slid = self.x + ax, self.z + az, abs(lost)
+                    break
+            if slid is not None:
+                # Along a wall: a graze costs a little speed, and coming in at
+                # a real angle is a bump - the share of the step the wall took.
+                into = slid / max(1e-6, abs(sx) + abs(sz))
+                if into > 0.45 and abs(self.speed) > 6.0 and now - self.hit_at > 1.0:
+                    self._hit("bump", now)
+                self.speed *= 1.0 - 0.3 * into
+                continue
+            self.blocked = True
+            hit = abs(self.speed)
+            self.speed = self.want = 0.0
+            if hit > CAB_DENT:
+                self._hit("crash", now)
+            elif hit > 2.0 and now - self.hit_at > 0.6:
+                self._hit("bump", now)
+            break
+        i, j = _cell_of(self.x, self.z)
+        if (cab_ground(i, j) == "rough" and abs(self.speed) > 3.0
+                and now - self.grass_at > 5.0):
+            self.grass_at = now
+            if self._riding():
+                self.fare["mood"] -= 0.15
+                self.say("grass", now)
+
+    def _traffic(self, now):
+        """The city's traffic does not see you: drive into it and that is on you."""
+        if now - self.hit_at < 2.0 or abs(self.speed) < 2.0:
+            return                  # stopped at the kerb, they go round you
+        v = View(self.x, self.z, self.heading, 3, 3)
+        for _, x, z, (dx, dz), kind, _ in near_cars(v, now, reach=12.0, every=True):
+            if math.hypot(x - self.x, z - self.z) < CAB_CAR:
+                rel = math.hypot(math.sin(self.heading) * self.speed - dx * 9.0,
+                                 math.cos(self.heading) * self.speed - dz * 9.0)
+                self.speed = self.want = 0.0
+                self._hit("car" if rel > 4.0 else "bump", now)
+                return
+
+    def _hit(self, what, now):
+        self.hit_at = now
+        if self._riding():
+            self.fare["mood"] -= {"bump": 0.2, "crash": 0.6, "car": 0.6}[what]
+            self.fare["dents"] += 1
+            self.say(what, now)
+        else:
+            self.said, self.said_at = {"bump": "*bump*", "crash": "*CRUNCH*",
+                                       "car": "*CRUNCH* - a horn, then a lot of words"
+                                       }[what], now
+
+    def _riding(self):
+        return self.fare is not None and self.fare["state"] == "riding"
+
+    # --- the fares ---------------------------------------------------------
+    def _fares(self, now, dt):
+        f = self.fare
+        if f is None:
+            if now >= self.call_at:
+                self._dispatch(now)
+            return
+        here = math.hypot(self.x - f["x"], self.z - f["z"])
+        still = abs(self.speed) < CAB_STOPPED
+        if f["state"] == "waiting":
+            if here < CAB_PICKUP and still:
+                f["state"], f["t"] = "boarding", now
+                self.radio = ""
+        elif f["state"] == "boarding":
+            if now - f["t"] >= CAB_BOARD:
+                self._board(now)
+        elif f["state"] == "riding":
+            f["driven"] += abs(self.speed) * dt
+            f["meter"] = CAB_FLAG + f["driven"] * CAB_PER
+            dx, dz = self.x - f["to"][0], self.z - f["to"][1]
+            if math.hypot(dx, dz) < CAB_DROP and still:
+                self._arrive(now)
+                return
+            if f["mood"] <= -0.6:
+                self.say("walk", now)
+                f["state"], f["t"], f["paid"] = "leaving", now, 0
+                self.goal = self.route = None
+                return
+            self._moan(now, dt)
+        elif f["state"] in ("leaving", "paying"):
+            if now - f["t"] >= CAB_BOARD + 1.0:
+                self.fare = None
+                self.call_at = now + self.rng.uniform(*CAB_WAIT)
+                return
+        self._satnav(now, dt)
+
+    def _moan(self, now, dt):
+        """What the one in the back thinks of the driving, now and then."""
+        f = self.fare
+        if now - self.moan_at < 6.0:
+            return
+        late = now - f["t"] > f["eta"] * 1.6 + 10.0
+        if f["kind"] == "nervous" and abs(self.speed) > CAB_LIMIT:
+            f["mood"] -= 0.15
+            self.say("fast", now)
+        elif f["kind"] == "hurry" and (late or (now - f["t"] > 8.0
+                                               and abs(self.speed) < 5.0)):
+            f["mood"] -= 0.1
+            self.say("slow", now)
+        elif self.off_route > 12.0:
+            f["mood"] -= 0.1
+            self.say("lost", now)
+            self.off_route = 0.0
+        else:
+            return
+        self.moan_at = now
+
+    def _dispatch(self, now):
+        """Somebody wants a cab, a few blocks off, standing at a kerb."""
+        ci, cj = _cell_of(self.x, self.z)
+        for _ in range(30):
+            a = self.rng.uniform(0.0, math.tau)
+            r = self.rng.uniform(*CAB_NEAR)
+            i, j = ci + int(round(math.cos(a) * r)), cj + int(round(math.sin(a) * r))
+            if not road_at(i, j) or cab_ground(i, j) != "road":
+                continue
+            spot = _kerb_spot(i, j)
+            if spot is None:
+                continue
+            path = cab_route((ci, cj), (i, j))
+            if path is None:
+                continue
+            kind = ("hurry", "nervous", "plain", "plain")[self.rng.randrange(4)]
+            self.fare = {"state": "waiting", "x": spot[0], "z": spot[1],
+                         "cell": (i, j), "kind": kind, "mood": 1.0, "dents": 0,
+                         "seed": self.rng.randrange(1 << 30), "t": now}
+            self.goal, self.route, self.route_at = (i, j), path, now
+            name = district(i, j)["name"]
+            self.radio = "DISPATCH: a fare in %s, %d m" % (
+                name, int(math.hypot(spot[0] - self.x, spot[1] - self.z)))
+            return
+        self.call_at = now + 2.0            # nobody about here: ask again
+
+    def _board(self, now):
+        """In they get, and say where - the nearest of some place far enough
+        off to be worth a cab, that the car can get to."""
+        f = self.fare
+        kinds = CAB_KINDS[:]
+        self.rng.shuffle(kinds)
+        for name, kind in kinds[:6]:
+            spot = find_place(f["x"], f["z"], kind)
+            if spot is None:
+                continue
+            d = math.hypot(spot[0] - f["x"], spot[1] - f["z"])
+            if not CAB_DEST[0] <= d <= CAB_DEST[1]:
+                continue
+            cell = _drop_cell(spot[0], spot[1])
+            if cell is None:
+                continue
+            path = cab_route(_cell_of(self.x, self.z), cell)
+            if path is None:
+                continue
+            to = ((cell[0] + 0.5) * CELL, (cell[1] + 0.5) * CELL)
+            f.update(state="riding", t=now, name=name, to=to, driven=0.0,
+                     meter=CAB_FLAG, eta=len(path) * CELL / CAB_PACE + 6.0)
+            self.goal, self.route, self.route_at = cell, path, now
+            self.say(f["kind"], now, name[0].upper() + name[1:])
+            return
+        self.said, self.said_at = "\"Actually - never mind. I'll walk.\"", now
+        f["state"], f["t"], f["paid"] = "leaving", now, 0
+        self.goal = self.route = None
+
+    def _arrive(self, now):
+        f = self.fare
+        meter = int(round(f["meter"]))
+        quick = now - f["t"] <= f["eta"]
+        mood = f["mood"] + (0.3 if quick and f["kind"] == "hurry" else 0.0)
+        if f["kind"] == "hurry" and not quick:
+            mood -= 0.2
+        tip = int(round(meter * CAB_TIP * max(0.0, min(1.3, mood))
+                        * (2.0 if f["kind"] == "hurry" and quick else 1.0)))
+        f["paid"] = meter + tip
+        self.pay += f["paid"]
+        self.earned += f["paid"]
+        self.fares += 1
+        self.say("good" if mood > 0.75 else "ok" if mood > 0.25 else "bad", now)
+        self.radio = "$%d on the meter, $%d tip" % (meter, tip)
+        f["state"], f["t"] = "paying", now
+        self.goal = self.route = None
+
+    # --- the satnav --------------------------------------------------------
+    def _satnav(self, now, dt):
+        """Keep the way up to date: drop the cells behind you, and if you have
+        left it, find a new one - once a second at most."""
+        if self.goal is None:
+            return
+        here = _cell_of(self.x, self.z)
+        if self.route:
+            idx = None
+            for k_, c in enumerate(self.route[:14]):
+                if abs(c[0] - here[0]) + abs(c[1] - here[1]) <= 1:
+                    idx = k_
+                    if c == here:
+                        break
+            if idx is not None:
+                self.route = self.route[idx:]
+                self.off_route = 0.0
+                return
+        self.off_route += dt
+        if now - self.route_at > 1.0:
+            self.route_at = now
+            path = cab_route(here, self.goal)
+            if path is not None:
+                self.route = path
+
+    def directions(self):
+        """What the satnav says: "left in 40 m", "straight on", "turn round"."""
+        if self.fare is None or self.fare["state"] not in ("waiting", "riding"):
+            return ""
+        if not self.route or len(self.route) < 2:
+            return "you are there - stop"
+        (ai, aj), (bi, bj) = self.route[0], self.route[1]
+        d0 = (bi - ai, bj - aj)
+        if d0[0] * math.sin(self.heading) + d0[1] * math.cos(self.heading) < -0.4:
+            return "turn round when you can"
+        for n in range(1, len(self.route) - 1):
+            (pi, pj), (qi, qj) = self.route[n], self.route[n + 1]
+            d1 = (qi - pi, qj - pj)
+            if d1 != d0:
+                cross = d0[0] * d1[1] - d0[1] * d1[0]
+                far = int(n * CELL)
+                return "%s in %d m" % ("right" if cross < 0 else "left", far)
+        return "straight on, %d m" % int(len(self.route) * CELL)
+
+    def status(self):
+        f = self.fare
+        if f is None:
+            return "for hire - waiting on dispatch"
+        if f["state"] == "waiting":
+            return "a fare waiting, %d m" % int(math.hypot(f["x"] - self.x,
+                                                         f["z"] - self.z))
+        if f["state"] == "boarding":
+            return "they are getting in"
+        if f["state"] == "riding":
+            return "to %s, %d m" % (f["name"], int(math.hypot(
+                f["to"][0] - self.x, f["to"][1] - self.z)))
+        return "paid $%d" % f.get("paid", 0) if f.get("paid") else "for hire"
+
+
+WAVER = [
+    " ,-. \\",
+    " (_) /",
+    " /#\\/ ",
+    "/|#|  ",
+    " / \\  ",
+    "_| |_ ",
+]
+
+
+def draw_cab_world(ch, co, v, cab, now):
+    """In the street, from the driver's seat: the fare waiting at the kerb with
+    an arm up and TAXI! over them, and where they are going marked once you
+    are near."""
+    walls = v.walls
+    f = cab.fare
+    if f is None:
+        return
+    if f["state"] in ("waiting", "boarding"):
+        blit_sprite(ch, co, v, walls, WAVER, f["x"], f["z"], 0.0, SMOKER_H,
+                    SMOKER_W * 1.2, GOLD)
+        mark, x, z, y, attr = ("TAXI!", f["x"], f["z"], SMOKER_H + 0.9,
+                               FLASH if int(now * 3) % 2 else GOLD)
+        reach = 160.0
+    elif f["state"] == "riding":
+        mark, (x, z), y, attr = "[ HERE ]", f["to"], 3.0, ROU_GREEN
+        reach = 90.0
+    else:
+        return
+    pr = v.project(x, y, z)
+    if pr is None or pr[2] > reach:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    if not (0 <= sy < v.height and 0 <= sx < v.width) or hidden(walls, sx, sy, dist):
+        return
+    _label(ch, co, sy, sx - len(mark) // 2, mark, attr)
+
+
+def _rim_glyph(a):
+    """A line's glyph by which way it runs on screen."""
+    a = a % math.pi
+    if a < math.pi / 8 or a > 7 * math.pi / 8:
+        return "-"
+    if a < 3 * math.pi / 8:
+        return "\\"
+    if a < 5 * math.pi / 8:
+        return "|"
+    return "/"
+
+
+def draw_wheel(ch, co, cx, cy, rx, ry, turn):
+    """The steering wheel in front of the dashboard, its rim an ellipse and
+    three spokes to the hub, turned `turn` radians."""
+    h, w = len(ch), len(ch[0])
+
+    def put(x, y, g, attr):
+        if 0 <= y < h and 0 <= x < w:
+            ch[y][x], co[y][x] = g, attr
+    n = max(24, int((rx + ry) * 6))
+    for s in range(n):
+        a = math.tau * s / n
+        x, y = cx + math.cos(a) * rx, cy - math.sin(a) * ry
+        tang = math.atan2(math.cos(a) * ry, math.sin(a) * rx)
+        put(int(round(x)), int(round(y)), _rim_glyph(tang), CURB)
+        if rx > 24:                               # a fat rim on a big window
+            put(int(round(cx + math.cos(a) * (rx - 1))),
+                int(round(cy - math.sin(a) * (ry - 0.5))), _rim_glyph(tang), BARK)
+    for base in (0.0, math.pi, -math.pi / 2):
+        a = base - turn
+        g = _rim_glyph(math.atan2(-math.sin(a) * ry, math.cos(a) * rx))
+        for t in range(2, 20):
+            u = t / 20.0
+            put(int(round(cx + math.cos(a) * rx * u)),
+                int(round(cy - math.sin(a) * ry * u)), g, CONCRETE)
+    put(cx - 1, cy, "(", GOLD_DIM)
+    put(cx, cy, "o", GOLD)
+    put(cx + 1, cy, ")", GOLD_DIM)
+
+
+def draw_satnav(ch, co, cab, x0, y0, mw, mh, now):
+    """The satnav on the dash: top down and heading up, the cab near the foot
+    of it, the streets as dots, the water, the way in gold, and the fare or
+    where they are going - an arrow at the edge when it is further than the
+    map goes. A cell is two columns by one row."""
+    if mw < 16 or mh < 6:
+        return
+    for x in range(x0, x0 + mw):
+        ch[y0][x], co[y0][x] = "-", CONCRETE
+        ch[y0 + mh - 1][x], co[y0 + mh - 1][x] = "-", CONCRETE
+    for y in range(y0 + 1, y0 + mh - 1):
+        for x in range(x0, x0 + mw):
+            ch[y][x], co[y][x] = " ", 0
+        ch[y][x0], co[y][x0] = "|", CONCRETE
+        ch[y][x0 + mw - 1], co[y][x0 + mw - 1] = "|", CONCRETE
+    _label(ch, co, y0, x0 + 2, " SATNAV ", GOLD)
+    ix0, ix1, iy0, iy1 = x0 + 1, x0 + mw - 2, y0 + 1, y0 + mh - 3
+    cxm = (ix0 + ix1) * 0.5
+    py = iy0 + (iy1 - iy0) * 0.72
+    per_row, per_col = CELL, CELL * 0.5
+    sh, chh = math.sin(cab.heading), math.cos(cab.heading)
+    way = set(cab.route or ())
+    for my in range(iy0, iy1 + 1):
+        fwd = (py - my) * per_row
+        for mx in range(ix0, ix1 + 1):
+            right = (mx - cxm) * per_col
+            i, j = _cell_of(cab.x + fwd * sh + right * chh,
+                            cab.z + fwd * chh - right * sh)
+            if (i, j) in way:
+                ch[my][mx], co[my][mx] = "o", GOLD
+            elif water_at(i, j) and not deck_at(i, j):
+                ch[my][mx], co[my][mx] = "~", CROWN_BLUE
+            else:
+                g = cab_ground(i, j)
+                if g == "road":
+                    ch[my][mx], co[my][mx] = ".", CONCRETE
+                elif g == "rough":
+                    ch[my][mx], co[my][mx] = ",", GRASS
+
+    def spot(wx, wz):
+        rx, rz = wx - cab.x, wz - cab.z
+        return (cxm + (rx * chh - rz * sh) / per_col,
+                py - (rx * sh + rz * chh) / per_row)
+
+    f = cab.fare
+    tgt = None
+    if f is not None and f["state"] == "waiting":
+        tgt = (f["x"], f["z"], "@")
+    elif f is not None and f["state"] == "riding":
+        tgt = (f["to"][0], f["to"][1], "X")
+    if tgt is not None:
+        mx, my = spot(tgt[0], tgt[1])
+        if ix0 <= mx <= ix1 and iy0 <= my <= iy1:
+            gy, gx = int(round(my)), int(round(mx))
+            ch[gy][gx], co[gy][gx] = tgt[2], FLASH if int(now * 3) % 2 else ROU_GREEN
+        else:
+            # Off the map: an arrow on its edge, the way to it.
+            dx, dy = mx - cxm, my - py
+            s = min((ix1 - cxm) / abs(dx) if dx else 1e9,
+                    (py - iy0) / -dy if dy < 0 else (iy1 - py) / dy if dy > 0 else 1e9)
+            ex, ey = int(round(cxm + dx * s)), int(round(py + dy * s))
+            ex, ey = max(ix0, min(ix1, ex)), max(iy0, min(iy1, ey))
+            a = math.atan2(-dy, dx * 0.5)
+            g = (">" if abs(a) < math.pi / 4 else "<" if abs(a) > 3 * math.pi / 4
+                 else "^" if a > 0 else "v")
+            ch[ey][ex], co[ey][ex] = g, ROU_GREEN
+    ch[int(round(py))][int(round(cxm))] = "A"
+    co[int(round(py))][int(round(cxm))] = FLASH
+    words = cab.directions() or ("for hire" if f is None else "")
+    _label(ch, co, y0 + mh - 2, x0 + 2, words.upper()[:mw - 4], GOLD)
+
+
+def draw_driver(ch, co, cab, now, wet, k=1):
+    """From the driver's seat: the roof and the pillars, the mirror with the
+    dice, the wipers in the wet, the dashboard with the speed and the meter,
+    the TAXI light's word, the wheel turning with your hands on it, and the
+    satnav stuck on the windscreen. What dispatch and the fare say along the
+    bottom."""
+    height, width = len(ch), len(ch[0])
+    f = cab.fare
+    meter = f["meter"] if f is not None and f["state"] == "riding" else 0.0
+    words = ""
+    if f is not None and now - cab.said_at < 5.0:
+        words = cab.said if cab.said.startswith(("*", "\"")) else '"%s"' % cab.said
+    elif now - cab.said_at < 2.5:
+        words = cab.said
+    if now - cab.horn_at < 0.6:
+        words = "HOOOONK"
+    mph = int(round(abs(cab.speed) * MPH))
+    if width < 40 or height < 14:
+        _text(ch, co, 0, 0, (" %d mph  %s" % (mph, cab.directions()))[:width], GOLD)
+        _text(ch, co, height - 1, 0, (" fare $%.2f %s" % (meter, words))[:width],
+              ROU_RED)
+        return
+    for x in range(width):
+        ch[0][x], co[0][x] = "=", BARK
+    dash_h = max(6, min(height // 5, 6 + 4 * (k - 1)))
+    dash = height - dash_h
+    for y in range(1, dash):                       # the pillars
+        w = max(1, int((dash - y) * 0.12) + 1)
+        for x in range(w):
+            ch[y][x], co[y][x] = ("\\" if x == w - 1 else " "), BARK
+            ch[y][width - 1 - x] = "/" if x == w - 1 else " "
+            co[y][width - 1 - x] = BARK
+    mx = width // 2
+    _text(ch, co, 1, mx - 6, "[___________]", CURB)
+    _text(ch, co, 2, mx - 1, "|", CURB)
+    dice = int(math.sin(now * 2.3 + cab.steer * 2.0) * 1.2)
+    _text(ch, co, 3, mx - 1 + dice, "[:]", ROU_RED)
+    if wet > 0.15:                                    # the wipers
+        a = math.sin(now * 3.0) * 1.2
+        for n in range(14):
+            for base in (width // 3, 2 * width // 3):
+                x = int(round(base + math.sin(a) * n * 2.0))
+                y = int(round(dash - 1 - math.cos(a) * n * 0.8))
+                if 1 <= y < dash and 0 <= x < width:
+                    ch[y][x], co[y][x] = "*", CONCRETE
+    if cab.map_on:
+        mw = max(24, min(64, width // 4))
+        mh = max(9, min(30, (height - dash_h) // 2))
+        draw_satnav(ch, co, cab, width - mw - 3, dash - mh - 1, mw, mh, now)
+    for y in range(dash, height):
+        for x in range(width):
+            ch[y][x], co[y][x] = ("_" if y == dash else " "), BARK
+    rx = max(6, width // 11)
+    ry = max(2, min(int(rx * 0.4), dash_h - 3))      # clear of the keys
+    wx = int(width * 0.3)
+    draw_wheel(ch, co, wx, dash + 1, rx, ry, cab.steer * 1.8)
+    hired = f is not None and f["state"] in ("boarding", "riding")
+    light = "[ HIRED ]" if hired else "[ FOR HIRE ]"
+    if k >= 2:
+        sx = sy = k - 1
+        right = _blocks(ch, co, dash + 1, 3, "%d" % mph, GOLD, sx, sy)
+        _text(ch, co, dash + 1 + 5 * sy, 3, "MPH", GOLD_DIM)
+        box = "$%.2f" % meter
+        bw = len(box) * 4 * sx
+        _blocks(ch, co, dash + 1, width - bw - 4, box, ROU_RED, sx, sy)
+        _text(ch, co, dash + 1 + 5 * sy, width - bw - 4, "FARE  " + light,
+              ROU_GREEN if hired else GOLD_DIM)
+        text_x = max(right + 4, wx + rx + 3)
+    else:
+        _text(ch, co, dash + 1, 3, "%3d MPH" % mph, GOLD)
+        box = " FARE $%6.2f " % meter
+        _text(ch, co, dash + 1, width - len(box) - 3, box, ROU_RED)
+        _text(ch, co, dash + 2, width - len(box) - 3, light,
+              ROU_GREEN if hired else GOLD_DIM)
+        text_x = wx + rx + 3
+    room = max(0, width - text_x - 22 * (1 if k == 1 else k) - 2)
+    if cab.radio:
+        _text(ch, co, dash + 1, text_x, cab.radio[:room], GOLD)
+    if words:
+        _text(ch, co, dash + 2, text_x, words[:room], HUD)
+    keys = CAB_KEYS if width >= 118 else CAB_KEYS_SHORT
+    _text(ch, co, height - 1, max(0, (width - len(keys)) // 2), keys[:width],
+          CONCRETE)
 
 
 # --- the metro --------------------------------------------------------------
@@ -25836,6 +26582,7 @@ def main(stdscr):
     oracle = {"said": [], "last_ns": time.perf_counter_ns(), "at": -1e9, "sung": None}
     booth = None                # in the confession booth: {"t0", "text", "said"}
     taxi = None                 # hailed, choosing, or riding: {"phase", ...}
+    cab = None                  # at the wheel of one yourself: a Cab
     metro = None                # on a platform or riding: {"phase", ...}
     flight = None               # at the gate or in the air: {"phase", ...}
     reading = False             # in the library's reading room
@@ -25847,7 +26594,8 @@ def main(stdscr):
         Not the lift, the roof or the confession booth - the booth is in the
         temple, and the temple stays the venue you are in. A function rather
         than a flag, so it is never out of date within a frame."""
-        return (sewer is not None or taxi is not None or metro is not None
+        return (sewer is not None or taxi is not None or cab is not None
+                or metro is not None
                 or flight is not None or reading or poke is not None)
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
@@ -25989,6 +26737,7 @@ def main(stdscr):
                                 sewer = new_sewer(cam_x, cam_z, yaw, now)
                             booth = None
                             taxi = None
+                            cab = None
                             metro = None
                             flight = None
                             if kind == "pilot":
@@ -26138,6 +26887,29 @@ def main(stdscr):
                             metro["waiting"] = True
                         else:
                             note, note_at = "the barrier wants $%d" % METRO_FARE, now
+            elif cab is not None and key not in (ord("q"), CHEAT_KEY):
+                if key in (27, ord("x"), ord("X")):
+                    if abs(cab.speed) < CAB_STOPPED:
+                        # Out at the kerb, and the driver comes back for it.
+                        cam_x, cam_z, yaw = cab.x, cab.z, cab.heading
+                        note, note_at = ("shift over: %d fare%s, $%d" % (
+                            cab.fares, "" if cab.fares == 1 else "s", cab.earned)
+                            if cab.fares else "you hand the keys back"), now
+                        if cab.fare is not None and cab.fare["state"] == "riding":
+                            note += " - your fare gets out and slams the door"
+                        cab = None
+                    else:
+                        note, note_at = "stop first - space brakes", now
+                else:
+                    cab.key({curses.KEY_UP: "faster", ord("w"): "faster",
+                             ord("W"): "faster", curses.KEY_DOWN: "slower",
+                             ord("s"): "slower", ord("S"): "slower",
+                             curses.KEY_LEFT: "left", ord("a"): "left",
+                             ord("A"): "left", curses.KEY_RIGHT: "right",
+                             ord("d"): "right", ord("D"): "right",
+                             ord(" "): "brake", ord("b"): "brake", ord("B"): "brake",
+                             ord("m"): "map", ord("M"): "map", ord("h"): "horn",
+                             ord("H"): "horn"}.get(key, ""), now)
             elif taxi is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (27, ord("x"), ord("X")) and taxi["phase"] != "ride":
                     taxi = None                 # wave it off, or get back out
@@ -26148,6 +26920,17 @@ def main(stdscr):
                         taxi["sel"] = (taxi["sel"] - 1) % n_
                     elif key in (curses.KEY_DOWN, ord("s"), ord("S")):
                         taxi["sel"] = (taxi["sel"] + 1) % n_
+                    elif key in (ord("d"), ord("D")):
+                        # The driver gets out and you get in the front: along
+                        # the street it pulled up in, the way you were facing.
+                        ax_, az_ = taxi["axis"]
+                        if ax_ * math.sin(yaw) + az_ * math.cos(yaw) < 0.0:
+                            ax_, az_ = -ax_, -az_
+                        cab = Cab(cam_x, cam_z, math.atan2(ax_, az_), now,
+                                  int(now * 1000.0))
+                        taxi = None
+                        note, note_at = ("\"All yours. I'll be in the diner.\" "
+                                         "- w to drive"), now
                     elif key in (10, 13, curses.KEY_ENTER, ord("t"), ord("T")):
                         name_, spot_, fare_ = taxi["dests"][taxi["sel"]]
                         if wallet.take(fare_):
@@ -26559,13 +27342,18 @@ def main(stdscr):
                 and now - taxi["t0"] >= TAXI_ARRIVE):
             # It has pulled up, and you are in: where to?
             taxi = {"phase": "menu", "dests": taxi_dests(cam_x, cam_z), "sel": 0,
-                    "t0": now}
+                    "t0": now, "axis": taxi["axis"]}
         if (taxi is not None and taxi["phase"] == "ride"
                 and now - taxi["t0"] >= taxi["dur"]):
             name_, spot_, fare_ = taxi["dest"]
             cam_x, cam_z, yaw = spot_
             taxi = None
             note, note_at = "-> %s, $%d. the cab pulls away" % (name_, fare_), now
+        if cab is not None:
+            cab.step(now - cab.clock, now)
+            if cab.pay:
+                wallet.give(cab.pay)        # the fares pay you, as they get out
+                cab.pay = 0
         sky_x += sky_v * frame_time
         yaw += spin * frame_time
         # Move on each axis in turn, so running into a wall at an angle slides
@@ -26907,6 +27695,12 @@ def main(stdscr):
             else:
                 ch, co = render_ride(width, height, now, metro)
                 hud = METRO_HUD % "on the train"
+        elif street and cab is not None:
+            v = View(cab.x, cab.z, cab.heading, width, height, eye=2.4)
+            ch, co, wet = render_street(v, now)
+            draw_cab_world(ch, co, v, cab, now)
+            draw_driver(ch, co, cab, now, wet, big_scale(width, height))
+            hud = CAB_HUD % cab.status()
         elif street and taxi is not None and taxi["phase"] != "hail":
             if taxi["phase"] == "ride":
                 u_ = min(1.0, (now - taxi["t0"]) / taxi["dur"])
@@ -26923,7 +27717,8 @@ def main(stdscr):
                 ch, co, wet = render_street(v, now)
                 draw_cab(ch, co, now, wet, "where to?", FARE_BASE, "Where to, friend?")
                 draw_taxi_menu(ch, co, taxi["dests"], taxi["sel"], wallet.money)
-                hud = TAXI_HUD % "ws or arrows choose  -  enter goes  -  x gets out"
+                hud = TAXI_HUD % ("ws or arrows choose  -  enter goes  -  d you drive"
+                                  "  -  x gets out")
         elif street:
             v = View(cam_x, cam_z, yaw, width, height)
             ch, co, wet = render_street(v, now)
@@ -26994,7 +27789,8 @@ def main(stdscr):
                              else (cam_x, cam_z, yaw))
             quiet = (venue is not None or lift is not None
                      or (sewer is not None and sewer["lair"])
-                     or flight is not None or metro is not None or taxi is not None)
+                     or flight is not None or metro is not None or taxi is not None
+                     or cab is not None)
             draw_case(ch, co, case, px_, pz_, py_, now, not quiet)
         if cheats:
             draw_cheats(ch, co, note)

@@ -175,6 +175,11 @@ def cases(run, report):
     ok &= report("a taxi: hail, it pulls up, choose, ride, arrive", *run(
         [(b"t", 3.6), (b"\x1bOB", .3), (b"s", .3), (b"w", .3), (b"\r", 15.0),
          (b"w", .5)], cols=100, rows=30))
+    for cab_size in ((100, 30), (300, 90)):
+        ok &= report("drive the cab yourself, %dx%d" % cab_size, *run(
+            [(b"t", 3.6), (b"d", .6), (b"w", .3), (b"w", 1.5), (b"a", .1), (b"a", .1),
+             (b"a", .4), (b"m", .3), (b"m", .3), (b"h", .3), (b"x", .3), (b" ", 2.5),
+             (b"x", 1.0), (b"w", .5)], cols=cab_size[0], rows=cab_size[1]))
     ok &= report("a fog night: to it, walk, a taxi through it", *run(
         [(b"`", .5), (b"#", 1.0), (b"w", 1.0), (b"W", 1.0), (b"t", 3.6), (b"\r", 8.0)],
         cols=100, rows=30))
