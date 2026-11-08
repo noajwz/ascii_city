@@ -6939,22 +6939,66 @@ fq_c.key("map", 1e9)
 check("m has nothing to turn on a wide panel", "both up" in fq_c.said)
 
 
-def wind_arrow(wx_, wz_, heading_):
-    """The radar's arrow for this wind, heading_ up: which glyphs it drew."""
-    g_ = [[" "] * 40 for _ in range(16)]
-    o_ = [[0] * 40 for _ in range(16)]
+def wind_arrow(wx_, wz_, heading_, w_=40, h_=16):
+    """The radar's arrow for this wind, heading_ up: the cells it drew."""
+    g_ = [[" "] * w_ for _ in range(h_)]
+    o_ = [[0] * w_ for _ in range(h_)]
     ac.draw_wind_arrow(g_, o_, wx_, wz_, math.sin(heading_), math.cos(heading_),
-                       (1, 1, 38, 14))
-    return "".join("".join(r_) for r_ in g_)
+                       (1, 1, w_ - 2, h_ - 2))
+    return [(x_, y_) for y_, r_ in enumerate(g_) for x_, c_ in enumerate(r_)
+            if c_ != " "]
+
+
+def arrow_points(cells_):
+    """Which way an arrow points: the end with the barbs on it is the wider."""
+    xs_ = [x_ for x_, _ in cells_]
+    ys_ = [y_ for _, y_ in cells_]
+    span_y, span_x = max(ys_) - min(ys_), (max(xs_) - min(xs_)) / 2.0
+    if span_y >= span_x:
+        top_ = len({x_ for x_, y_ in cells_ if y_ <= min(ys_) + 2})
+        foot_ = len({x_ for x_, y_ in cells_ if y_ >= max(ys_) - 2})
+        return "up" if top_ > foot_ else "down"
+    left_ = len({y_ for x_, y_ in cells_ if x_ <= min(xs_) + 4})
+    right_ = len({y_ for x_, y_ in cells_ if x_ >= max(xs_) - 4})
+    return "right" if right_ > left_ else "left"
 
 
 check("the wind arrow points the way it blows, heading up",
-      "^" in wind_arrow(0.0, 6.0, 0.0) and "v" in wind_arrow(0.0, -6.0, 0.0)
-      and ">" in wind_arrow(6.0, 0.0, 0.0) and "<" in wind_arrow(6.0, 0.0, math.pi)
-      and wind_arrow(0.0, 0.5, 0.0).strip() == "")
+      arrow_points(wind_arrow(0.0, 6.0, 0.0)) == "up"
+      and arrow_points(wind_arrow(0.0, -6.0, 0.0)) == "down"
+      and arrow_points(wind_arrow(6.0, 0.0, 0.0)) == "right"
+      and arrow_points(wind_arrow(6.0, 0.0, math.pi)) == "left"
+      and not wind_arrow(0.0, 0.5, 0.0))
 check("and it is longer the harder it blows",
-      len(wind_arrow(0.0, 9.0, 0.0).replace(" ", ""))
-      > len(wind_arrow(0.0, 3.0, 0.0).replace(" ", "")))
+      len(wind_arrow(0.0, 9.0, 0.0)) > len(wind_arrow(0.0, 3.0, 0.0)))
+wa_big = wind_arrow(0.0, 9.0, 0.0, 58, 30)
+check("and big: on a radar 30 rows deep it is a good third of it, two strokes wide",
+      max(y_ for _, y_ in wa_big) - min(y_ for _, y_ in wa_big) >= 10
+      and len({x_ for x_, y_ in wa_big if y_ == max(y_ for _, y_ in wa_big)}) >= 2)
+
+rn_c = ac.Cockpit(pk_home, 0.0)
+rn_rows = ["".join(r_) for r_ in ac.render_cockpit(300, 90, 1.0, rn_c)[0]]
+rn_nav = "\n".join(r_[300 // 5:2 * 300 // 5] for r_ in rn_rows[90 - 24:])
+check("the runways' numbers are on the navigation screen, each end",
+      all(n_ in rn_nav for n_ in ("18", "36", "09", "27")))
+rn_body = [r_ for r_ in rn_nav.splitlines() if "DIRECTION" not in r_]   # not "180"
+rn_18 = [n_ for n_, r_ in enumerate(rn_body) if "18" in r_]
+rn_36 = [n_ for n_, r_ in enumerate(rn_body) if "36" in r_]
+check("the right way round: facing south down 18, 36 is ahead and 18 behind",
+      rn_c.heading > 3.0 and rn_36 and rn_18 and rn_36[0] < rn_18[0])
+
+rl_c = ac.Cockpit(pk_home, 0.0)
+rl_c.key("radio", 0.0)
+rl_wide = ["".join(r_) for r_ in ac.render_cockpit(300, 90, 5.0, rl_c)[0]]
+rl_said = rl_c.heard(5.0)[-1][2][:20]
+rl_at = [(y_, r_.index(rl_said)) for y_, r_ in enumerate(rl_wide) if rl_said in r_]
+rl_com = [(y_, r_.index("COM  ")) for y_, r_ in enumerate(rl_wide) if "COM  " in r_]
+check("the radio's lines are on the right, under the frequencies",
+      rl_at and rl_com and rl_at[0][0] > rl_com[0][0]
+      and rl_at[0][1] > 4 * 300 // 5 - 2, "%s %s" % (rl_at, rl_com))
+rl_small = ["".join(r_) for r_ in ac.render_cockpit(110, 34, 5.0, rl_c)[0]]
+check("and where there is not the room for them, at the top of the windscreen",
+      any(rl_said in r_ for r_ in rl_small[:6]))
 
 fp_h = ac.zone_home("airport", 100, 100)
 fp_plans = {ac.flight_plan(fp_h, s_) for s_ in range(60)}

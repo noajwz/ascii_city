@@ -1344,6 +1344,15 @@ from each side, in step and mirrored, over and back every `WIPER_PERIOD` (`wiper
 in the last `WIPER_CLEAN`. Dry, they are parked and the frame is what it was; a check says so.
 Under half a millisecond at 300x90.
 
+ **The runways' numbers are on the way's screen** (asked for): each end's name off its
+threshold, out along the approach - 18 at the north end, where you land heading south - in
+green for where you are going, red for a closed runway, gold for the rest. **What the radio
+says is under the frequencies** (`draw_radio_log()`), newest at the foot, wrapped to the room,
+the station gold and you plain, and the wrong-frequency line there too - when there are
+`RADIO_LOG_W` columns and `RADIO_LOG_ROWS` rows for it; `ck.radio_right` tells
+`draw_flight_words()` not to put it at the top left of the windscreen as well, which is where
+it stays on a small window and in the view from outside.
+
  **Two radios, and the tower is not the only one talking** (asked for, 2026-11-08). Every
 call goes through `call()`, and "TWR" there means whichever station has you
 (`ck.station`, `_station_at()`): the tower of the nearest airport down low, and up at the cruise
@@ -1373,7 +1382,9 @@ section, the horizon in the middle, and the weather radar (`"WEATHER"`) in the f
 `draw_wind_arrow()` in its top right corner - the way the wind blows, heading up, longer the
 harder - and the wind in words along its foot. The words about the way that were in the fourth
 section (TO, the distance, LINE and SLOPE, WIND, WX, TFC) are gone there, asked for: the map
-says it - but on the ground the taxi words (`taxi_words()`, TAXI to runway 36, FUELLING)
+says it (the wind arrow was made bigger after: a shaft up to half the radar deep, two strokes
+wide when there is room, and two barbs swept back from the head, its glyphs picked for cells
+twice as tall as wide) - but on the ground the taxi words (`taxi_words()`, TAXI to runway 36, FUELLING)
 are kept, along the foot of the way's screen. `m` has nothing to turn there and says so; `[` `]` zoom both. On a narrow panel it is
 as it was: the horizon in the middle, and `m` puts one page over the words at the right.
 The narrow key hint is `key:word` now (`PILOT_KEYS_SHORT`), held to 110 columns by a check: with
