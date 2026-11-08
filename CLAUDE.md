@@ -1346,9 +1346,9 @@ Under half a millisecond at 300x90.
 
  **Keys moved, and the wings got heavy** (asked for, 2026-11-08): the throttle is `W` and
 `S` - shift and the nose keys - and `+` `-` (with `=` `_`) zoom the map and the radar, in place
-of `[` `]`; at the gate `W` is the push back. a/d roll you in at `PILOT_ROLL_IN` and the wings
-come back level at `PILOT_ROLL_OUT`, about a third and two thirds of what they were, so a
-second of `d` is under half a full bank. That broke `pk_fly()`, the keys-only robot, three
+of `[` `]`; at the gate `W` is the push back. a/d rolled you in at a `PILOT_ROLL_IN` then
+(gone now, see below) and the wings came back level slower, so a second of `d` was under half
+a full bank. That broke `pk_fly()`, the keys-only robot, three
 ways, and each was the robot's, not the plane's: it turned onto its next heading as late as
 before and overshot (it looks ahead by `PK_LEAD`, the time the wings take to come level, now);
 it circled a turn point for ever, the wider turns never coming within 90 of it (`PK_NEAR` is
@@ -1356,6 +1356,23 @@ it circled a turn point for ever, the wider turns never coming within 90 of it (
 height till it is within 60 of the line). 25 airports of 25 landed, NICE or better. **The
 frequency you are on is in block letters** on a big window, the size of the altitude over it,
 with COM and its station over it and STBY at the end of that row, and the radio's lines under.
+
+**Heavier again, and a bank can kill you** (asked for): a/d are a roll *rate* now,
+`PILOT_ROLL_RATE` a second while held, not a bank they ease to - there is no stop at
+`PILOT_MAX_BANK` (which only the autopilot and the director still use), so holding on is how
+you overbank. Let go and the wings come level at `PILOT_ROLL_OUT`, but not past
+`PILOT_BANK_UPSET` (70 degrees): on its side it rolls on over at `PILOT_ROLL_OVER` and the nose
+goes down, and only the other key held gets it back - `PILOT_ROLL_OVER` is under the roll rate
+on purpose; the first try had it faster, and an upset could not be flown out of. A bank costs
+lift: `PILOT_BANK_SINK` times (1/cos - 1) off the climb, and `stall()` goes up by the root of
+the load factor. Over `PILOT_BANK_WARN` (35) the panel shouts BANK ANGLE and the NOSE/BANK row
+goes red. Out of calm air, with the autopilot off, the wind knocks the wings
+(`PILOT_GUST_ROLL`, by the wind's strength over `PILOT_WIND_MOST`, a few sines and a hash), up
+to about 0.16 rad in a strong wind with nobody on the controls. **The rudder is A and D**
+(shift): `ck.rudder` eases to the key and back, and yaws the nose `PILOT_RUDDER` a second in
+the air with the wings level, `PILOT_RUDDER_GROUND` on the wheels - for the last of a crab on
+final, and the taxiways; RUD has a gauge after BANK. The keys-only robot needed nothing new
+for the rate, it was already looking ahead by the time the wings take to come level: 25 of 25.
 
  **The runways' numbers are on the way's screen** (asked for): each end's name off its
 threshold, out along the approach - 18 at the north end, where you land heading south - in
