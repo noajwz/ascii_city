@@ -6697,7 +6697,7 @@ for c_ in pk_all:
 check("the cockpit draws at every size, in every state", True)
 pk_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, pk_all[1])[0])
 check("with what you need on it", "AIRSPEED" in pk_t and "ALTITUDE" in pk_t
-      and ac.airport_name(pk_home)[:12] in pk_t and "x out" in pk_t)
+      and ac.airport_name(pk_home)[:12] in pk_t and "x:out" in pk_t)
 pk_big = "\n".join("".join(r_) for r_ in ac.render_cockpit(300, 90, 2.0, pk_all[1])[0])
 check("big, the figures in block letters", "##" in pk_big and "AIRSPEED" in pk_big)
 pk_w_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, pk_w)[0])
@@ -6749,7 +6749,7 @@ ap_t = 0.0
 while ap_c.state == "air" and ap_t < 400.0:
     ap_c.step(1.0 / 30.0, ap_t)
     ap_t += 1.0 / 30.0
-ap_words = " ".join(t_ for _, _, t_ in ap_c.radio)
+ap_words = " ".join(r_[2] for r_ in ap_c.radio)
 check("in the air it talks you round: vectors, the localiser, cleared to land",
       "heading" in ap_words and "localiser" in ap_words
       and "cleared to land" in ap_words and "Your landing" in ap_words, ap_words[:200])
@@ -6773,10 +6773,12 @@ ap_f.key("flaps", 0.0)
 check("flaps let it fly slower, two notches and back up",
       ap_s0 > ap_s1 > ap_s2 and ap_f.flaps == 0)
 ap_c = pk_at(alt_=135.0, v_=70.0, x_=pk_rx - 3000.0)
+ap_c._handover(0.0)
+ap_c.tuned = ap_c.station[2]            # up at the cruise, on the center's frequency
 ap_c.key("radio", 0.0)
 ap_ck = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 3.0, ap_c)[0])
 check("with the radio on: what was said, the flight director, what is switched on",
-      "TWR" in ap_ck and "(+)" in ap_ck and "[RADIO]" in ap_ck and "VS " in ap_ck)
+      "CTR" in ap_ck and "(+)" in ap_ck and "[RADIO]" in ap_ck and "VS " in ap_ck)
 ap_real = ac.FLASH, ac.ROU_GREEN
 ac.FLASH, ac.ROU_GREEN = 971, 972
 
@@ -6863,6 +6865,72 @@ fp_words = " ".join(c_.said_all)
 check("the tower sends you on your way and hands you over",
       "proceed direct" in fp_words and "contact" in fp_words and "Tower" in fp_words,
       fp_words[:160])
+# --- two radios: the tower low down, the center at the cruise ----------------------
+def fq_fly(flip_):
+    """A whole flight to its plan, logging who has you; with flip_, c pressed
+    as soon as the next frequency is waiting, the way a pilot would."""
+    log_ = []
+    real_ = ac.Cockpit.step
+
+    def step_(self_, dt_, now_):
+        was_ = self_.station
+        real_(self_, dt_, now_)
+        if self_.station != was_:
+            log_.append((self_.station, self_.standby, round(self_.alt)))
+        if flip_ and self_.standby == self_.station[2] != self_.tuned:
+            self_.key("freq", now_)
+    ac.Cockpit.step = step_
+    try:
+        c_, d_ = fp_fly(ac.zone_home("airport", 100, 100), 5, 100.0)
+    finally:
+        ac.Cockpit.step = real_
+    return c_, d_, log_
+
+
+fq_c, fq_d, fq_log = fq_fly(True)
+check("the tower hands you to the center climbing, the center back to the tower",
+      fq_c.state == "landed" and fq_log and fq_log[0][0][0] == "CTR"
+      and fq_log[-1][0] == ("TWR", ac.tower_name(fq_d), ac.tower_freq(fq_d)),
+      " > ".join("%s %d" % (st_[1], a_) for st_, _, a_ in fq_log))
+check("by height: up past the cruise line, down past the tower's",
+      fq_log[0][2] >= ac.PILOT_CENTER and fq_log[-1][2] <= ac.PILOT_TOWER + 1)
+check("each tells you the next frequency, and it is waiting on the other radio",
+      all(stby_ == st_[2] for st_, stby_, _ in fq_log)
+      and sum("contact" in t_ for t_ in fq_c.said_all) >= len(fq_log))
+fq_heard = " ".join(t_ for _, _, t_ in fq_c.heard(1e9))
+check("press c and you are on it: you check in, and you hear them",
+      "with you" in fq_heard and fq_c.tuned == fq_c.station[2])
+fq_n, _, _ = fq_fly(False)
+check("stay on the old frequency and you hear nothing the new station says",
+      fq_n.tuned != fq_n.station[2]
+      and all(w_ == "YOU" or f_ == fq_n.tuned for _, w_, _, f_ in fq_n.radio
+              if (_, w_, _) in [(t_, w2_, x_) for t_, w2_, x_ in fq_n.heard(1e9)])
+      and any(f_ != fq_n.tuned for _, w_, _, f_ in fq_n.radio if w_ != "YOU")
+      and not any(t_ == x_ for _, w_, t_, f_ in fq_n.radio if f_ != fq_n.tuned
+                  for _, _, x_ in fq_n.heard(1e9)))
+fq_txt = "\n".join("".join(r_) for r_ in ac.render_cockpit(160, 48, fq_n.missed_at
+                                                            + 1.0, fq_n)[0])
+check("and the panel says so: nothing on yours, and where they are",
+      "nothing on " + fq_n.tuned in fq_txt)
+check("the towers are on tower frequencies, the centers on center ones",
+      all(118.0 <= float(ac.tower_freq((a_, b_))) <= 121.95
+          and 124.0 <= float(ac.center_of(a_ * 999.0, b_ * 777.0)[1]) <= 135.95
+          for a_ in range(-5, 5) for b_ in range(-5, 5)))
+fq_rows = ac.render_cockpit(160, 48, 1e9, fq_c)[0]
+fq_com = [(y_, r_.index("COM  ")) for y_, r_ in enumerate(map("".join, fq_rows))
+          if "COM  " in r_]
+fq_alt = [(y_, r_.index("ALTITUDE")) for y_, r_ in enumerate(map("".join, fq_rows))
+          if "ALTITUDE" in r_]
+check("the radios are on the right, under the altitude",
+      fq_com and fq_alt and fq_com[0][0] > fq_alt[0][0]
+      and abs(fq_com[0][1] - fq_alt[0][1]) < 3
+      and "STBY " in "".join(fq_rows[fq_com[0][0] + 1]))
+fq_map = [r_.index("DIRECTION") for r_ in map("".join, fq_rows) if "DIRECTION" in r_]
+fq_wing = [r_.index("v") for r_ in map("".join, fq_rows) if "\\-v-/" in r_]
+check("on a wide panel the map is in the middle and the horizon left of it",
+      fq_map and fq_wing and 160 // 5 < fq_wing[0] < 2 * 160 // 5
+      < fq_map[0] < 3 * 160 // 5, "%s %s" % (fq_map, fq_wing))
+
 fp_h = ac.zone_home("airport", 100, 100)
 fp_plans = {ac.flight_plan(fp_h, s_) for s_ in range(60)}
 check("flight plans go to other airports, a tile to three off, and not always the same",
@@ -7066,7 +7134,7 @@ for c_ in ov_s:
         ac.render_cockpit(w_, h_, 2.3, c_)
 ov_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, ov_s[1])[0])
 check("it draws at every size, crashed or not, with what you need along the foot",
-      " kt" in ov_t and " ft" in ov_t and "v cockpit" in ov_t
+      " kt" in ov_t and " ft" in ov_t and "v:cockpit" in ov_t
       and ov_x.said[:20] in "\n".join("".join(r_) for r_ in ac.render_cockpit(
           110, 34, 2.0, ov_x)[0]))
 # The storms.
@@ -7124,7 +7192,7 @@ st_c = st_at(pk_rx - 6000.0, pk_zn - 300.0)
 st_c.key("radio", 0.0)
 st_c.step(1.0 / 30.0, 1.0)
 check("the tower tells you what you have flown into",
-      any("thunderstorm" in t_ for _, _, t_ in st_c.radio))
+      any("thunderstorm" in r_[2] for r_ in st_c.radio))
 st_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, st_c)[0])
 check("and so does the panel", "WX in the storm" in st_t)
 st_p = st_at(pk_rx - 6000.0, pk_zn - 4000.0)
@@ -7149,8 +7217,8 @@ for n_, (sx_, sz_) in enumerate(((-3000.0, -2200.0), (-2600.0, -2400.0),
     ac.air_cells = lambda x_, z_, now_, reach_=0.0, cell_=st_cell: [cell_]
     said_ = []
     call_ = c_.call
-    c_.call = lambda now_, who_, text_, delay_=0.0, c2_=call_, s_=said_: (
-        s_.append(text_), c2_(now_, who_, text_, delay_))
+    c_.call = lambda now_, who_, text_, delay_=0.0, c2_=call_, s_=said_, **kw_: (
+        s_.append(text_), c2_(now_, who_, text_, delay_, **kw_))
     c_.key("radio", 0.0)
     c_.key("autopilot", 0.0)
     t_, worst_ = 0.0, 0.0
@@ -7257,8 +7325,8 @@ tf_c.step(1.0 / 30.0, tf_T)
 tf_far = ac.render_cockpit(190, 50, tf_T, tf_meet(0.0, 6000.0))[1]
 ac.ROU_RED, ac.ROU_GREEN = tf_real
 check("head on at your height: TRAFFIC on the panel, and the tower calls it",
-      "TRAFFIC" in tf_c.warnings() and any("traffic, 12 o'clock" in t_
-                                           for _, _, t_ in tf_c.radio),
+      "TRAFFIC" in tf_c.warnings() and any("traffic, 12 o'clock" in r_[2]
+                                           for r_ in tf_c.radio),
       str((tf_c.warnings(), tf_c.radio[-1:])))
 check("a long way off, all you see of them is their lights",
       sum(1 for r_ in tf_far for a_ in r_ if a_ in (991, 992)) >= 3)
@@ -7282,8 +7350,8 @@ def tf_final(at_):
     c_.target, c_.end, c_.leg = pk_home, pk_zn, "final"
     said_ = []
     call_ = c_.call
-    c_.call = lambda now_, who_, text_, delay_=0.0: (said_.append(text_),
-                                                     call_(now_, who_, text_, delay_))
+    c_.call = lambda now_, who_, text_, delay_=0.0, **kw_: (
+        said_.append(text_), call_(now_, who_, text_, delay_, **kw_))
     c_.key("radio", at_)
     c_.key("autopilot", at_)
     t_ = at_
@@ -7387,7 +7455,8 @@ mp_got = []
 for page_ in range(2):
     mp_d.map_page = page_
     mp_co = ac.render_cockpit(190, 50, 2.0, mp_d)[1]
-    mp_box = [r_[39:75] for r_ in mp_co[mp_top + 1:49]]
+    mp_x0 = 190 // 2 - (190 // 5) // 2 + 1        # the map is in the middle now
+    mp_box = [r_[mp_x0:mp_x0 + 36] for r_ in mp_co[mp_top + 1:49]]
     mp_got.append((sum(1 for r_ in mp_box for a_ in r_ if a_ == 995),
                    sum(1 for r_ in mp_box for a_ in r_ if a_ == 996)))
 ac.ROU_GREEN, ac.ROU_RED, ac.air_cells = mp_real
@@ -7561,8 +7630,8 @@ def ht_taxi(gate_, wind_):
     c_ = ac.Cockpit(pk_home, 0.0, None, gate=gate_)
     said_ = []
     call_ = c_.call
-    c_.call = lambda now_, who_, text_, delay_=0.0: (said_.append(text_),
-                                                     call_(now_, who_, text_, delay_))
+    c_.call = lambda now_, who_, text_, delay_=0.0, **kw_: (
+        said_.append(text_), call_(now_, who_, text_, delay_, **kw_))
     t_ = 0.0
     c_.key("radio", t_)
     while t_ < 400.0 and not c_.lined and c_.state != "crashed":
@@ -7873,7 +7942,7 @@ fu_st = "\n".join("".join(r_) for r_ in ac.render_street(fu_v, 2.0)[0])
 check("the panel has the gauge and the filling, the station shows from the apron",
       "FUEL" in fu_txt and "40%" in fu_txt and "FUELLING" in fu_txt and "FUEL" in fu_st
       and fu_out is not None)
-check("and k is on the keys", "k fuel" in ac.PILOT_KEYS and "k fuel" in
+check("and k is on the keys", "k fuel" in ac.PILOT_KEYS and "k:fuel" in
       ac.PILOT_KEYS_SHORT)
 
 
@@ -7936,29 +8005,35 @@ for w_, h_ in ((50, 12), (80, 24), (160, 48), (299, 87), (301, 91), (451, 133)):
 check("and every size of window draws them", True)
 
 # --- the wipers ------------------------------------------------------------------
-wp_c = ac.Cockpit(pk_home, 0.0, fuel=1.0)
-wp_c.state, wp_c.alt, wp_c.v = "air", 60.0, 40.0
 wp_keep = ac.weather_name()
 while ac.weather_name() != "rain":
     ac.cycle_weather()
+wp_c = ac.Cockpit(pk_home, 0.0, fuel=1.0)
+wp_c.state, wp_c.alt, wp_c.v = "air", 60.0, 40.0
+wp_start = wp_c.wipers
 wp_on = ac.render_cockpit(160, 48, 5.0, wp_c)[0]
+wp_c.key("wipers", 5.0)
+wp_off = ac.render_cockpit(160, 48, 5.0, wp_c)[0]
 wp_arms_ = ac.wiper_arms
 ac.wiper_arms = lambda *a_: None
-wp_off = ac.render_cockpit(160, 48, 5.0, wp_c)[0]
+wp_c.wipers = True
+wp_none = ac.render_cockpit(160, 48, 5.0, wp_c)[0]
 ac.wiper_arms = wp_arms_
 while ac.weather_name() != "dry":
     ac.cycle_weather()
-wp_dry = ac.render_cockpit(160, 48, 5.0, wp_c)[0]
-ac.wiper_arms = lambda *a_: None
-wp_dry2 = ac.render_cockpit(160, 48, 5.0, wp_c)[0]
-ac.wiper_arms = wp_arms_
+wp_dry = ac.Cockpit(pk_home, 0.0, fuel=1.0).wipers
 while ac.weather_name() != wp_keep:
     ac.cycle_weather()
 check("in the rain the wipers go, and the glass behind them is clear",
       wp_on != wp_off and sum(a_ != b_ for ra_, rb_ in zip(wp_on, wp_off)
                               for a_, b_ in zip(ra_, rb_)) > 20)
-check("and dry, there are none: the windscreen is as it was",
-      wp_dry == wp_dry2)
+check("i switches them off: parked, the windscreen is as it is with none",
+      wp_off == wp_none and wp_c.said == "wipers off")
+check("they start on in the rain and off in the dry",
+      wp_start is True and wp_dry is False)
+check("and i is on the keys", "i wipers" in ac.PILOT_KEYS
+      and "i:wipe" in ac.PILOT_KEYS_SHORT and "c freq" in ac.PILOT_KEYS
+      and "c:freq" in ac.PILOT_KEYS_SHORT and len(ac.PILOT_KEYS_SHORT) <= 110)
 wp_a = ac.wiper_arms(160, 36, 0.0)
 wp_b = ac.wiper_arms(160, 36, ac.WIPER_PERIOD / 4.0)
 check("two of them, sweeping in step, mirrored, each over its own half",

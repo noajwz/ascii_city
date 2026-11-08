@@ -71,6 +71,7 @@ In the cockpit:
   s w        nose up, down   a d     bank        + -   throttle
   g          gear            f       flaps       b     brakes
   r          radio           p       autopilot   l     landing light
+  c          swap frequency  i       wipers      k     fuel pad
   m          map page        [ ]     map range   v     view from outside
   enter      a tug in, after landing             x     hand it back
              (at the gate, + pushes back; p taxis for you)
