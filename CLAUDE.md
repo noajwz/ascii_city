@@ -1219,11 +1219,12 @@ worst (`TIPS`) - pick the worst by the severity, not the colour: in the checks e
 same number. Stopped, it waits `PILOT_READ` or for Enter (and `x` now pays you too - it used to
 hand the plane back unpaid). `draw_nav_map()` is heading-up, you at 78% down, and shows **one page
 of `MAP_PAGES` at a time** - asked for, to make flying harder than one map with everything on
-it: ROUTE (the river and the woods, every runway - yours green, its line in - the guide's way,
-`guide()`'s `"to"`, and an arrow at the edge to your destination), WX (storms as radar, the wind
-along the foot) and TFC (traffic as arrows with their height in hundreds of feet, inside a ring
-at `TRAFFIC_CALL`). From `MAP_WIDE` columns it has the panel's second section (the panel sets
-`ck.map_wide`) and `m` goes round the pages; narrower, `m` goes words, ROUTE, WX, TFC, words. The
+it. There were three (route, weather, traffic); the route and the traffic were then asked to be
+one, so there are two: DIRECTION (the river and the woods, every runway - yours green, its line
+in - the guide's way, `guide()`'s `"to"`, an arrow at the edge to your destination, and traffic as
+arrows with their height in hundreds of feet) and WEATHER (storms as radar, the wind along the
+foot). From `MAP_WIDE` columns it has the panel's second section (the panel sets `ck.map_wide`)
+and `m` goes between the pages; narrower, `m` goes words, DIRECTION, WEATHER, words. The
 title is the page and the range, the heading only where there is room for it (on a 21-column map
 it covered the page's name). `[` `]` step
 `MAP_RANGES`.

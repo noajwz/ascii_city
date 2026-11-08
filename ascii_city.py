@@ -8196,7 +8196,7 @@ def storm_profile(u, lean, seed):
 
 MAP_RANGES = (600.0, 1200.0, 2400.0, 4800.0, 9600.0)   # units ahead of you, 3 to 48 km
 MAP_WIDE = 140             # from this many columns the map has a place of its own
-MAP_PAGES = ("ROUTE", "WX", "TFC")   # one thing at a time: m goes round them
+MAP_PAGES = ("DIRECTION", "WEATHER")   # one at a time: m goes between them
 
 
 def _label(ch, co, y, x, text, attr):
@@ -8355,13 +8355,13 @@ def draw_taxi_greens(ch, co, v, walls, ck):
 
 def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
     """The moving map: top down, your way up, you near the foot of it, and one
-    thing at a time on it - the pages, asked for to make flying a little harder
-    than one map with everything. ROUTE: the river and the woods to know the
-    place by, the runways about (where you are going in green, with the line
-    in to it), the guide's way and an arrow to where you are going. WX: the
-    storms as the weather radar sees them, and the wind. TFC: the other
-    flights, with how far above or below, and a ring where the tower starts
-    calling them. All of it from the world, worked out a cell at a time."""
+    of two pages on it - one thing at a time makes flying a little harder than
+    a map with everything. DIRECTION: the river and the woods to know the place
+    by, the runways about (where you are going in green, with the line in to
+    it), the guide's way and an arrow to where you are going, and the other
+    flights with how far above or below. WEATHER: the storms as the weather
+    radar sees them, and the wind. All of it from the world, worked out a cell
+    at a time."""
     if mw < 14 or mh < 5:
         return
     reach = MAP_RANGES[ck.map_range]
@@ -8396,10 +8396,8 @@ def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
             ch[my][mx], co[my][mx] = g, attr
 
     # The ground, a cell at a time: the storms, or the water and the woods.
-    cells = [c_ for c_ in ck.cells(now) if c_[3] > 0.2] if page == "WX" else []
+    cells = [c_ for c_ in ck.cells(now) if c_[3] > 0.2] if page == "WEATHER" else []
     for my in range(iy0, iy1 + 1):
-        if page == "TFC":
-            break
         fwd = (py - my) * per_row
         for mx in range(ix0, ix1 + 1):
             right = (mx - cxm) * per_col
@@ -8414,19 +8412,20 @@ def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
             if storm is not None:
                 ch[my][mx], co[my][mx] = ("#", ROU_RED) if storm < 0.55 else (":", GOLD)
                 continue
-            if page != "ROUTE":
+            if page != "DIRECTION":
                 continue
             i, j = int(wx // CELL), int(wz // CELL)
             if water_at(i, j):
                 ch[my][mx], co[my][mx] = "~", CROWN_BLUE
             elif woods_at(i, j):
                 ch[my][mx], co[my][mx] = ".", GRASS
-    if page == "WX":
+    if page == "WEATHER":
         wind = wind_words(*ck.wind(now))
         _label(ch, co, iy1, ix0 + 1, wind[:ix1 - ix0 - 1], GOLD_DIM)
     # The runways, and the way in to the one you are going to.
     goal = ck.goal()
-    for home in (airports_about(ck.x, ck.z, reach * 1.6) if page == "ROUTE" else ()):
+    for home in (airports_about(ck.x, ck.z, reach * 1.6) if page == "DIRECTION"
+                 else ()):
         mine = home == goal
         for (mx, mz, ax, az, half) in runways(*home):
             a = spot(mx - ax * half, mz - az * half)
@@ -8451,7 +8450,7 @@ def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
             if (ix0 <= mid[0] + 2 and mid[0] + 2 + len(name) <= ix1
                     and iy0 <= mid[1] <= iy1):
                 _text(ch, co, mid[1], mid[0] + 2, name, ROU_GREEN)
-    if ck.taxi and page == "ROUTE":
+    if ck.taxi and page == "DIRECTION":
         pts = [(ck.x, ck.z)] + list(ck.taxi)
         for (ax_, az_), (bx_, bz_) in zip(pts, pts[1:]):
             a_, b_ = spot(ax_, az_), spot(bx_, bz_)
@@ -8462,7 +8461,7 @@ def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
         end_ = spot(*ck.taxi[-1])
         put(end_[0], end_[1], "+", GOLD)
     # The way the guide would have you go, and where it is taking you.
-    if ck.state == "air" and page == "ROUTE":
+    if ck.state == "air" and page == "DIRECTION":
         tx, tz = ck.guide()["to"]
         t = spot(tx, tz)
         steps = max(abs(t[0] - int(cxm)), abs(t[1] - int(py)), 1)
@@ -8472,7 +8471,7 @@ def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
         put(t[0], t[1], "+", GOLD)
     # Where you are going, if it is off the map: an arrow at the edge.
     gpos = spot(*runways(*goal)[0][:2])
-    if page == "ROUTE" and not (ix0 <= gpos[0] <= ix1 and iy0 <= gpos[1] <= iy1):
+    if page == "DIRECTION" and not (ix0 <= gpos[0] <= ix1 and iy0 <= gpos[1] <= iy1):
         dx, dy = gpos[0] - cxm, gpos[1] - py
         room_x = (ix1 - cxm) / abs(dx) if dx else 9e9
         room_y = ((py - iy0) if dy < 0 else (iy1 - py)) / abs(dy) if dy else 9e9
@@ -8481,15 +8480,10 @@ def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
         steep = abs(dy) * 2 > abs(dx)
         arrow = ("^" if dy < 0 else "v") if steep else (">" if dx > 0 else "<")
         put(ex, ey, arrow, ROU_GREEN)
-    # The other flights: which way they are going, and how far above or below,
-    # inside a ring where the tower starts telling you about them.
-    if page == "TFC":
-        for n in range(48):
-            a = n * math.tau / 48.0
-            p = spot(ck.x + math.sin(a) * TRAFFIC_CALL,
-                     ck.z + math.cos(a) * TRAFFIC_CALL)
-            put(p[0], p[1], ".", CONCRETE)
-    for x, y, z, hx, hz, lights, tid in (ck.traffic(now) if page == "TFC" else ()):
+    # The other flights, over the way: which way they are going, and how far
+    # above or below.
+    for x, y, z, hx, hz, lights, tid in (ck.traffic(now) if page == "DIRECTION"
+                                          else ()):
         if y < 3.0 and ck.alt > 30.0:
             continue
         p = spot(x, z)
