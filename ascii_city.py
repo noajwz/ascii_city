@@ -5953,8 +5953,11 @@ PILOT_MAX_PITCH = 0.31
 PILOT_PITCH_STEP = 0.035  # a press of w or s
 PILOT_GRACE = 0.3      # seconds a key keeps a wing down: curses sees no key go up
 PILOT_GLIDE = 0.08     # the slope to come down, under 5 degrees: not the passenger's 8
-PILOT_KEYS = ("s nose up  w down  a d wings  + - power  g gear  f flaps  l light  "
-              "p auto  r radio  v outside  b brakes  x out")
+PILOT_READ = 20.0          # stopped: how long the report waits for you to read it
+PILOT_KEYS = ("s w nose  a d wings  + - power  g gear  f flaps  l light  p auto  "
+              "r radio  m map  [ ] zoom  v outside  b brakes  x out")
+PILOT_KEYS_SHORT = ("s w nose  a d bank  +- power  g gear  f flaps  l light  p auto  "
+                    "r radio  m map  v view  b brakes  x out")
 PILOT_SHEAR = 0.32     # how far the picture tilts, rows a column, at a bank of 1
 PILOT_LOOK = 3.0       # seconds ahead the terrain warning looks
 PILOT_LIGHTS = 9000.0  # how far off an airport's lights and its beacon are seen
@@ -6253,6 +6256,9 @@ class Cockpit:
         self._wx_at = self._cells_at = None
         self.climb_out = None           # the runway's way, until high enough to turn
         self.late = False               # told to expect a late landing clearance
+        self.report = None              # how the wheels met the runway
+        self.map_on = False             # m: the map in place of the words, when narrow
+        self.map_range = 1              # [ ]: how far ahead it shows
         self.tfc_told = set()           # the flights the tower has told you about
         self._tfc_at = None
         self.enroute = False
@@ -6265,7 +6271,14 @@ class Cockpit:
         if what in ("up", "down", "left", "right") and self.ap:
             self.ap = False             # any hand on the controls takes it back
             self.said = "autopilot off"
-        if what == "light":
+        if what == "map":
+            self.map_on = not self.map_on
+            self.said = "the map" if self.map_on else "the map off"
+        elif what in ("zoom in", "zoom out"):
+            self.map_range = max(0, min(len(MAP_RANGES) - 1, self.map_range + (
+                -1 if what == "zoom in" else 1)))
+            self.said = "map %d km" % int(MAP_RANGES[self.map_range] / 200.0)
+        elif what == "light":
             self.light = not self.light
             self.said = "landing light on" if self.light else "landing light off"
         elif what == "view":
@@ -6510,7 +6523,7 @@ class Cockpit:
         if mode == "final":
             high = min(PILOT_CRUISE, (along + 30.0) * PILOT_GLIDE + 2.0)
             fast = PILOT_APPROACH
-        return {"mode": mode, "heading": heading, "wx": wx,
+        return {"mode": mode, "heading": heading, "wx": wx, "to": (tx, tz),
                 "alt": high, "speed": fast, "runway": rwy, "along": along,
                 "lat": lat, "course": course, "home": self.target,
                 "dist": math.hypot(rx - self.x, (zn + zs) * 0.5 - self.z)}
@@ -6828,6 +6841,10 @@ class Cockpit:
         self._radio_tick(now)
         if self.state == "landed" and self.v < 1.5 and self.ended is None:
             self.ended = now
+            if self.report is not None:
+                ax, az = self.report["at"]
+                self.report["roll"] = math.hypot(self.x - ax, self.z - az)
+                self.report["left"] = abs(self.z - self.report["end"])
             self.said = "Stopped. The passengers want a word."
             if self.pay:
                 self.said = "%s. Stopped. $%d from the passengers." % (
@@ -6837,6 +6854,18 @@ class Cockpit:
         """The ground, and how you met it."""
         here, home = self.on_runway()
         sink = -self.vy
+        if here:
+            rx, zn, zs = runway(*home)
+            south = math.cos(self.heading) < 0.0
+            course = math.pi if south else 0.0
+            self.report = {
+                "sink": sink, "speed": self.v, "stall": self.stall(),
+                "bank": self.bank, "pitch": self.pitch,
+                "crab": (self.heading - course + math.pi) % math.tau - math.pi,
+                # Right of the line, the way you are going.
+                "off": (rx - self.x) if south else (self.x - rx),
+                "past": (zn - self.z) if south else (self.z - zs),
+                "at": (self.x, self.z), "end": zs if south else zn, "roll": None}
         if not here:
             self._wreck(now, PILOT_LOW_WRECK, place_below(self.x, self.z))
             return
@@ -7057,6 +7086,8 @@ def draw_cockpit(ch, co, ck, now):
     if y_ + 1 < h - 1:
         _text(ch, co, y_ + 1, 2, "NOSE %+3d  BANK %+3d" % (
             math.degrees(ck.pitch), math.degrees(ck.bank)), HUD)
+    wide_map = w >= MAP_WIDE
+    edge_ = sec - 1 if wide_map else cx - sec // 2
     if y_ + 2 < h - 1:
         # What is switched on, lit when it is, on as many rows as it takes.
         x_, row_ = 2, y_ + 2
@@ -7064,7 +7095,7 @@ def draw_cockpit(ch, co, ck, now):
                  else "GEAR ..")
         for word, on in ((gear_, ck.gear > 0.99), ("FLAPS %d" % ck.flaps, ck.flaps > 0),
                          ("AP", ck.ap), ("LIGHT", ck.light), ("RADIO", ck.radio_on)):
-            if x_ + len(word) + 2 > cx - sec // 2:
+            if x_ + len(word) + 2 > edge_:
                 x_, row_ = 2, row_ + 1
             if row_ >= h - 1:
                 break
@@ -7133,6 +7164,17 @@ def draw_cockpit(ch, co, ck, now):
             g = "|" if mark % 30 == 0 else "."
         ch[y0][bx0 + n], co[y0][bx0 + n] = g, GOLD if g.isalpha() else HUD
     ch[y0][midx], co[y0][midx] = "V", ROU_RED
+    # The moving map: a place of its own on a wide panel; on a narrow one, in
+    # place of the words about the way there when you ask for it (m).
+    if wide_map:
+        draw_nav_map(ch, co, ck, now, sec + 1, y0, sec - 2, h - 1 - y0)
+    elif ck.map_on:
+        draw_nav_map(ch, co, ck, now, w - 2 * sec + 1, y0, sec - 1, h - 1 - y0)
+        keys = PILOT_KEYS if len(PILOT_KEYS) <= w else PILOT_KEYS_SHORT
+        _text(ch, co, h - 1, max(0, cx - len(keys) // 2), keys[:w], CONCRETE)
+        draw_flight_words(ch, co, ck, now, top, k)
+        draw_landing_report(ch, co, ck, now, top, k)
+        return
     # The way there, and how you are doing on the slope.
     nx = w - 2 * sec + 2
     turn, dist, off, over = ck.nav()
@@ -7169,9 +7211,10 @@ def draw_cockpit(ch, co, ck, now):
             _text(ch, co, y_gauge, nx, label + " " + "".join(bar),
                   ROU_GREEN if at == mid_ else GOLD_DIM)
     # The keys, along the foot, in plain letters.
-    keys = PILOT_KEYS
+    keys = PILOT_KEYS if len(PILOT_KEYS) <= w else PILOT_KEYS_SHORT
     _text(ch, co, h - 1, max(0, cx - len(keys) // 2), keys[:w], CONCRETE)
     draw_flight_words(ch, co, ck, now, top, k)
+    draw_landing_report(ch, co, ck, now, top, k)
 
 
 def draw_wreck(ch, co, ck, now):
@@ -7490,6 +7533,246 @@ def storm_profile(u, lean, seed):
     if hi is None:
         return None
     return lo, hi
+
+
+MAP_RANGES = (600.0, 1200.0, 2400.0, 4800.0, 9600.0)   # units ahead of you, 3 to 48 km
+MAP_WIDE = 140             # from this many columns the map has a place of its own
+
+
+def _label(ch, co, y, x, text, attr):
+    """Text over a frame, spaces and all: _text leaves a space see-through."""
+    if not 0 <= y < len(ch):
+        return
+    for n, c in enumerate(text):
+        if 0 <= x + n < len(ch[0]):
+            ch[y][x + n], co[y][x + n] = c, attr if c != " " else 0
+
+
+def _verdict(text, how):
+    """A verdict, its colour and how bad: 0 good, 1 so-so, 2 bad."""
+    return text, (ROU_GREEN, GOLD, ROU_RED)[how], how
+
+
+def landing_lines(ck):
+    """The landing report, as (label, value, verdict, colour, how bad): what the wheels
+    met the runway at, and where, and how - read off the moment they did."""
+    r = ck.report
+    if r is None:
+        return []
+    out = []
+    fpm = int(round(r["sink"] * 25.0 * 60.0 / 10.0)) * 10
+    out.append(("Coming down", "%s ft/min" % format(fpm, ",")) + _verdict(
+        *(("a kiss", 0) if r["sink"] <= PILOT_GRADES[0][0] else
+          ("firm", 0) if r["sink"] <= PILOT_GRADES[1][0] else
+          ("hard", 1) if r["sink"] <= PILOT_GRADES[2][0] else ("far too hard", 2))))
+    side = abs(r["off"])
+    way = "right" if r["off"] > 0.0 else "left"
+    out.append(("Centre line", "%d m %s" % (int(round(side * 5.0)), way)
+                if side >= 0.5 else "on it") + _verdict(
+        *(("on it", 0) if side < 2.0 else ("a little %s" % way, 1) if side < 6.0
+          else ("well %s" % way, 2))))
+    past = r["past"]
+    out.append(("Touched down", "%d m in" % int(round(past * 5.0))) + _verdict(
+        *(("early", 1) if past < 30.0 else ("in the zone", 0) if past < 180.0
+          else ("long", 1) if past < 300.0 else ("very long", 2))))
+    crab = abs(math.degrees(r["crab"]))
+    out.append(("Crab", "%d deg" % int(round(crab))) + _verdict(
+        *(("straight", 0) if crab < 5.0 else ("a little sideways", 1) if crab < 10.0
+          else ("sideways", 2))))
+    kt = int(r["speed"] * 2.5)
+    out.append(("Speed", "%d kt" % kt) + _verdict(
+        *(("slow, near the stall", 2) if r["speed"] < r["stall"] + 3.0 else
+          ("on speed", 0) if r["speed"] < PILOT_APPROACH + 7.0 else
+          ("fast", 1) if r["speed"] < PILOT_APPROACH + 14.0 else ("much too fast", 2))))
+    bank = abs(math.degrees(r["bank"]))
+    out.append(("Wings", "%d deg" % int(round(bank))) + _verdict(
+        *(("level", 0) if bank < 4.0 else ("a wing down", 1) if bank < 12.0
+          else ("a wing low", 2))))
+    nose = math.degrees(r["pitch"])
+    out.append(("Nose", "%+d deg" % int(round(nose))) + _verdict(
+        *(("up, flared", 0) if nose > 0.5 else ("level", 1) if nose > -1.5
+          else ("nose first", 2))))
+    if r.get("roll") is not None:
+        out.append(("Stopped in", "%d m" % int(round(r["roll"] * 5.0)),
+                    "%d m of runway left" % int(round(r["left"] * 5.0)),
+                    ROU_GREEN, 0))
+    return out
+
+
+TIPS = {"Coming down": "Ease the throttle back late and tap s just before the wheels.",
+        "Centre line": "Follow the (+) on final; it lays off the wind for you.",
+        "Touched down": "Aim for the blocks a little way down the runway, not the end.",
+        "Crab": "Wings level and the nose straight down the runway at the last moment.",
+        "Speed": "Flaps 2 and a little throttle: about 120 kt on final.",
+        "Wings": "Let the wings come level before the wheels touch.",
+        "Nose": "Raise the nose a touch (s) in the last few feet: a flare."}
+
+
+def draw_landing_report(ch, co, ck, now, top, k):
+    """The report card, up in the windscreen from the moment the wheels touch:
+    each thing that matters with a verdict, and one tip for the worst of it."""
+    lines = landing_lines(ck)
+    if not lines:
+        return
+    h, w = len(ch), len(ch[0])
+    wide = min(56, w - 4)
+    if wide < 30:
+        return
+    worst = max(lines, key=lambda l_: l_[4])
+    tip = TIPS.get(worst[0]) if worst[4] else "Well flown."
+    tip_lines = bar_lines(tip or "", wide - 4)
+    tall = len(lines) + 4 + len(tip_lines)
+    x0 = max(1, min(w - wide - 2, w // 2 - wide // 2 + (w // 6 if w >= 120 else 0)))
+    y0 = 2 if k == 1 else 5 + 5 * 2 + 2
+    if y0 + tall >= top:
+        y0 = max(1, top - tall - 1)
+    for y in range(y0, min(h, y0 + tall)):
+        for x in range(x0, min(w, x0 + wide)):
+            ch[y][x], co[y][x] = " ", 0
+        if y in (y0, y0 + tall - 1):
+            for x in range(x0, min(w, x0 + wide)):
+                ch[y][x], co[y][x] = "-", CONCRETE
+        else:
+            ch[y][x0], co[y][x0] = "|", CONCRETE
+            if x0 + wide - 1 < w:
+                ch[y][x0 + wide - 1], co[y][x0 + wide - 1] = "|", CONCRETE
+    grade = ck.grade or ("WRECK" if ck.state == "crashed" else "")
+    _label(ch, co, y0, x0 + 2, " LANDING REPORT - %s " % grade, GOLD)
+    for n, (label, value, verdict, attr, how) in enumerate(lines):
+        y = y0 + 1 + n
+        _text(ch, co, y, x0 + 2, label, HUD)
+        _text(ch, co, y, x0 + 16, value[:16], FLASH)
+        _text(ch, co, y, x0 + 32, verdict[:wide - 34], attr)
+    for n, line in enumerate(tip_lines):
+        _text(ch, co, y0 + len(lines) + 2 + n, x0 + 2, line, GOLD_DIM)
+    if ck.ended is not None and ck.state == "landed":
+        _label(ch, co, y0 + tall - 1, x0 + wide - 25, " enter: to the terminal ", HUD)
+
+
+def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
+    """The moving map: top down, your way up, you near the foot of it. The
+    runways about (where you are going in green, with the line in to it), the
+    guide's way, the other flights with how far above or below, the storms as
+    the weather radar sees them, and the river and the woods to know the place
+    by. All of it from the world, worked out a cell at a time."""
+    if mw < 14 or mh < 5:
+        return
+    reach = MAP_RANGES[ck.map_range]
+    for x in range(x0, x0 + mw):
+        ch[y0][x], co[y0][x] = "-", CONCRETE
+    for y in range(y0 + 1, y0 + mh):
+        for x in range(x0, x0 + mw):
+            ch[y][x], co[y][x] = " ", 0
+        ch[y][x0], co[y][x0] = "|", CONCRETE
+        ch[y][x0 + mw - 1], co[y][x0 + mw - 1] = "|", CONCRETE
+    _label(ch, co, y0, x0 + 1, " MAP %d km " % int(reach / 200.0), HUD)
+    hdg = " %03d " % (int(round(math.degrees(ck.heading))) % 360)
+    _label(ch, co, y0, x0 + mw - len(hdg) - 1, hdg, GOLD)
+    ix0, ix1, iy0, iy1 = x0 + 1, x0 + mw - 2, y0 + 1, y0 + mh - 1
+    cxm = (ix0 + ix1) * 0.5
+    py = iy0 + (iy1 - iy0) * 0.78
+    per_row = reach / max(1.0, py - iy0)
+    per_col = per_row * 0.5               # cells are twice as tall as wide
+    sh, chh = math.sin(ck.heading), math.cos(ck.heading)
+
+    def spot(wx, wz):
+        rx, rz = wx - ck.x, wz - ck.z
+        return (int(round(cxm + (rx * chh - rz * sh) / per_col)),
+                int(round(py - (rx * sh + rz * chh) / per_row)))
+
+    def put(mx, my, g, attr):
+        if ix0 <= mx <= ix1 and iy0 <= my <= iy1:
+            ch[my][mx], co[my][mx] = g, attr
+
+    # The ground, a cell at a time: storms over everything, then water, woods.
+    cells = [c_ for c_ in ck.cells(now) if c_[3] > 0.2]
+    for my in range(iy0, iy1 + 1):
+        fwd = (py - my) * per_row
+        for mx in range(ix0, ix1 + 1):
+            right = (mx - cxm) * per_col
+            wx = ck.x + fwd * sh + right * chh
+            wz = ck.z + fwd * chh - right * sh
+            storm = None
+            for cx_, cz_, r_, p_, cid_ in cells:
+                d_ = math.hypot(wx - cx_, wz - cz_)
+                if d_ < r_:
+                    storm = d_ / r_
+                    break
+            if storm is not None:
+                ch[my][mx], co[my][mx] = ("#", ROU_RED) if storm < 0.55 else (":", GOLD)
+                continue
+            i, j = int(wx // CELL), int(wz // CELL)
+            if water_at(i, j):
+                ch[my][mx], co[my][mx] = "~", CROWN_BLUE
+            elif woods_at(i, j):
+                ch[my][mx], co[my][mx] = ".", GRASS
+    # The runways, and the way in to the one you are going to.
+    goal = ck.goal()
+    for home in airports_about(ck.x, ck.z, reach * 1.6):
+        rx, zn, zs = runway(*home)
+        mine = home == goal
+        a, b = spot(rx, zs), spot(rx, zn)
+        g = _plane_glyph(b[0] - a[0], b[1] - a[1])
+        n = max(abs(b[0] - a[0]), abs(b[1] - a[1]), 1)
+        for s in range(n + 1):
+            put(int(round(a[0] + (b[0] - a[0]) * s / n)),
+                int(round(a[1] + (b[1] - a[1]) * s / n)), g,
+                ROU_GREEN if mine else HUD)
+        if mine and ck.end is not None:
+            out = 1.0 if ck.end == zn else -1.0
+            for s in range(1, 13):
+                p = spot(rx, ck.end + out * s * PILOT_FIX / 8.0)
+                put(p[0], p[1], ".", ROU_GREEN)
+        if mine:                            # only its name: five ran together
+            name = airport_name(home).replace("THE ", "").split()[0][:8]
+            mid = spot(rx, (zn + zs) * 0.5)
+            if (ix0 <= mid[0] + 2 and mid[0] + 2 + len(name) <= ix1
+                    and iy0 <= mid[1] <= iy1):
+                _text(ch, co, mid[1], mid[0] + 2, name, ROU_GREEN)
+    # The way the guide would have you go, and where it is taking you.
+    if ck.state == "air":
+        tx, tz = ck.guide()["to"]
+        t = spot(tx, tz)
+        steps = max(abs(t[0] - int(cxm)), abs(t[1] - int(py)), 1)
+        for s in range(1, steps, 2):
+            put(int(round(cxm + (t[0] - cxm) * s / steps)),
+                int(round(py + (t[1] - py) * s / steps)), ".", GOLD_DIM)
+        put(t[0], t[1], "+", GOLD)
+    # Where you are going, if it is off the map: an arrow at the edge.
+    gx, gz_n, gz_s = runway(*goal)
+    gpos = spot(gx, (gz_n + gz_s) * 0.5)
+    if not (ix0 <= gpos[0] <= ix1 and iy0 <= gpos[1] <= iy1):
+        dx, dy = gpos[0] - cxm, gpos[1] - py
+        room_x = (ix1 - cxm) / abs(dx) if dx else 9e9
+        room_y = ((py - iy0) if dy < 0 else (iy1 - py)) / abs(dy) if dy else 9e9
+        scale = min(room_x, room_y)
+        ex, ey = int(round(cxm + dx * scale)), int(round(py + dy * scale))
+        steep = abs(dy) * 2 > abs(dx)
+        arrow = ("^" if dy < 0 else "v") if steep else (">" if dx > 0 else "<")
+        put(ex, ey, arrow, ROU_GREEN)
+    # The other flights: which way they are going, and how far above or below.
+    for x, y, z, hx, hz, lights, tid in ck.traffic(now):
+        if y < 3.0 and ck.alt > 30.0:
+            continue
+        p = spot(x, z)
+        if not (ix0 <= p[0] <= ix1 and iy0 <= p[1] <= iy1):
+            continue
+        rel = _wrap_pi(math.atan2(hx, hz) - ck.heading)
+        g = ("^" if abs(rel) < 0.79 else "v" if abs(rel) > 2.36
+             else ">" if rel > 0 else "<")
+        dy = y - ck.alt
+        d = math.hypot(x - ck.x, z - ck.z)
+        attr = (ROU_RED if abs(dy) < 20.0 and d < 600.0 else
+                GOLD if abs(dy) < 45.0 and d < TRAFFIC_CALL else CONCRETE)
+        put(p[0], p[1], g, attr)
+        tag = "%+03d" % max(-99, min(99, int(round(dy * 25.0 / 100.0))))
+        if p[0] + 1 + len(tag) <= ix1 and attr != CONCRETE:
+            _text(ch, co, p[1], p[0] + 1, tag, attr)
+    # And you.
+    me = (int(round(cxm)), int(round(py)))
+    put(me[0] - 1, me[1], "-", FLASH)
+    put(me[0], me[1], "^", FLASH)
+    put(me[0] + 1, me[1], "-", FLASH)
 
 
 def draw_air_traffic(ch, co, v, walls, ck, now, wet):
@@ -7819,7 +8102,8 @@ def draw_outside_hud(ch, co, ck, now):
             break
         _text(ch, co, h - 2, x, text, attr)
         x += len(text) + 3
-    keys = PILOT_KEYS.replace("v outside", "v cockpit")
+    keys = PILOT_KEYS if len(PILOT_KEYS) <= w else PILOT_KEYS_SHORT
+    keys = keys.replace("v outside", "v cockpit").replace("v view", "v cockpit")
     _text(ch, co, h - 1, max(0, w // 2 - len(keys) // 2), keys[:w], CONCRETE)
 
 
@@ -7870,6 +8154,8 @@ def render_outside(width, height, now, ck):
     draw_flight_words(ch, co, ck, now, height - 2, k)
     if ck.state == "crashed":
         draw_wreck_words(ch, co, ck, now)
+    else:
+        draw_landing_report(ch, co, ck, now, height - 2, k)
     return ch, co, v
 
 
@@ -24485,7 +24771,10 @@ def main(stdscr):
                         else:
                             note, note_at = ("the keys are $%d" % PILOT_FARE), now
                 elif flight["phase"] == "pilot":
-                    if key in (ord("x"), ord("X"), 27):
+                    if flight["ck"].ended is not None and key in (
+                            10, 13, curses.KEY_ENTER, ord("x"), ord("X"), 27):
+                        flight["ck"].ended = -1e9   # read it: on to the terminal
+                    elif key in (ord("x"), ord("X"), 27):
                         # The captain was only pretending to be sick.
                         gx_, gz_ = gate_door(*nearest_airport(flight["ck"].x,
                                                               flight["ck"].z))
@@ -24506,7 +24795,9 @@ def main(stdscr):
                             ord("p"): "autopilot", ord("P"): "autopilot",
                             ord("r"): "radio", ord("R"): "radio", ord("g"): "gear",
                             ord("G"): "gear", ord("l"): "light", ord("L"): "light",
-                            ord("v"): "view", ord("V"): "view"}.get(key, ""), now)
+                            ord("v"): "view", ord("V"): "view", ord("m"): "map",
+                            ord("M"): "map", ord("["): "zoom in",
+                            ord("]"): "zoom out"}.get(key, ""), now)
                 else:
                     if key in (curses.KEY_LEFT, ord("a")):
                         flight["want"] = max(-1.2, flight["want"] - 0.3)
@@ -24913,7 +25204,7 @@ def main(stdscr):
             ck_.step(min(0.1, now - flight["last"]), now)
             flight["last"] = now
             if ck_.ended is not None and now - ck_.ended > (
-                    5.0 if ck_.state == "crashed" else 3.5):
+                    5.0 if ck_.state == "crashed" else PILOT_READ):
                 # Out of the doors of wherever you got to, one way or the other.
                 gx_, gz_ = gate_door(*nearest_airport(ck_.x, ck_.z))
                 cam_x, cam_z, yaw = gx_ + 3.0, gz_, math.pi / 2
