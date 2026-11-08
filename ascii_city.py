@@ -8161,6 +8161,7 @@ def draw_cockpit(ch, co, ck, now):
     rows = cockpit_rows(h, k)
     top = h - rows
     cx = w // 2
+    ck.radio_right = False          # till the panel finds the room for the radio
     # The coaming comes up in the middle, and the frame leans in from the sides.
     hump = 2 * k
     for x in range(w):
@@ -8297,6 +8298,10 @@ def draw_cockpit(ch, co, ck, now):
         _text(ch, co, y_ + 4, ax, "STBY %s  %s" % (ck.standby, (
             ck.station[1] if ck.standby == ck.station[2] and not right_ else "")),
               GOLD if ck.standby == ck.station[2] and not right_ else CONCRETE)
+    # And what has been said on it, under the frequencies, when there is room
+    # for it; otherwise it stays at the top left of the windscreen.
+    ck.radio_right = draw_radio_log(ch, co, ck, now, ax, y_ + 6, w - ax - 2,
+                                    h - 2 - (y_ + 6) + 1)
     # The artificial horizon: sky over ground, tilted with you, a wing marker on it.
     bx0, bx1 = cx - sec // 2 + 2, cx + sec // 2 - 2
     by0, by1 = y0 + 1, h - 2
@@ -8902,22 +8907,30 @@ def draw_wind_arrow(ch, co, wx, wz, sh, chh, box):
     the map, longer the harder it blows, in the radar's top right corner."""
     ix0, iy0, ix1, iy1 = box
     speed = math.hypot(wx, wz)
-    most = max(2, min((iy1 - iy0) // 3, (ix1 - ix0) // 6))
+    most = max(2, min((iy1 - iy0) // 2 - 1, (ix1 - ix0) // 5))
     if speed < 1.0 or most < 2:
         return
     dx, dy = (wx * chh - wz * sh) / speed, -(wx * sh + wz * chh) / speed
-    n = max(2, int(round(most * min(1.0, speed / PILOT_WIND_MOST))))
-    mx, my = ix1 - 2 * most - 1, iy0 + most
-    g = _plane_glyph(dx, dy)
-    for s_ in range(-n, n + 1):
-        x, y = int(round(mx + dx * s_ * 2.0)), int(round(my + dy * s_))
-        if ix0 <= x <= ix1 and iy0 <= y <= iy1:
-            ch[y][x], co[y][x] = g, FLASH
-    head = (">" if abs(dx) * 2.0 > abs(dy) * 2.0 and dx > 0 else
-            "<" if abs(dx) > abs(dy) else "v" if dy > 0 else "^")
-    hx, hy = int(round(mx + dx * n * 2.0)), int(round(my + dy * n))
-    if ix0 <= hx <= ix1 and iy0 <= hy <= iy1:
-        ch[hy][hx], co[hy][hx] = head, FLASH
+    n = max(2, int(round(most * min(1.0, 0.4 + 0.6 * speed / PILOT_WIND_MOST))))
+    mx, my = ix1 - 2 * most - 2, iy0 + most + 1
+    fat = 2 if most >= 5 else 1           # a shaft two strokes wide when there is room
+
+    def stroke(x0_, y0_, ux, uy, length, glyph):
+        for s_ in range(int(length * 2) + 1):
+            t_ = s_ * 0.5
+            for f_ in range(fat):
+                x = int(round(x0_ + ux * t_ * 2.0 - uy * f_ * 2.0 * 0.5))
+                y = int(round(y0_ + uy * t_ + ux * f_ * 0.5))
+                if ix0 <= x <= ix1 and iy0 <= y <= iy1:
+                    ch[y][x], co[y][x] = glyph, FLASH
+    # The shaft from tail to head, then the head's two barbs swept back.
+    stroke(mx - dx * n * 2.0, my - dy * n, dx, dy, 2 * n, _plane_glyph(2 * dx, dy))
+    hx, hy = mx + dx * n * 2.0, my + dy * n
+    barb = max(1.5, n * 0.6)
+    for turn in (2.5, -2.5):
+        bx = dx * math.cos(turn) - dy * math.sin(turn)
+        by = dx * math.sin(turn) + dy * math.cos(turn)
+        stroke(hx, hy, bx, by, barb, _plane_glyph(2 * bx, by))
 
 
 def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh, page=None):
@@ -9006,6 +9019,17 @@ def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh, page=None):
                 put(int(round(a[0] + (b[0] - a[0]) * s / n)),
                     int(round(a[1] + (b[1] - a[1]) * s / n)), "x" if shut_ else g,
                     ROU_RED if shut_ else ROU_GREEN if mine else HUD)
+        # Each end's number just off its threshold, out along the approach -
+        # 18 at the north end, where you come in heading south.
+        for end_ in approaches(home):
+            if end_["rw"] >= len(runways(*home)):
+                continue
+            shut_ = (tuple(home), end_["rw"]) in ck.closed
+            (tx_, tz_), (ox_, oz_) = end_["thr"], end_["out"]
+            lx_, ly_ = spot(tx_ + ox_ * per_row * 1.6, tz_ + oz_ * per_row * 1.6)
+            for n_, c_ in enumerate(end_["name"]):
+                put(lx_ - 1 + n_, ly_, c_, ROU_RED if shut_ else ROU_GREEN if mine
+                    else GOLD_DIM)
         if mine:
             appr_ = (ck.appr if ck.appr is not None and ck.appr["home"] == tuple(home)
                      else ck.pick_approach(home))
@@ -9401,8 +9425,11 @@ def draw_flight_words(ch, co, ck, now, top, k):
     if ck.state == "landed" and k > 1 and ck.grade:
         tw = blocks_width(ck.grade, 3)
         _blocks(ch, co, 5, cx - tw // 2, ck.grade, ROU_GREEN, 3, 2)
-    # The radio, top left of the windscreen: the last few things said.
+    # The radio, top left of the windscreen: the last few things said - unless
+    # the panel has it under the frequencies.
     said = [r_ for r_ in ck.heard(now) if now - r_[0] < 16.0][-3:]
+    if getattr(ck, "radio_right", False) and not ck.outside:
+        return
     if said:
         room = min(w // 2 - 4, 60)
         y = 1 if k == 1 else 2
@@ -9425,6 +9452,35 @@ def draw_flight_words(ch, co, ck, now, top, k):
                                        for _, _, t_ in said)     # under what was said
         if y < top - 1:
             _label(ch, co, y, 3, line[:w - 6], ROU_RED if int(now * 2) % 2 else GOLD)
+
+
+RADIO_LOG_W = 28        # the least room the radio's lines get under the frequencies
+RADIO_LOG_ROWS = 3
+
+
+def draw_radio_log(ch, co, ck, now, x0, y0, room, rows):
+    """What was said on the frequency you are on, newest at the foot, wrapped
+    to the room under the frequencies: the station's lines gold and yours
+    plain, the older ones dimmer. On the wrong frequency, a line saying who is
+    calling and where. False, and nothing drawn, if there is not the room."""
+    if room < RADIO_LOG_W or rows < RADIO_LOG_ROWS:
+        return False
+    lines = []
+    for when, who, text in ck.heard(now)[-6:]:
+        for n, part in enumerate(bar_lines(text, room - 5)):
+            lines.append((((who + "  ") if n == 0 else "     ") + part,
+                          HUD if who == "YOU" else GOLD if now - when < 16.0
+                          else GOLD_DIM))
+    if (0.0 <= now - ck.missed_at < 8.0 and ck.tuned != ck.station[2]
+            and ck.state != "crashed"):
+        miss = "...nothing on %s. %s is on %s%s" % (
+            ck.tuned, ck.station[1], ck.station[2],
+            " - c" if ck.standby == ck.station[2] else "")
+        for part in bar_lines(miss, room):
+            lines.append((part, ROU_RED if int(now * 2) % 2 else GOLD))
+    for n, (line, attr) in enumerate(lines[-rows:]):
+        _text(ch, co, y0 + n, x0, line[:room], attr)
+    return True
 
 
 def wx_words(ck, now):
