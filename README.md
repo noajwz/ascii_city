@@ -177,7 +177,7 @@ the city is infinite, identical every time you walk back to it, and held in no m
   kick, the puddles ripple, and at closing time everyone spills out into the street.
 - **A temple** with stained glass and a rose window, where a terminal on the altar gives you the
   word of God the way TempleOS did, and a priest in the confession booth hears what you type.
-- **A library** with a reading room: a Wikipedia reader and a PsychonautWiki one.
+- **A library** with a reading room and a Wikipedia reader on the shelf.
 - **A Pokemon Center** or two, Nurse Joy at the counter and a PC with a type chart on it.
 - **Ramen shops** down the lit lanes, a neon bowl over the door, where you can sit and wait for
   your bowl; and **an all-night cyberpunk diner** with a giant neon coffee cup steaming on its
