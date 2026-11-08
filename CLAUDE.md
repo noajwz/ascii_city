@@ -1226,7 +1226,28 @@ at `TRAFFIC_CALL`). From `MAP_WIDE` columns it has the panel's second section (t
 `ck.map_wide`) and `m` goes round the pages; narrower, `m` goes words, ROUTE, WX, TFC, words. The
 title is the page and the range, the heading only where there is room for it (on a 21-column map
 it covered the page's name). `[` `]` step
-`MAP_RANGES`. `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
+`MAP_RANGES`.
+
+**A second runway, and the wind picks.** `runways(ci, cj)` is every runway as (middle, along,
+half length): the long one north-south and a crosswind one east-west, `RUNWAY2_DJ` cells north
+of the field. **Not across the middle**: the Strip stands 50 cells west of every airport, alongside
+it, so an east-west approach through the field went straight over its hotels, and the approach
+corridor would have cut them down. Out past the north end its corridor (`approach_cap()`, a band
+of 8 cells) passes north of the Strip's last row. `airport_at()` takes in that north field.
+`approaches(home)` is each end of each runway (`name` 18/36/09/27, `course`, `thr`eshold, `out`
+along the approach, `rw`); `active_approach()` is the one most into the wind, or in still air the
+nearer end of the long one, and `ck.pick_approach()` asks it (or the end a check set in `ck.end`).
+`guide()`, `nav()`, the report, `on_runway()` (`runway_under()`), the alignment on the wheels
+(`runway_course()`), the climb-out and the map all work in that runway's frame - right of the line
+is positive now, for every way in. `taxi_net()` lays out the taxiways and holds; `field_cell()`
+caches per cell which runways, taxiways and hold bars touch it, so `field_point()` - grass, tarmac
+or paint - is cheap enough for the ground pass (about 2.5 ms more standing on the airport).
+Two things it showed: **`approach_cap()` only looked in its own column of tiles** - the crosswind
+approaches run east and west into the next - **and returned the first corridor it found**, not the
+lowest, so a cell far out under one airport's approach and close in under another's kept a tower
+the second needed gone. And a go-around turned for the entry point at a thousand feet, out of the
+corridor and into one: it climbs straight ahead (`climb_out`) like a departure now. The Chinatown
+lantern check was held to 60% by the luck of its first 250 buildings; the rate is 55%. `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
 see-through, which is how the first titles came out `--MAP-6-km--`. The key hint has a short form
 (`PILOT_KEYS_SHORT`) for windows under 118 columns. About 2-3 ms a frame at 300x90.
 
