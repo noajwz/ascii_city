@@ -6738,6 +6738,8 @@ for n_ in range(12):
     c_.key("autopilot", 0.0)
     goals_, t_ = set(), 0.0
     while c_.state == "air" and t_ < 400.0:
+        if c_.ice > 0.15 and not c_.deice:
+            c_.key("deice", t_)             # ICE on the panel: what a pilot does
         c_.step(1.0 / 30.0, t_)
         goals_.add(c_.target)
         t_ += 1.0 / 30.0
@@ -6829,11 +6831,11 @@ check("the nearest airport is the nearest", ap_miss == 0, str(ap_miss))
 # --- the gear, the wind and the flight plan ---------------------------------------
 
 
-def fp_fly(home_, seed_, t0_, hand_gear_=True):
+def fp_fly(home_, seed_, t0_, hand_gear_=True, trouble_=None):
     """A whole flight to the flight plan: off the runway by hand, then the
     autopilot, the gear up after lift-off and down again on final."""
     dest_ = ac.flight_plan(home_, seed_)
-    c_ = ac.Cockpit(home_, t0_, dest_)
+    c_ = ac.Cockpit(home_, t0_, dest_, trouble=trouble_)
     c_.said_all, call_ = [], c_.call
     c_.call = lambda *a_, **k_: (c_.said_all.append(a_[2]), call_(*a_, **k_))
     t_ = t0_
@@ -6856,6 +6858,8 @@ def fp_fly(home_, seed_, t0_, hand_gear_=True):
             c_.bank = c_.commands()[0]      # it puts the wings on the director
         if c_.state == "landed":
             c_.key("brake", t_)
+        if c_.ice > 0.15 and not c_.deice:
+            c_.key("deice", t_)             # ICE on the panel: what a pilot does
         c_.step(1.0 / 30.0, t_)
         t_ += 1.0 / 30.0
     return c_, dest_
@@ -7818,6 +7822,8 @@ def em_fly(trouble_, seed_=3, t0_=1000.0, both_=None, wind_=(0.0, 0.0), hand_=No
                 c_.bank = c_.commands()[0]
         if c_.state == "landed":
             c_.key("brake", t_)
+        if c_.ice > 0.15 and not c_.deice:
+            c_.key("deice", t_)             # ICE on the panel: what a pilot does
         c_.step(1.0 / 30.0, t_)
         t_ += 1.0 / 30.0
     return c_
@@ -7846,11 +7852,13 @@ check("one flight in eight has trouble coming, any of the three",
       str(em_some))
 ac._check_rides[0] = 0
 check("a check ride always has one, and goes through them",
-      [ac.check_ride() for _ in range(4)] == ["engine", "birds", "blocked", "engine"])
+      [ac.check_ride() for _ in range(5)] == ["engine", "birds", "blocked", "hold",
+                                               "engine"])
 em_n = em_fly(None)
 check("on the way down the heights are called, each once, the last every ten feet",
       em_n.state == "landed" and [c_ for c_, _ in em_n.calls]
-      == [str(f_) for f_ in ac.PILOT_CALLOUTS], str(em_n.calls))
+      == ["MINIMUMS" if f_ == ac.PILOT_MINIMUMS else str(f_)
+          for f_ in ac.PILOT_CALLOUTS], str(em_n.calls))
 em_up = pk_at(alt_=0.5, v_=50.0)
 em_up.pitch = em_up.pitch_set = 0.15
 em_up.throttle = 1.0
@@ -8092,6 +8100,152 @@ for w_, h_ in ((50, 12), (80, 24), (160, 48), (299, 87), (301, 91), (451, 133)):
         ck_panel(w_, h_, f_, 1.0, 1)
 check("and every size of window draws them", True)
 
+# --- icing, and the de-icer ----------------------------------------------------------
+ic_real = ac.Cockpit.weather
+ac.Cockpit.weather = lambda self_, now_: 1.0           # in a storm's cloud throughout
+ic_c = ac.Cockpit(pk_home, 0.0)
+ic_c.state, ic_c.alt, ic_c.v, ic_c.throttle = "air", 135.0, 70.0, 0.6
+ic_c.x, ic_c.z, ic_c.heading = pk_rx - 4000.0, pk_zn, 0.0
+ic_s0 = ic_c.stall()
+for n_ in range(1, 30 * 40):
+    ic_c.step(1.0 / 30.0, n_ / 30.0)
+ic_iced, ic_s1, ic_warn = ic_c.ice, ic_c.stall(), ic_c.warnings()
+ic_glass = "\n".join("".join(r_) for r_ in ac.render_cockpit(120, 36, 40.0, ic_c)[0][:20])
+ic_c.key("deice", 40.0)
+ic_f0 = ic_c.fuel
+for n_ in range(30 * 40, 30 * 60):
+    ic_c.step(1.0 / 30.0, n_ / 30.0)
+ac.Cockpit.weather = ic_real
+check("in a storm's cloud the wings ice up, and it says ICE",
+      ic_iced > 0.6 and "ICE" in ic_warn, "%.2f" % ic_iced)
+check("iced, it stalls faster: so left alone, a stall",
+      ic_s1 > ic_s0 * 1.2, "%.0f against %.0f" % (ic_s1, ic_s0))
+check("the windscreen frosts over from the frame in", ic_glass.count("#") > 100)
+check("e is the de-icer: it clears it, and costs fuel",
+      ic_c.ice < 0.05 and ic_c.deice and "ICE" not in ic_c.warnings())
+ic_d = ac.Cockpit(pk_home, 0.0)
+ic_d.state, ic_d.alt, ic_d.v, ic_d.throttle, ic_d.calm = "air", 135.0, 70.0, 0.6, True
+ic_d2 = ac.Cockpit(pk_home, 0.0)
+ic_d2.state, ic_d2.alt, ic_d2.v, ic_d2.throttle, ic_d2.calm = "air", 135.0, 70.0, 0.6, True
+ic_d2.key("deice", 0.0)
+for n_ in range(1, 300):
+    ic_d.step(1.0 / 30.0, n_ / 30.0)
+    ic_d2.step(1.0 / 30.0, n_ / 30.0)
+check("and it drinks: more fuel gone with it on", ic_d2.fuel < ic_d.fuel)
+ic_r = ac.Cockpit(pk_home, 0.0)
+ic_r.state, ic_r.alt = "air", 135.0
+ic_keep = ac.weather_name()
+while ac.weather_name() != "rain":
+    ac.cycle_weather()
+ic_rain = ic_r.icing(5.0) if not ac.night(5.0)["fog"] else 0.0
+while ac.weather_name() != ic_keep:
+    ac.cycle_weather()
+check("but not in ordinary rain, which is a third of the time", ic_rain == 0.0)
+check("and e is on the keys", "e de-ice" in ac.PILOT_KEYS)
+
+# --- fog approaches -------------------------------------------------------------------
+fg_skip = ac._night_skip
+fg_c = ac.Cockpit(pk_home, 0.0)
+fg_c.state, fg_c.calm, fg_c.end = "air", True, pk_zn
+fg_c.x, fg_c.z, fg_c.heading, fg_c.v = pk_rx, pk_zn + 110.0, math.pi, 45.0
+fg_c.alt = 140.0 * ac.PILOT_GLIDE + 2.0          # on the slope, in the fog's layer
+fg_t = 5.0
+while ac.night(fg_t)["fog"]:
+    ac._night_skip += ac.NIGHT_LENGTH
+fg_clear = ac.render_cockpit(160, 48, fg_t, fg_c)[0]
+ac.skip_to_fog(fg_t)
+fg_fog = ac.render_cockpit(160, 48, fg_t, fg_c)[0]
+fg_top = 48 - ac.cockpit_rows(48, 1) - 3
+
+
+def fg_lit(rows_):
+    return sum(1 for r_ in rows_[2:fg_top] for c_ in r_[30:130] if c_ not in " .:")
+
+
+check("a fog night from the air: the city gone grey", fg_lit(fg_fog) < fg_lit(fg_clear) * 0.4,
+      "%d against %d" % (fg_lit(fg_fog), fg_lit(fg_clear)))
+check("and the runway's lights come out of it close in, soft",
+      sum(r_[30:130].count("o") for r_ in fg_fog[2:fg_top]) > 4)
+fg_c.z = pk_zn + 500.0
+fg_c.alt = 530.0 * ac.PILOT_GLIDE + 2.0          # over the top of it
+fg_over = ac.render_cockpit(160, 48, fg_t, fg_c)[0]
+fg_skip2 = ac._night_skip
+while ac.night(fg_t)["fog"]:
+    ac._night_skip += ac.NIGHT_LENGTH
+fg_over_clear = ac.render_cockpit(160, 48, fg_t, fg_c)[0]
+ac._night_skip = fg_skip2
+check("over it, the ground is under a layer of it: seen, but less of it",
+      0 < fg_lit(fg_over) < fg_lit(fg_over_clear),
+      "%d against %d" % (fg_lit(fg_over), fg_lit(fg_over_clear)))
+fg_c.z, fg_c.alt = pk_zn + 500.0, 12.0
+fg_panel = "\n".join("".join(r_) for r_ in fg_fog)
+check("on the way in the needles are live: LOC along the foot, GS up the side",
+      "LOC" in fg_panel and "GS" in fg_panel and "<>" in fg_panel)
+fg_c.x = pk_rx + 30.0
+fg_c.alt = 12.0
+fg_r = ["".join(r_) for r_ in ac.render_cockpit(160, 48, fg_t, fg_c)[0]]
+fg_l = [r_ for r_ in fg_r if "LOC" in r_]
+fg_d = [n_ for n_, r_ in enumerate(fg_r) if "<>" in r_ and "o" in r_ and r_.count(":") > 10]
+check("right of the line, the localiser's diamond is over to the left",
+      any(r_.index("<>") < r_.index("V") if "V" in r_ else True for r_ in fg_r
+          if "<>" in r_ and "::" in r_) or bool(fg_d))
+fg_far = ac.Cockpit(pk_home, 0.0)
+fg_far.state, fg_far.x, fg_far.z, fg_far.alt = "air", pk_rx - 6000.0, pk_zn, 135.0
+check("and far from any runway, no needles",
+      "LOC" not in "\n".join("".join(r_) for r_ in ac.render_cockpit(160, 48, fg_t,
+                                                                       fg_far)[0]))
+fg_c.state, fg_c.cleared, fg_c.leg = "air", False, "final"
+fg_c.x, fg_c.z = pk_rx, pk_zn + 1500.0
+fg_c.alt, fg_c.heading, fg_c.clock = 1530.0 * ac.PILOT_GLIDE + 2.0, math.pi, fg_t
+fg_c.runway_busy = lambda *a_: False          # nobody else about, for this
+fg_k, fg_line = fg_c.atc_line(fg_c.guide())
+check("the tower gives you the visibility with the landing clearance",
+      fg_k[0] == "cleared" and "Fog, visibility" in fg_line, fg_line)
+check("the decision height is called MINIMUMS", ac.PILOT_MINIMUMS in ac.PILOT_CALLOUTS)
+ac._night_skip = fg_skip
+
+# --- holding patterns ----------------------------------------------------------------
+hd_odds = sum(ac.Cockpit(pk_home, float(s_), (0, 0), gate=1).hold_due is not None
+              for s_ in range(300)) / 300.0
+check("one flight from the gate in three, the field is busy and you hold",
+      0.2 < hd_odds < 0.45, "%.2f" % hd_odds)
+check("never on the checks' flights, which start on the runway",
+      ac.Cockpit(pk_home, 0.0, (0, 0)).hold_due is None)
+hd_legs = []
+hd_real = ac.Cockpit.step
+
+
+def hd_step(self_, dt_, now_):
+    hd_real(self_, dt_, now_)
+    if not hd_legs or hd_legs[-1] != self_.leg:
+        hd_legs.append(self_.leg)
+    if self_.leg == "hold":
+        hd_legs.append(("v", self_.v))
+
+
+ac.Cockpit.step = hd_step
+try:
+    hd_c, hd_dest = fp_fly(ac.zone_home("airport", 100, 100), 7, 100.0, trouble_="hold")
+finally:
+    ac.Cockpit.step = hd_real
+hd_said = " ".join(hd_c.said_all)
+hd_order = [l_ for l_ in hd_legs if isinstance(l_, str)]
+hd_order = [l_ for n_, l_ in enumerate(hd_order) if n_ == 0 or l_ != hd_order[n_ - 1]]
+check("a hold: to the fix, round the racetrack, then on with the approach, and down",
+      "hold" in hd_order and hd_order.index("hold") < len(hd_order) - 1
+      and hd_order[-1] == "final" and hd_c.state == "landed", str(hd_order))
+check("the tower says hold, right turns, and when to expect more, then lets you go",
+      "hold at the fix" in hd_said and "right turns" in hd_said
+      and "Expect further clearance" in hd_said and "leave the hold" in hd_said)
+hd_v = [v_ for l_ in hd_legs if isinstance(l_, tuple) for _, v_ in [l_]]
+check("and you hold slower, at the holding speed",
+      hd_v and sum(hd_v[-30:]) / len(hd_v[-30:]) < ac.PILOT_CRUISE_SPEED - 8.0)
+hd_p = ac.Cockpit(pk_home, 0.0, trouble="hold")
+hd_p.state, hd_p.leg, hd_p.hold_t0, hd_p.alt = "air", "hold", 0.0, 135.0
+check("the panel counts the hold down",
+      "HOLD 0:" in "\n".join("".join(r_) for r_ in ac.render_cockpit(160, 48, 10.0,
+                                                                      hd_p)[0]))
+
 # --- the wipers ------------------------------------------------------------------
 wp_keep = ac.weather_name()
 while ac.weather_name() != "rain":
@@ -8187,8 +8341,8 @@ check("the panel has the rudder's gauge beside the bank", "RUD ---|--O" in rd_ro
       or "RUD ---|-O" in rd_rows or "RUD ---|" in rd_rows)
 check("W and S are the power, + and - the zoom, A and D the rudder, on the keys",
       "W S power" in ac.PILOT_KEYS and "+ - zoom" in ac.PILOT_KEYS
-      and "A D rudder" in ac.PILOT_KEYS and "AD:rud" in ac.PILOT_KEYS_SHORT
-      and "WS:thr" in ac.PILOT_KEYS_SHORT and "+-:zoom" in ac.PILOT_KEYS_SHORT)
+      and "A D rudder" in ac.PILOT_KEYS and "AD:rud" in ac.PILOT_KEYS_SHORT and "e:ice" in ac.PILOT_KEYS_SHORT
+      and "WS:thr" in ac.PILOT_KEYS_SHORT)
 check("and i is on the keys", "i wipers" in ac.PILOT_KEYS
       and "i:wipe" in ac.PILOT_KEYS_SHORT and "c freq" in ac.PILOT_KEYS
       and "c:freq" in ac.PILOT_KEYS_SHORT and len(ac.PILOT_KEYS_SHORT) <= 110)

@@ -6210,6 +6210,15 @@ PILOT_BANK_SINK = 6.0  # what a bank costs in height: units a second at 60 degre
 PILOT_ROLL_OVER = 0.08  # past the upset it rolls on over at this - under a/d's rate,
                         # so holding the other way, and height in hand, gets it back
 PILOT_GUST_ROLL = 0.14  # radians a second a gust can roll you, in the strongest wind
+PILOT_FOG_TOP = 14.0   # a fog night's fog is this deep: 350 ft, and over it, clear
+PILOT_FOG_NEAR = 40.0  # in it from the air you see clear this far
+PILOT_FOG_FAR = 170.0  # and nothing past this: the runway's lights, four seconds out
+PILOT_ICE_RATE = 0.02  # ice a second in the worst of it: a storm, snow - fifty seconds
+PILOT_DEICE_RATE = 0.06  # e: the de-icer clears it three times as fast as it comes
+PILOT_DEICE_BURN = 0.25  # and drinks this much more fuel, of the engines' idle
+PILOT_ICE_STALL = 0.45   # a wing iced all over stalls this much faster
+PILOT_ICE_DRAG = 0.4     # and drags this much more
+PILOT_ICE_WARN = 0.25    # ICE on the panel from here
 PILOT_RUDDER = 0.1     # the rudder, A and D: yaw at full, radians a second, in the air
 PILOT_RUDDER_GROUND = 0.25  # and on the wheels, a gentle nose-wheel turn
 PILOT_MAX_PITCH = 0.31
@@ -6227,10 +6236,10 @@ PUSH_BACK = 34.0           # and how far
 PILOT_READ = 20.0          # stopped: how long the report waits for you to read it
 PILOT_KEYS = ("s w nose  a d wings  A D rudder  W S power  g gear  f flaps  l light  "
               "p auto  "
-              "k fuel  i wipers  "
+              "k fuel  i wipers  e de-ice  "
               "r radio  c freq  m map  + - zoom  v outside  b brakes  x out")
 PILOT_KEYS_SHORT = ("sw:nose ad:bank AD:rud WS:thr g:gear f:flap p:auto k:fuel "
-                    "i:wipe r:atc c:freq m:map +-:zoom v:view b:brk x:out")
+                    "i:wipe e:ice r:atc c:freq m:map v:view b:brk x:out")
 PILOT_CENTER = 110.0   # climbing past this (2,750 ft) the tower hands you to the center
 PILOT_TOWER = 100.0    # and coming down past this, the center to the tower - not the
                        # same height, or flying along it the radio would flip for ever
@@ -6264,9 +6273,18 @@ AIRPORT_NAMES = ["ASCII CITY INTERNATIONAL", "NEON FIELD", "HARBOUR POINT",
 PILOT_DEST_PAY = 200   # on top, for landing where the flight plan said
 PILOT_GEAR_TIME = 4.0  # seconds for the wheels to go up or down
 PILOT_WIND_MOST = 9.0  # units a second: a strong night's crosswind, before a storm
-PILOT_CALLOUTS = (1000, 500, 100, 50, 40, 30, 20, 10)   # feet, called on the way down
+PILOT_CALLOUTS = (1000, 500, 200, 100, 50, 40, 30, 20, 10)   # feet, on the way down
+PILOT_MINIMUMS = 200       # the decision height: see the runway here, or go round
 PILOT_TROUBLE_ODDS = 8     # one flight in this many, something goes wrong
 PILOT_TROUBLES = ("engine", "birds", "blocked")
+CHECK_RIDES = PILOT_TROUBLES + ("hold",)   # and the desk's check ride, a hold too
+PILOT_HOLD_ODDS = 3        # one flight from the gate in this many, the field is busy
+PILOT_HOLD_TIME = 45.0     # and you hold this long, about a lap - a tank is only some
+                           # four minutes at the cruise; two of holding was half of it
+PILOT_HOLD_SPEED = 55.0    # slower in the hold, the way they fly them: less fuel
+PILOT_HOLD_OUT = 700.0     # the holding fix, this far out past the final fix
+PILOT_HOLD_W = 600.0       # the racetrack: this wide, two of the heavy wings' turns
+PILOT_HOLD_L = 900.0       # and its legs this long
 PILOT_SAVE_PAY = 150       # on top, for getting it down after it went wrong
 PILOT_YAW = 0.035          # one engine out: how hard the other swings the nose round
 PILOT_BIRDS_AT = 7.0       # the flock, on the climb out: 175 ft
@@ -6304,7 +6322,7 @@ def check_ride():
     """A check ride, booked at the desk: the instructor is going to fail
     something, and goes through the list a ride at a time."""
     _check_rides[0] += 1
-    return PILOT_TROUBLES[(_check_rides[0] - 1) % len(PILOT_TROUBLES)]
+    return CHECK_RIDES[(_check_rides[0] - 1) % len(CHECK_RIDES)]
 
 
 def airport_name(home):
@@ -6568,6 +6586,9 @@ class Cockpit:
         self.bank = 0.0
         self.bank_in, self.bank_until = 0.0, 0.0
         self.rudder = self.rudder_in = 0.0      # the rudder, -1 left to 1 right
+        self.ice = 0.0                  # on the wings and the glass, 0..1
+        self.deice = False              # e: the de-icer
+        self.ice_told = False
         self.rudder_until = 0.0
         self.throttle = 0.0
         self.brake_until = 0.0
@@ -6627,6 +6648,13 @@ class Cockpit:
         self.end, self.side, self.went_round = None, 1.0, False
         self.up_at = None               # when the wheels left the ground
         self.trouble = trouble          # what is going to go wrong, if anything
+        # A hold on the way in, if the field is busy: seconds of it, or None.
+        self.hold_due = (PILOT_HOLD_TIME if trouble == "hold" or (
+            gate is not None and dest is not None
+            and _mix(self.seed, 1, 7913) % PILOT_HOLD_ODDS == 0) else None)
+        self.hold_t0 = None             # when you went into it
+        self.hold_wp = 0                # which corner of the racetrack is next
+        self.hold_left = False          # and has the tower let you go
         self.trouble_at = None          # and when it did
         self.engines = 2                # still going
         self.dead_side = 1.0 if self.seed & 1 else -1.0   # the one that goes: 1 right
@@ -6724,6 +6752,9 @@ class Cockpit:
             self.radio_key(now)
         elif what == "freq":
             self.flip_radio(now)
+        elif what == "deice":
+            self.deice = not self.deice
+            self.said = "de-ice on" if self.deice else "de-ice off"
         elif what == "wipers":
             self.wipers = not self.wipers
             self.said = "wipers on" if self.wipers else "wipers off"
@@ -7115,9 +7146,31 @@ class Cockpit:
 
     def stall(self):
         """Under this it stops flying: flaps take it down, and a bank takes it
-        up - the wings carry the turn as well as the jet."""
+        up - the wings carry the turn as well as the jet - and so does ice on
+        them."""
         return ((PILOT_STALL - 4.0 * self.flaps)
-                * math.sqrt(1.0 / max(0.25, math.cos(self.bank))))
+                * math.sqrt(1.0 / max(0.25, math.cos(self.bank)))
+                * (1.0 + PILOT_ICE_STALL * getattr(self, "ice", 0.0)))
+
+    def icing(self, now):
+        """How fast ice is coming on here, a fraction of the worst: in a
+        storm's cloud, in falling snow, and a little in freezing fog low down.
+        Not in ordinary rain - it rains a third of the time, and every flight
+        iced up. Never in the calm air the checks fly in."""
+        if self.calm or self.state != "air":
+            return 0.0
+        return max(self.weather(now), snowfall(now),
+                   0.3 if night(now)["fog"] and self.alt < PILOT_FOG_TOP else 0.0)
+
+    def _ice(self, dt, now):
+        if self.deice:
+            self.ice = max(0.0, self.ice - PILOT_DEICE_RATE * dt)
+        else:
+            self.ice = min(1.0, self.ice + PILOT_ICE_RATE * self.icing(now) * dt)
+        if self.ice > 0.3 and not self.ice_told and self.radio_on:
+            self.ice_told = True
+            self.call(now, "TWR", "AC 101, icing reported in that cloud. "
+                      "Check your de-ice is on.")
 
     def guide(self):
         """Where the tower would have you go, as a real approach goes: out to a
@@ -7147,7 +7200,30 @@ class Cockpit:
             tx, tz = on_line(PILOT_FIX + 900.0, self.side * 900.0)
             if math.hypot(tx - self.x, tz - self.z) < 160.0:
                 self.leg = "fix"
-        if self.leg == "fix":
+        if self.leg == "fix" and self.hold_due is not None:
+            # The field is busy: to the holding fix first, out past the final
+            # fix on the line, and round the racetrack there till told.
+            tx, tz = on_line(PILOT_FIX + PILOT_HOLD_OUT)
+            if math.hypot(tx - self.x, tz - self.z) < 200.0:
+                self.leg, self.hold_t0, self.hold_wp = "hold", self.clock, 1
+        if self.leg == "hold":
+            # Right turns: inbound along the line towards the runway, over to
+            # the right, out on the far side, and back across to the fix.
+            out_h = PILOT_FIX + PILOT_HOLD_OUT
+            corners = (on_line(out_h), on_line(out_h, PILOT_HOLD_W),
+                       on_line(out_h + PILOT_HOLD_L, PILOT_HOLD_W),
+                       on_line(out_h + PILOT_HOLD_L))
+            tx, tz = corners[self.hold_wp]
+            if math.hypot(tx - self.x, tz - self.z) < 180.0:
+                if (self.hold_wp == 0 and self.hold_due is not None
+                        and self.clock - self.hold_t0 >= self.hold_due):
+                    # Over the fix inbound, the time up: on with the approach.
+                    self.leg, self.hold_due, self.hold_left = "fix", None, True
+                    tx, tz = on_line(PILOT_FIX)
+                else:
+                    self.hold_wp = (self.hold_wp + 1) % 4
+                    tx, tz = corners[self.hold_wp]
+        if self.leg == "fix" and self.hold_due is None:
             tx, tz = on_line(PILOT_FIX)
             # Caught well inside what final will put up with, or a crosswind put
             # you on final and off the line in the same moment, round and round.
@@ -7168,7 +7244,8 @@ class Cockpit:
             else:
                 lead = max(150.0, min(600.0, along * 0.4))
                 tx, tz = on_line(max(-200.0, along - lead))
-        mode = {"entry": "around", "fix": "intercept", "final": "final"}[self.leg]
+        mode = {"entry": "around", "fix": "intercept", "final": "final",
+                "hold": "hold"}[self.leg]
         heading, wx = math.atan2(tx - self.x, tz - self.z), None
         if mode != "final":
             heading, wx = self._round_weather(heading, tx, tz)
@@ -7177,6 +7254,8 @@ class Cockpit:
         if mode == "final":
             high = min(PILOT_CRUISE, (along + 30.0) * PILOT_GLIDE + 2.0)
             fast = PILOT_APPROACH
+        elif mode == "hold":
+            fast = PILOT_HOLD_SPEED
         return {"mode": mode, "heading": heading, "wx": wx, "to": (tx, tz),
                 "alt": high, "speed": fast, "runway": rwy, "along": along,
                 "lat": lat, "course": course, "home": self.target,
@@ -7324,6 +7403,13 @@ class Cockpit:
             return ("enroute", hdg), (
                 "AC 101, proceed direct %s, heading %03d, maintain %s."
                 % (airport_name(g["home"]).title(), hdg, feet))
+        if g["mode"] == "hold":
+            left = max(0.0, (self.hold_due or 0.0) - (self.clock - self.hold_t0))
+            mins = max(1, int(math.ceil(left / 60.0)))
+            return ("hold", mins), ("AC 101, hold at the fix for runway %s, right "
+                                    "turns, maintain %s. Expect further clearance "
+                                    "in %d minute%s." % (g["runway"], feet, mins,
+                                                         "" if mins == 1 else "s"))
         if g["mode"] == "around":
             return ("around", hdg), ("AC 101, turn %s heading %03d, maintain %s, "
                                      "vectors for runway %s." % (way, hdg, feet,
@@ -7346,6 +7432,9 @@ class Cockpit:
             self.cleared = True
             line = "AC 101, %s, runway %s, cleared to land." % (
                 wind_words(*self.wind(self.clock)), g["runway"])
+            if night(self.clock)["fog"]:
+                line += (" Fog, visibility %d metres. Fly the needles." % int(
+                    PILOT_FOG_FAR * fog_reach(self.clock)[1] / FOG_FAR))
             if self.gear < 0.99:
                 line += " Check your gear is down."
             return ("cleared",), line
@@ -7490,6 +7579,13 @@ class Cockpit:
                                   / 200.0))
                     self.atc_key, now = None, now + 2.0
             
+        if self.hold_left:
+            # Let go from the hold: the approach, and the guide's next word.
+            self.hold_left = False
+            self.call(now, "TWR", "AC 101, leave the hold. Cleared for the approach, "
+                      "runway %s." % g["runway"])
+            self.atc_key, self.atc_at = None, now + 3.0
+            return
         key, line = self.atc_line(g)
         if key != self.atc_key or now - self.atc_at > 25.0:
             self.atc_key, self.atc_at = key, now
@@ -7505,7 +7601,8 @@ class Cockpit:
             elif (feet <= mark < self.last_feet and mark not in self.called
                   and self.state == "air"):
                 self.called.add(mark)
-                self.callout, self.callout_at = str(mark), now
+                self.callout, self.callout_at = (
+                    "MINIMUMS" if mark == PILOT_MINIMUMS else str(mark)), now
         self.last_feet = feet
 
     def _trouble(self, now):
@@ -7663,7 +7760,9 @@ class Cockpit:
                     self._fuelled(now)
             return
         if self.engines and self.fuel > 0.0:
-            self.fuel = max(0.0, self.fuel - PILOT_BURN * (PILOT_IDLE + self.throttle)
+            self.fuel = max(0.0, self.fuel - PILOT_BURN * (
+                PILOT_IDLE + self.throttle + (PILOT_DEICE_BURN * PILOT_IDLE
+                                              if self.deice else 0.0))
                             * self.engines / 2.0 * dt
                             * (1.0 if self.state == "air" else PILOT_TAXI_BURN))
             if self.fuel <= 0.0:
@@ -7757,8 +7856,10 @@ class Cockpit:
                 self.gear = max(self.gear_set, self.gear - move)
         braking = now < self.brake_until
         steering = self.bank_in if now < self.bank_until else 0.0
+        self._ice(dt, now)
         drag = PILOT_DRAG * self.v * self.v * (
-            1.0 + 0.18 * self.flaps + 0.25 * self.gear)
+            1.0 + 0.18 * self.flaps + 0.25 * self.gear) * (
+            1.0 + PILOT_ICE_DRAG * self.ice)
         if self.state == "air" and self.ap:
             self._fly_itself(dt, now)
         elif self.ap and self.state in ("ground", "landed"):
@@ -8001,6 +8102,8 @@ class Cockpit:
             out.append("STALL")
         if abs(self.bank) > PILOT_BANK_WARN:
             out.append("BANK ANGLE")
+        if self.ice > PILOT_ICE_WARN and not self.deice:
+            out.append("ICE")
         if self.gear < 0.99 and self.alt < 25.0 and self.vy < -1.0:
             out.append("GEAR")
         near = self.nearest_traffic(self.clock)
@@ -8279,22 +8382,29 @@ def draw_cockpit(ch, co, ck, now):
                   + "#" * lit_ + "-" * (wide_ - lit_) + "]", GOLD_DIM)
     y_ += thr_rows - 1
     if y_ + 1 < h - 1:
-        rud_ = ["-"] * 7
-        rud_[3] = "|"
-        rud_[3 + int(round(ck.rudder * 3))] = "O"
-        _text(ch, co, y_ + 1, 2, "NOSE %+3d  BANK %+3d  RUD %s" % (
-            math.degrees(ck.pitch), math.degrees(ck.bank), "".join(rud_)),
+        _text(ch, co, y_ + 1, 2, "NOSE %+3d  BANK %+3d" % (
+            math.degrees(ck.pitch), math.degrees(ck.bank)),
               ROU_RED if abs(ck.bank) > PILOT_BANK_WARN else HUD)
     if y_ + 2 < h - 1:
         # What is switched on, lit when it is, on as many rows as it takes.
         x_, row_ = 2, y_ + 2
         gear_ = ("GEAR DN" if ck.gear > 0.99 else "GEAR UP" if ck.gear < 0.01
                  else "GEAR ..")
-        words_ = [(gear_, ck.gear > 0.99)]
+        rud_ = ["-"] * 7
+        rud_[3] = "|"
+        rud_[3 + int(round(ck.rudder * 3))] = "O"
+        words_ = [("RUD " + "".join(rud_), abs(ck.rudder) > 0.05),
+                  (gear_, ck.gear > 0.99)]
         if k == 1:
             words_.append(("FLAPS %d" % ck.flaps, ck.flaps > 0))
         words_ += [("AP", ck.ap), ("LIGHT", ck.light), ("RADIO", ck.radio_on),
-                   ("WIPERS", ck.wipers)]
+                   ("WIPERS", ck.wipers), ("DE-ICE", ck.deice)]
+        if ck.leg == "hold" and ck.hold_t0 is not None:
+            left_ = max(0, int((ck.hold_due or 0.0) - (now - ck.hold_t0)))
+            words_.append(("HOLD %d:%02d" % (left_ // 60, left_ % 60), "gold"))
+        if ck.ice > 0.05:
+            words_.append(("ICE %d%%" % round(ck.ice * 100),
+                           None if ck.ice > 0.5 else "gold"))
         if ck.engines < 2 and not ck.dry:
             words_.append(("ENG 1+2 OUT" if ck.engines == 0 else "ENG %d OUT" % (
                 2 if ck.dead_side > 0 else 1), None))
@@ -8396,6 +8506,7 @@ def draw_cockpit(ch, co, ck, now):
         fy = max(by0, min(by1, fy))
         for dx_, g in ((-1, "("), (0, "+"), (1, ")")):
             ch[fy][fx + dx_], co[fy][fx + dx_] = g, ROU_GREEN
+    draw_ils(ch, co, ck, bx0, by0, bx1, by1)
     # The compass over it.
     deg = math.degrees(ck.heading) % 360.0
     tape = bx1 - bx0 + 1
@@ -8967,6 +9078,35 @@ def draw_taxi_greens(ch, co, v, walls, ck):
         px, pz = qx, qz
 
 
+ILS_REACH = 2500.0      # the needles come alive this near the runway's end
+ILS_LINE = 45.0         # a full needle's swing off the centre line, units
+ILS_SLOPE = 16.0        # and off the glide slope
+
+
+def draw_ils(ch, co, ck, bx0, by0, bx1, by1):
+    """The localiser and the glide slope on the horizon, the way a real one has
+    them: a diamond along the foot for the centre line, one up the right side
+    for the slope, each centred when you are on it. In fog it is what you land
+    by. Only coming at the runway, within ILS_REACH."""
+    if ck.state != "air" or bx1 - bx0 < 12 or by1 - by0 < 4:
+        return
+    turn, dist, off, over = ck.nav()
+    if dist > ILS_REACH or abs(turn) > 1.2:
+        return
+    midx, midy = (bx0 + bx1) // 2, (by0 + by1) // 2
+    half, halfy = (bx1 - bx0) // 2 - 2, (by1 - by0) // 2 - 1
+    for n in (-2, -1, 1, 2):                    # the scales' dots
+        ch[by1][midx + n * half // 2], co[by1][midx + n * half // 2] = "o", HUD
+        ch[midy + n * halfy // 2][bx1], co[midy + n * halfy // 2][bx1] = "o", HUD
+    lx = midx + int(round(max(-1.0, min(1.0, -off / ILS_LINE)) * half))
+    gy = midy + int(round(max(-1.0, min(1.0, over / ILS_SLOPE)) * halfy))
+    on_l, on_g = abs(off) < ILS_LINE * 0.15, abs(over) < ILS_SLOPE * 0.15
+    _text(ch, co, by1, lx - 1, "<>", ROU_GREEN if on_l else GOLD)
+    _text(ch, co, gy, bx1 - 1, "<>", ROU_GREEN if on_g else GOLD)
+    _text(ch, co, by1 - 1, bx0 + 1, "LOC", HUD)
+    _text(ch, co, by0 + 1, bx1 - 3, "GS", HUD)
+
+
 def draw_wind_arrow(ch, co, wx, wz, sh, chh, box):
     """The wind on the radar: an arrow the way it is blowing, heading up like
     the map, longer the harder it blows, in the radar's top right corner."""
@@ -9352,6 +9492,24 @@ def draw_murk(ch, co, v, walls, amount, now):
             if row[sx] != " " and _mix(sx, y, seed) % 100 < p and not hidden(
                     walls, sx, y, d):
                 row[sx], rowc[sx] = " ", 0
+
+
+def draw_frost(ch, co, ice, upto):
+    """Ice on the windscreen: in from the sides and down from the top, as deep
+    as the wings are iced, thick at the frame and feathered at its edge. The
+    wipers do not touch it; the de-icer does."""
+    if ice < 0.03:
+        return
+    w = len(ch[0])
+    depth = ice * 0.32
+    for y in range(min(upto, len(ch))):
+        for x in range(w):
+            edge = min(x / w, (w - 1 - x) / w, y / max(1.0, upto) * 2.0)
+            h = _mix(x, y, 6091) % 1000 / 1000.0
+            if edge < depth * (0.55 + 0.45 * h):
+                inner = edge / max(depth, 1e-6)
+                ch[y][x] = "#" if inner < 0.35 else "*" if inner < 0.7 else ":"
+                co[y][x] = SNOW
 
 
 WIPER_PERIOD = 1.3     # seconds a wiper takes over and back
@@ -9760,6 +9918,12 @@ def render_cockpit(width, height, now, ck):
         draw_runway_lights(ch, co, v, home, now)
     draw_blocker(ch, co, v, walls, ck, now)
     draw_hose(ch, co, v, walls, ck, now)
+    if night(now)["fog"]:
+        # A fog night from the air: in it, a few seconds' sight and the lights
+        # going soft; over it, the ground under a layer of it, and only the
+        # bit of the way down through it that is fog counts.
+        draw_fog(ch, co, v, walls, now, PILOT_FOG_NEAR, PILOT_FOG_FAR,
+                 1.0 if ck.alt < PILOT_FOG_TOP else PILOT_FOG_TOP / ck.alt)
     if ck.birds_at is not None:
         # Out of the dark into the landing light, and over the top of you.
         draw_birds(ch, co, now - ck.birds_at, width // 2, v.horizon,
@@ -9780,6 +9944,7 @@ def render_cockpit(width, height, now, ck):
                     ck.light, height - rows, arms, k)
     if arms:
         draw_wipers(ch, co, arms, k)
+    draw_frost(ch, co, ck.ice, height - rows)
     draw_cockpit(ch, co, ck, now)
     if ck.state == "crashed":
         draw_wreck(ch, co, ck, now)
@@ -18700,7 +18865,7 @@ FOG_LIGHTS = set("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                  "abcdefghijklmnopqrstuvwxyz*@+#%$&")
 
 
-def draw_fog(ch, co, v, walls, now):
+def draw_fog(ch, co, v, walls, now, near=None, far=None, scale=1.0):
     """The fog, over the whole picture. Every cell has a distance - the wall
     in its column, the ground at its row, the sky beyond everything - and
     the further it is the more likely the fog has taken it: structure goes
@@ -18708,7 +18873,12 @@ def draw_fog(ch, co, v, walls, now):
     softer the further it is, which is what neon does in fog. Over it all, a
     faint grain of the stuff drifting."""
     height, width = v.height, v.width
-    near, far = fog_reach(now)
+    roll = fog_reach(now)
+    if near is None:
+        near, far = roll
+    else:
+        # A reach of its own (the plane's) breathing the way the street's does.
+        near, far = near * roll[0] / FOG_NEAR, far * roll[1] / FOG_FAR
     wd, wtop, wbase = walls[0], walls[1], walls[2]
     drift = int(now * 1.5)
     blooms = []
@@ -18725,6 +18895,8 @@ def draw_fog(ch, co, v, walls, now):
                     # Above the nearest roof: something further, or the sky.
                     d = far * 1.2 if wd[x] is not None and y > wtop[x] - 40 else None
             h = _mix(x, y + drift // 3, 3601) % 1000 / 1000.0
+            if d is not None:
+                d *= scale                       # over the fog: only so much of it
             if d is None:                        # the sky: a grey glow of it
                 if c == " " and h < 0.18:
                     ch[y][x], co[y][x] = (":" if h < 0.03 else "."), FOG_DIM
@@ -19168,7 +19340,8 @@ def render_street(v, now):
     v.ind_lamps = near_ind_lamps(v, 60.0) if v.eye < 10.0 else []
     v.suburb = near_suburb(v, 48.0) if v.eye < 10.0 else []
     v.blackout = night(now)["blackout"]
-    v.fog = night(now)["fog"] and v.eye < 10.0      # from a roof, you are over it
+    v.fog = (night(now)["fog"] and v.eye < 10.0      # from a roof, you are over it
+             and not v.air)                         # the plane has a fog of its own
     v.crown = crown_light(now, wet)
     v.bass = bass_lots(v, now)
 
@@ -27552,6 +27725,7 @@ def main(stdscr):
                             ord("k"): "fuel", ord("K"): "fuel",
                             ord("c"): "freq", ord("C"): "freq",
                             ord("i"): "wipers", ord("I"): "wipers",
+                            ord("e"): "deice", ord("E"): "deice",
                             ord("]"): "zoom out"}.get(key, ""), now)
                 else:
                     if key in (curses.KEY_LEFT, ord("a")):

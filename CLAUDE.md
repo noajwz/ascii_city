@@ -1357,6 +1357,41 @@ height till it is within 60 of the line). 25 airports of 25 landed, NICE or bett
 frequency you are on is in block letters** on a big window, the size of the altitude over it,
 with COM and its station over it and STBY at the end of that row, and the radio's lines under.
 
+**Icing, fog approaches and holding patterns** (asked for together, 2026-11-08).
+- **Ice** (`ck.ice`, 0..1, `_ice()` every step): it comes on at `PILOT_ICE_RATE` times
+  `icing()` - the storm's cloud (`weather()`), falling snow (`snowfall()`), and a little in
+  a fog night's fog below `PILOT_FOG_TOP`; never in calm air. **Not in plain rain**: the first
+  version iced rain at the cruise, it rains a third of the time, and every flight iced up. Ice
+  raises `stall()` by up to `PILOT_ICE_STALL` and the drag by `PILOT_ICE_DRAG`, so left alone
+  it stalls you; ICE on the panel past `PILOT_ICE_WARN`, an `[ICE 40%]` word, the tower once,
+  and `draw_frost()` frosts the windscreen in from the frame (the wipers do not touch it).
+  `e` is the de-icer (`ck.deice`): it takes it off at `PILOT_DEICE_RATE` and drinks
+  `PILOT_DEICE_BURN` of idle more. The autopilot does not switch it on - that is yours - so
+  the checks' robot pilots (`fp_fly()`, `em_fly()`, the anywhere-round-an-airport test) put it
+  on when ICE shows, as a pilot would; a town-wide storm iced one solid before they did.
+- **Fog from the air**: `render_street()` leaves the street's fog off for `v.air`, and
+  `render_cockpit()` runs `draw_fog()` with a reach of its own (`PILOT_FOG_NEAR`,
+  `PILOT_FOG_FAR`, the street's breathing kept) and a `scale`: in the layer (below
+  `PILOT_FOG_TOP`, 350 ft) every distance counts; over it only the fraction of the way down
+  that is fog, `top / alt`, so the ground is there but thinner. The runway's lights bloom out
+  of it close in. **`draw_ils()`** puts the localiser along the foot of the horizon and the
+  glide slope up its side, as diamonds, within `ILS_REACH` of the runway coming at it
+  (`ILS_LINE`, `ILS_SLOPE` a full swing): the needles the words section used to have, where a
+  real PFD has them. MINIMUMS is called at `PILOT_MINIMUMS`, and on a fog night the landing
+  clearance gives the visibility. **Checks of the cockpit's view must put the plane where a
+  plane is**: one at 300 ft 500 out was inside a building, every frame blank, fog or not.
+- **Holds**: one gate flight in `PILOT_HOLD_ODDS` (and the desk's check ride, `CHECK_RIDES`,
+  not the random troubles) has `hold_due`. In `guide()` a pending hold sends the `fix` leg to a
+  holding fix `PILOT_HOLD_OUT` past the final fix, then the `hold` leg is a racetrack of four
+  corners on the right of the inbound line (`PILOT_HOLD_W` by `PILOT_HOLD_L`), till the time
+  is up and you are back over the fix inbound; then `hold_left`, the tower's "leave the hold,
+  cleared for the approach", and on. The fix leg's own steering must wait while a hold is
+  pending, or it overwrote the hold's target and only planes coming straight in ever held.
+  The tower says hold, right turns, maintain, and when to expect more (keyed on the minutes
+  left); the panel counts `HOLD 0:40` down; the guide wants `PILOT_HOLD_SPEED` in it. **It is
+  short on purpose**: a tank is about four minutes at the cruise, and the first, two-minute
+  hold ran half the test flights dry. 9 of 9 held and landed NICE on the autopilot.
+
 **Heavier again, and a bank can kill you** (asked for): a/d are a roll *rate* now,
 `PILOT_ROLL_RATE` a second while held, not a bank they ease to - there is no stop at
 `PILOT_MAX_BANK` (which only the autopilot and the director still use), so holding on is how
