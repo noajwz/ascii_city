@@ -3,39 +3,17 @@
 An endless, procedurally generated city at night that you walk around in your terminal — and
 fly over, and go into, and get lost in.
 
-![The city from across the river, on a clear night](docs/waterfront.svg)
+![The city from across the river, on a clear night](docs/ASCII-CITY.png)
 
 ```bash
+git clone GitHub.com/noajwz/ascii_city
 python3 ascii_city.py
 ```
 
 One file of stdlib-only Python — `curses` and some arithmetic. No dependencies, no build step,
-nothing saved. Inspired by [Grow Now! Games](https://youtu.be/3YtygAx_C6A).
+nothing saved. 
 
-<table>
-  <tr>
-    <td><img src="docs/street.svg" alt="A street in Chinatown at night"></td>
-    <td><img src="docs/casino.svg" alt="The casino floor: the roulette wheel and a slot machine"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Chinatown — hung signs, lanterns, somebody smoking outside</sub></td>
-    <td align="center"><sub>The casino — the wheel spins honestly</sub></td>
-  </tr>
-  <tr>
-    <td><img src="docs/cockpit.svg" alt="The cockpit on final approach, the runway's lights ahead"></td>
-    <td><img src="docs/outside.svg" alt="The jet seen from behind, on final over the town"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Flying it yourself — on final, the instruments below</sub></td>
-    <td align="center"><sub>The same approach from outside the jet</sub></td>
-  </tr>
-  <tr>
-    <td colspan="2"><img src="docs/storm.svg" alt="A thunderstorm ahead of the plane, lit by a strike"></td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center"><sub>A thunderstorm six kilometres out, caught as it strikes</sub></td>
-  </tr>
-</table>
+
 
 ## For the best experience
 
