@@ -14551,7 +14551,8 @@ def near_cars(v, now, reach=CAR_REACH, every=False):
                     trip = _trip_of(axis, along, ph)
                     g = _mix(axis * 7919 + span[0], (d * 100003 + k) * 977 + trip,
                              2303)
-                    if g % odds or not _trip_ok(axis, span[0], off, trip, ph):
+                    if (g % odds or not _trip_ok(axis, span[0], off, trip, ph)
+                            or g in _cars_off):
                         continue
                     x, z = (off, along) if axis == 0 else (along, off)
                     rx, rz = x - v.x, z - v.z
@@ -14570,6 +14571,12 @@ def near_cars(v, now, reach=CAR_REACH, every=False):
                             else "car")
                     dirv = (0.0, float(d)) if axis == 0 else (float(d), 0.0)
                     out.append((d2, x, z, dirv, kind, g))
+    for x, z, dirv, kind, g in _cars_extra:      # the one chasing you
+        rx, rz = x - v.x, z - v.z
+        d2 = rx * rx + rz * rz
+        if d2 <= reach * reach and (every or (d2 >= CAR_CLEAR ** 2 and rx * v.dx
+                                              + rz * v.dz >= SPRITE_NEAR)):
+            out.append((d2, x, z, dirv, kind, g))
     out.sort(reverse=True)
     return out
 
@@ -24973,6 +24980,29 @@ CAB_DEST = (110.0, 1300.0)      # and how far they want to go, in units
 CAB_ROUTE_MAX = 60000  # cells the satnav looks at before it gives up
 CAB_GREED = 1.3        # how much it trusts the straight line: quick, nearly the best
 MPH = 2.24             # a unit a second, in miles an hour: a unit is a metre
+CAB_GRIP = 10.0        # how fast the way it goes swings round to the way it points
+CAB_HB_GRIP = 1.4      # and with the handbrake on: the back lets go
+CAB_HB_YAW = 1.8       # the handbrake swings the back out: the wheel turns more
+CAB_HB_DRAG = 6.0      # it slows you, the back wheels locked
+CAB_SLIDE_DRAG = 7.0   # and going sideways slows you, by how sideways
+CAB_SLIP_MOST = 1.3    # past this it is a spin, and the slide ends it
+CAB_DRIFT = 0.25       # slip past this, and going, is a drift
+CAB_SKIDS = 400        # the marks on the road behind you, the most kept
+COP_LIMIT_MPH = 45     # the speed limit
+COP_LIMIT = COP_LIMIT_MPH / MPH
+COP_SEES = 45.0        # a police car sees you this far off, if nothing is in the way
+COP_TOP = 27.0         # how fast it chases: less than flat out, so a straight is yours
+COP_ACCEL = 9.0
+COP_KEEP = 7.0         # it sits this far off your bumper
+COP_CATCH = 12.0       # stopped with it this near, you have pulled over
+COP_LOSE = 120.0       # this far behind on the road you drove, it has lost you
+COP_HIDE = 4.0         # or out of its sight this long, and far enough ahead
+COP_BOX = 12.0         # this long on your bumper and it boxes you in
+COP_FINE = 40          # the ticket
+COP_PER_MPH = 3        # and this a mile an hour over
+COP_RAN = 60           # more for running
+COP_HEAT = 90.0        # after you lose one, every police car knows the cab this long
+COP_REST = 25.0        # and after a ticket, they leave you be this long
 CAB_KINDS = [("the casino", "casino"), ("the club", "club"),
              ("the pictures", "cinema"), ("the arcade", "arcade"),
              ("a ramen counter", "ramen"), ("the diner", "diner"),
@@ -25005,10 +25035,25 @@ CAB_SAYS = {
             "I'm leaving a review."],
     "walk": ["Let me out. I'll walk.", "Stop the car. I'm getting out.",
              "That's it - I'm walking from here."],
+    "siren": ["Is that for us?", "Oh no. Police.", "Are those lights for us?"],
+    "lost_cops": {"plain": ["...Is that normal around here?", "Did we just do that?"],
+                  "hurry": ["WOO! That was incredible!", "Now that's a cab ride!"],
+                  "nervous": ["I think I'm going to be sick.", "Let me out. Please."]},
+    "ticket": {"plain": ["Great.", "That's coming out of your tip."],
+               "hurry": ["I'm going to be SO late.", "Unbelievable."],
+               "nervous": ["I told you to slow down.", "Thank you, officer."]},
+    "drift": {"plain": ["Whoa!", "Did we just go sideways?"],
+              "hurry": ["Nice!", "Yes! Again!"],
+              "nervous": ["Please don't do that again.", "Oh God. Oh God."]},
 }
+COP_SAYS = ["License and registration.", "Do you know why I pulled you over?",
+            "Evening. In a hurry, are we?"]
+_cars_off = set()       # the traffic's police car that pulled out after you
+_cars_extra = []        # and where it is now, for the street to draw like any car
 CAB_HUD = " driving the cab  -  %s "
-CAB_KEYS = "w s speed  a d steer  space brakes  m map  h horn  x pull over"
-CAB_KEYS_SHORT = "ws speed  ad steer  spc brake  m h x"
+CAB_KEYS = ("w s speed  a d steer  space brakes  e handbrake  m map  h horn  "
+            "x pull over")
+CAB_KEYS_SHORT = "ws speed  ad steer  spc brake  e handbrake  m h x"
 _cab_seen = {}
 
 
@@ -25081,6 +25126,15 @@ def _cell_of(x, z):
     return int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
 
 
+def cab_sight(ax, az, bx, bz):
+    """Can one see the other: nothing built between them."""
+    n = int(math.hypot(bx - ax, bz - az) / 2.0) + 1
+    for k in range(1, n):
+        if not is_open(*_cell_of(ax + (bx - ax) * k / n, az + (bz - az) * k / n)):
+            return False
+    return True
+
+
 def _kerb_spot(i, j):
     """Where somebody waits for a cab in this road cell: against a building
     beside it, a step out from the wall. None if no building is beside it."""
@@ -25137,6 +25191,16 @@ class Cab:
         self.map_on = True
         self.horn_at = -1e9
         self.blocked = False
+        self.slip = 0.0             # the way it goes less the way it points
+        self.hb_until = 0.0         # the handbrake, held while the key repeats
+        self.drift_t = 0.0          # how long this slide has gone on
+        self.skids = []             # the marks it has left: (x, z)
+        self.cop = None             # the police car after you, if one is
+        self.cop_look = self.car_hit_at = -1e9
+        self.heat_until = self.cop_rest = -1e9
+        self.fine = 0               # money for main() to take from the wallet
+        self.officer = ""           # what the officer at your window says
+        self.mirror = None          # the last picture in the mirror, and when
 
     # --- the controls ----------------------------------------------------
     def key(self, what, now):
@@ -25155,6 +25219,10 @@ class Cab:
             else:
                 self.steer_until = max(self.steer_until, now + CAB_GRACE)
             self.steer_in = d
+        elif what == "handbrake":
+            fresh = now > self.hb_until
+            self.hb_until = (now + TURN_FIRST if fresh
+                             else max(self.hb_until, now + CAB_GRACE))
         elif what == "map":
             self.map_on = not self.map_on
         elif what == "horn":
@@ -25178,27 +25246,74 @@ class Cab:
             self.steer += max(-CAB_CENTRE * dt, min(CAB_CENTRE * dt, -self.steer))
         wet = max(rain_intensity(now), snow_cover(now))
         grip = 1.0 - (1.0 - CAB_WET_GRIP) * min(1.0, wet * 1.5)
-        want = 0.0 if now < self.brake_until else self.want
-        if now < self.brake_until:
+        held = self.cop is not None and self.cop["state"] == "stopped"
+        hb = now < self.hb_until and not held
+        want = 0.0 if now < self.brake_until or held else self.want
+        if hb:
+            # The back wheels lock: no power, and it slows - and the wheel
+            # swings the back out, so the nose comes round faster than the
+            # way it is going does. That difference is the drift.
+            rate, want = CAB_HB_DRAG, 0.0
+        elif now < self.brake_until or held:
             rate = CAB_BRAKE * grip * 1.4
         elif self.speed * (want - self.speed) < 0.0 or abs(want) < abs(self.speed):
             rate = CAB_BRAKE * grip
         else:
             rate = CAB_ACCEL * (1.0 if want >= 0.0 else 0.5)
         self.speed += max(-rate * dt, min(rate * dt, want - self.speed))
+        yaw = 0.0
         if abs(self.speed) > 0.05:
             r = CAB_R + CAB_R_FAST * abs(self.speed)
-            self.heading = _wrap(self.heading + self.steer * self.speed / r * dt)
+            yaw = self.steer * self.speed / r * (CAB_HB_YAW if hb else 1.0)
+            self.heading = _wrap(self.heading + yaw * dt)
+        # The way it is going does not turn with the nose; the tyres pull it
+        # round after it, hard on a dry road, less in the wet, hardly at all
+        # with the back locked.
+        self.slip -= yaw * dt
+        self.slip *= math.exp(-(CAB_HB_GRIP if hb else CAB_GRIP * grip) * dt)
+        self.slip = max(-CAB_SLIP_MOST, min(CAB_SLIP_MOST, self.slip))
+        side = abs(math.sin(self.slip))
+        if side > 0.05:
+            drag = CAB_SLIDE_DRAG * side * dt
+            self.speed = (max(0.0, self.speed - drag) if self.speed > 0.0
+                          else min(0.0, self.speed + drag))
         self._move(self.speed * dt, now)
+        self._drift(now, dt)
         self._traffic(now)
+        self._police(now, dt)
         self._fares(now, dt)
+
+    def _drift(self, now, dt):
+        """Going sideways: the marks it leaves, the noise, and what the one in
+        the back thinks of it when it is over."""
+        if abs(self.slip) > CAB_DRIFT and abs(self.speed) > 5.0:
+            if self.drift_t == 0.0:
+                self.said, self.said_at = "*SCREEEECH*", now
+            self.drift_t += dt
+            last = self.skids[-1] if self.skids else None
+            back = math.sin(self.heading) * 1.3, math.cos(self.heading) * 1.3
+            if last is None or math.hypot(self.x - back[0] - last[0],
+                                          self.z - back[1] - last[1]) > 0.7:
+                self.skids.append((self.x - back[0], self.z - back[1]))
+                del self.skids[:-CAB_SKIDS]
+            return
+        if self.drift_t > 0.8:
+            if self._riding():
+                kind = self.fare["kind"]
+                self.fare["mood"] += {"hurry": 0.15, "nervous": -0.25}.get(kind, 0.0)
+                lines = CAB_SAYS["drift"][kind]
+                self.said, self.said_at = lines[self.rng.randrange(len(lines))], now
+            else:
+                self.said, self.said_at = "*drift* %.1f s" % self.drift_t, now
+        self.drift_t = 0.0
 
     def _move(self, dist, now):
         """Along the heading, a step at a time so nothing is driven through;
         into a wall at an angle it slides along it, head on it stops you."""
         self.blocked = False
         n = 1 + int(abs(dist) / (STEP_MAX * 0.5))
-        sx, sz = math.sin(self.heading) * dist / n, math.cos(self.heading) * dist / n
+        go = self.heading + self.slip
+        sx, sz = math.sin(go) * dist / n, math.cos(go) * dist / n
         for _ in range(n):
             if can_stand(self.x + sx, self.z + sz):
                 self.x, self.z = self.x + sx, self.z + sz
@@ -25218,7 +25333,7 @@ class Cab:
                 continue
             self.blocked = True
             hit = abs(self.speed)
-            self.speed = self.want = 0.0
+            self.speed = self.want = self.slip = 0.0
             if hit > CAB_DENT:
                 self._hit("crash", now)
             elif hit > 2.0 and now - self.hit_at > 0.6:
@@ -25237,13 +25352,154 @@ class Cab:
         if now - self.hit_at < 2.0 or abs(self.speed) < 2.0:
             return                  # stopped at the kerb, they go round you
         v = View(self.x, self.z, self.heading, 3, 3)
-        for _, x, z, (dx, dz), kind, _ in near_cars(v, now, reach=12.0, every=True):
+        for _, x, z, (dx, dz), kind, g in near_cars(v, now, reach=12.0, every=True):
+            if self.cop is not None and g == self.cop["g"]:
+                continue                    # the one behind you: it keeps its distance
             if math.hypot(x - self.x, z - self.z) < CAB_CAR:
+                self.car_hit_at = now
                 rel = math.hypot(math.sin(self.heading) * self.speed - dx * 9.0,
                                  math.cos(self.heading) * self.speed - dz * 9.0)
                 self.speed = self.want = 0.0
                 self._hit("car" if rel > 4.0 else "bump", now)
                 return
+
+    # --- the police --------------------------------------------------------
+    def _police(self, now, dt):
+        """A police car that sees you speeding, or hit a car, puts its lights
+        on and comes after you - along the road you drove, a breadcrumb a
+        unit, so it goes where you went and never through a wall. Stop with
+        it behind you and it is a ticket; get far enough ahead, or out of its
+        sight long enough, and you have lost it."""
+        c = self.cop
+        if c is None:
+            if now - self.cop_look < 0.25 or now < self.cop_rest:
+                return
+            self.cop_look = now
+            why = ("speed" if abs(self.speed) > COP_LIMIT
+                   else "crash" if now - self.car_hit_at < 1.5
+                   else "known" if now < self.heat_until else None)
+            if why is None:
+                return
+            v = View(self.x, self.z, self.heading, 3, 3)
+            for _, x, z, dirv, kind, g in near_cars(v, now, COP_SEES, every=True):
+                if kind != "police" or not cab_sight(x, z, self.x, self.z):
+                    continue
+                n = max(1, int(math.hypot(self.x - x, self.z - z)))
+                path = [(x + (self.x - x) * k / n, z + (self.z - z) * k / n, COP_TOP)
+                        for k in range(1, n + 1)]
+                self.cop = {"state": "chase", "x": x, "z": z, "dir": dirv,
+                            "v": 10.0, "g": g, "why": why, "t0": now, "t_chase": now,
+                            "path": path,
+                            "unseen": 0.0, "close": 0.0, "boxed": False,
+                            "mph": int(abs(self.speed) * MPH)}
+                _cars_off.add(g)
+                self.radio = "WEE-OO - police, lights on: pull over, or lose them"
+                if self._riding():
+                    self.say("siren", now)
+                return
+            return
+        if c["state"] == "chase":
+            last = c["path"][-1] if c["path"] else (c["x"], c["z"])
+            if math.hypot(self.x - last[0], self.z - last[1]) > 1.0:
+                c["path"].append((self.x, self.z, abs(self.speed)))
+            c["mph"] = max(c["mph"], int(abs(self.speed) * MPH))
+            gap = self._cop_gap()
+            cap = COP_TOP
+            if c["path"]:
+                cap = min(COP_TOP, c["path"][0][2] * 1.1 + 3.0)    # your speed there
+            if gap < COP_KEEP + 3.0:
+                cap = min(cap, abs(self.speed) + (gap - COP_KEEP))
+            c["v"] += max(-COP_ACCEL * 2.0 * dt, min(COP_ACCEL * dt, max(0.0, cap)
+                                                     - c["v"]))
+            self._cop_go(min(c["v"] * dt, max(0.0, gap - COP_KEEP)))
+            gap = self._cop_gap()
+            seen = gap < 110.0 and cab_sight(c["x"], c["z"], self.x, self.z)
+            c["unseen"] = 0.0 if seen else c["unseen"] + dt
+            moving = abs(self.speed) > CAB_STOPPED
+            c["close"] = c["close"] + dt if gap < COP_KEEP + 4.0 and moving else 0.0
+            if gap > COP_LOSE or (c["unseen"] > COP_HIDE and gap > 35.0):
+                self._lost_cops(now)
+            elif c["close"] > COP_BOX:
+                c["boxed"] = True           # one in front, one behind: that is that
+                self.speed = self.want = 0.0
+                self._pulled_over(now)
+            else:
+                stopped_ = gap < COP_CATCH and not moving
+                c["still"] = c.get("still", 0.0) + dt if stopped_ else 0.0
+                if c["still"] > 1.0:        # stopped a moment, not just bumped
+                    self._pulled_over(now)
+        elif c["state"] == "stopped":
+            t = now - c["t0"]
+            over = max(0, c["mph"] - COP_LIMIT_MPH)
+            if t < 2.5:
+                self.officer = COP_SAYS[c["g"] % len(COP_SAYS)]
+            elif t < 5.0:
+                self.officer = (("%d in a %d." % (c["mph"], COP_LIMIT_MPH))
+                                if over else "You hit a car back there.")
+                if c["ran"]:
+                    self.officer += " And then you ran."
+                if c["boxed"]:
+                    self.officer += " Nowhere to go, was there."
+            elif not c["fined"]:
+                c["fined"] = (COP_FINE + COP_PER_MPH * over
+                              + (COP_RAN if c["ran"] else 0))
+                self.fine += c["fined"]
+                self.officer = "That's $%d. Drive safe." % c["fined"]
+                self.radio = "ticket: $%d" % c["fined"]
+                if self._riding():
+                    kind = self.fare["kind"]
+                    self.fare["mood"] -= 0.2
+                    lines = CAB_SAYS["ticket"][kind]
+                    self.said, self.said_at = lines[self.rng.randrange(len(lines))], now
+            elif t > 8.0:
+                self._cops_gone(now, COP_REST)
+
+    def _pulled_over(self, now):
+        c = self.cop
+        c.update(state="stopped", t0=now, fined=0, ran=now - c["t_chase"] > 20.0)
+        self.radio = ""
+
+    def _lost_cops(self, now):
+        self.radio = "you lost them - every cop in town knows the cab for a while"
+        if self._riding():
+            kind = self.fare["kind"]
+            self.fare["mood"] += {"hurry": 0.3, "nervous": -0.4}.get(kind, 0.0)
+            lines = CAB_SAYS["lost_cops"][kind]
+            self.said, self.said_at = lines[self.rng.randrange(len(lines))], now
+        self._cops_gone(now, 3.0)
+        self.heat_until = now + COP_HEAT
+
+    def _cops_gone(self, now, rest):
+        _cars_off.discard(self.cop["g"])
+        _cars_extra[:] = []
+        self.cop, self.officer = None, ""
+        self.cop_rest = now + rest
+
+    def _cop_gap(self):
+        """How far behind it is, along the road you drove."""
+        c = self.cop
+        px, pz, n = c["x"], c["z"], 0.0
+        for x, z, _ in c["path"]:
+            n += math.hypot(x - px, z - pz)
+            px, pz = x, z
+        return n + math.hypot(self.x - px, self.z - pz)
+
+    def _cop_go(self, d):
+        c = self.cop
+        while d > 1e-6 and c["path"]:
+            x, z, _ = c["path"][0]
+            seg = math.hypot(x - c["x"], z - c["z"])
+            if seg > 1e-6:
+                c["dir"] = ((x - c["x"]) / seg, (z - c["z"]) / seg)
+            if seg <= d:
+                c["x"], c["z"] = x, z
+                c["path"].pop(0)
+                d -= seg
+            else:
+                c["x"] += (x - c["x"]) * d / seg
+                c["z"] += (z - c["z"]) * d / seg
+                d = 0.0
+        _cars_extra[:] = [(c["x"], c["z"], c["dir"], "police", c["g"])]
 
     def _hit(self, what, now):
         self.hit_at = now
@@ -25434,6 +25690,10 @@ class Cab:
         return "straight on, %d m" % int(len(self.route) * CELL)
 
     def status(self):
+        c = self.cop
+        if c is not None:
+            return ("POLICE - pull over, or lose them" if c["state"] == "chase"
+                    else "pulled over")
         f = self.fare
         if f is None:
             return "for hire - waiting on dispatch"
@@ -25463,6 +25723,11 @@ def draw_cab_world(ch, co, v, cab, now):
     an arm up and TAXI! over them, and where they are going marked once you
     are near."""
     walls = v.walls
+    for x, z in cab.skids:                      # what the drifts left on the road
+        pr = v.project(x, 0.02, z)
+        if pr is not None and pr[2] < 60.0:
+            put_cell(ch, co, v, walls, int(round(pr[0])), int(round(pr[1])), pr[2],
+                     "=" if pr[2] < 25.0 else "-", CONCRETE)
     f = cab.fare
     if f is None:
         return
@@ -25599,6 +25864,44 @@ def draw_satnav(ch, co, cab, x0, y0, mw, mh, now):
     _label(ch, co, y0 + mh - 2, x0 + 2, words.upper()[:mw - 4], GOLD)
 
 
+MIRROR_FPS = 15
+
+
+def mirror_size(width, height):
+    """The rear-view mirror's picture, columns by rows, or None: too small."""
+    if width < 60 or height < 24:
+        return None
+    return max(16, min(72, width // 5)), max(4, min(14, height // 6))
+
+
+def draw_mirror(ch, co, cab, now, x0, y0, mw, mh):
+    """The rear-view mirror: the street behind you, the real one, rendered
+    looking back and turned round the way a mirror turns it - which is where
+    the police car comes from."""
+    # Fifteen times a second, not thirty: it is a whole render_street() of its
+    # own, about 5 ms whatever its size, and a mirror that size does not show
+    # the difference.
+    key = (int(now * MIRROR_FPS), mw, mh)
+    if cab.mirror is None or cab.mirror[0] != key:
+        v = View(cab.x, cab.z, cab.heading + math.pi, mw, mh, eye=2.4)
+        # A mirror is narrow and close up: half the field of view, twice the
+        # size, or a police car twenty units back is one row of it. And it
+        # looks down the road, not up at the sky.
+        v.plx, v.plz, v.fx, v.fy = v.plx * 0.5, v.plz * 0.5, v.fx * 2.0, v.fy * 2.0
+        v.horizon = max(1, mh // 3)
+        cab.mirror = (key,) + render_street(v, now)[:2]
+    _, mch, mco = cab.mirror
+    for y in range(mh):
+        for x in range(mw):
+            ch[y0 + y][x0 + x] = mch[y][mw - 1 - x]
+            co[y0 + y][x0 + x] = mco[y][mw - 1 - x]
+    for y in range(y0, y0 + mh):
+        ch[y][x0 - 1], co[y][x0 - 1] = "[", CURB
+        ch[y][x0 + mw], co[y][x0 + mw] = "]", CURB
+    for x in range(x0 - 1, x0 + mw + 1):
+        ch[y0 + mh][x], co[y0 + mh][x] = "-", CURB
+
+
 def draw_driver(ch, co, cab, now, wet, k=1):
     """From the driver's seat: the roof and the pillars, the mirror with the
     dice, the wipers in the wet, the dashboard with the speed and the meter,
@@ -25615,6 +25918,9 @@ def draw_driver(ch, co, cab, now, wet, k=1):
         words = cab.said
     if now - cab.horn_at < 0.6:
         words = "HOOOONK"
+    if cab.officer:
+        words = 'OFFICER: "%s"' % cab.officer
+    siren = cab.cop is not None and cab.cop["state"] == "chase"
     mph = int(round(abs(cab.speed) * MPH))
     if width < 40 or height < 14:
         _text(ch, co, 0, 0, (" %d mph  %s" % (mph, cab.directions()))[:width], GOLD)
@@ -25631,11 +25937,27 @@ def draw_driver(ch, co, cab, now, wet, k=1):
             ch[y][x], co[y][x] = ("\\" if x == w - 1 else " "), BARK
             ch[y][width - 1 - x] = "/" if x == w - 1 else " "
             co[y][width - 1 - x] = BARK
+    c = cab.cop
+    if c is not None and c["state"] == "chase" and cab._cop_gap() < 40.0:
+        # The lights behind you come in through the back window, on the roof
+        # and down the pillars.
+        bar = police_light(now, c["g"])
+        for y in range(dash):
+            for x in (list(range(width)) if y == 0 else
+                      [x_ for x_ in range(width) if (x_ < 12 or x_ >= width - 12)
+                       and ch[y][x_] in "\\/"]):
+                co[y][x] = bar
     mx = width // 2
-    _text(ch, co, 1, mx - 6, "[___________]", CURB)
-    _text(ch, co, 2, mx - 1, "|", CURB)
+    size = mirror_size(width, height)
+    if size is None:
+        _text(ch, co, 1, mx - 6, "[___________]", CURB)
+        top = 2
+    else:
+        draw_mirror(ch, co, cab, now, mx - size[0] // 2, 1, size[0], size[1])
+        top = size[1] + 2
+    _text(ch, co, top, mx - 1, "|", CURB)
     dice = int(math.sin(now * 2.3 + cab.steer * 2.0) * 1.2)
-    _text(ch, co, 3, mx - 1 + dice, "[:]", ROU_RED)
+    _text(ch, co, top + 1, mx - 1 + dice, "[:]", ROU_RED)
     if wet > 0.15:                                    # the wipers
         a = math.sin(now * 3.0) * 1.2
         for n in range(14):
@@ -25675,7 +25997,11 @@ def draw_driver(ch, co, cab, now, wet, k=1):
               ROU_GREEN if hired else GOLD_DIM)
         text_x = wx + rx + 3
     room = max(0, width - text_x - 22 * (1 if k == 1 else k) - 2)
-    if cab.radio:
+    if siren:
+        _text(ch, co, dash + 1, text_x, ("WEE-OO WEE-OO" if int(now * 3) % 2
+                                         else "  WEE-OO WEE-OO")[:room],
+              police_light(now, cab.cop["g"]))
+    elif cab.radio:
         _text(ch, co, dash + 1, text_x, cab.radio[:room], GOLD)
     if words:
         _text(ch, co, dash + 2, text_x, words[:room], HUD)
@@ -26889,7 +27215,9 @@ def main(stdscr):
                             note, note_at = "the barrier wants $%d" % METRO_FARE, now
             elif cab is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (27, ord("x"), ord("X")):
-                    if abs(cab.speed) < CAB_STOPPED:
+                    if cab.cop is not None:
+                        note, note_at = "not with the police right behind you", now
+                    elif abs(cab.speed) < CAB_STOPPED:
                         # Out at the kerb, and the driver comes back for it.
                         cam_x, cam_z, yaw = cab.x, cab.z, cab.heading
                         note, note_at = ("shift over: %d fare%s, $%d" % (
@@ -26909,7 +27237,8 @@ def main(stdscr):
                              ord("d"): "right", ord("D"): "right",
                              ord(" "): "brake", ord("b"): "brake", ord("B"): "brake",
                              ord("m"): "map", ord("M"): "map", ord("h"): "horn",
-                             ord("H"): "horn"}.get(key, ""), now)
+                             ord("H"): "horn", ord("e"): "handbrake",
+                             ord("E"): "handbrake"}.get(key, ""), now)
             elif taxi is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (27, ord("x"), ord("X")) and taxi["phase"] != "ride":
                     taxi = None                 # wave it off, or get back out
@@ -27354,6 +27683,12 @@ def main(stdscr):
             if cab.pay:
                 wallet.give(cab.pay)        # the fares pay you, as they get out
                 cab.pay = 0
+            if cab.fine:
+                wallet.take(min(cab.fine, wallet.money))    # and the police take it
+                cab.fine = 0
+        elif _cars_extra or _cars_off:
+            _cars_extra[:] = []             # out of the cab, the chase is over
+            _cars_off.clear()
         sky_x += sky_v * frame_time
         yaw += spin * frame_time
         # Move on each axis in turn, so running into a wall at an angle slides
