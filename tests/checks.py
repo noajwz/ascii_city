@@ -7205,6 +7205,164 @@ for n_ in range(150):
 check("on the grass it drags, but with the power on you can get off it",
       ht_g.state == "ground" and 2.0 < ht_g.v < 8.0, str(ht_g.v))
 
+# --- the height callouts, and when it goes wrong ---------------------------------
+
+
+def em_fly(trouble_, seed_=3, t0_=1000.0, both_=None, wind_=(0.0, 0.0), hand_=None):
+    """fp_fly with something going wrong: off the runway by hand, the autopilot,
+    the gear, the director on final. hand_(c, t) flies once it has gone wrong."""
+    c_ = ac.Cockpit(pk_home, t0_, ac.flight_plan(pk_home, seed_), trouble=trouble_)
+    if both_ is not None:
+        while (ac._mix(c_.seed, 0, 7911) % 4 == 0) != both_:
+            c_.seed += 1
+    c_.wind = lambda now_: wind_
+    c_.words, c_.calls, call_ = [], [], c_.call
+    c_.call = lambda *a_, **k_: (c_.words.append(a_[2]), call_(*a_, **k_))
+    t_ = t0_
+    c_.key("radio", t_)
+    for _ in range(10):
+        c_.key("more", t_)
+    while (c_.state != "crashed" and c_.ended is None and t_ < t0_ + 900.0
+           and not (c_.state == "landed" and c_.v < 1.5)):
+        if c_.callout and (not c_.calls or c_.calls[-1][1] != c_.callout_at):
+            c_.calls.append((c_.callout, c_.callout_at))
+        if not (hand_ is not None and c_.trouble_at is not None and hand_(c_)):
+            if (c_.state == "ground" and c_.v > ac.PILOT_ROTATE - 4.0
+                    and c_.pitch_set < 0.14):
+                c_.key("up", t_)
+            if (c_.state == "air" and not c_.ap and c_.alt > 8.0
+                    and c_.leg != "final" and c_.engines):
+                c_.key("autopilot", t_)
+            if c_.state == "air":
+                if c_.alt > 20.0 and c_.leg != "final" and c_.gear_set > 0.5:
+                    c_.key("gear", t_)
+                elif c_.leg == "final" and c_.gear_set < 0.5:
+                    c_.key("gear", t_)
+            if c_.state == "air" and not c_.ap and c_.leg == "final":
+                c_.bank = c_.commands()[0]
+        if c_.state == "landed":
+            c_.key("brake", t_)
+        c_.step(1.0 / 30.0, t_)
+        t_ += 1.0 / 30.0
+    return c_
+
+
+def em_dead_stick(c_):
+    """No engines: straight back down on the runway ahead, the way it says."""
+    if c_.engines or c_.state != "air":
+        return False
+    a_ = c_.dep or min(ac.approaches(pk_home),
+                       key=lambda a_: abs(ac._wrap_pi(a_["course"] - c_.heading)))
+    (thx_, thz_), (ox_, oz_) = a_["thr"], a_["out"]
+    lat_ = (c_.x - thx_) * -oz_ + (c_.z - thz_) * ox_
+    want_ = a_["course"] - max(-0.5, min(0.5, lat_ * 0.04))
+    c_.bank = max(-0.2, min(0.2, ac._wrap_pi(want_ - c_.heading) * 1.6))
+    if c_.alt < 2.5:
+        c_.bank = max(-0.08, min(0.08, c_.bank))
+    c_.throttle, c_.pitch_set = 0.0, (-0.1 if c_.alt > 2.0 else -0.04)
+    return True
+
+
+em_kinds = [ac.flight_trouble(s_) for s_ in range(4000)]
+em_some = sum(1 for k_ in em_kinds if k_) / 4000.0
+check("one flight in eight has trouble coming, any of the three",
+      0.1 < em_some < 0.15 and set(em_kinds) == {None} | set(ac.PILOT_TROUBLES),
+      str(em_some))
+ac._check_rides[0] = 0
+check("a check ride always has one, and goes through them",
+      [ac.check_ride() for _ in range(4)] == ["engine", "birds", "blocked", "engine"])
+em_n = em_fly(None)
+check("on the way down the heights are called, each once, the last every ten feet",
+      em_n.state == "landed" and [c_ for c_, _ in em_n.calls]
+      == [str(f_) for f_ in ac.PILOT_CALLOUTS], str(em_n.calls))
+em_up = pk_at(alt_=0.5, v_=50.0)
+em_up.pitch = em_up.pitch_set = 0.15
+em_up.throttle = 1.0
+for n_ in range(300):
+    em_up.step(1.0 / 30.0, n_ / 30.0)
+check("and none going up", em_up.alt > 15.0 and em_up.callout is None,
+      str(em_up.alt))
+em_e = em_fly("engine")
+check("an engine fails in the cruise: a mayday, in to the nearest, landed on one "
+      "and paid for it", em_e.state == "landed" and em_e.engines == 1
+      and any("Mayday" in w_ for w_ in em_e.words)
+      and any("The nearest is" in w_ for w_ in em_e.words)
+      and em_e.pay >= ac.PILOT_SAVE_PAY, str((em_e.state, em_e.engines, em_e.said)))
+em_b1 = em_fly("birds", both_=False)
+check("birds on the climb out take one engine; it climbs on the other, comes round, "
+      "lands", em_b1.state == "landed" and em_b1.engines == 1
+      and em_b1.birds_at is not None and "bird strike" in " ".join(em_b1.words))
+em_b2 = [em_fly("birds", seed_=s_, t0_=1000.0 + 977 * s_, both_=True, wind_=w_,
+                hand_=em_dead_stick)
+         for s_, w_ in ((0, (0.0, 0.0)), (1, (6.0, 0.0)), (2, (-6.0, 0.0)))]
+check("one time in four both: there is runway left ahead, and straight back down "
+      "on it you get down", all(c_.state == "landed" and c_.engines == 0
+                                for c_ in em_b2), str([c_.said for c_ in em_b2]))
+em_ap = pk_at(alt_=30.0)
+em_ap.engines, em_ap.trouble_at = 0, 0.0
+em_ap.key("autopilot", 1.0)
+check("with no engines the autopilot will not take it", not em_ap.ap)
+em_k = em_fly("blocked")
+em_shut = {rw_ for h_, rw_ in em_k.closed}
+check("a truck on the runway on short final: sent round, that runway shut, and "
+      "down on the other", em_k.state == "landed" and em_k.blocker is not None
+      and em_shut and ac.runway_under(pk_home, em_k.x, em_k.z) not in em_shut
+      and any("go around" in w_ for w_ in em_k.words), str((em_k.state, em_k.said)))
+em_t = ac.Cockpit(pk_home, 0.0)
+em_t.calm = True
+em_t.blocker = (pk_rx, pk_zn - 200.0, (1.0, 0.0), -100.0)
+em_t.state, em_t.alt, em_t.v, em_t.heading = "landed", 0.0, 30.0, math.pi
+em_t.x, em_t.z = pk_rx, pk_zn - 190.0
+for n_ in range(30):
+    em_t.step(1.0 / 30.0, n_ / 30.0)
+check("land on it anyway and you find the truck", em_t.state == "crashed"
+      and "truck" in em_t.said)
+em_wi = 100
+em_wj = int(round(ac.river_centre(em_wi)))
+em_soft = pk_at(alt_=0.01, v_=40.0, x_=em_wi * ac.CELL + 2.5,
+                z_=em_wj * ac.CELL + 2.5, pitch_=-math.asin(3.0 / 40.0))
+em_soft.trouble_at = 0.0
+em_soft.step(1.0 / 30.0, 1.0)
+em_hard = pk_at(alt_=0.01, v_=40.0, x_=em_wi * ac.CELL + 2.5,
+                z_=em_wj * ac.CELL + 2.5, pitch_=-math.asin(15.0 / 40.0))
+em_hard.step(1.0 / 30.0, 1.0)
+check("gently onto the water is a ditching, everyone out on the wings; hard is not",
+      ac.water_at(em_wi, em_wj) and em_soft.state == "landed"
+      and em_soft.grade == "DITCHED" and em_soft.pay == ac.PILOT_SAVE_PAY
+      and em_hard.state == "crashed", str((em_soft.state, em_hard.state)))
+em_y = pk_at(alt_=100.0, v_=60.0)
+em_y.engines, em_y.dead_side, em_y.throttle = 1, 1.0, 1.0
+h0_ = em_y.heading
+for n_ in range(90):
+    em_y.step(1.0 / 30.0, n_ / 30.0)
+check("on one engine the nose swings round to the dead one",
+      0.05 < ac._wrap_pi(em_y.heading - h0_) < 0.2, str(em_y.heading - h0_))
+em_bad = []
+for w_, h_ in ((300, 90), (110, 34), (80, 24), (61, 19)):
+    for out_ in (False, True):
+        for c_ in (em_b2[0], em_e, em_k):
+            c_.outside = out_
+            c_.birds_at = 10.0 if c_ is em_b2[0] else c_.birds_at
+            c_.blocker = c_.blocker and c_.blocker[:3] + (5.0,)
+            try:
+                ac.render_cockpit(w_, h_, 10.5, c_)
+            except Exception as e_:
+                em_bad.append((w_, h_, out_, repr(e_)))
+            c_.outside = False
+check("the flock, the truck and the smoke draw, inside and out, at any size",
+      not em_bad, str(em_bad))
+em_p = pk_at(alt_=3.9, v_=48.0, z_=pk_zn + 60.0)
+em_p.callout, em_p.callout_at = "100", 1.0
+em_p.engines, em_p.trouble_at, em_p.dead_side = 1, -50.0, 1.0
+em_g, em_co = ac.render_cockpit(300, 90, 1.2, em_p)[:2]
+check("the height big in the windscreen, and the engine out lit on the panel",
+      sum(1 for y_ in range(60) for x_ in range(300)
+          if em_g[y_][x_] == "#" and em_co[y_][x_] == ac.ROU_GREEN) > 40
+      and "ENG 2 OUT" in "\n".join("".join(r_) for r_ in em_g))
+em_gate = "\n".join("".join(r_) for r_ in ac.render_gate(
+    110, 34, 2.0, {"home": pk_home})[0])
+check("and the desk sells a check ride", "check ride" in em_gate)
+
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
 ac.FLASH, ac.ROU_RED = 901, 902

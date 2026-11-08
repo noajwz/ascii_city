@@ -1286,7 +1286,32 @@ degrees and 8 units (the autopilot is held to the old figures, `tight`), and `r`
 you were given clears you whatever the route says - at the hold it is "line up and wait", on the
 wrong runway the tower tells you. And **the grass was a trap**: a fixed `PILOT_GRASS` drag
 bigger than a few steps of throttle held a jet still where it stood, power on; it is per unit of
-speed now. `ht_taxi()` in the checks taxis on the keys alone, corners cut, the way a person does. `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
+speed now. `ht_taxi()` in the checks taxis on the keys alone, corners cut, the way a person does.
+**Height callouts, and when it goes wrong.** `_callouts()` calls `PILOT_CALLOUTS` on the way
+down (1000, 500, 100, then every ten feet from 50), each once until you are well back above it,
+and `draw_flight_words()` puts the last one up big in the sky over the runway for a second. The
+low ones come fast - the game's sink is about 100 ft a second against a real 12 - so unflared
+they are three frames each; the speed of the countdown is itself the cue. **Trouble**:
+`flight_trouble(seed)` gives one flight in `PILOT_TROUBLE_ODDS` something, which the gate and
+the menu's `8` pass in (`Cockpit(..., trouble=)`; the checks and the robot never get one), and
+`t` at the desk is a **check ride**, `check_ride()` going down `PILOT_TROUBLES`. `_trouble()`
+fires it: **engine** in the cruise, 40 s and more after lift-off (`up_at`); **birds** at
+`PILOT_BIRDS_AT` on the climb out - `draw_birds()` past the windscreen for `BIRD_PAST`, a jolt,
+and at `BIRD_HIT` one engine, or one time in four both; **blocked** on final 120 to 450 out -
+`_block()` puts a truck on the touchdown zone (`blocker_at()`, driving out over `BLOCK_ROLL`,
+amber streaks so it shows from a mile, `draw_blocker()`), shuts that runway (`closed`, which
+`active_approach(..., shut=)` honours and the map draws in red `x`), and sends you round to the
+other. `_lose_engines()`: thrust goes by `engines / 2`, one out swings the nose to it
+(`PILOT_YAW`, held off with a little bank), the mayday, the radio on, `dest` the nearest
+airport; with none the autopilot will not take it. **The dual failure was measured before it
+was tuned**: at 175 ft there are about 350 units of runway still ahead, and the game's lift is
+in the pitch, so with no power you float level until the speed goes - which is what killed the
+first robot, floating past the end. Nose straight down and back on it gets down, 36 of 36 in
+crosswinds; that is what the windscreen tells you. Landing gently on water is now a ditching
+(`_ditch()`, `DITCHED`), and getting it down after trouble pays `PILOT_SAVE_PAY`. `em_fly()` in
+the checks is fp_fly with trouble: engine, birds both ways and the truck all landed, 20 of 20
+each in five winds when measured.
+ `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
 see-through, which is how the first titles came out `--MAP-6-km--`. The key hint has a short form
 (`PILOT_KEYS_SHORT`) for windows under 118 columns. About 2-3 ms a frame at 300x90.
 
