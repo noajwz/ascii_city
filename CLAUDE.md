@@ -2633,6 +2633,57 @@ the fare in red. **It is the city going by the window, not a map of the way**: t
 straight avenue, and at the end you are set down at the place, facing it. Six to fourteen
 seconds a ride, by distance.
 
+### Driving it yourself
+
+**`d` in WHERE TO? and the driver gets out**: "All yours. I'll be in the diner." `cab` in
+`main()` is a `Cab`, and `elsewhere()` counts it. There is no cheat key for it - the panel has
+none left - and it needs none: `t` works on any street, so the way in is two keys from anywhere.
+
+- **The controls stay put, the plane's way**, because curses sees no key go up: `w`/`s` step
+  the speed held (`CAB_STEP`, a cruise control, up to `CAB_TOP`, down to `CAB_BACK` in
+  reverse), space or `b` brakes to a stop, and a steering key holds the wheel over only while it
+  keeps repeating (`TURN_FIRST` for a fresh press, then `CAB_GRACE`) and it comes back by itself.
+  The wheel turns you by how fast you are going (`CAB_R` plus `CAB_R_FAST` a unit of speed), so
+  standing still it turns nothing. Wet roads (rain or lying snow) brake at `CAB_WET_GRIP`.
+- **Walls and cars.** `_move()` steps the way `main()` walks, with `can_stand()`: into a wall at
+  an angle it slides along it, and only if the wall took more than `0.45` of the step is that a
+  bump - the first version called every graze one, and the robot driver was bumping three times
+  a fare. Head on, under `CAB_DENT` is a bump and over it a crash. The traffic does not see you:
+  within `CAB_CAR` of a car in `near_cars()` you have hit it - unless you are stopped, since the
+  cars would drive through a cab at the kerb every two seconds. Note that the traffic is not
+  drawn within `CAR_CLEAR`, so the car vanishes as you hit it.
+- **The fares** (`_fares()`): dispatch (`_dispatch()`) finds somebody `CAB_NEAR` cells off, on
+  a road cell beside a building, a step out from the wall (`_kerb_spot()`), and only if the
+  satnav can get you there. They wave (`WAVER`) with TAXI! flashing over them
+  (`draw_cab_world()`). Stop within `CAB_PICKUP` and they get in, and `_board()` picks where
+  to: the nearest of a shuffle of `CAB_KINDS`, `CAB_DEST` off, put down at the road cell
+  nearest it (`_drop_cell()`), with [ HERE ] over it once you are close. The meter is
+  `CAB_FLAG` and `CAB_PER` a unit driven, not as the crow flies; the tip is up to `CAB_TIP` of
+  it by their `mood`, which bumps, crashes, cars and the grass (`cab_ground()` "rough": a park,
+  the quad, the tarmac) take from. A quarter are in a hurry and tip double inside `eta`, a
+  quarter are nervous and do not like `CAB_LIMIT`; drive them round the houses and they ask
+  if you are lost. At `mood` -0.6 they get out and walk, unpaid. What they say is `CAB_SAYS`.
+  **This is the first money in the city that is not the `+` cheat**: `cab.pay` goes into the
+  wallet each frame. `x` stopped pulls over and you are standing there; a fare still in the back
+  gets out with you, unpaid.
+- **The satnav** (`cab_route()`) is A* over road cells - streets, alleys, car parks, bridges
+  (`cab_ground()` "road", cached) - with its state the cell *and* the way in, so a turn can
+  cost something (0.6) and there is no turning round in the road: without that the way across
+  a wide junction was a staircase and "left in 10 m" came every other cell. An alley costs 2.5.
+  `CAB_GREED` weights the straight line: plain A* took 110 ms on a long fare, and at 1.3 it is
+  11. Off the way for a second, it looks again (`_satnav()`); `directions()` says the next turn
+  from the way. `draw_satnav()` is heading up, a cell two columns by a row, the way in gold, an
+  arrow on the edge when the fare is off the map. `m` puts it away.
+- **The view** is `render_street()` at `eye=2.4` with `draw_driver()` over it: the roof and
+  pillars, the mirror and dice, wipers in the wet, the dashboard with the speed, the meter and
+  HIRED / FOR HIRE, the wheel (`draw_wheel()`, in front of the dash, turning with `steer`), and
+  dispatch and the fare along the dash. On the big-window system the speed and the fare go in
+  block letters and the satnav and the wheel are worked out from the window's size anyway.
+  About 16 ms a frame at 120x36 and 27 at 300x90.
+
+`cab_robot()` in the checks drives six shifts of three fares on the keys alone, following the
+satnav, all delivered and paid. If you change the handling and it cannot, neither can anyone.
+
 ## Money
 
 **One balance for the whole city.** `main()` owns a `Wallet` — `STARTING_MONEY`, a thousand
@@ -2646,8 +2697,9 @@ what you get instead: the usher, the bouncer, the cook's sign, the drone. The li
 (`LIFT_FEES`: a sky deck, the roof party; the fire escapes and the lighthouse stair are free), a
 taxi by the fare, and
 a show from the lighthouse is `SHOW_FEE`; refused, the HUD says what it costs. The balance leads
-the HUD everywhere. Nothing tops it up — the casino's old stake when you were broke would have
-been money for nothing — except `+` in the menu, `+$1000`. Like everything else you carry, it is
+the HUD everywhere. Nothing tops it up for nothing — the casino's old stake when you were broke
+would have been money for nothing — but you can earn it driving a cab (see Driving it
+yourself), and `+` in the menu is `+$1000`. Like everything else you carry, it is
 for the session and nowhere else.
 
 ## Testing it

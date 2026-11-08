@@ -4762,6 +4762,164 @@ for w_, h_ in ((20, 8), (40, 14), (240, 70)):
     ac.draw_taxi_menu(g_, c_, tdests, 3, 100.0)
 check("and any size of window is fine", True)
 
+# --- driving the cab yourself ------------------------------------------------------
+check("the cab's where to? offers the wheel", "drive it yourself" in mtext)
+cb_x, cb_z, cb_y = ac.find_place(sx_, sz_, "street")
+cb_ = ac.Cab(cb_x, cb_z, cb_y, 0.0, 7)
+cb_.call_at = 1e9                       # no fares for this part
+for _ in range(3):
+    cb_.key("faster", 0.0)
+cb_t = 0.0
+while cb_t < 2.5:
+    cb_t += 1.0 / 30.0
+    cb_.step(1.0 / 30.0, cb_t)
+check("w holds a speed and it gets up to it, no further",
+      cb_.want == 3 * ac.CAB_STEP and abs(cb_.speed - cb_.want) < 0.01,
+      "%.1f" % cb_.speed)
+cb_.key("brake", cb_t)
+for _ in range(60):                     # it is raining: the brakes have less
+    cb_t += 1.0 / 30.0
+    cb_.step(1.0 / 30.0, cb_t)
+check("space stops it, and it stays stopped", cb_.speed == 0.0 and cb_.want == 0.0)
+cb_.heading, cb_h0 = 0.0, None
+for _ in range(15):
+    cb_t += 1.0 / 30.0
+    cb_.key("right", cb_t)
+    cb_.step(1.0 / 30.0, cb_t)
+check("the wheel goes over, but standing still it turns nothing",
+      cb_.steer > 0.5 and cb_.heading == 0.0)
+for _ in range(30):
+    cb_t += 1.0 / 30.0
+    cb_.step(1.0 / 30.0, cb_t)
+check("let go of the key and the wheel comes back", cb_.steer == 0.0)
+
+
+cw_y, cw_run = min(((cb_y + k_ * math.pi / 2, ac.probe(cb_x, cb_z, cb_y + k_ * math.pi
+                                                    / 2, 400.0)) for k_ in range(4)),
+                   key=lambda a_: a_[1] if a_[1] > 9.0 else 1e9)
+
+
+def cab_wall(speed):
+    """Drive at a wall at this speed, straight at it: what happens."""
+    c_ = ac.Cab(cb_x, cb_z, cw_y, 0.0, 7)
+    c_.call_at = 1e9
+    c_.x, c_.z = (cb_x + math.sin(cw_y) * (cw_run - 9.0),
+                  cb_z + math.cos(cw_y) * (cw_run - 9.0))
+    c_.speed = c_.want = speed
+    t_ = 0.0
+    while t_ < 3.0 and not c_.blocked:
+        t_ += 1.0 / 30.0
+        c_.step(1.0 / 30.0, t_)
+    return c_
+
+
+cw_slow, cw_fast = cab_wall(4.0), cab_wall(20.0)
+check("into a wall: it stops you, and it never goes through it",
+      cw_slow.blocked and cw_fast.blocked and cw_fast.speed == 0.0
+      and ac.can_stand(cw_fast.x, cw_fast.z))
+check("slowly a bump, fast a crash", cw_slow.said == "*bump*"
+      and cw_fast.said == "*CRUNCH*", "%s / %s" % (cw_slow.said, cw_fast.said))
+
+cr_a = ac._cell_of(cb_x, cb_z)
+cr_ = ac.cab_route(cr_a, (cr_a[0] + 30, cr_a[1] + 25))
+cr_ = cr_ or ac.cab_route(cr_a, (cr_a[0] - 30, cr_a[1] + 25))
+check("the satnav finds a way, a road cell at a time, no jumps",
+      cr_ is not None and all(abs(a[0] - b[0]) + abs(a[1] - b[1]) == 1
+                              for a, b in zip(cr_, cr_[1:]))
+      and all(ac.cab_ground(*c_) == "road" for c_ in cr_[1:-1]),
+      "%d cells" % len(cr_ or ()))
+check("and it does not wander round the houses",
+      cr_ is not None and len(cr_) < 1.6 * (abs(cr_[-1][0] - cr_a[0])
+                                            + abs(cr_[-1][1] - cr_a[1])) + 10)
+check("and none at all through the river where there is no bridge",
+      not any(ac.water_at(*c_) and not ac.deck_at(*c_) for c_ in cr_ or ()))
+
+
+def cab_robot(c_, now):
+    """A driver on nothing but the keys: follow the satnav's way, slow for
+    the corners, pull up by the fare and where they are going. If it cannot
+    do a shift, neither can anyone."""
+    f_ = c_.fare
+    tgt_ = (None if f_ is None else (f_["x"], f_["z"]) if f_["state"] == "waiting"
+            else f_["to"] if f_["state"] == "riding" else None)
+    want_ = 0.0
+    if tgt_ is not None:
+        r_ = c_.route if c_.route and len(c_.route) > 1 else None
+        if r_:
+            look_ = r_[min(2, len(r_) - 1)]
+            tx_, tz_ = (look_[0] + 0.5) * ac.CELL, (look_[1] + 0.5) * ac.CELL
+        else:
+            tx_, tz_ = tgt_
+        err_ = ac._wrap(math.atan2(tx_ - c_.x, tz_ - c_.z) - c_.heading)
+        if abs(err_) > 0.06:
+            c_.key("left" if err_ < 0 else "right", now)
+        bend_ = r_ and any((r_[k][0] - r_[k - 1][0], r_[k][1] - r_[k - 1][1])
+                           != (r_[1][0] - r_[0][0], r_[1][1] - r_[0][1])
+                           for k in range(2, min(5, len(r_))))
+        want_ = 4.0 if abs(err_) > 0.6 or not r_ else 8.0 if bend_ else 16.0
+        d_ = math.hypot(tgt_[0] - c_.x, tgt_[1] - c_.z)
+        if d_ < 16.0:
+            want_ = 0.0 if d_ < 6.0 else 3.0
+    if want_ == 0.0 and abs(c_.speed) > 0.5:
+        c_.key("brake", now)
+    elif c_.want < want_ - 1:
+        c_.key("faster", now)
+    elif c_.want > want_ + 1:
+        c_.key("slower", now)
+
+
+cab_res = []
+cab_said = set()
+for n_ in range(6):
+    sp_ = ac.find_place(sx_ + n_ * 900.0, sz_ - n_ * 500.0, "street")
+    c_ = ac.Cab(sp_[0], sp_[1], sp_[2], 0.0, 100 + n_)
+    t_, paid_, legal_ = 0.0, 0, True
+    while t_ < 400.0 and c_.fares < 3:
+        t_ += 1.0 / 30.0
+        cab_robot(c_, t_)
+        c_.step(1.0 / 30.0, t_)
+        paid_ += c_.pay
+        c_.pay = 0
+        legal_ = legal_ and ac.can_stand(c_.x, c_.z)
+        if c_.fare is not None:
+            cab_said.add(c_.fare["state"])
+    cab_res.append((c_.fares, paid_, c_.earned, legal_, t_))
+check("a robot on the keys alone drives a shift: three fares from six starts",
+      all(r_[0] == 3 for r_ in cab_res), str([r_[0] for r_ in cab_res]))
+check("they pay what the meter says and more, and it all comes to you",
+      all(r_[1] == r_[2] >= 3 * ac.CAB_FLAG for r_ in cab_res),
+      "$" + " $".join(str(r_[1]) for r_ in cab_res))
+check("waiting, getting in, riding, paying: every part of a fare",
+      {"waiting", "boarding", "riding", "paying"} <= cab_said)
+check("and never once anywhere a car cannot be", all(r_[3] for r_ in cab_res))
+
+fd_ = ac.Cab(cb_x, cb_z, cb_y, 0.0, 3)
+fd_.step(1.0 / 30.0, 2.0)
+fdv_ = ac.View(fd_.x, fd_.z, fd_.heading, 120, 36, eye=2.4)
+fdch_, fdco_, fdw_ = ac.render_street(fdv_, 2.0)
+ac.draw_cab_world(fdch_, fdco_, fdv_, fd_, 2.0)
+ac.draw_driver(fdch_, fdco_, fd_, 2.0, fdw_)
+fdtx_ = "\n".join("".join(r_) for r_ in fdch_)
+check("from the driver's seat: the wheel, the speed, the meter, the satnav",
+      "(o)" in fdtx_ and "MPH" in fdtx_ and "FARE $" in fdtx_ and "SATNAV" in fdtx_
+      and "FOR HIRE" in fdtx_ and "DISPATCH" in fdtx_)
+fd_.key("map", 2.0)
+fdch_ = [[" "] * 120 for _ in range(36)]
+ac.draw_driver(fdch_, [[0] * 120 for _ in range(36)], fd_, 2.0, 0.0)
+check("and m puts the satnav away", "SATNAV" not in
+      "\n".join("".join(r_) for r_ in fdch_))
+fd_.key("map", 2.0)
+cab_big = {}
+for w_, h_ in ((20, 8), (39, 13), (80, 24), (299, 87), (300, 90), (451, 133)):
+    g_ = [[" "] * w_ for _ in range(h_)]
+    ac.draw_driver(g_, [[0] * w_ for _ in range(h_)], fd_, 2.0, 0.7,
+                   ac.big_scale(w_, h_))
+    cab_big[(w_, h_)] = "\n".join("".join(r_) for r_ in g_)
+check("any size of window, and big ones get the speed in block letters",
+      "MPH" in cab_big[(80, 24)] and "###" not in cab_big[(299, 87)]
+      and "###" in cab_big[(300, 90)] and "###" in cab_big[(451, 133)]
+      and "mph" in cab_big[(20, 8)])
+
 # --- fog nights --------------------------------------------------------------------
 fog_n = sum(1 for k in range(2000) if ac.night(k * ac.NIGHT_LENGTH + 1.0)["fog"])
 check("fog comes in one night in a while", 2000 / 20.0 < fog_n < 2000 / 5.0,

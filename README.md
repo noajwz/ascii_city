@@ -98,6 +98,13 @@ In the cockpit:
              (at the gate, + pushes back; p taxis for you)
 ```
 
+At the wheel of a cab (`t` on any street, then `d` when it pulls up):
+
+```
+  w s        speed up, down  a d     steer       space brakes
+  m          the satnav      h       horn        x     pull over and get out
+```
+
 The cheat menu teleports you to anything worth looking at — it searches the city for what is
 already there rather than spawning it, so the rare things stay exactly as rare as they are.
 
@@ -139,6 +146,10 @@ the city is infinite, identical every time you walk back to it, and held in no m
   across the water a row of lights sliding through the town.
 - **Taxis** you can hail on any street and ride across town, and **a metro**, its lit M at the
   kerb, a platform and a train to anywhere for $3.
+- **Drive the cab yourself.** The driver hands you the keys and goes for a coffee: dispatch
+  finds you fares waving at the kerb, the satnav shows the way, and they pay on the meter and
+  tip on the ride - the one honest way to earn money in town. Some are in a hurry, some want it
+  gentle, and nobody likes the kerb.
 - **Billboards** hung out over the wide streets, selling soda in neon.
 - **Car parks** under orange sodium lamps, and **tunnels** under the road decks — under the short
   ones, a fire in a can.
