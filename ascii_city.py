@@ -6201,8 +6201,17 @@ PILOT_BRAKES = 11.0
 PILOT_GRAVITY = 9.0    # what a climb costs in speed
 PILOT_TURN = 30.0      # how hard a bank turns you: 40 degrees at 70 is 20 a second
 PILOT_MAX_BANK = 0.7   # radians
-PILOT_ROLL_IN = 0.55   # how fast a/d roll you in, a second: heavy, asked for (was 1.6)
-PILOT_ROLL_OUT = 0.45  # and how fast it comes back level by itself (was 0.7)
+PILOT_ROLL_RATE = 0.2  # radians a second a/d roll you while held: heavier again, asked
+                       # for - and it does not stop at a bank: hold it and you overbank
+PILOT_ROLL_OUT = 0.3   # how fast the wings come back level by themselves
+PILOT_BANK_WARN = 0.61  # 35 degrees: BANK ANGLE
+PILOT_BANK_UPSET = 1.22  # 70: past this it is falling out of the sky, the nose going
+PILOT_BANK_SINK = 6.0  # what a bank costs in height: units a second at 60 degrees
+PILOT_ROLL_OVER = 0.08  # past the upset it rolls on over at this - under a/d's rate,
+                        # so holding the other way, and height in hand, gets it back
+PILOT_GUST_ROLL = 0.14  # radians a second a gust can roll you, in the strongest wind
+PILOT_RUDDER = 0.1     # the rudder, A and D: yaw at full, radians a second, in the air
+PILOT_RUDDER_GROUND = 0.25  # and on the wheels, a gentle nose-wheel turn
 PILOT_MAX_PITCH = 0.31
 PILOT_PITCH_STEP = 0.035  # a press of w or s
 PILOT_GRACE = 0.3      # seconds a key keeps a wing down: curses sees no key go up
@@ -6216,10 +6225,11 @@ PILOT_GRASS = 0.35         # on the grass the wheels dig in, the harder the fast
 PUSH_TIME = 10.0           # the tug: how long the push back from the stand takes
 PUSH_BACK = 34.0           # and how far
 PILOT_READ = 20.0          # stopped: how long the report waits for you to read it
-PILOT_KEYS = ("s w nose  a d wings  W S power  g gear  f flaps  l light  p auto  "
+PILOT_KEYS = ("s w nose  a d wings  A D rudder  W S power  g gear  f flaps  l light  "
+              "p auto  "
               "k fuel  i wipers  "
               "r radio  c freq  m map  + - zoom  v outside  b brakes  x out")
-PILOT_KEYS_SHORT = ("sw:nose ad:bank WS:thr g:gear f:flap l:lite p:auto k:fuel "
+PILOT_KEYS_SHORT = ("sw:nose ad:bank AD:rud WS:thr g:gear f:flap p:auto k:fuel "
                     "i:wipe r:atc c:freq m:map +-:zoom v:view b:brk x:out")
 PILOT_CENTER = 110.0   # climbing past this (2,750 ft) the tower hands you to the center
 PILOT_TOWER = 100.0    # and coming down past this, the center to the tower - not the
@@ -6557,6 +6567,8 @@ class Cockpit:
         self.pitch = self.pitch_set = 0.0
         self.bank = 0.0
         self.bank_in, self.bank_until = 0.0, 0.0
+        self.rudder = self.rudder_in = 0.0      # the rudder, -1 left to 1 right
+        self.rudder_until = 0.0
         self.throttle = 0.0
         self.brake_until = 0.0
         self.state = "ground"           # gate, push, ground, air, landed, crashed
@@ -6723,6 +6735,9 @@ class Cockpit:
             self.bank_in, self.bank_until = -1.0, now + PILOT_GRACE
         elif what == "right":
             self.bank_in, self.bank_until = 1.0, now + PILOT_GRACE
+        elif what in ("rudder left", "rudder right"):
+            self.rudder_in = -1.0 if what == "rudder left" else 1.0
+            self.rudder_until = now + PILOT_GRACE
         elif what == "more":
             self.throttle = min(1.0, self.throttle + 0.1)
         elif what == "less":
@@ -7099,8 +7114,10 @@ class Cockpit:
         return at + self.wx_side[cid] * half, cid
 
     def stall(self):
-        """Under this it stops flying: flaps take it down."""
-        return PILOT_STALL - 4.0 * self.flaps
+        """Under this it stops flying: flaps take it down, and a bank takes it
+        up - the wings carry the turn as well as the jet."""
+        return ((PILOT_STALL - 4.0 * self.flaps)
+                * math.sqrt(1.0 / max(0.25, math.cos(self.bank))))
 
     def guide(self):
         """Where the tower would have you go, as a real approach goes: out to a
@@ -7746,17 +7763,38 @@ class Cockpit:
             self._fly_itself(dt, now)
         elif self.ap and self.state in ("ground", "landed"):
             self._taxi_itself(dt, now)
+        # The rudder: A and D, held while the key repeats, easing over and back.
+        rud_in = self.rudder_in if now < self.rudder_until else 0.0
+        self.rudder += max(-dt * 1.5, min(dt * 1.5, rud_in - self.rudder))
         if self.state == "air":
             if self.ap:
                 pass                            # it has the wings
             elif steering:
-                self.bank += ((steering * PILOT_MAX_BANK - self.bank)
-                              * min(1.0, dt * PILOT_ROLL_IN))
-            else:
+                # Held, it keeps rolling: there is no stop at a nice bank, and
+                # holding on is how you end up on your side.
+                self.bank += steering * PILOT_ROLL_RATE * dt
+            elif abs(self.bank) < PILOT_BANK_UPSET:
                 self.bank -= self.bank * min(1.0, dt * PILOT_ROLL_OUT)
+            # (on its side nothing brings it back but you: the other key, held)
+            if not self.calm and not self.ap:
+                # The wind knocks a wing up now and then, harder the more of it.
+                wx_, wz_ = self.wind(now)
+                gust = min(1.0, math.hypot(wx_, wz_) / PILOT_WIND_MOST)
+                self.bank += gust * PILOT_GUST_ROLL * dt * (
+                    math.sin(now * 0.9 + self.seed) * 0.6
+                    + math.sin(now * 2.3 + self.seed * 0.7) * 0.4
+                    + ((_mix(int(now * 1.5), self.seed, 6081) & 255) / 127.5 - 1.0)
+                    * 0.5)
+            if abs(self.bank) > PILOT_BANK_UPSET:
+                # On its side the wing lifts nothing: it rolls on over.
+                self.bank += math.copysign(PILOT_ROLL_OVER, self.bank) * dt
+            self.bank = max(-1.5, min(1.5, self.bank))
+            self.heading += PILOT_RUDDER * self.rudder * dt
             set_ = self.pitch_set
             if self.v < self.stall():
                 set_ = -0.18                    # the nose drops, whatever you want
+            if abs(self.bank) > PILOT_BANK_UPSET:
+                set_ = min(set_, -0.4)          # and so it does falling off a bank
             self.pitch += (set_ - self.pitch) * min(1.0, dt * 1.5)
             self.v += (self.throttle * PILOT_THRUST * self.engines / 2.0 - drag
                        - math.sin(self.pitch) * PILOT_GRAVITY
@@ -7767,7 +7805,8 @@ class Cockpit:
                 # The one still going pushes the nose round to the dead one.
                 self.heading += self.dead_side * PILOT_YAW * self.throttle * dt
             self.vy = (self.v * math.sin(self.pitch)
-                       - max(0.0, self.stall() - self.v) * 1.2)
+                       - max(0.0, self.stall() - self.v) * 1.2
+                       - PILOT_BANK_SINK * (1.0 / max(0.25, math.cos(self.bank)) - 1.0))
             rough = self.weather(now) * PILOT_BUMP
             if rough > 0.0:
                 # A storm: up and down draughts, and a wing knocked now and then.
@@ -7784,7 +7823,8 @@ class Cockpit:
         else:
             if self.v > 2.0 or self.throttle > 0.0:
                 # Sharp at a walk, for the taxiways' corners; gentle at speed.
-                self.heading += (steering * (0.9 if self.v < 16.0 else 0.3)
+                self.heading += ((steering * (0.9 if self.v < 16.0 else 0.3)
+                                  + self.rudder * PILOT_RUDDER_GROUND)
                                  * min(1.0, self.v / 3.0) * dt)
             home_ = nearest_airport(self.x, self.z)
             if runway_under(home_, self.x, self.z, 1.0, 6.0) is None:
@@ -7959,6 +7999,8 @@ class Cockpit:
             out.append("LOW FUEL")
         if self.v < self.stall() + 4.0:
             out.append("STALL")
+        if abs(self.bank) > PILOT_BANK_WARN:
+            out.append("BANK ANGLE")
         if self.gear < 0.99 and self.alt < 25.0 and self.vy < -1.0:
             out.append("GEAR")
         near = self.nearest_traffic(self.clock)
@@ -8237,8 +8279,12 @@ def draw_cockpit(ch, co, ck, now):
                   + "#" * lit_ + "-" * (wide_ - lit_) + "]", GOLD_DIM)
     y_ += thr_rows - 1
     if y_ + 1 < h - 1:
-        _text(ch, co, y_ + 1, 2, "NOSE %+3d  BANK %+3d" % (
-            math.degrees(ck.pitch), math.degrees(ck.bank)), HUD)
+        rud_ = ["-"] * 7
+        rud_[3] = "|"
+        rud_[3 + int(round(ck.rudder * 3))] = "O"
+        _text(ch, co, y_ + 1, 2, "NOSE %+3d  BANK %+3d  RUD %s" % (
+            math.degrees(ck.pitch), math.degrees(ck.bank), "".join(rud_)),
+              ROU_RED if abs(ck.bank) > PILOT_BANK_WARN else HUD)
     if y_ + 2 < h - 1:
         # What is switched on, lit when it is, on as many rows as it takes.
         x_, row_ = 2, y_ + 2
@@ -27492,9 +27538,9 @@ def main(stdscr):
                             curses.KEY_UP: "down", ord("w"): "down", ord("W"): "more",
                             curses.KEY_DOWN: "up", ord("s"): "up",
                             ord("S"): "less", curses.KEY_LEFT: "left",
-                            ord("a"): "left", ord("A"): "left",
+                            ord("a"): "left", ord("A"): "rudder left",
                             curses.KEY_RIGHT: "right", ord("d"): "right",
-                            ord("D"): "right", ord("+"): "zoom in",
+                            ord("D"): "rudder right", ord("+"): "zoom in",
                             ord("="): "zoom in", ord("-"): "zoom out",
                             ord("_"): "zoom out", ord("b"): "brake",
                             ord("B"): "brake", ord("f"): "flaps", ord("F"): "flaps",

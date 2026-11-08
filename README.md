@@ -68,7 +68,8 @@ And two things outside the terminal:
 In the cockpit:
 
 ```
-  s w        nose up, down   a d     bank        W S   throttle (shift w, s)
+  s w        nose up, down   a d     roll        W S   throttle (shift w, s)
+  A D        rudder (shift a, d): the nose round gently, the wings level
   g          gear            f       flaps       b     brakes
   r          radio           p       autopilot   l     landing light
   c          swap frequency  i       wipers      k     fuel pad
