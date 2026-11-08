@@ -4836,9 +4836,10 @@ check("and none at all through the river where there is no bridge",
 
 
 def cab_robot(c_, now):
-    """A driver on nothing but the keys: follow the satnav's way, slow for
-    the corners, pull up by the fare and where they are going. If it cannot
-    do a shift, neither can anyone."""
+    """A driver on nothing but the keys: follow the satnav's way, the wheel
+    over as far as the bend needs and no further, slow for the corners, pull
+    up by the fare and where they are going. If it cannot do a shift, neither
+    can anyone."""
     f_ = c_.fare
     tgt_ = (None if f_ is None else (f_["x"], f_["z"]) if f_["state"] == "waiting"
             else f_["to"] if f_["state"] == "riding" else None)
@@ -4851,12 +4852,13 @@ def cab_robot(c_, now):
         else:
             tx_, tz_ = tgt_
         err_ = ac._wrap(math.atan2(tx_ - c_.x, tz_ - c_.z) - c_.heading)
-        if abs(err_) > 0.06:
-            c_.key("left" if err_ < 0 else "right", now)
+        aim_ = max(-1.0, min(1.0, err_ * 2.5))     # as far over as it needs
+        if abs(aim_ - c_.steer) > 0.1:
+            c_.key("left" if aim_ < c_.steer else "right", now)
         bend_ = r_ and any((r_[k][0] - r_[k - 1][0], r_[k][1] - r_[k - 1][1])
                            != (r_[1][0] - r_[0][0], r_[1][1] - r_[0][1])
-                           for k in range(2, min(5, len(r_))))
-        want_ = 4.0 if abs(err_) > 0.6 or not r_ else 8.0 if bend_ else 16.0
+                           for k in range(2, min(7, len(r_))))
+        want_ = 3.0 if abs(err_) > 0.6 or not r_ else 5.0 if bend_ else 16.0
         d_ = math.hypot(tgt_[0] - c_.x, tgt_[1] - c_.z)
         if d_ < 16.0:
             want_ = 0.0 if d_ < 6.0 else 3.0
@@ -4886,6 +4888,10 @@ for n_ in range(6):
     cab_res.append((c_.fares, paid_, c_.earned, legal_, t_))
 check("a robot on the keys alone drives a shift: three fares from six starts",
       all(r_[0] == 3 for r_ in cab_res), str([r_[0] for r_ in cab_res]))
+cab_turn = [ac.CAB_TOP / (ac.CAB_R + ac.CAB_R_FAST * ac.CAB_TOP),
+            8.0 / (ac.CAB_R + ac.CAB_R_FAST * 8.0)]
+check("the steering is gentle: at full lock and flat out, under 1.3 rad/s",
+      cab_turn[0] < 1.3 and cab_turn[1] < 1.0, "%.2f, %.2f at 8" % tuple(cab_turn))
 check("they pay what the meter says and more, and it all comes to you",
       all(r_[1] == r_[2] >= 3 * ac.CAB_FLAG for r_ in cab_res),
       "$" + " $".join(str(r_[1]) for r_ in cab_res))
