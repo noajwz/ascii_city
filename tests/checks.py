@@ -7131,6 +7131,80 @@ tw_c.heading = math.atan2(tw_bx - tw_c.x, tw_bz - tw_c.z)
 tw_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(160, 45, 300.0, tw_c)[0])
 check("and it is there from the cockpit too", "#####" in tw_t)
 
+# --- taxiing by hand, and the tower clearing you ---------------------------------
+
+
+def ht_taxi(gate_, wind_):
+    """Out to the runway by the keys alone, the way a person taxis: turning
+    early at the corners, steering by eye, lining up roughly."""
+    real_ = ac.air_wind
+    ac.air_wind = lambda now_: wind_
+    c_ = ac.Cockpit(pk_home, 0.0, None, gate=gate_)
+    said_ = []
+    call_ = c_.call
+    c_.call = lambda now_, who_, text_, delay_=0.0: (said_.append(text_),
+                                                     call_(now_, who_, text_, delay_))
+    t_ = 0.0
+    c_.key("radio", t_)
+    while t_ < 400.0 and not c_.lined and c_.state != "crashed":
+        if c_.state == "ground" and c_.taxi:
+            aim_ = c_.taxi[0]
+            if len(c_.taxi) > 1 and math.hypot(aim_[0] - c_.x, aim_[1] - c_.z) < 25.0:
+                aim_ = c_.taxi[1]
+            if len(c_.taxi) == 1 and ac.runway_under(pk_home, c_.x, c_.z) is not None:
+                (thx_, thz_), (ox_, oz_) = c_.dep["thr"], c_.dep["out"]
+                aim_ = (thx_ - ox_ * 120.0, thz_ - oz_ * 120.0)
+            err_ = ac._wrap_pi(math.atan2(aim_[0] - c_.x, aim_[1] - c_.z) - c_.heading)
+            if err_ > 0.06:
+                c_.key("right", t_)
+            elif err_ < -0.06:
+                c_.key("left", t_)
+            want_ = 4.0 if abs(err_) > 0.5 else 9.0
+            if c_.v < want_ - 1.5 and c_.throttle < 0.3:
+                c_.key("more", t_)
+            elif c_.v > want_ + 1.5:
+                c_.key("less" if c_.throttle > 0.0 else "brake", t_)
+        c_.step(1.0 / 30.0, t_)
+        t_ += 1.0 / 30.0
+    ac.air_wind = real_
+    return c_, " ".join(said_)
+
+
+ht_got = [ht_taxi(g_, w_) for g_, w_ in ((1, (0.0, 0.0)), (2, (7.0, 0.0)))]
+check("taxi out by hand, corners cut: line up and wait at the hold, then cleared",
+      all(c_.lined and "line up and wait" in w_ and "cleared for take-off" in w_
+          for c_, w_ in ht_got), str([(c_.lined, c_.dep and c_.dep["name"])
+                                      for c_, _ in ht_got]))
+ht_c = ac.Cockpit(pk_home, 0.0, None, gate=1)
+ht_c.calm = True
+ht_c.key("more", 0.0)
+for n_ in range(int(ac.PUSH_TIME * 30) + 5):
+    ht_c.step(1.0 / 30.0, n_ / 30.0)
+(ht_tx, ht_tz), (ht_ox, ht_oz) = ht_c.dep["thr"], ht_c.dep["out"]
+ht_c.x, ht_c.z = ht_tx - ht_ox * 40.0 - ht_oz * 4.0, ht_tz - ht_oz * 40.0 + ht_ox * 4.0
+ht_c.heading = ht_c.dep["course"] + 0.1
+ht_c.key("radio", 30.0)
+check("on the right runway, roughly lined up, r gets the take-off, whatever the route",
+      ht_c.lined and "cleared for take-off" in ht_c.radio[-1][2])
+ht_w = ac.Cockpit(pk_home, 0.0, None, gate=1)
+ht_w.calm = True
+ht_w.key("more", 0.0)
+for n_ in range(int(ac.PUSH_TIME * 30) + 5):
+    ht_w.step(1.0 / 30.0, n_ / 30.0)
+ht_mx, ht_mz = ac.runways(*pk_home)[1][:2]
+ht_w.x, ht_w.z, ht_w.heading = ht_mx, ht_mz, 0.5 * math.pi
+ht_w.key("radio", 30.0)
+check("on the wrong one, the tower says so",
+      "You were given runway" in ht_w.radio[-1][2] and not ht_w.lined)
+ht_g = ac.Cockpit(pk_home, 0.0)
+ht_g.calm = True
+ht_g.state, ht_g.v, ht_g.throttle = "ground", 0.0, 0.3
+ht_g.x, ht_g.z, ht_g.heading = pk_rx - 20.0, pk_zn - 300.0, math.pi
+for n_ in range(150):
+    ht_g.step(1.0 / 30.0, n_ / 30.0)
+check("on the grass it drags, but with the power on you can get off it",
+      ht_g.state == "ground" and 2.0 < ht_g.v < 8.0, str(ht_g.v))
+
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
 ac.FLASH, ac.ROU_RED = 901, 902

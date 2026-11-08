@@ -6191,7 +6191,8 @@ PILOT_TAXI = 8.0           # the speed the autopilot taxis at, about twenty knot
 PILOT_TAXI_MAX = 14.0      # off a runway, any faster and the panel says so
 PILOT_TAXI_DRAG = 0.1      # off the runways, slowing with the speed: a step of throttle
                            # is a walk and two a taxi, where it took you to fifty knots
-PILOT_GRASS = 3.0          # on the grass the wheels dig in
+PILOT_GRASS = 0.35         # on the grass the wheels dig in, the harder the faster:
+                           # a fixed drag held you stuck where you stood, power on
 PUSH_TIME = 10.0           # the tug: how long the push back from the stand takes
 PUSH_BACK = 34.0           # and how far
 PILOT_READ = 20.0          # stopped: how long the report waits for you to read it
@@ -6775,6 +6776,22 @@ class Cockpit:
         self.taxi, self.taxi_to = pts, ("gate", g)
         self.gate_g, self.stand = GATE_JS[g], (sx, sz)
 
+    def on_departure(self, home, tight=False):
+        """On the runway the tower gave you, pointing the right way down it near
+        enough, near the line, with most of it still ahead: lined up. By hand
+        that is as good as anyone gets it - the wheels straighten up on the
+        roll - where it used to want what only the autopilot could do."""
+        a = self.dep
+        if a is None or runway_under(home, self.x, self.z, 2.0, 0.0) != a["rw"]:
+            return False
+        (thx, thz), (ox, oz) = a["thr"], a["out"]
+        lat = (self.x - thx) * -oz + (self.z - thz) * ox
+        into = -((self.x - thx) * ox + (self.z - thz) * oz)
+        # The autopilot can line up to a whisker, so it is held to it.
+        most, side = (0.06, 2.5) if tight else (0.2, 8.0)
+        return (abs(_wrap_pi(self.heading - a["course"])) < most and abs(lat) < side
+                and into < a["length"] * 0.4)
+
     def taxi_left(self):
         """How far there is still to go on the taxi route, in units."""
         if not self.taxi:
@@ -6803,22 +6820,27 @@ class Cockpit:
         if not self.taxi:
             return
         tx, tz = self.taxi[0]
+        # On to the next point once you are at this one - or past it, the way a
+        # hand on the tiller cuts a corner: only within 9 units of every point
+        # used to count, and taxiing by hand the route stuck at a corner and the
+        # tower never gave the take-off.
+        while len(self.taxi) > 1:
+            (ax, az), (bx, bz) = self.taxi[0], self.taxi[1]
+            seg = (bx - ax) ** 2 + (bz - az) ** 2
+            past = seg > 0.0 and ((self.x - ax) * (bx - ax)
+                                  + (self.z - az) * (bz - az)) / seg > 0.0
+            if math.hypot(ax - self.x, az - self.z) >= 12.0 and not past:
+                break
+            self.taxi.pop(0)
+            if self.taxi_to[0] == "runway" and len(self.taxi) == 1:
+                self.said = "holding short of runway %s: line up" % self.taxi_to[1]
+                if self.radio_on:
+                    self.call(now, "TWR", "AC 101, runway %s, line up and wait."
+                              % self.taxi_to[1])
+        tx, tz = self.taxi[0]
         d = math.hypot(tx - self.x, tz - self.z)
-        if len(self.taxi) > 1:
-            if d < 9.0:
-                self.taxi.pop(0)
-                if self.taxi_to[0] == "runway" and len(self.taxi) == 1:
-                    self.said = "holding short of runway %s: line up" % self.taxi_to[1]
-                    if self.radio_on:
-                        self.call(now, "TWR", "AC 101, runway %s, line up and wait."
-                                  % self.taxi_to[1])
-            return
         if self.taxi_to[0] == "runway":
-            course = self.dep["course"]
-            (thx, thz), (ox, oz) = self.dep["thr"], self.dep["out"]
-            lat = (self.x - thx) * -oz + (self.z - thz) * ox
-            if (d < 60.0 and runway_under(home, self.x, self.z) is not None
-                    and abs(_wrap_pi(self.heading - course)) < 0.08 and abs(lat) < 2.5):
+            if self.on_departure(home, tight=self.ap):
                 if self.ap:
                     self.ap, self.v, self.throttle = False, 0.0, 0.0
                 self.taxi, self.lined, self.lining = None, True, False
@@ -7149,6 +7171,28 @@ class Cockpit:
             self._start_push(now)
         elif self.state == "push":
             self.call(now, "YOU", "AC 101, pushing back.")
+        elif (self.state == "ground" and self.taxi and self.taxi_to[0] == "runway"
+              and self.on_departure(here)):
+            # On the runway you were given, near enough lined up: whatever the
+            # route thinks, that is ready for departure.
+            self.taxi, self.lined, self.lining = None, True, False
+            self.call(now, "YOU", "%s, AC 101, ready for departure." % tower_name(here))
+            self.call(now, "TWR", self.takeoff_line(now), PILOT_RADIO_LAG)
+        elif (self.state == "ground" and self.taxi and self.taxi_to[0] == "runway"
+              and runway_under(here, self.x, self.z, 2.0, 6.0) is not None):
+            n_ = runway_under(here, self.x, self.z, 2.0, 6.0)
+            on_ = min((a_ for a_ in approaches(here) if a_["rw"] == n_),
+                      key=lambda a_: abs(_wrap_pi(a_["course"] - self.heading)))
+            self.call(now, "YOU", "%s, AC 101, ready for departure." % tower_name(here))
+            self.call(now, "TWR", "AC 101, that is runway %s. You were given "
+                      "runway %s: taxi to it." % (on_["name"], self.taxi_to[1]),
+                      PILOT_RADIO_LAG)
+        elif (self.state == "ground" and self.taxi and self.taxi_to[0] == "runway"
+              and len(self.taxi) == 1):
+            self.call(now, "YOU", "%s, AC 101, holding short runway %s, ready." % (
+                tower_name(here), self.taxi_to[1]))
+            self.call(now, "TWR", "AC 101, runway %s, line up and wait."
+                      % self.taxi_to[1], PILOT_RADIO_LAG)
         elif self.state == "ground" and self.taxi and self.taxi_to[0] == "runway":
             self.call(now, "YOU", "%s, AC 101, request taxi." % ground)
             self.call(now, "TWR", "AC 101, taxi to holding point runway %s via %s." % (
@@ -7321,7 +7365,7 @@ class Cockpit:
                         self.crash(now, "Off the paving at speed. The wheels dug in, "
                                    "and the rest of it kept going.")
                         return
-                    drag += PILOT_GRASS if self.v > 0.0 else 0.0
+                    drag += PILOT_GRASS * self.v
             self.bank -= self.bank * min(1.0, dt * 4.0)
             self.v += (self.throttle * PILOT_THRUST - drag
                        - (PILOT_ROLLING if self.v > 0.0 else 0.0)
