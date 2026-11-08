@@ -70,6 +70,7 @@ In the cockpit:
 ```
   s w        nose up, down   a d     roll        W S   throttle (shift w, s)
   A D        rudder (shift a, d): the nose round gently, the wings level
+  e          de-ice the wings: on, and the ice comes off (it costs fuel)
   g          gear            f       flaps       b     brakes
   r          radio           p       autopilot   l     landing light
   c          swap frequency  i       wipers      k     fuel pad
