@@ -6926,10 +6926,35 @@ check("the radios are on the right, under the altitude",
       and abs(fq_com[0][1] - fq_alt[0][1]) < 3
       and "STBY " in "".join(fq_rows[fq_com[0][0] + 1]))
 fq_map = [r_.index("DIRECTION") for r_ in map("".join, fq_rows) if "DIRECTION" in r_]
+fq_wx = [r_.index("WEATHER") for r_ in map("".join, fq_rows) if "WEATHER" in r_]
 fq_wing = [r_.index("v") for r_ in map("".join, fq_rows) if "\\-v-/" in r_]
-check("on a wide panel the map is in the middle and the horizon left of it",
-      fq_map and fq_wing and 160 // 5 < fq_wing[0] < 2 * 160 // 5
-      < fq_map[0] < 3 * 160 // 5, "%s %s" % (fq_map, fq_wing))
+fq_all = "\n".join(map("".join, fq_rows))
+check("a wide panel has three screens: the way, the horizon, the weather radar",
+      fq_map and fq_wing and fq_wx and 160 // 5 < fq_map[0] < 2 * 160 // 5
+      < fq_wing[0] < 3 * 160 // 5 < fq_wx[0] < 4 * 160 // 5,
+      "%s %s %s" % (fq_map, fq_wing, fq_wx))
+check("and the words about the way that were there are gone",
+      "LINE " not in fq_all and "WX " not in fq_all and "TFC " not in fq_all)
+fq_c.key("map", 1e9)
+check("m has nothing to turn on a wide panel", "both up" in fq_c.said)
+
+
+def wind_arrow(wx_, wz_, heading_):
+    """The radar's arrow for this wind, heading_ up: which glyphs it drew."""
+    g_ = [[" "] * 40 for _ in range(16)]
+    o_ = [[0] * 40 for _ in range(16)]
+    ac.draw_wind_arrow(g_, o_, wx_, wz_, math.sin(heading_), math.cos(heading_),
+                       (1, 1, 38, 14))
+    return "".join("".join(r_) for r_ in g_)
+
+
+check("the wind arrow points the way it blows, heading up",
+      "^" in wind_arrow(0.0, 6.0, 0.0) and "v" in wind_arrow(0.0, -6.0, 0.0)
+      and ">" in wind_arrow(6.0, 0.0, 0.0) and "<" in wind_arrow(6.0, 0.0, math.pi)
+      and wind_arrow(0.0, 0.5, 0.0).strip() == "")
+check("and it is longer the harder it blows",
+      len(wind_arrow(0.0, 9.0, 0.0).replace(" ", ""))
+      > len(wind_arrow(0.0, 3.0, 0.0).replace(" ", "")))
 
 fp_h = ac.zone_home("airport", 100, 100)
 fp_plans = {ac.flight_plan(fp_h, s_) for s_ in range(60)}
@@ -7420,8 +7445,9 @@ check("a flare is a nose up, and a good one says so",
 mp_c = pk_at(alt_=70.0, v_=60.0, z_=pk_zn + 900.0)
 mp_c.leg, mp_c.end, mp_c.target = "final", pk_zn, pk_home
 mp_w = "\n".join("".join(r_) for r_ in ac.render_cockpit(190, 50, 2.0, mp_c)[0])
-check("a wide panel has the moving map in it, as well as the words",
-      "DIRECTION 6 km" in mp_w and "LINE" in mp_w and "-^-" in mp_w)
+check("a wide panel has the moving map and the radar in it, and not the words",
+      "DIRECTION 6 km" in mp_w and "WEATHER 6 km" in mp_w and "-^-" in mp_w
+      and "LINE" not in mp_w)
 mp_c.key("zoom out", 2.0)
 mp_c.key("zoom out", 2.0)
 mp_z = "\n".join("".join(r_) for r_ in ac.render_cockpit(190, 50, 2.0, mp_c)[0])
@@ -7432,9 +7458,8 @@ for n_ in range(2):
     mp_pages.append("\n".join("".join(r_) for r_ in ac.render_cockpit(
         190, 50, 2.0, mp_c)[0]))
     mp_c.key("map", 2.0)
-check("m goes between the map's two pages: the way, and the weather",
-      " DIRECTION " in mp_pages[0] and " WEATHER " in mp_pages[1]
-      and mp_c.map_page == 0)
+check("both pages are up whatever m does: the way, and the weather",
+      all(" DIRECTION " in p_ and " WEATHER " in p_ for p_ in mp_pages))
 mp_seen = []
 for n_ in range(4):
     t_ = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, mp_c)[0])
@@ -7453,9 +7478,8 @@ ac.air_cells = lambda x_, z_, now_, reach_=0.0: [(pk_rx + 900.0, pk_zn + 1500.0,
 mp_top = 50 - ac.cockpit_rows(50, 1)
 mp_got = []
 for page_ in range(2):
-    mp_d.map_page = page_
     mp_co = ac.render_cockpit(190, 50, 2.0, mp_d)[1]
-    mp_x0 = 190 // 2 - (190 // 5) // 2 + 1        # the map is in the middle now
+    mp_x0 = (1 + 2 * page_) * (190 // 5) + 1      # the way second, the radar fourth
     mp_box = [r_[mp_x0:mp_x0 + 36] for r_ in mp_co[mp_top + 1:49]]
     mp_got.append((sum(1 for r_ in mp_box for a_ in r_ if a_ == 995),
                    sum(1 for r_ in mp_box for a_ in r_ if a_ == 996)))
