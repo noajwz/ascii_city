@@ -3457,7 +3457,7 @@ def lot(i, j):
             b["gate"] = (part == "terminal"
                          and (i, j) == gate_cell(*zone_home("airport", i, j)))
             b["height"] = {"terminal": 13.0, "hangar": 15.0,
-                           "tower": 34.0}.get(part, 13.0)
+                           "tower": ATC_TOP}.get(part, 13.0)
         if d is STRIP:
             side, seg = strip_hotel(i, j)
             m = _mix(side, seg, 3903)
@@ -7501,6 +7501,57 @@ def airports_about(x, z, reach):
     return out
 
 
+ATC_TOP = 34.0             # the control tower's roof, its cab the four units under it
+RADAR_TURN = 4.0           # seconds the radar on top takes to go round once
+
+
+def draw_atc_tower(ch, co, v, walls, home, now, wet):
+    """The control tower, as a tower: the cab wider than the shaft, a ring of
+    lit glass with a catwalk round it and a roof over it; on the roof a mast,
+    and on the mast the radar going round - a bar that is long, then edge on,
+    then long again, which is how you see it turn. The beacon on top."""
+    ci, cj = home
+    bx, bz = (ci - 19 + 0.5) * CELL, (cj + 38 + 0.5) * CELL
+    pr = v.project(bx, ATC_TOP, bz)
+    if pr is None:
+        return
+    d = pr[2]
+    if d > 2600.0:
+        return
+    glass = NEON[2][0]
+    rad = 4.2
+    n = max(8, min(48, int(rad * v.fx / max(d, 1.0) * 6.0)))
+    for k in range(n):
+        a = k * math.tau / n
+        x, z = bx + math.cos(a) * rad, bz + math.sin(a) * rad
+        put_point(ch, co, v, walls, bx + math.cos(a) * (rad + 1.0), ATC_TOP - 4.4,
+                  bz + math.sin(a) * (rad + 1.0), "-", CURB)          # the catwalk
+        put_point(ch, co, v, walls, x, ATC_TOP - 4.0, z, "=", CONCRETE)
+        for h in (ATC_TOP - 3.0, ATC_TOP - 2.0, ATC_TOP - 1.0):
+            lit = _mix(k, int(h), 6301) % 7 != 0
+            put_point(ch, co, v, walls, x, h, z, "#" if lit else ":", glass)
+        put_point(ch, co, v, walls, x * 0.8 + bx * 0.2, ATC_TOP + 0.3,
+                  z * 0.8 + bz * 0.2, "_", CONCRETE)                  # the roof
+    # The mast, and the radar on it.
+    top = ATC_TOP + 3.2
+    for h in (ATC_TOP + 0.8, ATC_TOP + 1.6, ATC_TOP + 2.4):
+        put_point(ch, co, v, walls, bx, h, bz, "|", CONCRETE)
+    a = now / RADAR_TURN * math.tau
+    ex, ez = math.cos(a) * 3.8, math.sin(a) * 3.8
+    p0, p1 = v.project(bx - ex, top, bz - ez), v.project(bx + ex, top, bz + ez)
+    if p0 is not None and p1 is not None:
+        dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+        g = _plane_glyph(dx, dy)
+        steps = int(max(abs(dx), abs(dy))) + 1
+        for k in range(steps + 1):
+            t = k / float(steps)
+            put_cell(ch, co, v, walls, int(round(p0[0] + dx * t)),
+                     int(round(p0[1] + dy * t)), p0[2] + (p1[2] - p0[2]) * t, g, FLASH)
+    put_point(ch, co, v, walls, bx, top, bz, "o", CONCRETE)
+    if int(now * 1.3) % 2:
+        put_point(ch, co, v, walls, bx, top + 1.0, bz, ".", ROU_RED)
+
+
 def draw_runway_lights(ch, co, v, home, now):
     """The runways from a long way off, as what you would see of them: white
     down their edges, green across the ends, and the beacon on the tower going
@@ -7518,13 +7569,16 @@ def draw_runway_lights(ch, co, v, home, now):
     green = int(now / 0.9) % 2 == 0
     bx, bz = (ci - 19 + 0.5) * CELL, (cj + 38 + 0.5) * CELL
     for up in (0.0, 1.5):
-        put_point(ch, co, v, walls, bx, 34.0 + up, bz, "@",
+        put_point(ch, co, v, walls, bx, ATC_TOP + 5.0 + up, bz, "@",
                   ROU_GREEN if green else FLASH)
+    if near_airport(v, 500.0) != tuple(home):
+        draw_atc_tower(ch, co, v, walls, home, now, 0.0)    # else the street drew it
     near = far < PILOT_NEAR_LIGHTS
     if far > 1500.0:
         # Far off a light is one cell whatever its size, so it gets a glow round
         # it, in screen space: the beacon, and the ends of the runways.
-        put_halo(ch, co, v, walls, bx, 34.0, bz, ROU_GREEN if green else FLASH, True)
+        put_halo(ch, co, v, walls, bx, ATC_TOP + 5.0, bz,
+                 ROU_GREEN if green else FLASH, True)
         for a in approaches(home):
             put_halo(ch, co, v, walls, a["thr"][0], 0.1, a["thr"][1], ROU_GREEN, True)
     step = 26 if near else 52
@@ -9043,7 +9097,8 @@ def draw_airport(ch, co, v, walls, home, now, wet):
                 FLASH if lit else BULB_DIM, max(wet, 0.3), now)
     # The tower's beacon, green and white turning.
     tx, tz = (ci - 19 + 0.5) * CELL, (cj + 38 + 0.5) * CELL
-    put_lit(ch, co, v, walls, tx, 35.5, tz, "*",
+    draw_atc_tower(ch, co, v, walls, (ci, cj), now, wet)
+    put_lit(ch, co, v, walls, tx, ATC_TOP + 5.5, tz, "*",
             ROU_GREEN if int(now * 2) % 2 else FLASH, max(wet, 0.3), now)
     # The name over the terminal's front.
     pr = v.project((ci - 22) * CELL, 14.5, cj * CELL)

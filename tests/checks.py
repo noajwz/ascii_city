@@ -7108,6 +7108,29 @@ tx_g.v = 25.0
 tx_g.step(1.0 / 30.0, 41.0)
 check("at speed that is a wreck", tx_g.state == "crashed")
 
+# --- the control tower --------------------------------------------------------
+tw_ci, tw_cj = pk_home
+tw_bx, tw_bz = (tw_ci - 19 + 0.5) * ac.CELL, (tw_cj + 38 + 0.5) * ac.CELL
+
+
+def tw_frame(t_):
+    v_ = ac.View(tw_bx + 60.0, tw_bz - 70.0, math.atan2(-60.0, 70.0), 160, 45)
+    v_.horizon = 34
+    return ac.render_street(v_, t_)
+
+
+tw_a, tw_b = tw_frame(300.0), tw_frame(301.0)
+tw_rows = range(10, 22)
+check("the control tower has a cab of glass over its shaft",
+      sum(1 for y_ in tw_rows for g_ in tw_a[0][y_] if g_ == "#") >= 6)
+check("and the radar on top goes round",
+      ["".join(tw_a[0][y_][70:95]) for y_ in range(12, 18)]
+      != ["".join(tw_b[0][y_][70:95]) for y_ in range(12, 18)])
+tw_c = ac.Cockpit(pk_home, 300.0, None, gate=3)
+tw_c.heading = math.atan2(tw_bx - tw_c.x, tw_bz - tw_c.z)
+tw_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(160, 45, 300.0, tw_c)[0])
+check("and it is there from the cockpit too", "#####" in tw_t)
+
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
 ac.FLASH, ac.ROU_RED = 901, 902
