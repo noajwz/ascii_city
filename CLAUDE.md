@@ -1367,9 +1367,15 @@ square, Uptown Tower at 100, landed.
 **`i` is the wipers' switch** (`ck.wipers`, `[WIPERS]` on the panel): on to start with if it is
 raining, and they sweep whether there is water on the glass or not, the way a switch does.
 
-**The map and the horizon swapped places** on a wide panel (`MAP_WIDE` up): the horizon, its
-compass and the flight director in the second section, the map in the middle. On a narrow one
-the horizon stays in the middle and `m` puts the map over the words at the right, as before.
+**Three screens on a wide panel** (`MAP_WIDE` up), asked for after the map and the horizon
+were tried the other way round: the way (`draw_nav_map(..., "DIRECTION")`) in the second
+section, the horizon in the middle, and the weather radar (`"WEATHER"`) in the fourth, with
+`draw_wind_arrow()` in its top right corner - the way the wind blows, heading up, longer the
+harder - and the wind in words along its foot. The words about the way that were in the fourth
+section (TO, the distance, LINE and SLOPE, WIND, WX, TFC) are gone there, asked for: the map
+says it - but on the ground the taxi words (`taxi_words()`, TAXI to runway 36, FUELLING)
+are kept, along the foot of the way's screen. `m` has nothing to turn there and says so; `[` `]` zoom both. On a narrow panel it is
+as it was: the horizon in the middle, and `m` puts one page over the words at the right.
 The narrow key hint is `key:word` now (`PILOT_KEYS_SHORT`), held to 110 columns by a check: with
 the frequencies and the wipers added the old spacing ran off a 110-column window.
 

@@ -6656,8 +6656,10 @@ class Cockpit:
         if what == "map":
             # Round the pages; narrow, the words come back after the last of them.
             if self.map_wide:
-                self.map_page = (self.map_page + 1) % len(MAP_PAGES)
-            elif not self.map_on:
+                # Both screens are up on a wide panel; nothing to turn.
+                self.said = "the map and the radar are both up - [ ] for the range"
+                return
+            if not self.map_on:
                 self.map_on, self.map_page = True, 0
             elif self.map_page < len(MAP_PAGES) - 1:
                 self.map_page += 1
@@ -8296,12 +8298,7 @@ def draw_cockpit(ch, co, ck, now):
             ck.station[1] if ck.standby == ck.station[2] and not right_ else "")),
               GOLD if ck.standby == ck.station[2] and not right_ else CONCRETE)
     # The artificial horizon: sky over ground, tilted with you, a wing marker on it.
-    # The map and the horizon swapped places, asked for: on a wide panel the
-    # horizon is in the second section and the map in the middle.
-    if wide_map:
-        bx0, bx1 = sec + 2, 2 * sec - 3
-    else:
-        bx0, bx1 = cx - sec // 2 + 2, cx + sec // 2 - 2
+    bx0, bx1 = cx - sec // 2 + 2, cx + sec // 2 - 2
     by0, by1 = y0 + 1, h - 2
     midx, midy = (bx0 + bx1) // 2, (by0 + by1) // 2
     tilt = math.tan(max(-1.2, min(1.2, ck.bank)))
@@ -8343,8 +8340,22 @@ def draw_cockpit(ch, co, ck, now):
     # The moving map: a place of its own on a wide panel; on a narrow one, in
     # place of the words about the way there when you ask for it (m).
     if wide_map:
-        draw_nav_map(ch, co, ck, now, cx - sec // 2 + 1, y0, sec - 2, h - 1 - y0)
-    elif ck.map_on:
+        # Three screens across the middle of a wide panel: the way, the horizon,
+        # and the weather radar with the wind. The words about the way that used
+        # to be where the radar is are gone; the map says it.
+        draw_nav_map(ch, co, ck, now, sec + 1, y0, sec - 2, h - 1 - y0, "DIRECTION")
+        draw_nav_map(ch, co, ck, now, 3 * sec + 1, y0, sec - 2, h - 1 - y0, "WEATHER")
+        taxi_ = taxi_words(ck)
+        if taxi_ is not None and h - 4 > y0 + 2:
+            # On the ground the way to go is words still, along the map's foot.
+            _label(ch, co, h - 4, sec + 2, taxi_[0][:sec - 4], GOLD)
+            _label(ch, co, h - 3, sec + 2, taxi_[1][:sec - 4], ROU_GREEN)
+        keys = PILOT_KEYS if len(PILOT_KEYS) <= w else PILOT_KEYS_SHORT
+        _text(ch, co, h - 1, max(0, cx - len(keys) // 2), keys[:w], CONCRETE)
+        draw_flight_words(ch, co, ck, now, top, k)
+        draw_landing_report(ch, co, ck, now, top, k)
+        return
+    if ck.map_on:
         draw_nav_map(ch, co, ck, now, w - 2 * sec + 1, y0, sec - 1, h - 1 - y0)
         keys = PILOT_KEYS if len(PILOT_KEYS) <= w else PILOT_KEYS_SHORT
         _text(ch, co, h - 1, max(0, cx - len(keys) // 2), keys[:w], CONCRETE)
@@ -8886,7 +8897,30 @@ def draw_taxi_greens(ch, co, v, walls, ck):
         px, pz = qx, qz
 
 
-def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
+def draw_wind_arrow(ch, co, wx, wz, sh, chh, box):
+    """The wind on the radar: an arrow the way it is blowing, heading up like
+    the map, longer the harder it blows, in the radar's top right corner."""
+    ix0, iy0, ix1, iy1 = box
+    speed = math.hypot(wx, wz)
+    most = max(2, min((iy1 - iy0) // 3, (ix1 - ix0) // 6))
+    if speed < 1.0 or most < 2:
+        return
+    dx, dy = (wx * chh - wz * sh) / speed, -(wx * sh + wz * chh) / speed
+    n = max(2, int(round(most * min(1.0, speed / PILOT_WIND_MOST))))
+    mx, my = ix1 - 2 * most - 1, iy0 + most
+    g = _plane_glyph(dx, dy)
+    for s_ in range(-n, n + 1):
+        x, y = int(round(mx + dx * s_ * 2.0)), int(round(my + dy * s_))
+        if ix0 <= x <= ix1 and iy0 <= y <= iy1:
+            ch[y][x], co[y][x] = g, FLASH
+    head = (">" if abs(dx) * 2.0 > abs(dy) * 2.0 and dx > 0 else
+            "<" if abs(dx) > abs(dy) else "v" if dy > 0 else "^")
+    hx, hy = int(round(mx + dx * n * 2.0)), int(round(my + dy * n))
+    if ix0 <= hx <= ix1 and iy0 <= hy <= iy1:
+        ch[hy][hx], co[hy][hx] = head, FLASH
+
+
+def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh, page=None):
     """The moving map: top down, your way up, you near the foot of it, and one
     of two pages on it - one thing at a time makes flying a little harder than
     a map with everything. DIRECTION: the river and the woods to know the place
@@ -8905,7 +8939,7 @@ def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
             ch[y][x], co[y][x] = " ", 0
         ch[y][x0], co[y][x0] = "|", CONCRETE
         ch[y][x0 + mw - 1], co[y][x0 + mw - 1] = "|", CONCRETE
-    page = MAP_PAGES[ck.map_page]
+    page = page or MAP_PAGES[ck.map_page]
     _label(ch, co, y0, x0 + 1, " " + page + " ", GOLD)
     km = "%d km " % int(reach / 200.0)
     _label(ch, co, y0, x0 + len(page) + 3, km, HUD)
@@ -8953,8 +8987,10 @@ def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
             elif woods_at(i, j):
                 ch[my][mx], co[my][mx] = ".", GRASS
     if page == "WEATHER":
-        wind = wind_words(*ck.wind(now))
+        wx_, wz_ = ck.wind(now)
+        wind = wind_words(wx_, wz_)
         _label(ch, co, iy1, ix0 + 1, wind[:ix1 - ix0 - 1], GOLD_DIM)
+        draw_wind_arrow(ch, co, wx_, wz_, sh, chh, (ix0, iy0, ix1, iy1))
     # The runways, and the way in to the one you are going to.
     goal = ck.goal()
     for home in (airports_about(ck.x, ck.z, reach * 1.6) if page == "DIRECTION"
