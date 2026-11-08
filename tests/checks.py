@@ -6877,6 +6877,69 @@ check("and with the runway clear, just cleared to land", "cleared to land" in tf
       and "go around" not in tf_w and tf_c.state == "landed", tf_w[:200])
 ac.air_cells = tf_cells
 
+# --- the landing report, and the moving map ---------------------------------
+lr_c = pk_at(alt_=0.01, v_=48.0, pitch_=-0.03, x_=pk_rx + 3.0, z_=pk_zn - 100.0)
+lr_c.step(1.0 / 30.0, 1.0)
+lr_l = {l_[0]: l_ for l_ in ac.landing_lines(lr_c)}
+check("a landing gets its report: where you touched, how far off the line, how fast",
+      lr_c.state == "landed" and lr_l["Touched down"][2] == "in the zone"
+      and lr_l["Centre line"][1] == "15 m left" and lr_l["Centre line"][2]
+      == "a little left" and lr_l["Speed"][2] == "on speed"
+      and lr_l["Nose"][2] == "nose first" and lr_l["Wings"][2] == "level",
+      str([(k_, v_[1], v_[2]) for k_, v_ in lr_l.items()]))
+lr_t = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, lr_c)[0])
+check("up in the windscreen from the moment the wheels touch, with a tip",
+      "LANDING REPORT - " + lr_c.grade in lr_t and "flare" in lr_t
+      and "to the terminal" not in lr_t)
+for n_ in range(30 * 40):
+    lr_c.key("brake", 1.0 + n_ / 30.0)
+    lr_c.step(1.0 / 30.0, 1.0 + n_ / 30.0)
+    if lr_c.ended is not None:
+        break
+lr_s = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 50.0, lr_c)[0])
+check("stopped: how far it took, how much runway was left, and on when read",
+      lr_c.report["roll"] > 10.0 and "Stopped in" in lr_s and "to the terminal" in lr_s
+      and lr_c.report["left"] > 0.0)
+lr_c.outside = True
+check("and from outside too", "LANDING REPORT" in "\n".join(
+    "".join(r_) for r_ in ac.render_cockpit(110, 34, 50.0, lr_c)[0]))
+lr_b = pk_at(alt_=0.0, v_=48.0, pitch_=0.04, z_=pk_zn - 100.0)
+lr_b.vy = -1.0
+lr_b._touch_down(1.0)
+lr_f = {l_[0]: l_ for l_ in ac.landing_lines(lr_b)}
+check("a flare is a nose up, and a good one says so",
+      lr_f["Nose"][2] == "up, flared" and lr_f["Coming down"][2] == "a kiss")
+mp_c = pk_at(alt_=70.0, v_=60.0, z_=pk_zn + 900.0)
+mp_c.leg, mp_c.end, mp_c.target = "final", pk_zn, pk_home
+mp_w = "\n".join("".join(r_) for r_ in ac.render_cockpit(190, 50, 2.0, mp_c)[0])
+check("a wide panel has the moving map in it, as well as the words",
+      "MAP 6 km" in mp_w and "LINE" in mp_w and "-^-" in mp_w)
+mp_c.key("zoom out", 2.0)
+mp_c.key("zoom out", 2.0)
+mp_z = "\n".join("".join(r_) for r_ in ac.render_cockpit(190, 50, 2.0, mp_c)[0])
+mp_c.key("zoom in", 2.0)
+check("[ and ] for its range", "MAP 24 km" in mp_z and mp_c.map_range == 2)
+mp_n = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, mp_c)[0])
+mp_c.key("map", 2.0)
+mp_m = "\n".join("".join(r_) for r_ in ac.render_cockpit(110, 34, 2.0, mp_c)[0])
+check("a narrow one: the words, and m swaps the map in for them",
+      "MAP" not in mp_n and "LINE" in mp_n and "MAP" in mp_m and "LINE" not in mp_m
+      and "m map" in mp_m)
+mp_real = ac.ROU_GREEN, ac.ROU_RED, ac.air_cells
+ac.ROU_GREEN, ac.ROU_RED = 995, 996
+mp_d = pk_at(alt_=135.0, v_=70.0, x_=pk_rx, z_=pk_zn + 3000.0)
+mp_d.target, mp_d.end, mp_d.map_range = pk_home, pk_zn, 2
+mp_d.calm = False
+ac.air_cells = lambda x_, z_, now_, reach_=0.0: [(pk_rx + 900.0, pk_zn + 1500.0,
+                                                  700.0, 1.0, 77)]
+mp_co = ac.render_cockpit(190, 50, 2.0, mp_d)[1]
+ac.ROU_GREEN, ac.ROU_RED, ac.air_cells = mp_real
+mp_top = 50 - ac.cockpit_rows(50, 1)
+mp_box = [r_[39:75] for r_ in mp_co[mp_top + 1:49]]
+check("on it, the runway you are going to in green, and a storm ahead in red",
+      sum(1 for r_ in mp_box for a_ in r_ if a_ == 995) >= 4
+      and sum(1 for r_ in mp_box for a_ in r_ if a_ == 996) >= 2)
+
 # --- the cars' lights, a long way off ----------------------------------------------
 tf_real = ac.FLASH, ac.ROU_RED
 ac.FLASH, ac.ROU_RED = 901, 902

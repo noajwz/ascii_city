@@ -1211,6 +1211,21 @@ stopped talking); flying into one is a crash (`TRAFFIC_HIT`). `key()` now sets `
 before the first step judged the runway at the wrong moment. **`draw_plane` had its sides swapped**
 all along (its "right" was its left), so red was on the right wing in the street view too.
 
+**The landing report and the moving map.** `_touch_down()` keeps `ck.report` (sink, centre-line
+offset to your right, how far past the threshold, crab, speed, bank, nose), and the roll and the
+runway left are added when you stop. `landing_lines()` turns it into rows with a verdict and a
+severity, `draw_landing_report()` boxes them up in the windscreen (either view) with a tip for the
+worst (`TIPS`) - pick the worst by the severity, not the colour: in the checks every colour is the
+same number. Stopped, it waits `PILOT_READ` or for Enter (and `x` now pays you too - it used to
+hand the plane back unpaid). `draw_nav_map()` is heading-up, you at 78% down: storms as radar, the
+river and the woods, every runway (yours green, its line in), the guide's way (`guide()` now says
+where it is going, `"to"`), an arrow at the edge to your destination, traffic as arrows with their
+height in hundreds of feet. From `MAP_WIDE` columns it has the panel's second section and the
+annunciators wrap short of it; narrower, `m` puts it in place of the words. `[` `]` step
+`MAP_RANGES`. `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
+see-through, which is how the first titles came out `--MAP-6-km--`. The key hint has a short form
+(`PILOT_KEYS_SHORT`) for windows under 118 columns. About 2-3 ms a frame at 300x90.
+
 **The approach had to be made flyable.** `approach_cap()` claimed to keep the town low but sky decks and
 landmarks ignored it, and it stopped 550 units out, under a slope that only cleared the tallest thing at
 1050: the first robot flight hit a building on final. Now it runs `APPROACH_LONG` cells off each end, no
