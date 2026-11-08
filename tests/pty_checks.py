@@ -183,7 +183,8 @@ def cases(run, report):
     for cab_size in ((100, 30), (300, 90)):
         ok &= report("drive the cab yourself, %dx%d" % cab_size, *run(
             [(b"t", 3.6), (b"d", .6), (b"w", .3), (b"w", 1.5), (b"a", .1), (b"a", .1),
-             (b"a", .4), (b"m", .3), (b"m", .3), (b"h", .3), (b"x", .3)]
+             (b"a", .4), (b"m", .3), (b"m", .3), (b"h", .3), (b"l", .3), (b"l", .3),
+             (b"x", .3)]
             + [(b"e", .04), (b"d", .04)] * 12
             + [(b" ", 2.5), (b"x", 1.0), (b"w", .5)], cols=cab_size[0], rows=cab_size[1]))
     ok &= report("a fog night: to it, walk, a taxi through it", *run(

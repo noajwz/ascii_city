@@ -15194,6 +15194,16 @@ def hwy_lanes(x0, x1):
     return ((xm + 1.6, 1), (xm + 4.0, 1), (xm - 1.6, -1), (xm - 4.0, -1))
 
 
+def hwy_pace(x0, lx, d):
+    """How fast a highway lane goes, units a second, signed with its way."""
+    for n, (lx_, d_) in enumerate(hwy_lanes(x0, x0 + 3 * CELL)):
+        if abs(lx_ - lx) < 0.3 and d_ == d:
+            m = _mix(int(x0), n, 2503)
+            fast = 2.5 if abs(lx - (x0 + 1.5 * CELL)) < 2 else 0.0   # the inside lane
+            return (19.0 + (m & 7) * 0.8 + fast) * d
+    return 22.0 * d
+
+
 def hwy_cars(x0, x1, z, reach, now):
     """(z, lane x, direction, seed) of every car on the highway within reach."""
     if TRAFFIC_ODDS.get(TRAFFIC[_traffic]) is None:
@@ -15202,8 +15212,7 @@ def hwy_cars(x0, x1, z, reach, now):
         now = int((now + _night_skip) / NIGHT_LENGTH) * NIGHT_LENGTH - _night_skip
     for n, (lx, d) in enumerate(hwy_lanes(x0, x1)):
         m = _mix(int(x0), n, 2503)
-        fast = 2.5 if abs(lx - (x0 + x1) * 0.5) < 2 else 0.0   # the inside lane
-        pace = (19.0 + (m & 7) * 0.8 + fast) * d
+        pace = hwy_pace(x0, lx, d)
         shift = now * pace + (m >> 3 & 1023) / 1023.0 * HWY_SLOT
         k0 = int(math.floor((z - reach - shift) / HWY_SLOT))
         for k in range(k0, k0 + int(2 * reach / HWY_SLOT) + 2):
@@ -15211,6 +15220,58 @@ def hwy_cars(x0, x1, z, reach, now):
             if g % HWY_ODDS:
                 continue
             yield k * HWY_SLOT + shift, lx, d, g
+
+
+HWY_RAMP_EVERY = 4     # blocks along a highway from one pair of on-ramps to the next
+HWY_RAMP_L = 6         # cells a ramp climbs over: thirty units up nine
+_ramp_cache = {}
+
+
+def ramp_at(i, j):
+    """The highway ramp this cell is part of, or None: (kind, way, x0, x1, low,
+    high) - "on" or "off", +1 or -1 the way the traffic on it goes, its lane
+    across, and the z of its foot and of its top. Ramps are in the outer lane
+    of each side, the side whose traffic they serve: every HWY_RAMP_EVERY
+    blocks an on-ramp each way just past a cross street, and half way between
+    them an off-ramp each way - so to leave, keep to the outside lane and it
+    takes you down. Only where the whole lane under it is dry road."""
+    key = i * 1048576 + j
+    if key in _ramp_cache:
+        return _ramp_cache[key]
+    _evict(_ramp_cache, 20000)
+    hit = None
+    span = hwy_span(i // XP)
+    if span is not None and i in (span[0], span[0] + span[1] - 1):
+        b = j // ZP
+        r = b % HWY_RAMP_EVERY
+        js = b * ZP + 1
+        if r in (0, HWY_RAMP_EVERY // 2) and js <= j < js + HWY_RAMP_L:
+            if all(road_at(i, jj) and not water_at(i, jj) and not woods_at(i, jj)
+                   for jj in range(js - 1, js + HWY_RAMP_L + 1)):
+                way = 1 if i == span[0] + span[1] - 1 else -1
+                kind = "on" if r == 0 else "off"
+                z0, z1 = js * CELL, (js + HWY_RAMP_L) * CELL
+                # The foot is where the ramp's traffic comes from: an on-ramp
+                # starts low behind it, an off-ramp ends low ahead of it.
+                low = ((z0 if way > 0 else z1) if kind == "on"
+                       else (z1 if way > 0 else z0))
+                hit = (kind, way, i * CELL, (i + 1) * CELL, low, z1 + z0 - low)
+    _ramp_cache[key] = hit
+    return hit
+
+
+def ramp_height(r, z):
+    """How high a ramp is at z along it."""
+    return HWY_H * min(1.0, abs(z - r[4]) / (HWY_RAMP_L * CELL))
+
+
+def hwy_deck(x):
+    """(x0, x1) of the highway whose deck is over this x, or None."""
+    span = hwy_span((int(x / CELL + BIG) - BIG) // XP)
+    if span is None:
+        return None
+    x0, x1 = span[0] * CELL, (span[0] + span[1]) * CELL
+    return (x0, x1) if x0 <= x < x1 else None
 
 
 def hwy_near(x, z):
@@ -15263,8 +15324,14 @@ def draw_hwy(ch, co, v, walls, x0, x1, now, wet):
             put_point(ch, co, v, walls, xm, y, z, "|", CONCRETE)
         put_point(ch, co, v, walls, xm, HWY_H + 3.0, z, "o", EMBER_HOT)
         z += HWY_LAMP
+    draw_ramps(ch, co, v, walls, x0, x1, zs, ze)
     if dx0 < v.x < dx1 and v.eye < HWY_H:
         return                                   # under the deck
+    draw_hwy_cars(ch, co, v, walls, x0, x1, now, reach, zs, ze)
+
+
+def draw_hwy_cars(ch, co, v, walls, x0, x1, now, reach, zs, ze):
+    """The highway's traffic, between zs and ze along it."""
     for cz, lx, d, g in hwy_cars(x0, x1, v.z, reach, now):
         if not zs - 5 < cz < ze + 5:
             continue
@@ -15582,6 +15649,9 @@ def draw_traffic(ch, co, v, walls, now, wet):
         coming = (v.x - x) * dx + (v.z - z) * dz > 0.0
         paint = tone_colour(("mid", "far", "cold", "warm", "rust")[g >> 3 & 3],
                             (g >> 8 & 15) / 15.0)
+        if _cars_lift.get(g):
+            draw_lifted_police(ch, co, v, walls, x, z, dx, dz, g, now, wet)
+            continue
         if kind == "bus":
             blit_sprite(ch, co, v, walls, BUS, x, z, 0.0, 2.8, 2.9, paint)
             half, h = 1.2, 0.7
@@ -15603,6 +15673,157 @@ def draw_traffic(ch, co, v, walls, now, wet):
             lx, lz = ex - dz * s, ez + dx * s
             put_lit(ch, co, v, walls, lx, h, lz, "o" if coming else "*",
                     FLASH if coming else ROU_RED, max(wet, 0.3), now)
+
+
+def draw_ramps(ch, co, v, walls, x0, x1, zs, ze):
+    """The highway's ramps along this stretch: each a lane-wide slope from the
+    street to the deck, its two edges and a parapet, and a board at the foot -
+    HWY for an on-ramp, EXIT where an off-ramp comes down."""
+    i0 = int(x0 / CELL + BIG) - BIG
+    span = hwy_span(i0 // XP)
+    if span is None:
+        return
+    for i in (span[0], span[0] + span[1] - 1):
+        for b in range(int(zs // (ZP * CELL)) - 1, int(ze // (ZP * CELL)) + 2):
+            r = ramp_at(i, b * ZP + 1)
+            if r is None:
+                continue
+            z0, z1 = min(r[4], r[5]), max(r[4], r[5])
+            for ex in (r[2] + 0.4, r[3] - 0.4):
+                z = z0
+                while z <= z1:
+                    hh = ramp_height(r, z)
+                    put_point(ch, co, v, walls, ex, hh, z, "=", CURB)
+                    put_point(ch, co, v, walls, ex, hh + 0.6, z, "-", CONCRETE)
+                    z += max(0.3, math.hypot(ex - v.x, z - v.z) * 0.02)
+            # The board, at the foot, facing the traffic that wants it.
+            board = "HWY ^" if r[0] == "on" else "EXIT"
+            pr = v.project((r[2] + r[3]) * 0.5, 3.4, r[4])
+            if pr is not None and pr[2] < 90.0:
+                bx, by = int(round(pr[0])), int(round(pr[1]))
+                bxc = max(0, min(v.width - 1, bx))
+                if 0 <= by < v.height and not hidden(walls, bxc, by, pr[2]):
+                    _label(ch, co, by, bx - len(board) // 2, board, ROU_GREEN)
+
+
+def draw_deck(ch, co, v, walls, cab, now):
+    """From up on the highway: the deck's surface under you, the lane lines
+    dashed down it, the median, the rails - painted over the street below
+    wherever a ray down meets the deck before anything else - and the
+    highway's traffic on it again, since the paint went over it. On a ramp,
+    the ramp's lane at the height you are, the same way."""
+    deck = hwy_deck(cab.x if cab.ramp is None else (cab.ramp[2] + cab.ramp[3]) * 0.5)
+    if deck is None:
+        return
+    x0, x1 = deck
+    xm = (x0 + x1) * 0.5
+    dx0, dx1 = x0 + PAVE + 0.4, x1 - PAVE - 0.4
+    up = v.eye > HWY_H + 0.3
+    planes = []
+    if up:
+        planes.append((HWY_H, dx0, dx1, -1e9, 1e9))
+    if cab.ramp is not None:
+        r = cab.ramp
+        planes.append((cab.h, r[2], r[3], min(r[4], r[5]), max(r[4], r[5])))
+    painted = set()
+    # The nearest facade in each column: nothing further off can hide a cell
+    # nearer than it, so hidden() is only asked where it might say yes.
+    near_wall = [min((run[0] for run in col), default=1e9) for col in walls[4]]
+    for plane, lo, hi, z0, z1 in planes:
+        if v.eye - plane < 0.2:
+            continue
+        for y in range(v.horizon + 1, v.height):
+            d = (v.eye - plane) * v.fy / (y - v.horizon)
+            if d > 140.0:
+                continue
+            # Across the row the ground point moves in a straight line, so the
+            # columns over the deck are one run: solve for its two ends.
+            ax = v.x + d * (v.dx - v.plx)            # at the left edge
+            bx = v.x + d * (v.dx + v.plx)            # at the right
+            if abs(bx - ax) < 1e-9:
+                if not lo <= ax <= hi:
+                    continue
+                s0, s1 = 0, v.width - 1
+            else:
+                f0, f1 = sorted(((lo - ax) / (bx - ax), (hi - ax) / (bx - ax)))
+                s0 = max(0, int(math.ceil(f0 * (v.width - 1))))
+                s1 = min(v.width - 1, int(math.floor(f1 * (v.width - 1))))
+            for sx in range(s0, s1 + 1):
+                if (y, sx) in painted:
+                    continue
+                cam = 2.0 * sx / (v.width - 1) - 1.0
+                wx = v.x + d * (v.dx + v.plx * cam)
+                wz = v.z + d * (v.dz + v.plz * cam)
+                if not z0 <= wz <= z1:
+                    continue
+                if near_wall[sx] < d and hidden(walls, sx, y, d):
+                    continue
+                painted.add((y, sx))
+                edge = min(abs(wx - lo), abs(wx - hi))
+                if edge < 0.35:
+                    g, a = "#", CONCRETE
+                elif plane == HWY_H and abs(wx - xm) < 0.25:
+                    g, a = "=", GOLD_DIM
+                elif (plane == HWY_H and int(wz / 3.0) % 2
+                      and min(abs(wx - xm - 2.8), abs(wx - xm + 2.8)) < 0.18):
+                    g, a = ":", CONCRETE
+                else:
+                    g, a = " ", 0
+                ch[y][sx], co[y][sx] = g, a
+    if up:
+        draw_hwy_cars(ch, co, v, walls, x0, x1, now, ROOF_REACH, v.z - 200, v.z + 200)
+    for x, z, (dx, dz), kind, g in _cars_extra:
+        if _cars_lift.get(g):
+            draw_lifted_police(ch, co, v, walls, x, z, dx, dz, g, now, 0.5)
+
+
+def draw_headlights(ch, co, v, walls, cab):
+    """The cab's headlights: a pool of light on the road ahead, on whatever it
+    is driving on, widening and fading - further and narrower on high beam.
+    Only the road in front of you; never the dark beyond it."""
+    if not cab.lights:
+        return
+    reach, spread = (34.0, 0.34) if cab.lights == 1 else (70.0, 0.2)
+    plane = cab.h
+    near_wall = [min((run[0] for run in col), default=1e9) for col in walls[4]]
+    for y in range(v.horizon + 1, v.height):
+        d = (v.eye - plane) * v.fy / (y - v.horizon)
+        if not 1.5 < d < reach:
+            continue
+        fade = 1.0 - d / reach
+        half = (1.3 + d * spread) * v.fx / d       # the beam's columns, this row
+        for sx in range(max(0, int(v.cx - half)), min(v.width, int(v.cx + half) + 1)):
+            lat = (sx - v.cx) * d / v.fx
+            if abs(lat) > 1.3 + d * spread or (near_wall[sx] < d
+                                                and hidden(walls, sx, y, d)):
+                continue
+            edge = 1.0 - abs(lat) / (1.3 + d * spread)
+            lit = fade * (0.35 + 0.65 * edge)
+            c = ch[y][sx]
+            if c == " ":
+                if _mix(sx, y, 6101) % 1000 < lit * 520:
+                    ch[y][sx] = "," if _mix(sx, y, 6103) & 1 else "."
+                    co[y][sx] = BULB if lit > 0.45 else BULB_DIM
+            elif lit > 0.25:
+                co[y][sx] = BULB if lit > 0.55 else BULB_DIM
+
+
+def draw_lifted_police(ch, co, v, walls, x, z, dx, dz, g, now, wet):
+    """The police car after you, up a ramp or on the deck: the street's own car
+    drawn at its height, the lightbar going."""
+    lift = _cars_lift.get(g, 0.0)
+    coming = (v.x - x) * dx + (v.z - z) * dz > 0.0
+    blit_sprite(ch, co, v, walls, CAR, x, z, lift, lift + 1.35, 1.9, MOON_DIM)
+    bar = police_light(now, g)
+    put_lit(ch, co, v, walls, x - 0.25 * dz, lift + 1.55, z - 0.25 * dx, "=", bar,
+            max(wet, 0.5), now)
+    put_lit(ch, co, v, walls, x + 0.25 * dz, lift + 1.55, z + 0.25 * dx, "=",
+            NEON[2][0] if bar == ROU_RED else ROU_RED, max(wet, 0.5), now)
+    end = 1.0 if coming else -1.0
+    for s in (-0.75, 0.75):
+        put_lit(ch, co, v, walls, x + dx * end * 1.9 - dz * s, lift + 0.55,
+                z + dz * end * 1.9 + dx * s, "o" if coming else "*",
+                FLASH if coming else ROU_RED, max(wet, 0.3), now)
 
 
 def siren_near(x, z, now):
@@ -25502,6 +25723,7 @@ CAB_CENTRE = 6.0       # and comes back by itself
 CAB_GRACE = 0.16       # a steering key holds the wheel over this long after it
 CAB_DENT = 9.0         # hit something faster than this: a crash, not a bump
 CAB_CAR = 2.6          # a car this near is a car hit
+CAB_HWY_DENT = 9.0     # on the highway, coming up behind one this much faster: a crash
 CAB_FLAG = 4.0         # the meter starts at this
 CAB_PER = 0.03         # and a dollar every thirty-odd units driven
 CAB_TIP = 0.25         # what a perfect ride tips, of the meter
@@ -25587,10 +25809,11 @@ COP_SAYS = ["License and registration.", "Do you know why I pulled you over?",
             "Evening. In a hurry, are we?"]
 _cars_off = set()       # the traffic's police car that pulled out after you
 _cars_extra = []        # and where it is now, for the street to draw like any car
+_cars_lift = {}         # and how high, by its seed: up a ramp after you
 CAB_HUD = " driving the cab  -  %s "
-CAB_KEYS = ("w s speed  a d steer  space brakes  e handbrake  m map  h horn  "
+CAB_KEYS = ("w s speed  a d steer  space brakes  e handbrake  l lights  m map  h horn  "
             "x pull over")
-CAB_KEYS_SHORT = "ws speed  ad steer  spc brake  e handbrake  m h x"
+CAB_KEYS_SHORT = "ws speed  ad steer  spc brake  e handbrake  l m h x"
 _cab_seen = {}
 
 
@@ -25621,8 +25844,7 @@ def cab_route(start, goal, limit=CAB_ROUTE_MAX):
     an alley costs more than a street, the way a cabbie would take one."""
     if start == goal:
         return [start]
-    gi, gj = goal
-    dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+    gi, gj = goal[0], goal[1]
     best = {}
     came = {}
     heap = [(0.0, 0.0, start, -1)]
@@ -25642,25 +25864,84 @@ def cab_route(start, goal, limit=CAB_ROUTE_MAX):
         seen += 1
         if seen > limit:
             return None
-        i, j = cell
-        for nd, (di, dj) in enumerate(dirs):
-            if d >= 0 and nd == d ^ 1:
+        for nd, nxt, step in cab_steps(cell, goal):
+            if d >= 0 and nd == d ^ 1 and len(nxt) == 2 == len(cell):
                 continue                    # no turning round in the road
-            nxt = (i + di, j + dj)
-            if nxt != goal and cab_ground(*nxt) != "road":
-                continue
-            step = 1.0 if road_at(*nxt) or nxt == goal else 2.5
             ng = g + step + (0.6 if d >= 0 and nd != d else 0.0)
             if ng < best.get((nxt, nd), 1e18):
                 best[(nxt, nd)] = ng
                 came[(nxt, nd)] = (cell, d)
                 h = abs(nxt[0] - gi) + abs(nxt[1] - gj)
-                heapq.heappush(heap, (ng + h * CAB_GREED, ng, nxt, nd))
+                heapq.heappush(heap, (ng + h * CAB_GREED * (
+                    CAB_DECK_COST if len(nxt) == 3 else 1.0), ng, nxt, nd))
     return None
+
+
+CAB_DECK_COST = 0.35    # a cell along the highway, against a street's 1: it is quick
+CAB_RAMP_COST = 0.5     # and a cell of ramp
+
+
+def cab_steps(cell, goal):
+    """Where the satnav can go from a node, (way, node, cost): a street cell
+    is (i, j), a cell of highway deck (i, j, 1) - one node a side, in that
+    side's outer column, going that side's way. Streets go to their four
+    neighbours that are road, but not into a ramp's lane; just short of an
+    on-ramp's foot you can go up it, onto the deck past its top; on the deck
+    you go on, or at an off-ramp, down it to the street past its foot."""
+    dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+    out = []
+    if len(cell) == 2:
+        i, j = cell
+        for nd, (di, dj) in enumerate(dirs):
+            nxt = (i + di, j + dj)
+            r = ramp_at(*nxt)
+            if r is not None:
+                if (r[0] == "on" and di == 0 and dj == r[1]
+                        and _ramp_cell(r[4], r[1], True) == j):
+                    top = _ramp_cell(r[5], r[1], False)
+                    out.append((nd, (i, top, 1), HWY_RAMP_L * CAB_RAMP_COST))
+                continue                        # a ramp's lane is the ramp's
+            if nxt != goal and cab_ground(*nxt) != "road":
+                continue
+            out.append((nd, nxt, 1.0 if road_at(*nxt) or nxt == goal else 2.5))
+        return out
+    i, j, _ = cell
+    span = hwy_span(i // XP)
+    if span is None:
+        return out
+    way = 1 if i == span[0] + span[1] - 1 else -1
+    nd = 2 if way > 0 else 3
+    out.append((nd, (i, j + way, 1), CAB_DECK_COST))
+    r = ramp_at(i, j + way)
+    if r is not None and r[0] == "off" and r[1] == way:
+        foot = _ramp_cell(r[4], way, False)
+        out.append((nd, (i, foot), HWY_RAMP_L * CAB_RAMP_COST))
+    return out
+
+
+def _ramp_cell(z, way, before):
+    """The cell just before a ramp end at z (going `way`), or just after it."""
+    c = int(round(z / CELL))
+    if before:
+        return c - 1 if way > 0 else c
+    return c if way > 0 else c - 1
 
 
 def _cell_of(x, z):
     return int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+
+
+def cab_node(x, z, h):
+    """The satnav's node for where the cab is: its street cell, or up on the
+    deck, that side's node."""
+    i, j = _cell_of(x, z)
+    if h < HWY_H - 1.0:
+        return i, j
+    span = hwy_span(i // XP)
+    if span is None:
+        return i, j
+    xm = (span[0] + span[1] * 0.5) * CELL
+    return (span[0] + span[1] - 1 if x > xm else span[0]), j, 1
 
 
 def cab_sight(ax, az, bx, bz):
@@ -25738,6 +26019,9 @@ class Cab:
         self.fine = 0               # money for main() to take from the wallet
         self.officer = ""           # what the officer at your window says
         self.mirror = None          # the last picture in the mirror, and when
+        self.h = 0.0                # how high the wheels are: up a ramp, on the deck
+        self.ramp = None            # the ramp you are on, if one
+        self.lights = 1             # l: the headlights - off, on, high beam
 
     # --- the controls ----------------------------------------------------
     def key(self, what, now):
@@ -25762,6 +26046,10 @@ class Cab:
                              else max(self.hb_until, now + CAB_GRACE))
         elif what == "map":
             self.map_on = not self.map_on
+        elif what == "lights":
+            self.lights = (self.lights + 1) % 3
+            self.said, self.said_at = ("headlights off", "headlights on",
+                                       "high beam")[self.lights], now
         elif what == "horn":
             self.horn_at = now
 
@@ -25851,13 +26139,30 @@ class Cab:
         n = 1 + int(abs(dist) / (STEP_MAX * 0.5))
         go = self.heading + self.slip
         sx, sz = math.sin(go) * dist / n, math.cos(go) * dist / n
+        if self.h > 0.0 or self.ramp is not None:
+            self._move_up(sx, sz, n, now)
+            return
+        def clear(x, z):
+            # Somewhere a car can be on the street: and not a ramp's side or its
+            # high end, which are walls like any other.
+            r_ = ramp_at(*_cell_of(x, z))
+            return can_stand(x, z) and (r_ is None or ramp_height(r_, z) < 1.0)
+
         for _ in range(n):
-            if can_stand(self.x + sx, self.z + sz):
+            r = ramp_at(*_cell_of(self.x + sx, self.z + sz))
+            if r is not None and ramp_height(r, self.z + sz) < 1.0:
+                # Onto a ramp at its foot: up you go (or down it the wrong
+                # way, an exit driven up from the street).
+                self.x, self.z, self.ramp = self.x + sx, self.z + sz, r
+                self.h = ramp_height(r, self.z)
+                self._move_up(sx, sz, n - 1, now)
+                return
+            if clear(self.x + sx, self.z + sz):
                 self.x, self.z = self.x + sx, self.z + sz
                 continue
             slid = None
             for ax, az, lost in ((sx, 0.0, sz), (0.0, sz, sx)):
-                if abs(ax) + abs(az) > 1e-6 and can_stand(self.x + ax, self.z + az):
+                if abs(ax) + abs(az) > 1e-6 and clear(self.x + ax, self.z + az):
                     self.x, self.z, slid = self.x + ax, self.z + az, abs(lost)
                     break
             if slid is not None:
@@ -25884,10 +26189,66 @@ class Cab:
                 self.fare["mood"] -= 0.15
                 self.say("grass", now)
 
+    def _wall(self, now):
+        """Head on into something: stopped, and a bump or a crash by how fast."""
+        self.blocked = True
+        hit = abs(self.speed)
+        self.speed = self.want = self.slip = 0.0
+        if hit > CAB_DENT:
+            self._hit("crash", now)
+        elif hit > 2.0 and now - self.hit_at > 0.6:
+            self._hit("bump", now)
+
+    def _move_up(self, sx, sz, n, now):
+        """Off the ground: up a ramp or along the deck. A ramp's rails keep you
+        in its lane and its height goes with how far along it you are; the
+        deck's rails and the median keep you on your own side of it, and the
+        outside lane over an off-ramp takes you down it."""
+        for _ in range(max(0, n)):
+            nx, nz = self.x + sx, self.z + sz
+            r = self.ramp
+            if r is not None:
+                lo, hi = r[2] + 1.2, r[3] - 1.2
+            else:
+                deck = hwy_deck(self.x)
+                if deck is None:
+                    self.h = 0.0                # not over a deck: nothing to be on
+                    return
+                xm = (deck[0] + deck[1]) * 0.5
+                lo, hi = ((xm + 0.6, deck[1] - PAVE - 0.2) if self.x > xm
+                          else (deck[0] + PAVE + 0.2, xm - 0.6))
+            if not lo <= nx <= hi:
+                # The rail: a graze along it, a bump coming in at it.
+                into = abs(sx) / max(1e-6, abs(sx) + abs(sz))
+                if into > 0.45 and abs(self.speed) > 6.0 and now - self.hit_at > 1.0:
+                    self._hit("bump", now)
+                self.speed *= 1.0 - 0.3 * into
+                nx = max(lo, min(hi, nx))
+            self.x, self.z = nx, nz
+            if r is not None:
+                z0, z1 = min(r[4], r[5]), max(r[4], r[5])
+                if z0 <= nz <= z1:
+                    self.h = ramp_height(r, nz)
+                elif abs(nz - r[4]) < abs(nz - r[5]):
+                    self.h, self.ramp = 0.0, None   # off the foot, on the street
+                    return
+                else:
+                    self.h, self.ramp = HWY_H, None  # over the top, on the deck
+            else:
+                off = ramp_at(*_cell_of(nx, nz))
+                if (off is not None and off[0] == "off"
+                        and ramp_height(off, nz) > HWY_H - 1.5):
+                    self.ramp = off                 # the exit: down it
+
     def _traffic(self, now):
         """The city's traffic does not see you: drive into it and that is on you."""
         if now - self.hit_at < 2.0 or abs(self.speed) < 2.0:
             return                  # stopped at the kerb, they go round you
+        if self.h > HWY_H - 1.0:
+            self._deck_traffic(now)
+            return
+        if self.h > 0.5:
+            return                          # on a ramp: nothing else is
         v = View(self.x, self.z, self.heading, 3, 3)
         for _, x, z, (dx, dz), kind, g in near_cars(v, now, reach=12.0, every=True):
             if self.cop is not None and g == self.cop["g"]:
@@ -25909,8 +26270,8 @@ class Cab:
         sight long enough, and you have lost it."""
         c = self.cop
         if c is None:
-            if now - self.cop_look < 0.25 or now < self.cop_rest:
-                return
+            if now - self.cop_look < 0.25 or now < self.cop_rest or self.h > 0.5:
+                return                      # (no police up on the highway)
             self.cop_look = now
             why = ("speed" if abs(self.speed) > COP_LIMIT
                    else "crash" if now - self.car_hit_at < 1.5
@@ -25922,8 +26283,8 @@ class Cab:
                 if kind != "police" or not cab_sight(x, z, self.x, self.z):
                     continue
                 n = max(1, int(math.hypot(self.x - x, self.z - z)))
-                path = [(x + (self.x - x) * k / n, z + (self.z - z) * k / n, COP_TOP)
-                        for k in range(1, n + 1)]
+                path = [(x + (self.x - x) * k / n, z + (self.z - z) * k / n, COP_TOP,
+                         0.0) for k in range(1, n + 1)]
                 self.cop = {"state": "chase", "x": x, "z": z, "dir": dirv,
                             "v": 10.0, "g": g, "why": why, "t0": now, "t_chase": now,
                             "path": path,
@@ -25938,7 +26299,7 @@ class Cab:
         if c["state"] == "chase":
             last = c["path"][-1] if c["path"] else (c["x"], c["z"])
             if math.hypot(self.x - last[0], self.z - last[1]) > 1.0:
-                c["path"].append((self.x, self.z, abs(self.speed)))
+                c["path"].append((self.x, self.z, abs(self.speed), self.h))
             c["mph"] = max(c["mph"], int(abs(self.speed) * MPH))
             gap = self._cop_gap()
             cap = COP_TOP
@@ -26008,6 +26369,7 @@ class Cab:
 
     def _cops_gone(self, now, rest):
         _cars_off.discard(self.cop["g"])
+        _cars_lift.pop(self.cop["g"], None)
         _cars_extra[:] = []
         self.cop, self.officer = None, ""
         self.cop_rest = now + rest
@@ -26016,7 +26378,7 @@ class Cab:
         """How far behind it is, along the road you drove."""
         c = self.cop
         px, pz, n = c["x"], c["z"], 0.0
-        for x, z, _ in c["path"]:
+        for x, z, *_ in c["path"]:
             n += math.hypot(x - px, z - pz)
             px, pz = x, z
         return n + math.hypot(self.x - px, self.z - pz)
@@ -26024,7 +26386,8 @@ class Cab:
     def _cop_go(self, d):
         c = self.cop
         while d > 1e-6 and c["path"]:
-            x, z, _ = c["path"][0]
+            x, z, _, h = c["path"][0]
+            _cars_lift[c["g"]] = h          # up the ramp after you
             seg = math.hypot(x - c["x"], z - c["z"])
             if seg > 1e-6:
                 c["dir"] = ((x - c["x"]) / seg, (z - c["z"]) / seg)
@@ -26037,6 +26400,40 @@ class Cab:
                 c["z"] += (z - c["z"]) * d / seg
                 d = 0.0
         _cars_extra[:] = [(c["x"], c["z"], c["dir"], "police", c["g"])]
+
+    def _deck_traffic(self, now):
+        """The highway's traffic, two lanes a side and close together. A car in
+        your lane ahead and slower: come up on it gently and you follow it at
+        its speed till you change lanes; come into it fast, or into the side
+        of one, and that is a crash. Your lane is the one you are in, not a
+        circle round you: the lanes are only 2.4 apart."""
+        deck = hwy_deck(self.x)
+        if deck is None:
+            return
+        vz = math.cos(self.heading) * self.speed
+        for cz, lx, d, g in hwy_cars(deck[0], deck[1], self.z, 12.0, now):
+            side = abs(lx - self.x)
+            if side > 1.5:
+                continue
+            ahead = (cz - self.z) * d
+            pace = hwy_pace(deck[0], lx, d)
+            rel = vz * d - abs(pace)
+            if 0.0 < ahead < 4.5 and rel > 0.0 and vz * d > 0.0:
+                if rel > CAB_HWY_DENT:
+                    self.speed = self.want = 0.0
+                    self.car_hit_at = now
+                    self._hit("car", now)
+                elif now - self.moan_at > 4.0:
+                    self.said, self.said_at, self.moan_at = (
+                        "brake lights ahead - change lanes", now, now)
+                if rel <= CAB_HWY_DENT:
+                    self.speed = math.copysign(abs(pace), self.speed)
+                return
+            if abs(ahead) < 2.2 and side < 1.0 and now - self.hit_at > 1.5:
+                self.car_hit_at = now           # into the side of one
+                self.speed *= 0.5
+                self._hit("car", now)
+                return
 
     def _hit(self, what, now):
         self.hit_at = now
@@ -26060,7 +26457,7 @@ class Cab:
                 self._dispatch(now)
             return
         here = math.hypot(self.x - f["x"], self.z - f["z"])
-        still = abs(self.speed) < CAB_STOPPED
+        still = abs(self.speed) < CAB_STOPPED and self.h < 0.5   # not from the deck
         if f["state"] == "waiting":
             if here < CAB_PICKUP and still:
                 f["state"], f["t"] = "boarding", now
@@ -26112,6 +26509,7 @@ class Cab:
     def _dispatch(self, now):
         """Somebody wants a cab, a few blocks off, standing at a kerb."""
         ci, cj = _cell_of(self.x, self.z)
+        start = cab_node(self.x, self.z, self.h)
         for _ in range(30):
             a = self.rng.uniform(0.0, math.tau)
             r = self.rng.uniform(*CAB_NEAR)
@@ -26121,7 +26519,7 @@ class Cab:
             spot = _kerb_spot(i, j)
             if spot is None:
                 continue
-            path = cab_route((ci, cj), (i, j))
+            path = cab_route(start, (i, j))
             if path is None:
                 continue
             kind = ("hurry", "nervous", "plain", "plain")[self.rng.randrange(4)]
@@ -26151,7 +26549,7 @@ class Cab:
             cell = _drop_cell(spot[0], spot[1])
             if cell is None:
                 continue
-            path = cab_route(_cell_of(self.x, self.z), cell)
+            path = cab_route(cab_node(self.x, self.z, self.h), cell)
             if path is None:
                 continue
             to = ((cell[0] + 0.5) * CELL, (cell[1] + 0.5) * CELL)
@@ -26188,11 +26586,14 @@ class Cab:
         left it, find a new one - once a second at most."""
         if self.goal is None:
             return
-        here = _cell_of(self.x, self.z)
+        if self.ramp is not None:
+            return                      # up or down a ramp: the way waits for you
+        here = cab_node(self.x, self.z, self.h)
         if self.route:
             idx = None
             for k_, c in enumerate(self.route[:14]):
-                if abs(c[0] - here[0]) + abs(c[1] - here[1]) <= 1:
+                if (len(c) == len(here)
+                        and abs(c[0] - here[0]) + abs(c[1] - here[1]) <= 1):
                     idx = k_
                     if c == here:
                         break
@@ -26207,30 +26608,59 @@ class Cab:
             if path is not None:
                 self.route = path
 
+    def route_point(self, n):
+        """Where to steer for the satnav's n-th node: a street cell's middle;
+        on the deck, the inside lane - the outside one goes down every exit -
+        till your own exit is near, then the outside one."""
+        c = self.route[min(n, len(self.route) - 1)]
+        if len(c) == 2:
+            return (c[0] + 0.5) * CELL, (c[1] + 0.5) * CELL
+        span = hwy_span(c[0] // XP)
+        xm = (span[0] + span[1] * 0.5) * CELL
+        way = 1 if c[0] == span[0] + span[1] - 1 else -1
+        exiting = any(len(q) == 2 for q in self.route[n:n + 5])
+        return xm + way * (4.0 if exiting else 1.6), (c[1] + 0.5) * CELL
+
     def directions(self):
         """What the satnav says: "left in 40 m", "straight on", "turn round"."""
         if self.fare is None or self.fare["state"] not in ("waiting", "riding"):
             return ""
         if not self.route or len(self.route) < 2:
             return "you are there - stop"
-        (ai, aj), (bi, bj) = self.route[0], self.route[1]
-        d0 = (bi - ai, bj - aj)
+        if self.ramp is not None:
+            return "up the ramp" if self.ramp[0] == "on" else "down the exit"
+
+        def way(p, q):
+            return ((q[0] > p[0]) - (q[0] < p[0]), (q[1] > p[1]) - (q[1] < p[1]))
+        d0 = way(self.route[0], self.route[1])
         if d0[0] * math.sin(self.heading) + d0[1] * math.cos(self.heading) < -0.4:
             return "turn round when you can"
-        for n in range(1, len(self.route) - 1):
-            (pi, pj), (qi, qj) = self.route[n], self.route[n + 1]
-            d1 = (qi - pi, qj - pj)
-            if d1 != d0:
+        run = 0
+        for n in range(len(self.route) - 1):
+            p, q = self.route[n], self.route[n + 1]
+            far = int(run * CELL)
+            if len(p) != len(q):
+                # Onto the highway, or off it: the ramps are in the outside lane.
+                return ("on-ramp in %d m, keep right" % far if len(q) == 3
+                        else "exit in %d m, keep right" % far)
+            d1 = way(p, q)
+            if d1 != d0 and n > 0:
                 cross = d0[0] * d1[1] - d0[1] * d1[0]
-                far = int(n * CELL)
                 return "%s in %d m" % ("right" if cross < 0 else "left", far)
-        return "straight on, %d m" % int(len(self.route) * CELL)
+            run += abs(q[0] - p[0]) + abs(q[1] - p[1])
+        on_deck = len(self.route[0]) == 3
+        return ("stay on the highway, keep left, %d m" if on_deck
+                else "straight on, %d m") % int(run * CELL)
 
     def status(self):
         c = self.cop
         if c is not None:
             return ("POLICE - pull over, or lose them" if c["state"] == "chase"
                     else "pulled over")
+        if self.ramp is not None:
+            return "up the on-ramp" if self.ramp[0] == "on" else "down the exit"
+        if self.h > 0.5:
+            return "on the highway"
         f = self.fare
         if f is None:
             return "for hire - waiting on dispatch"
@@ -26350,7 +26780,7 @@ def draw_satnav(ch, co, cab, x0, y0, mw, mh, now):
     py = iy0 + (iy1 - iy0) * 0.72
     per_row, per_col = CELL, CELL * 0.5
     sh, chh = math.sin(cab.heading), math.cos(cab.heading)
-    way = set(cab.route or ())
+    way = {c[:2] for c in cab.route or ()}
     for my in range(iy0, iy1 + 1):
         fwd = (py - my) * per_row
         for mx in range(ix0, ix1 + 1):
@@ -26359,6 +26789,10 @@ def draw_satnav(ch, co, cab, x0, y0, mw, mh, now):
                             cab.z + fwd * chh - right * sh)
             if (i, j) in way:
                 ch[my][mx], co[my][mx] = "o", GOLD
+            elif ramp_at(i, j) is not None:
+                ch[my][mx], co[my][mx] = "/", GOLD_DIM
+            elif hwy_at(i) and not water_at(i, j):
+                ch[my][mx], co[my][mx] = "=", CONCRETE
             elif water_at(i, j) and not deck_at(i, j):
                 ch[my][mx], co[my][mx] = "~", CROWN_BLUE
             else:
@@ -26420,13 +26854,16 @@ def draw_mirror(ch, co, cab, now, x0, y0, mw, mh):
     # the difference.
     key = (int(now * MIRROR_FPS), mw, mh)
     if cab.mirror is None or cab.mirror[0] != key:
-        v = View(cab.x, cab.z, cab.heading + math.pi, mw, mh, eye=2.4)
+        v = View(cab.x, cab.z, cab.heading + math.pi, mw, mh, eye=2.4 + cab.h)
         # A mirror is narrow and close up: half the field of view, twice the
         # size, or a police car twenty units back is one row of it. And it
         # looks down the road, not up at the sky.
         v.plx, v.plz, v.fx, v.fy = v.plx * 0.5, v.plz * 0.5, v.fx * 2.0, v.fy * 2.0
         v.horizon = max(1, mh // 3)
-        cab.mirror = (key,) + render_street(v, now)[:2]
+        mch, mco, _ = render_street(v, now)
+        if cab.h > 0.0 or cab.ramp is not None:
+            draw_deck(mch, mco, v, v.walls, cab, now)
+        cab.mirror = (key, mch, mco)
     _, mch, mco = cab.mirror
     for y in range(mh):
         for x in range(mw):
@@ -27781,7 +28218,8 @@ def main(stdscr):
                              ord("d"): "right", ord("D"): "right",
                              ord(" "): "brake", ord("b"): "brake", ord("B"): "brake",
                              ord("m"): "map", ord("M"): "map", ord("h"): "horn",
-                             ord("H"): "horn", ord("e"): "handbrake",
+                             ord("H"): "horn", ord("l"): "lights", ord("L"): "lights",
+                             ord("e"): "handbrake",
                              ord("E"): "handbrake"}.get(key, ""), now)
             elif taxi is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (27, ord("x"), ord("X")) and taxi["phase"] != "ride":
@@ -28575,8 +29013,11 @@ def main(stdscr):
                 ch, co = render_ride(width, height, now, metro)
                 hud = METRO_HUD % "on the train"
         elif street and cab is not None:
-            v = View(cab.x, cab.z, cab.heading, width, height, eye=2.4)
+            v = View(cab.x, cab.z, cab.heading, width, height, eye=2.4 + cab.h)
             ch, co, wet = render_street(v, now)
+            if cab.h > 0.0 or cab.ramp is not None:
+                draw_deck(ch, co, v, v.walls, cab, now)
+            draw_headlights(ch, co, v, v.walls, cab)
             draw_cab_world(ch, co, v, cab, now)
             draw_driver(ch, co, cab, now, wet, big_scale(width, height))
             hud = CAB_HUD % cab.status()
