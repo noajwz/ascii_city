@@ -1217,11 +1217,15 @@ runway left are added when you stop. `landing_lines()` turns it into rows with a
 severity, `draw_landing_report()` boxes them up in the windscreen (either view) with a tip for the
 worst (`TIPS`) - pick the worst by the severity, not the colour: in the checks every colour is the
 same number. Stopped, it waits `PILOT_READ` or for Enter (and `x` now pays you too - it used to
-hand the plane back unpaid). `draw_nav_map()` is heading-up, you at 78% down: storms as radar, the
-river and the woods, every runway (yours green, its line in), the guide's way (`guide()` now says
-where it is going, `"to"`), an arrow at the edge to your destination, traffic as arrows with their
-height in hundreds of feet. From `MAP_WIDE` columns it has the panel's second section and the
-annunciators wrap short of it; narrower, `m` puts it in place of the words. `[` `]` step
+hand the plane back unpaid). `draw_nav_map()` is heading-up, you at 78% down, and shows **one page
+of `MAP_PAGES` at a time** - asked for, to make flying harder than one map with everything on
+it: ROUTE (the river and the woods, every runway - yours green, its line in - the guide's way,
+`guide()`'s `"to"`, and an arrow at the edge to your destination), WX (storms as radar, the wind
+along the foot) and TFC (traffic as arrows with their height in hundreds of feet, inside a ring
+at `TRAFFIC_CALL`). From `MAP_WIDE` columns it has the panel's second section (the panel sets
+`ck.map_wide`) and `m` goes round the pages; narrower, `m` goes words, ROUTE, WX, TFC, words. The
+title is the page and the range, the heading only where there is room for it (on a 21-column map
+it covered the page's name). `[` `]` step
 `MAP_RANGES`. `_label()` writes text over a frame spaces and all; `_text()` leaves spaces
 see-through, which is how the first titles came out `--MAP-6-km--`. The key hint has a short form
 (`PILOT_KEYS_SHORT`) for windows under 118 columns. About 2-3 ms a frame at 300x90.
