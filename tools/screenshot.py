@@ -13,6 +13,7 @@ init_colors() - which would rot the first time someone edited it - this fakes
 just enough curses for the real init_colors() to run, and records which
 xterm-256 colour each attribute stands for.
 """
+import math
 import os
 import sys
 import unicodedata
@@ -113,6 +114,26 @@ def to_svg(ch, co, title=""):
     return "\n".join(out)
 
 
+W, H = 160, 45          # a window you would actually use, not the old postcard
+
+
+def write(docs, name, ch, co, title):
+    open(os.path.join(docs, name + ".svg"), "w").write(
+        to_svg(ch, co, "ascii_city - " + title))
+    print("wrote docs/%s.svg" % name)
+
+
+def jet(home, x, z, heading, alt, now, outside=False, flaps=0, speed=70.0,
+        pitch=0.0, lag=0.0):
+    """A cockpit set up in the air, as if flown there, with nothing being said."""
+    ck = ac.Cockpit(home, 0.0)
+    ck.state, ck.alt, ck.v, ck.throttle, ck.flaps = "air", alt, speed, 0.6, flaps
+    ck.x, ck.z, ck.heading, ck.pitch, ck.outside = x, z, heading, pitch, outside
+    ck.said_at, ck.shown = -99.0, ck.said
+    ck.cam = [heading - lag, alt + 1.5 + ac.CHASE_UP, now]
+    return ac.render_cockpit(W, H, now, ck)
+
+
 def main():
     ac.WIDE_OK = True          # a real terminal reports this; headless does not
     ac._lots.clear()
@@ -129,23 +150,49 @@ def main():
         sp = ac.find_place(x0 + hop * 700, z0 - hop * 500, "@3")
         if sp is None:
             continue
-        g, _, _ = ac.render_street(ac.View(sp[0], sp[1], sp[2], 108, 26), 300.0)
+        g, _, _ = ac.render_street(ac.View(sp[0], sp[1], sp[2], W, H), 300.0)
         s = sum(40 if unicodedata.east_asian_width(c) in ("W", "F") else 1
                 for r in g for c in r if c != " ")
         if s > score:
             best, score = sp, s
-    g, c, _ = ac.render_street(ac.View(best[0], best[1], best[2], 108, 26), 300.0)
-    open(os.path.join(docs, "street.svg"), "w").write(
-        to_svg(g, c, "ascii_city - a street"))
+    g, c, _ = ac.render_street(ac.View(best[0], best[1], best[2], W, H), 300.0)
+    write(docs, "street", g, c, "a street")
 
-    # And the waterfront, on the clearest night with the milky way up.
+    # The waterfront, on the clearest night with the milky way up.
     night = max(range(300),
                 key=lambda k: ac.night(k * ac.NIGHT_LENGTH + 200)["clarity"]
                 + (0.3 if ac.night(k * ac.NIGHT_LENGTH + 200)["band"] else 0))
-    g2, c2 = ac.render_skyline(140.0, 108, 26, night * ac.NIGHT_LENGTH + 200)
-    open(os.path.join(docs, "waterfront.svg"), "w").write(
-        to_svg(g2, c2, "ascii_city - the waterfront"))
-    print("wrote docs/street.svg and docs/waterfront.svg")
+    g, c = ac.render_skyline(140.0, W, H, night * ac.NIGHT_LENGTH + 200)
+    write(docs, "waterfront", g, c, "the waterfront")
+
+    # The plane: on final to the first airport, from the seat and from behind,
+    # with no storm about to spoil the view.
+    home = ac.zone_home("airport", 100, 100)
+    rx, zn, zs = ac.runway(*home)
+    cells = ac.air_cells
+    ac.air_cells = lambda x, z, now, reach=0.0: []
+    g, c, _ = jet(home, rx + 2.0, zn + 350.0, math.pi, 30.0, 300.0, flaps=2,
+                  speed=48.0, pitch=-0.03)
+    write(docs, "cockpit", g, c, "on final")
+    g, c, _ = jet(home, rx + 4.0, zn + 700.0, math.pi, 58.0, 300.0, outside=True,
+                  flaps=2, speed=48.0, pitch=0.02, lag=-0.06)
+    write(docs, "outside", g, c, "the jet from outside")
+    ac.air_cells = cells
+
+    # And a thunderstorm ahead, caught as it strikes.
+    cell = min(ac.air_cells(rx, zn, 300.0, 20000.0),
+               key=lambda cl: math.hypot(cl[0] - rx, cl[1] - zn))
+    now = next(300.0 + k * 0.05 for k in range(2000)
+               if (ac.air_strike(cell, 300.0 + k * 0.05) or (0.0,))[0] > 0.8)
+    ahead = 0.8
+    g, c, _ = jet(home, cell[0] - math.sin(ahead) * (cell[2] + 1200.0),
+                  cell[1] - math.cos(ahead) * (cell[2] + 1200.0), ahead, 135.0, now)
+    write(docs, "storm", g, c, "a storm ahead")
+
+    # Inside the casino, the wheel going round.
+    g, c = ac.render_casino_room(ac.Spin(500.0, "ROYALE"), W, H, 502.2,
+                                 ac.Slot(ac.Wallet(1000)))
+    write(docs, "casino", g, c, "the casino")
 
 
 if __name__ == "__main__":
