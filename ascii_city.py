@@ -22228,20 +22228,13 @@ CHEAT_SKIP = 40.0      # ignore what is already underfoot, so a repeat moves on
 CHEAT_RINGS = 200      # cells of search before giving up and saying so
 
 CHEAT_PLACES = [
-    # Letters where they can be the place's own (r ramen, d diner, c casino),
-    # never a key that is another one's other case. Kinds that are not here
-    # any more - inside a casino, a dead end, far away - are still found by
-    # find_place(), for the tests, but the panel is for going somewhere.
-    ("c", "casino", "casino"),
-    ("k", "club", "club"),
-    ("p", "roof party", "roofparty"),
+    # Only what the taxi does not go to: everywhere it does - the casino, the
+    # club, the pictures and the rest of TAXI_DESTS - is a fare away from any
+    # street, so the panel was asked to drop them, and the FUN, EAT and
+    # AROUND TOWN groups with them. Letters where they can be the place's own
+    # (b bar, r roof, t turtles, f fly), never a key that is another one's
+    # other case, and never a digit: those are the parts of town.
     ("v", "woods rave", "rave"),
-    ("g", "arcade", "arcade"),
-    ("m", "cinema", "cinema"),
-    ("f", "carnival", "carnival"),
-    ("j", "claw machine", "claw"),
-    ("h", "strength test", "striker"),
-    ("x", "a manhole", "manhole"),
     ("[", "factory rave", "warehouse"),
     ("9", "the factories", "industrial"),
     ("]", "building site", "site"),
@@ -22257,44 +22250,42 @@ CHEAT_PLACES = [
     (",", "pokemon center", "center"),
     (";", "lemonade, 3am", "lemonade"),
     ("?", "the stargazer", "telescope"),
-    ("r", "ramen", "ramen"),
-    ("d", "diner", "diner"),
-    ("^", "sky deck", "tower"),
-    ("1", "rooftop bar", "bar"),
-    ("i", "lighthouse top", "lighthousedoor"),
-    ("b", "big bridge", "grand"),
     ("$", "billboard", "billboard"),
-    ("e", "stock exchange", "exchange"),
-    ("*", "the temple", "temple"),
-    ("y", "lit alley", "yokocho"),
-    ("=", "under the el", "el"),
-    ("|", "fire escape", "escape"),
-    ("2", "a low roof", "lowroof"),
-    ("3", "washing lines", "washing"),
-    ("4", "bowling", "bowling"),
-    ("5", "the turtles", "lair"),
-    ("8", "fly the plane", "pilot"),
-    ("_", "car park", "carpark"),
-    ("<", "police car", "police"),
-    (")", "highway", "highway"),
-    ("o", "the woods", "woods"),
-    ("~", "the lake", "lake"),
+    ("b", "rooftop bar", "bar"),
+    ("r", "a low roof", "lowroof"),
+    ("h", "washing lines", "washing"),
+    ("k", "bowling", "bowling"),
+    ("t", "the turtles", "lair"),
+    ("f", "fly the plane", "pilot"),
+]
+
+# Off the panel, for the pty checks alone: with ASCII_CITY_TEST set, ctrl-a and
+# then one of these keys jumps as the panel's keys used to. The checks walk into
+# the casino, sit at the ramen counter and climb the fire escapes from a jump,
+# and a taxi there would cost them a minute a case. Nobody playing sees them.
+CHEAT_HIDDEN = [
+    ("c", "casino", "casino"), ("k", "club", "club"), ("p", "roof party", "roofparty"),
+    ("g", "arcade", "arcade"), ("m", "cinema", "cinema"), ("f", "carnival", "carnival"),
+    ("j", "claw machine", "claw"), ("h", "strength test", "striker"),
+    ("x", "a manhole", "manhole"), ("r", "ramen", "ramen"), ("d", "diner", "diner"),
+    ("^", "sky deck", "tower"), ("i", "lighthouse top", "lighthousedoor"),
+    ("b", "big bridge", "grand"), ("e", "stock exchange", "exchange"),
+    ("*", "the temple", "temple"), ("y", "lit alley", "yokocho"),
+    ("=", "under the el", "el"), ("|", "fire escape", "escape"),
+    ("_", "car park", "carpark"), ("<", "police car", "police"),
+    (")", "highway", "highway"), ("o", "the woods", "woods"), ("~", "the lake", "lake"),
     ("t", "riverbank", "bank"),
 ]
+CHEAT_TEST = 1                          # ctrl-a
+TEST_JUMPS = bool(os.environ.get("ASCII_CITY_TEST"))
 
 # Placed parts of town, listed after the picked ones.
 CHEAT_ZONES = ["industrial", "site", "plot", "suburbs", "strip", "airport"]
 
 # The panel's groups, by what you would go there for.
 CHEAT_GROUPS = [
-    ("NIGHTLIFE", ["casino", "club", "roofparty", "rave", "warehouse"]),
-    ("FUN", ["arcade", "cinema", "carnival", "claw", "striker", "manhole"]),
-    ("EAT", ["ramen", "diner"]),
-    ("VIEWS", ["tower", "lighthousedoor", "grand", "billboard"]),
-    ("MONEY", ["exchange"]),
-    ("AROUND TOWN", ["temple", "yokocho", "el", "escape", "carpark", "police",
-                     "highway"]),
-    ("OUT OF TOWN", ["woods", "lake", "bank"]),
+    ("NIGHTLIFE", ["rave", "warehouse"]),
+    ("VIEWS", ["billboard"]),
 ]
 
 
@@ -23335,32 +23326,32 @@ def find_place(x, z, kind):
     return None
 
 
-# The fifth column.
-CHEAT_MORE = ["university", "library", "metro", "flight", "center", "bar",
-              "lowroof", "washing", "bowling",
-              "lair", "pilot"]
-_panel_page = [0]       # which page an 80-column panel is showing
+# The third column.
+CHEAT_MORE = ["university", "library", "metro", "flight", "pilot", "center", "bar",
+              "lowroof", "washing", "bowling", "lair"]
 
 
 def draw_cheats(ch, co, note):
     """The panel, drawn over the live frame rather than instead of it, so that
     what you change to the weather happens in front of you.
 
-    Four columns, by what you go somewhere for - CHEAT_GROUPS - then the
-    parts of town, and the weather, the sky and the nights. It was once one
-    long column that grew taller than the terminal and quietly stopped
-    opening at all. There is a test that it opens at 80x24."""
+    Four columns: what you go somewhere for - CHEAT_GROUPS - and the money,
+    the parts of town, the rest, and the weather, the sky and the nights. It
+    was once one long column that grew taller than the terminal and quietly
+    stopped opening at all, and then five that needed a second page on an 80
+    column window; since the taxi's places came off it, four fit. There is a
+    test that it opens at 80x24."""
     height, width = len(ch), len(ch[0])
     names = {kind: (k, name) for k, name, kind in CHEAT_PLACES}
     groups = {g: [("", g)] + [names[kind] for kind in kinds]
               for g, kinds in CHEAT_GROUPS}
     gap = [("", "")]
-    left = groups["NIGHTLIFE"] + [("/", "closing time")] + gap + groups["FUN"] \
-        + gap + groups["EAT"]
-    middle = groups["MONEY"] + [("+", "+$1000"), ("%", "jackpot next")]
-    middle += [("", "PARTS OF TOWN")] + [(d["key"], d["name"]) for d in DISTRICTS]
+    left = (groups["NIGHTLIFE"] + [("/", "closing time")] + gap
+            + [("", "MONEY"), ("+", "+$1000"), ("%", "jackpot next")] + gap
+            + groups["VIEWS"] + gap + [("", "THE MYSTERY"), ("m", "start it"),
+                                       ("c", "the next clue")])
+    middle = [("", "PARTS OF TOWN")] + [(d["key"], d["name"]) for d in DISTRICTS]
     middle += [names[kind] for kind in CHEAT_ZONES if kind in names]
-    right = groups["AROUND TOWN"] + gap + groups["OUT OF TOWN"] + gap + groups["VIEWS"]
     sky = [("", "WEATHER & SKY"),
            ("w", weather_name()), ("L", "strike now"),
            ("s", "sky " + clouds_name()), ("a", "people " + crowd_name()),
@@ -23373,15 +23364,8 @@ def draw_cheats(ch, co, note):
            ("`", "close")]
     more = [("", "AND THE REST")] + [names[k] for k in CHEAT_MORE if k in names]
     more.append(("\\", "storm far ahead"))
-    more.append(("6", "start the mystery"))
-    more.append(("7", "the next clue"))
     col = 18
-    if width >= col * 5 + 7:
-        columns = (left, middle, right, sky, more)     # room for all five
-    elif _panel_page[0]:
-        columns = (left, middle, right, more + [("", ""), ("\t", "back")])
-    else:
-        columns = (left, middle, right, sky)
+    columns = (left, middle, more, sky)
     rows = max(len(c) for c in columns)
     w, h = col * len(columns) + 3, rows + (3 if note else 2)
     if width < w + 4 or height < h + 2:
@@ -23399,18 +23383,13 @@ def draw_cheats(ch, co, note):
         cx = x0 + 2 + n * col
         for r, (k, label) in enumerate(column):
             y = y0 + 1 + r
-            if k == "\t":
-                _text(ch, co, y, cx, ("tab " + label)[:col - 1], GOLD_DIM)
-            elif k:
+            if k:
                 _text(ch, co, y, cx, k, GOLD)
                 _text(ch, co, y, cx + 2, label[:col - 3], HUD)
             elif label:
                 _text(ch, co, y, cx, label[:col - 1], GOLD)
     if note:
         _text(ch, co, y0 + h - 2, x0 + 2, note[:w - 4], FLASH)
-    if len(columns) == 4:
-        _text(ch, co, y0 + h - 1, x0 + w - 13,
-              "[tab]back" if _panel_page[0] else "[tab]more", GOLD_DIM)
 
 
 def _beam(ch, co, x0, y0, ang, y1, attr):
@@ -26978,6 +26957,7 @@ def main(stdscr):
     roof_x = roof_z = 0.0       # where you are on the landmark's roof
     wheel_at = 0.0
     cheats = False              # is the cheat panel up
+    hidden_next = False         # and was the last key in it the checks' ctrl-a
     note = ""                   # and what did it last do
     note_at = -1e9              # when, so the HUD can show it after the panel closes
     autopilot = False
@@ -27000,8 +26980,8 @@ def main(stdscr):
                 # the whole reason it is drawn over the view.
                 if key in (CHEAT_KEY, 27):
                     cheats, note = False, ""
-                elif key == ord("\t"):
-                    _panel_page[0] = 1 - _panel_page[0]    # the other page
+                elif key == CHEAT_TEST and TEST_JUMPS:
+                    hidden_next = True          # the next key is a checks-only one
                 elif key == ord("q"):
                     return
                 elif key == ord("w"):
@@ -27043,7 +27023,7 @@ def main(stdscr):
                     note = "next pull 777, next plinko ball to the edge"
                 elif key == ord("/"):
                     skip_to_closing(now)
-                    note = "closing time - k for a club"
+                    note = "closing time - take a cab to the club"
                 elif key == ord("#"):
                     note = ("the fog is coming in" if skip_to_fog(now)
                             else "no such night near")
@@ -27060,7 +27040,7 @@ def main(stdscr):
                         "hazy" if nt["clarity"] < 0.4 else
                         "clear" if nt["clarity"] > 0.75 else "middling",
                         moon_face(nt["phase"]) or "no")
-                elif key == ord("6"):
+                elif key == ord("m") and not hidden_next:
                     if case is None or case["done"]:
                         case = new_case("menu", cam_x, cam_z, now)
                         note = "a note, under your shoe"
@@ -27069,9 +27049,11 @@ def main(stdscr):
                 else:
                     jumps = [(k, name, kind) for k, name, kind in CHEAT_PLACES]
                     if case is not None and not case["done"]:
-                        jumps.append(("7", "next clue", CASE_TRAIL[case["stage"]][2]))
+                        jumps.append(("c", "next clue", CASE_TRAIL[case["stage"]][2]))
                     jumps += [(d["key"], d["name"], "@%d" % n)
                               for n, d in enumerate(DISTRICTS)]
+                    if hidden_next:
+                        jumps, hidden_next = list(CHEAT_HIDDEN), False
                     for k, name, kind in jumps:
                         if key != ord(k):
                             continue
