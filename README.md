@@ -193,7 +193,8 @@ the city is infinite, identical every time you walk back to it, and held in no m
 - **A flight plan** to another airport, and a tower on the radio that clears you, gives you
   headings and talks you down — and a flight director and an autopilot that fly its way.
 - **Flaps and gear** (forget the gear and it is a belly landing), **a crosswind** every night,
-  and runways lit from a long way off.
+  and runways lit from a long way off — two at every airport, and the tower gives you the one
+  into the wind.
 - **A view from outside** the jet, and **a landing light** that picks out the runway's paint.
 - **A moving map** in the panel, one page at a time — the route and runways, the weather radar, or
   the other traffic — and a

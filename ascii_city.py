@@ -2270,7 +2270,13 @@ def clock_tower(i, j):
 
 
 def airport_at(i, j):
-    return zone_depth("airport", i, j) > 0.0
+    """On the airfield: the zone, and the crosswind runway's field out past its
+    north end, with the taxiway to it."""
+    if zone_depth("airport", i, j) > 0.0:
+        return True
+    ci, cj = zone_home("airport", i, j)
+    return (cj + RUNWAY2_DJ - 10 <= j <= cj + RUNWAY2_DJ + 5
+            and abs(i - ci - RUNWAY_DI) <= RUNWAY2_HALF + 3)
 
 
 def airport_part(i, j):
@@ -2293,16 +2299,32 @@ def approach_cap(i, j):
     from the end of the runway you can watch them come in over the roofs. It
     goes on until the slope is over the tallest thing in the city, because you
     can fly it yourself now, and it may run over into the next tile of the map."""
-    for tile in (0, WOODS_TILE, -WOODS_TILE):
-        ci, cj = zone_home("airport", i, j + tile)
+    best = None
+    for tile_i, tile in ((0, 0), (0, WOODS_TILE), (0, -WOODS_TILE),
+                         (WOODS_TILE, 0), (-WOODS_TILE, 0)):
+        # The next tile east or west too: the crosswind runway's approaches run
+        # that way, and over the tile's edge they were not kept low at all. And
+        # the lowest of them where two cross, not the first one found: under
+        # one airport's approach far out and another's close in, the first
+        # was letting a tower stand in the second.
+        ci, cj = zone_home("airport", i + tile_i, j + tile)
         out = j - (cj + RUNWAY_HALF + 3)        # from inside the wavy fence on
         if out < 0:
             # And the same off the south end, under the climb-out: a flight takes
             # off that way, and at first it is only just over the roofs.
             out = (cj - RUNWAY_HALF - 3) - j
         if 0 <= out <= APPROACH_LONG and abs(i - (ci + RUNWAY_DI)) <= 15:
-            return 4.5 + max(0, out - 4) * CELL * 0.07
-    return None
+            cap = 4.5 + max(0, out - 4) * CELL * 0.07
+            best = cap if best is None else min(best, cap)
+        # The crosswind one, off both ends: a narrower band, which passes north
+        # of the Strip's towers rather than through them.
+        out = i - (ci + RUNWAY_DI + RUNWAY2_HALF + 3)
+        if out < 0:
+            out = (ci + RUNWAY_DI - RUNWAY2_HALF - 3) - i
+        if 0 <= out <= APPROACH_LONG and abs(j - (cj + RUNWAY2_DJ)) <= 8:
+            cap = 4.5 + max(0, out - 4) * CELL * 0.07
+            best = cap if best is None else min(best, cap)
+    return best
 
 
 def runway(i, j):
@@ -2311,6 +2333,214 @@ def runway(i, j):
     ci, cj = zone_home("airport", i, j)
     return ((ci + RUNWAY_DI) * CELL, (cj + RUNWAY_HALF) * CELL,
             (cj - RUNWAY_HALF) * CELL)
+
+
+RUNWAY2_DJ = RUNWAY_HALF + 18   # the crosswind runway's middle, north of the field's
+RUNWAY2_HALF = 46               # half its length, in cells: shorter than the long one
+TAXI_W = 8.0                    # half a taxiway's width, in units
+GATE_JS = (-18, -6, 6, 18)      # the stands along the terminal, cells from its middle
+_field_cache = {}
+_rw_cache = {}
+
+
+def runways(ci, cj):
+    """Every runway at the airport, as (middle x, middle z, along x, along z,
+    half its length): the long one north-south through the field, and the
+    crosswind one east-west, out past its north end - not across the middle,
+    where the town under its approach would have been the Strip's towers,
+    which stand beside every field to the west."""
+    hit = _rw_cache.get((ci, cj))
+    if hit is None:
+        if len(_rw_cache) > 400:
+            _rw_cache.clear()
+        rx = (ci + RUNWAY_DI) * CELL
+        hit = _rw_cache[(ci, cj)] = (
+            (rx, cj * CELL, 0.0, 1.0, RUNWAY_HALF * CELL),
+            (rx, (cj + RUNWAY2_DJ) * CELL, 1.0, 0.0, RUNWAY2_HALF * CELL))
+    return hit
+
+
+def approaches(home):
+    """Every way in to land: each end of each runway, as a dict - its name (18,
+    36, 09, 27: the way you are heading, in tens of degrees), the heading, the
+    threshold, the way back out along the approach, which runway, how long."""
+    key = ("appr",) + tuple(home)
+    hit = _rw_cache.get(key)
+    if hit is None:
+        hit = []
+        for n, (mx, mz, ax, az, half) in enumerate(runways(*home)):
+            for sgn in (1.0, -1.0):
+                course = math.atan2(-sgn * ax, -sgn * az) % math.tau
+                tens = int(round(math.degrees(course) / 10.0)) % 36 or 36
+                hit.append({"name": "%02d" % tens, "course": course,
+                            "thr": (mx + sgn * ax * half, mz + sgn * az * half),
+                            "out": (sgn * ax, sgn * az), "rw": n, "length": 2.0 * half,
+                            "home": tuple(home)})
+        _rw_cache[key] = hit
+    return hit
+
+
+def runway_under(home, x, z, margin=0.0, past=0.0):
+    """Which of the airport's runways a point is on, by index, or None."""
+    for n, (mx, mz, ax, az, half) in enumerate(runways(*home)):
+        s = (x - mx) * ax + (z - mz) * az
+        t = (x - mx) * az - (z - mz) * ax
+        if abs(s) <= half + past and abs(t) <= RUNWAY_W + margin:
+            return n
+    return None
+
+
+def runway_course(home, n, heading):
+    """Of the two ways along runway n, the one nearer to the heading."""
+    mx, mz, ax, az, half = runways(*home)[n]
+    a = math.atan2(ax, az)
+    return min((a % math.tau, (a + math.pi) % math.tau),
+               key=lambda c: abs(_wrap_pi(c - heading)))
+
+
+def active_approach(home, wind, x, z):
+    """The way in the tower gives you: whichever end is most into the wind, if
+    there is any to speak of; in still air, the nearer end of the long one."""
+    wx, wz = wind
+    apps = approaches(home)
+    if math.hypot(wx, wz) < 2.5:
+        return min((a for a in apps if a["rw"] == 0),
+                   key=lambda a: math.hypot(a["thr"][0] - x, a["thr"][1] - z))
+    return max(apps, key=lambda a: -(wx * math.sin(a["course"])
+                                     + wz * math.cos(a["course"])))
+
+
+def taxi_net(home):
+    """The taxiways: A down the west side of the long runway from end to end
+    and on north, B along the south side of the crosswind one, the turn-offs
+    from each runway to them, and a lead-in from A to each stand at the
+    terminal; and where you hold short of each runway. As a dict, kept."""
+    key = ("taxi",) + tuple(home)
+    hit = _rw_cache.get(key)
+    if hit is not None:
+        return hit
+    ci, cj = home
+    x0, z0 = ci * CELL, cj * CELL
+    rx = (ci + RUNWAY_DI) * CELL
+    xt = rx + TAXIWAY_DX
+    h1, h2 = RUNWAY_HALF * CELL, RUNWAY2_HALF * CELL
+    z2 = (cj + RUNWAY2_DJ) * CELL
+    zt2 = z2 - 34.0
+    exits1 = [z0 + h1 - 10.0, z0 + 150.0, z0 + 50.0, z0 - 50.0, z0 - 150.0,
+              z0 - h1 + 10.0]
+    exits2 = [rx - h2 + 10.0, rx - 130.0, rx - 60.0, rx + 60.0, rx + 130.0,
+              rx + h2 - 10.0]
+    segs = [(xt, z0 - h1 + 10.0, xt, zt2), (rx - h2 + 10.0, zt2, rx + h2 - 10.0, zt2)]
+    segs += [(xt, z, rx, z) for z in exits1]
+    segs += [(x, zt2, x, z2) for x in exits2]
+    stands = [(x0 - 94.0, z0 + g * CELL) for g in GATE_JS]
+    segs += [(sx, sz, xt, sz) for sx, sz in stands]
+    edge = RUNWAY_W + 7.0
+    holds = {"18": (rx - edge, z0 + h1 - 10.0, 1.0, 0.0),
+             "36": (rx - edge, z0 - h1 + 10.0, 1.0, 0.0),
+             "27": (rx + h2 - 10.0, z2 - edge, 0.0, 1.0),
+             "09": (rx - h2 + 10.0, z2 - edge, 0.0, 1.0)}
+    hit = _rw_cache[key] = {"segs": segs, "stands": stands, "holds": holds, "xt": xt,
+                            "zt2": zt2, "z2": z2, "rx": rx, "exits1": exits1,
+                            "exits2": exits2,
+                            "apron": (x0 - 112.0, xt, z0 - 110.0, z0 + 110.0)}
+    return hit
+
+
+def field_cell(i, j):
+    """What of the airfield is near a cell - the runways, taxiways and hold
+    lines whose ground it touches - worked out once, so a point on it only
+    asks those. An empty tuple is grass."""
+    key = i * 1048576 + j
+    hit = _field_cache.get(key)
+    if hit is not None:
+        return hit
+    if len(_field_cache) > 60000:
+        _field_cache.clear()
+    home = zone_home("airport", i, j)
+    xa, za = i * CELL - 1.0, j * CELL - 1.0
+    xb, zb = xa + CELL + 2.0, za + CELL + 2.0
+    feats = []
+    for (mx, mz, ax, az, half) in runways(*home):
+        lx, ly = (half, RUNWAY_W) if ax else (RUNWAY_W, half)
+        if xb >= mx - lx and xa <= mx + lx and zb >= mz - ly and za <= mz + ly:
+            feats.append(("rw", mx, mz, ax, az, half))
+    net = taxi_net(home)
+    for (sx0, sz0, sx1, sz1) in net["segs"]:
+        lo_x, hi_x = min(sx0, sx1) - TAXI_W, max(sx0, sx1) + TAXI_W
+        lo_z, hi_z = min(sz0, sz1) - TAXI_W, max(sz0, sz1) + TAXI_W
+        if xb >= lo_x and xa <= hi_x and zb >= lo_z and za <= hi_z:
+            feats.append(("tx", sx0, sz0, sx1, sz1))
+    for hx, hz, ux, uz in net["holds"].values():
+        if xb >= hx - TAXI_W - 2 and xa <= hx + TAXI_W + 2 and zb >= hz - TAXI_W - 2 \
+                and za <= hz + TAXI_W + 2:
+            feats.append(("hold", hx, hz, ux, uz))
+    a0, a1, b0, b1 = net["apron"]
+    if xb >= a0 and xa <= a1 and zb >= b0 and za <= b1:
+        feats.append(("apron", a0, a1, b0, b1))
+    hit = _field_cache[key] = tuple(feats)
+    return hit
+
+
+def _runway_mark(across, end, s):
+    """A runway's paint at a point: across the middle, how far from the nearer
+    end, how far along. The edges, the dashed centre line, the piano keys."""
+    if abs(across - RUNWAY_W + 0.4) < 0.35:
+        return "=", STAR
+    if across < 0.3 and (s % 12.0) < 6.0:
+        return "|", STAR
+    if end < 9.0 and (across * 1.4) % 3.0 < 1.4:
+        return "#", STAR
+    if 70.0 < end < 100.0 and 5.0 < across < 9.0:
+        return "#", STAR                    # the aiming point
+    if (150.0 < end < 168.0 or 230.0 < end < 248.0) and 5.0 < across < 8.0:
+        return "=", STAR                    # the touchdown bars
+    return None
+
+
+def field_point(feats, x, z):
+    """A point on the airfield: (glyph, colour) for paint, None for plain
+    tarmac, False for the grass between."""
+    paved = False
+    for f in feats:
+        kind = f[0]
+        if kind == "rw":
+            _, mx, mz, ax, az, half = f
+            s = (x - mx) * ax + (z - mz) * az
+            t = (x - mx) * az - (z - mz) * ax
+            if abs(s) <= half and abs(t) < RUNWAY_W:
+                return _runway_mark(abs(t), half - abs(s), s + half)
+        elif kind == "hold":
+            _, hx, hz, ux, uz = f
+            along = (x - hx) * ux + (z - hz) * uz
+            across = (x - hx) * uz - (z - hz) * ux
+            if abs(across) < TAXI_W and (abs(along) < 0.4 or abs(along - 1.3) < 0.4):
+                return "=", GOLD
+    for f in feats:
+        if f[0] == "tx":
+            _, sx0, sz0, sx1, sz1 = f
+            if sx0 == sx1:
+                off, lo, hi, at = x - sx0, min(sz0, sz1), max(sz0, sz1), z
+            else:
+                off, lo, hi, at = z - sz0, min(sx0, sx1), max(sx0, sx1), x
+            if abs(off) < TAXI_W and lo - TAXI_W <= at <= hi + TAXI_W:
+                if abs(off) < 0.3 and lo <= at <= hi:
+                    return ":", GOLD
+                paved = True
+        elif f[0] == "apron":
+            _, a0, a1, b0, b1 = f
+            if a0 <= x <= a1 and b0 <= z <= b1:
+                paved = True
+    return None if paved else False
+
+
+def paved_at(x, z):
+    """Whether the wheels are on something made for them: a runway, a taxiway,
+    the apron. Off the airfield, no."""
+    i, j = int(x // CELL), int(z // CELL)
+    if not airport_at(i, j):
+        return False
+    return field_point(field_cell(i, j), x, z) is not False
 
 
 def strip_at(i, j):
@@ -6255,6 +6485,7 @@ class Cockpit:
         self.in_storm = False
         self._wx_at = self._cells_at = None
         self.climb_out = None           # the runway's way, until high enough to turn
+        self.appr = None                # the way in the guide is flying you
         self.late = False               # told to expect a late landing clearance
         self.report = None              # how the wheels met the runway
         self.map_on = False             # m: the map in place of the words, when narrow
@@ -6354,7 +6585,8 @@ class Cockpit:
             rx, zn, zs = runway(*goal)
             far = math.hypot(rx - self.x, (zn + zs) * 0.5 - self.z)
             if far < PILOT_ENROUTE + 1500.0:
-                out[goal] = (False, self.end == zn)
+                out[goal] = (False, self.appr is not None and self.appr["name"] == "18"
+                             and self.appr["home"] == tuple(goal))
         return out
 
     def traffic(self, now):
@@ -6416,6 +6648,9 @@ class Cockpit:
         if g["mode"] != "final" or g["along"] > 450.0 or self.alt < 3.0:
             return
         if self.runway_busy(self.eta(g["along"])):
+            # Round again - straight ahead up the runway and over the roofs
+            # before any turn: turning at a thousand feet put one into a tower.
+            self.climb_out = g["course"]
             self.leg, self.went_round = "entry", True
             self.cleared = self.late = False
             self.side = 1.0 if g["lat"] >= 0.0 else -1.0
@@ -6490,41 +6725,48 @@ class Cockpit:
         starts at, then down the slope along the line. A step at a time, kept in
         self.leg, so it never changes its mind about which way you are coming.
         ATC, the flight director and the autopilot all read this, so they agree."""
-        rx, zn, zs = runway(*self.goal())
-        if self.leg is None:
-            self.end = zn if self.z >= (zn + zs) * 0.5 else zs
-        out = 1.0 if self.end == zn else -1.0
-        end = self.end
-        rwy, course = ("18", math.pi) if out > 0.0 else ("36", 0.0)
-        along = (self.z - end) * out          # how far out from the end, on the line
-        lat = self.x - rx
+        home = self.goal()
+        if self.leg is None or self.appr is None or self.appr["home"] != tuple(home):
+            self.appr = self.pick_approach(home)
+        a = self.appr
+        (thx, thz), (ox, oz) = a["thr"], a["out"]
+        rgx, rgz = -oz, ox                      # right, the way you land
+        rwy, course = a["name"], a["course"]
+        along = (self.x - thx) * ox + (self.z - thz) * oz   # out from the end
+        lat = (self.x - thx) * rgx + (self.z - thz) * rgz  # right of the line
+
+        def on_line(out_, side_=0.0):
+            return (thx + ox * out_ + rgx * side_, thz + oz * out_ + rgz * side_)
+
         if self.leg is None:
             ahead = along > PILOT_FIX + 200.0 and abs(lat) < along - PILOT_FIX + 300.0
             self.leg = "fix" if ahead else "entry"
             self.side = 1.0 if lat >= 0.0 else -1.0
         if self.leg == "entry":
-            tx, tz = rx + self.side * 900.0, end + out * (PILOT_FIX + 900.0)
+            tx, tz = on_line(PILOT_FIX + 900.0, self.side * 900.0)
             if math.hypot(tx - self.x, tz - self.z) < 160.0:
                 self.leg = "fix"
         if self.leg == "fix":
-            tx, tz = rx, end + out * PILOT_FIX
+            tx, tz = on_line(PILOT_FIX)
             # Caught well inside what final will put up with, or a crosswind put
             # you on final and off the line in the same moment, round and round.
             if math.hypot(tx - self.x, tz - self.z) < 150.0:
                 self.leg = "final"
             elif along < PILOT_FIX * 0.55:
                 self.leg = "entry"               # inside it: go out and round again
-                tx, tz = rx + self.side * 900.0, end + out * (PILOT_FIX + 900.0)
+                tx, tz = on_line(PILOT_FIX + 900.0, self.side * 900.0)
         if self.leg == "final":
             # Round again if blown off the line, or past the end still high - not
             # when floating in the last few feet, which is a landing.
             if abs(lat) > 250.0 or (along < -40.0 and self.alt > 20.0):
                 self.leg, self.went_round = "entry", True   # blown off it: round again
                 self.side = 1.0 if lat >= 0.0 else -1.0
-                tx, tz = rx + self.side * 900.0, end + out * (PILOT_FIX + 900.0)
+                if self.alt < PILOT_CLEAR:
+                    self.climb_out = course     # straight ahead first
+                tx, tz = on_line(PILOT_FIX + 900.0, self.side * 900.0)
             else:
                 lead = max(150.0, min(600.0, along * 0.4))
-                tx, tz = rx, end + out * max(-200.0, along - lead)
+                tx, tz = on_line(max(-200.0, along - lead))
         mode = {"entry": "around", "fix": "intercept", "final": "final"}[self.leg]
         heading, wx = math.atan2(tx - self.x, tz - self.z), None
         if mode != "final":
@@ -6537,7 +6779,17 @@ class Cockpit:
         return {"mode": mode, "heading": heading, "wx": wx, "to": (tx, tz),
                 "alt": high, "speed": fast, "runway": rwy, "along": along,
                 "lat": lat, "course": course, "home": self.target,
-                "dist": math.hypot(rx - self.x, (zn + zs) * 0.5 - self.z)}
+                "dist": math.hypot(runways(*home)[0][0] - self.x,
+                                   runways(*home)[0][1] - self.z)}
+
+    def pick_approach(self, home):
+        """The way in to an airport: what the tower gives in this wind - or, if
+        a check has set the end of the long runway (ck.end), that one."""
+        if self.end is not None:
+            for a in approaches(home):
+                if a["rw"] == 0 and abs(a["thr"][1] - self.end) < 1.0:
+                    return a
+        return active_approach(home, self.wind(self.clock), self.x, self.z)
 
     def goal(self):
         """The airport the tower is bringing you in to: the nearest when it was
@@ -6651,7 +6903,7 @@ class Cockpit:
             return ("low",), "AC 101, you are low. Check your height."
         if abs(g["lat"]) > 25.0:
             return ("drift", g["lat"] > 0), "AC 101, you are %s of the centre line." % (
-                "right" if (g["lat"] > 0) == (g["course"] == 0.0) else "left")
+                "right" if g["lat"] > 0 else "left")
         return ("on",), "AC 101, on the slope, on the centre line. Looking good."
 
     def radio_key(self, now):
@@ -6736,10 +6988,8 @@ class Cockpit:
             self.call(now, "TWR", line)
 
     def on_runway(self):
-        ci, cj = nearest_airport(self.x, self.z)
-        rx, zn, zs = runway(ci, cj)
-        return (abs(self.x - rx) <= RUNWAY_W + 1.0 and zs - 6.0 <= self.z <= zn + 6.0,
-                (ci, cj))
+        home = nearest_airport(self.x, self.z)
+        return runway_under(home, self.x, self.z, 1.0, 6.0) is not None, home
 
     def crash(self, now, line):
         self.state, self.ended = "crashed", now
@@ -6819,7 +7069,10 @@ class Cockpit:
                     and self.pitch_set >= 0.05):
                 self.state, self.said = "air", "positive climb"
                 self.alt = 0.2
-                self.climb_out = math.pi if math.cos(self.heading) < 0.0 else 0.0
+                home_ = nearest_airport(self.x, self.z)
+                n_ = runway_under(home_, self.x, self.z, 2.0, 6.0)
+                self.climb_out = (self.heading if n_ is None
+                                  else runway_course(home_, n_, self.heading))
         self.x += math.sin(self.heading) * flat
         self.z += math.cos(self.heading) * flat
         if self.state == "air":
@@ -6827,11 +7080,13 @@ class Cockpit:
             self.x += wx * dt
             self.z += wz * dt
         elif self.state == "landed":
-            # On the wheels it straightens up with the runway; on its belly it
-            # grinds to a halt.
-            course = math.pi if math.cos(self.heading) < 0.0 else 0.0
-            self.heading += ((course - self.heading + math.pi) % math.tau - math.pi
-                             ) * min(1.0, dt * 2.0)
+            # On the wheels it straightens up with the runway while it is fast;
+            # on its belly it grinds to a halt.
+            home_ = nearest_airport(self.x, self.z)
+            n_ = runway_under(home_, self.x, self.z, 1.0, 6.0)
+            if n_ is not None and (self.v > 12.0 or self.belly):
+                course = runway_course(home_, n_, self.heading)
+                self.heading += _wrap_pi(course - self.heading) * min(1.0, dt * 2.0)
             if self.belly:
                 self.v = max(0.0, self.v - 9.0 * dt)
         for x, y, z, hx, hz, lights, tid in self.traffic(now):
@@ -6855,7 +7110,8 @@ class Cockpit:
             if self.report is not None:
                 ax, az = self.report["at"]
                 self.report["roll"] = math.hypot(self.x - ax, self.z - az)
-                self.report["left"] = abs(self.z - self.report["end"])
+                ex, ez = self.report["end"]
+                self.report["left"] = math.hypot(self.x - ex, self.z - ez)
             self.said = "Stopped. The passengers want a word."
             if self.pay:
                 self.said = "%s. Stopped. $%d from the passengers." % (
@@ -6866,25 +7122,28 @@ class Cockpit:
         here, home = self.on_runway()
         sink = -self.vy
         if here:
-            rx, zn, zs = runway(*home)
-            south = math.cos(self.heading) < 0.0
-            course = math.pi if south else 0.0
+            n_ = runway_under(home, self.x, self.z, 1.0, 6.0)
+            a = min((a_ for a_ in approaches(home) if a_["rw"] == n_),
+                    key=lambda a_: abs(_wrap_pi(a_["course"] - self.heading)))
+            (tx, tz), (ox, oz) = a["thr"], a["out"]
             self.report = {
                 "sink": sink, "speed": self.v, "stall": self.stall(),
                 "bank": self.bank, "pitch": self.pitch,
-                "crab": (self.heading - course + math.pi) % math.tau - math.pi,
+                "crab": _wrap_pi(self.heading - a["course"]),
                 # Right of the line, the way you are going.
-                "off": (rx - self.x) if south else (self.x - rx),
-                "past": (zn - self.z) if south else (self.z - zs),
-                "at": (self.x, self.z), "end": zs if south else zn, "roll": None}
+                "off": (self.x - tx) * -oz + (self.z - tz) * ox,
+                "past": -((self.x - tx) * ox + (self.z - tz) * oz),
+                "at": (self.x, self.z), "runway": a["name"],
+                "end": (tx - ox * a["length"], tz - oz * a["length"]), "roll": None}
         if not here:
             self._wreck(now, PILOT_LOW_WRECK, place_below(self.x, self.z))
             return
         if abs(self.bank) > 0.3:
             self.crash(now, "A wing got there first.")
             return
-        course = math.pi if math.cos(self.heading) < 0.0 else 0.0
-        crab = abs((self.heading - course + math.pi) % math.tau - math.pi)
+        course = runway_course(home, runway_under(home, self.x, self.z, 1.0, 6.0),
+                               self.heading)
+        crab = abs(_wrap_pi(self.heading - course))
         if crab > 0.35:
             self.crash(now, "Sideways onto the runway. The wheels went one way, "
                        "the rest of it another.")
@@ -6938,13 +7197,15 @@ class Cockpit:
         """The airport to make for: (name of the way, distance, how far off the
         centre line, how far over the slope, in units), the slope and the line
         being the ones to the end of the runway you are coming at."""
-        rx, zn, zs = runway(*self.goal())
-        end = zn if abs(self.z - zn) < abs(self.z - zs) else zs
-        d = math.hypot(rx - self.x, end - self.z)
-        off = self.x - rx
-        over = self.alt - abs(self.z - end) * PILOT_GLIDE
-        turn = (math.atan2(rx - self.x, end - self.z) - self.heading + math.pi
-                ) % math.tau - math.pi
+        home = self.goal()
+        a = (self.appr if self.appr is not None and self.appr["home"] == tuple(home)
+             else self.pick_approach(home))
+        (thx, thz), (ox, oz) = a["thr"], a["out"]
+        d = math.hypot(thx - self.x, thz - self.z)
+        off = (self.x - thx) * -oz + (self.z - thz) * ox   # right of the line
+        out_ = max(0.0, (self.x - thx) * ox + (self.z - thz) * oz)
+        over = self.alt - out_ * PILOT_GLIDE
+        turn = _wrap_pi(math.atan2(thx - self.x, thz - self.z) - self.heading)
         return turn, d, off, over
 
 
@@ -6962,15 +7223,16 @@ def airports_about(x, z, reach):
 
 
 def draw_runway_lights(ch, co, v, home, now):
-    """The runway from a long way off, as what you would see of it: white down
-    its edges, green across the ends, and the beacon on the tower going round,
-    green and white, up over the town, which is what you look for first. Nearer,
-    a line of strobes running in along the approach, and four lights beside the
-    touchdown that tell you about the slope - white over it, red under it, two of
-    each when you are right. All of it behind whatever stands in front."""
-    rx, zn, zs = runway(*home)
+    """The runways from a long way off, as what you would see of them: white
+    down their edges, green across the ends, and the beacon on the tower going
+    round, green and white, up over the town, which is what you look for first.
+    Nearer, a line of strobes running in along each approach, a windsock at
+    each end, and four lights beside each touchdown that tell you about the
+    slope - white over it, red under it, two of each when you are right. All
+    of it behind whatever stands in front."""
     walls = v.walls
-    far = math.hypot(rx - v.x, (zn + zs) * 0.5 - v.z)
+    mx0, mz0 = runways(*home)[0][:2]
+    far = math.hypot(mx0 - v.x, mz0 - v.z)
     if far > PILOT_LIGHTS:
         return
     ci, cj = home
@@ -6979,32 +7241,36 @@ def draw_runway_lights(ch, co, v, home, now):
     for up in (0.0, 1.5):
         put_point(ch, co, v, walls, bx, 34.0 + up, bz, "@",
                   ROU_GREEN if green else FLASH)
+    near = far < PILOT_NEAR_LIGHTS
     if far > 1500.0:
         # Far off a light is one cell whatever its size, so it gets a glow round
-        # it, in screen space: the beacon, and the two ends of the runway.
+        # it, in screen space: the beacon, and the ends of the runways.
         put_halo(ch, co, v, walls, bx, 34.0, bz, ROU_GREEN if green else FLASH, True)
-        for end in (zn, zs):
-            put_halo(ch, co, v, walls, rx, 0.1, end, ROU_GREEN, True)
-    step = 26 if far < PILOT_NEAR_LIGHTS else 52
-    for z in range(int(zs), int(zn) + 1, step):
-        for side in (-RUNWAY_W, RUNWAY_W):
-            put_point(ch, co, v, walls, rx + side, 0.1, float(z), "*", FLASH)
-    for end, sign in ((zn, 1.0), (zs, -1.0)):
-        for n in range(-4, 5, 1 if far < PILOT_NEAR_LIGHTS else 2):
-            put_point(ch, co, v, walls, rx + n * RUNWAY_W * 0.25, 0.1, end, "*",
-                      ROU_GREEN)
-        if far > PILOT_NEAR_LIGHTS:
+        for a in approaches(home):
+            put_halo(ch, co, v, walls, a["thr"][0], 0.1, a["thr"][1], ROU_GREEN, True)
+    step = 26 if near else 52
+    for (mx, mz, ax, az, half) in runways(*home):
+        for s in range(int(-half), int(half) + 1, step):
+            for side in (-RUNWAY_W, RUNWAY_W):
+                put_point(ch, co, v, walls, mx + ax * s + az * side, 0.1,
+                          mz + az * s - ax * side, "*", FLASH)
+    wx, wz = air_wind(now)
+    speed = math.hypot(wx, wz)
+    for a in approaches(home):
+        (tx, tz), (ox, oz) = a["thr"], a["out"]
+        px, pz = oz, -ox                    # across the end
+        for n in range(-4, 5, 1 if near else 2):
+            put_point(ch, co, v, walls, tx + px * n * RUNWAY_W * 0.25, 0.1,
+                      tz + pz * n * RUNWAY_W * 0.25, "*", ROU_GREEN)
+        if not near:
             continue
         run = int(now * 3.0) % 8
         for n in range(1, 9):
-            z = end + sign * n * 45.0
             lit = n == 8 - run
-            put_point(ch, co, v, walls, rx, 0.3, z, "@" if lit else "*",
-                      FLASH if lit else BULB_DIM)
+            put_point(ch, co, v, walls, tx + ox * n * 45.0, 0.3, tz + oz * n * 45.0,
+                      "@" if lit else "*", FLASH if lit else BULB_DIM)
         # The windsock by the end, standing out the way the wind blows.
-        wx, wz = air_wind(now)
-        speed = math.hypot(wx, wz)
-        sx_, sz_ = rx + RUNWAY_W + 8.0, end
+        sx_, sz_ = tx + px * (RUNWAY_W + 8.0), tz + pz * (RUNWAY_W + 8.0)
         for n in range(4):
             put_point(ch, co, v, walls, sx_, n * 1.0, sz_, "|", CONCRETE)
         if speed > 0.5:
@@ -7013,13 +7279,15 @@ def draw_runway_lights(ch, co, v, home, now):
                 put_point(ch, co, v, walls, sx_ + wx / speed * n * 0.7,
                           3.6 - droop * n * 0.5, sz_ + wz / speed * n * 0.7,
                           "=", EMBER_HOT if n % 2 else FLASH)
-        # The four lights, on the left of the way in, at the touchdown point.
-        td = end - sign * 30.0
-        over = (v.eye - 3.0) - abs(v.z - td) * PILOT_GLIDE
-        on = 2 + max(-2, min(2, int(over / max(3.0, abs(v.z - td) * 0.012))))
+        # The four lights, to the right of the way in, at the touchdown point.
+        tdx, tdz = tx - ox * 30.0, tz - oz * 30.0
+        dist = math.hypot(v.x - tdx, v.z - tdz)
+        over = (v.eye - 3.0) - dist * PILOT_GLIDE
+        on = 2 + max(-2, min(2, int(over / max(3.0, dist * 0.012))))
         for n in range(4):
-            put_point(ch, co, v, walls, rx - sign * (RUNWAY_W + 3.0 + n * 2.0), 0.4,
-                      td, "o", FLASH if n < on else ROU_RED)
+            off = RUNWAY_W + 3.0 + n * 2.0
+            put_point(ch, co, v, walls, tdx - oz * off, 0.4, tdz + ox * off, "o",
+                      FLASH if n < on else ROU_RED)
 
 
 def cockpit_rows(height, k):
@@ -7430,7 +7698,7 @@ def runway_paint(x, z, rx, zn, zs):
 GROUND_GLYPHS = " .,:'`\"_"
 
 
-def draw_landing_light(ch, co, v, walls, ck, now, runways):
+def draw_landing_light(ch, co, v, walls, ck, now, _runways=None):
     """The landing light, on whatever is under it: a pool of light running out
     ahead of the nose that picks out the paint on a runway and the grass round
     it. Worked a row at a time, as the ground is: each row is one distance, so
@@ -7488,22 +7756,17 @@ def draw_landing_light(ch, co, v, walls, ck, now, runways):
                 continue                    # a light, a car: leave it be
             m = _mix(int(gx * 2.0), int(gz * 2.0), 6021) % 100
             g, attr = None, CONCRETE
-            for rx, zn, zs in runways:
-                if abs(gx - rx) <= RUNWAY_W and zs <= gz <= zn:
-                    g = runway_paint(gx, gz, rx, zn, zs)
-                    if g is not None:
-                        attr = FLASH if glow > 0.4 else HUD
-                    elif m < 30 + 40 * glow:
-                        g = "." if m % 3 else ","
-                    else:
-                        g = " "
-                    break
-                if abs(gx - rx) < 220.0 and zs - 450.0 < gz < zn + 450.0:
-                    if m < 35 + 50 * glow:
-                        g, attr = ",.'\""[m % 4], GRASS
-                    else:
-                        g = " "
-                    break
+            ci_, cj_ = int(gx // CELL), int(gz // CELL)
+            if airport_at(ci_, cj_):
+                mark = field_point(field_cell(ci_, cj_), gx, gz)
+                if mark:
+                    g, attr = mark[0], FLASH if glow > 0.4 else HUD
+                elif mark is None:
+                    g = ("." if m % 3 else ",") if m < 30 + 40 * glow else " "
+                elif m < 35 + 50 * glow:
+                    g, attr = ",.'\""[m % 4], GRASS
+                else:
+                    g = " "
             if g is None:
                 if old != " " or m >= 30 + 50 * glow:
                     continue
@@ -7735,23 +7998,27 @@ def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
     # The runways, and the way in to the one you are going to.
     goal = ck.goal()
     for home in (airports_about(ck.x, ck.z, reach * 1.6) if page == "ROUTE" else ()):
-        rx, zn, zs = runway(*home)
         mine = home == goal
-        a, b = spot(rx, zs), spot(rx, zn)
-        g = _plane_glyph(b[0] - a[0], b[1] - a[1])
-        n = max(abs(b[0] - a[0]), abs(b[1] - a[1]), 1)
-        for s in range(n + 1):
-            put(int(round(a[0] + (b[0] - a[0]) * s / n)),
-                int(round(a[1] + (b[1] - a[1]) * s / n)), g,
-                ROU_GREEN if mine else HUD)
-        if mine and ck.end is not None:
-            out = 1.0 if ck.end == zn else -1.0
+        for (mx, mz, ax, az, half) in runways(*home):
+            a = spot(mx - ax * half, mz - az * half)
+            b = spot(mx + ax * half, mz + az * half)
+            g = _plane_glyph(b[0] - a[0], b[1] - a[1])
+            n = max(abs(b[0] - a[0]), abs(b[1] - a[1]), 1)
+            for s in range(n + 1):
+                put(int(round(a[0] + (b[0] - a[0]) * s / n)),
+                    int(round(a[1] + (b[1] - a[1]) * s / n)), g,
+                    ROU_GREEN if mine else HUD)
+        if mine:
+            appr_ = (ck.appr if ck.appr is not None and ck.appr["home"] == tuple(home)
+                     else ck.pick_approach(home))
+            (tx_, tz_), (ox_, oz_) = appr_["thr"], appr_["out"]
             for s in range(1, 13):
-                p = spot(rx, ck.end + out * s * PILOT_FIX / 8.0)
+                run_ = s * PILOT_FIX / 8.0
+                p = spot(tx_ + ox_ * run_, tz_ + oz_ * run_)
                 put(p[0], p[1], ".", ROU_GREEN)
         if mine:                            # only its name: five ran together
             name = airport_name(home).replace("THE ", "").split()[0][:8]
-            mid = spot(rx, (zn + zs) * 0.5)
+            mid = spot(*runways(*home)[0][:2])
             if (ix0 <= mid[0] + 2 and mid[0] + 2 + len(name) <= ix1
                     and iy0 <= mid[1] <= iy1):
                 _text(ch, co, mid[1], mid[0] + 2, name, ROU_GREEN)
@@ -7765,8 +8032,7 @@ def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
                 int(round(py + (t[1] - py) * s / steps)), ".", GOLD_DIM)
         put(t[0], t[1], "+", GOLD)
     # Where you are going, if it is off the map: an arrow at the edge.
-    gx, gz_n, gz_s = runway(*goal)
-    gpos = spot(gx, (gz_n + gz_s) * 0.5)
+    gpos = spot(*runways(*goal)[0][:2])
     if page == "ROUTE" and not (ix0 <= gpos[0] <= ix1 and iy0 <= gpos[1] <= iy1):
         dx, dy = gpos[0] - cxm, gpos[1] - py
         room_x = (ix1 - cxm) / abs(dx) if dx else 9e9
@@ -8409,6 +8675,20 @@ def draw_airport(ch, co, v, walls, home, now, wet):
         for z_, light in ((zn, ROU_GREEN), (zs, ROU_RED)):
             put_lit(ch, co, v, walls, rx + k * 2.6, 0.25, z_, "o", light,
                     max(wet, 0.3), now)
+    # The crosswind runway, out past the north end, the same way.
+    mx2, mz2, _, _, h2 = runways(ci, cj)[1]
+    if abs(mz2 - v.z) < 420.0:
+        x_ = mx2 - h2
+        while x_ <= mx2 + h2:
+            if abs(x_ - v.x) < 360.0:
+                for side in (-RUNWAY_W, RUNWAY_W):
+                    put_lit(ch, co, v, walls, x_, 0.25, mz2 + side, "o", STAR,
+                            max(wet, 0.3), now)
+            x_ += 12.0
+        for ex in (mx2 - h2, mx2 + h2):
+            for k in range(-5, 6):
+                put_lit(ch, co, v, walls, ex, 0.25, mz2 + k * 2.6, "o", ROU_GREEN,
+                        max(wet, 0.3), now)
     run = int(now * 14) % 10
     for k in range(1, 10):
         za = zn + k * 9.0
@@ -10157,7 +10437,7 @@ def ground_cell(i, j):
     rock = not wet_cell and not solid and headland_at(i, j)
     tarmac = not wet_cell and not solid and car_park_at(i, j)
     mh = None if solid or wet_cell else manhole_at(i, j)
-    apt = None if solid or wet_cell or not airport_at(i, j) else runway(i, j)
+    apt = None if solid or wet_cell or not airport_at(i, j) else field_cell(i, j)
     plot_ = None if solid or wet_cell else plot_at(i, j)
     dirt = plot_ is not None
     weeds = dirt and plot_["kind"] == "empty"
@@ -10276,21 +10556,16 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 edge = CELL - fz_
 
             if apt is not None:
-                # Tarmac: the runway's edge lines, the dashes down its middle
-                # and the piano keys at each end; the taxiway's yellow line.
-                rx_, zn_, zs_ = apt
-                dx_ = x - rx_
-                on_rw = abs(dx_) < RUNWAY_W and zs_ <= z <= zn_
-                if on_rw and abs(abs(dx_) - RUNWAY_W + 0.4) < 0.35:
-                    ch[y][sx], co[y][sx] = "=", STAR
-                elif on_rw and abs(dx_) < 0.3 and (z % 12.0) < 6.0:
-                    ch[y][sx], co[y][sx] = "|", STAR
-                elif on_rw and min(z - zs_, zn_ - z) < 9.0 and (dx_ * 1.4) % 3.0 < 1.4:
-                    ch[y][sx], co[y][sx] = "#", STAR
-                elif abs(dx_ - TAXIWAY_DX) < 0.3:
-                    ch[y][sx], co[y][sx] = ":", GOLD
-                elif _mix(int(x * 2.0), int(z * 2.0), 3911) % 11 == 0:
-                    ch[y][sx], co[y][sx] = ".", CONCRETE
+                # The airfield: the runways' edges, centre lines and piano keys,
+                # the taxiways' yellow lines and hold bars, and grass between.
+                m_ = field_point(apt, x, z)
+                if m_:
+                    ch[y][sx], co[y][sx] = m_
+                elif m_ is None:
+                    if _mix(int(x * 2.0), int(z * 2.0), 3911) % 11 == 0:
+                        ch[y][sx], co[y][sx] = ".", CONCRETE
+                elif _mix(int(x * 2.0), int(z * 2.0), 3913) % 9 == 0:
+                    ch[y][sx], co[y][sx] = ",", GRASS
                 continue
             if dirt:
                 # The building site: churned mud and puddles, no paving; an
