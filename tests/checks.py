@@ -4762,6 +4762,40 @@ for w_, h_ in ((20, 8), (40, 14), (240, 70)):
     ac.draw_taxi_menu(g_, c_, tdests, 3, 100.0)
 check("and any size of window is fine", True)
 
+# --- the panel's key, where ` is a dead key -----------------------------------------
+class FakeScr:
+    """getch() over a list of keys that arrived together, then -1."""
+    def __init__(self, keys):
+        self.keys = list(keys)
+
+    def getch(self):
+        return self.keys.pop(0) if self.keys else -1
+
+
+def read_all(keys):
+    scr_, got_ = FakeScr(keys), []
+    ac.curses.ungetch = lambda k_: scr_.keys.insert(0, k_)
+    while True:
+        k_ = ac.read_key(scr_)
+        if k_ == -1:
+            return got_
+        got_.append(k_)
+
+
+bt_ = ac.CHEAT_KEY
+check("` alone is the panel's key, and so is F1",
+      read_all([bt_]) == [bt_] and read_all([ac.curses.KEY_F1]) == [bt_])
+check("a dead key's `` is one press, not open-and-shut",
+      read_all([bt_, bt_]) == [bt_])
+check("and ` with the letter it let go on is the panel, not a cheat",
+      read_all([bt_, ord("c")]) == [bt_])
+check("and ` with a vowel, come out as one accented letter, is the panel too",
+      read_all([0xC3, 0xA0]) == [bt_] and read_all([0xC3, 0x88]) == [bt_])
+check("other two-byte letters still come through as they were",
+      read_all([0xC3, 0xA9]) == [0xC3, 0xA9])
+check("and keys pressed one at a time are untouched",
+      read_all([ord("w")]) == [ord("w")])
+
 # --- driving the cab yourself ------------------------------------------------------
 check("the cab's where to? offers the wheel", "drive it yourself" in mtext)
 cb_x, cb_z, cb_y = ac.find_place(sx_, sz_, "street")

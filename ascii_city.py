@@ -22197,6 +22197,33 @@ def render_game(game, hi, width, height, now):
 # ===========================================================================
 
 CHEAT_KEY = ord("`")
+CHEAT_GRAVES = {128, 136, 140, 146, 153, 160, 168, 172, 178, 185}   # A E I O U a e i o u
+
+
+def read_key(scr):
+    """The next key, with ` made to work on a keyboard where it is a dead key.
+
+    On US-International - the usual layout on Windows in the Netherlands - `
+    sends nothing until the next key, and then the two together: `` for a
+    second press, ` and the letter after it, or the two combined, a with a
+    grave on it (two UTF-8 bytes, 0xC3 and one of CHEAT_GRAVES). Pressed
+    by hand the two keys are never in the same frame, so whatever came in
+    with a ` was the dead key letting go: it is one press of the panel's key
+    and nothing more - not the panel opening and shutting again at once,
+    and not a cheat you never asked for. F1 opens the panel too, a key that
+    is never dead."""
+    k = scr.getch()
+    if k == curses.KEY_F1:
+        return CHEAT_KEY
+    if k == CHEAT_KEY:
+        scr.getch()                 # its partner, if it had one: dropped
+    elif k == 0xC3:
+        nxt = scr.getch()
+        if nxt in CHEAT_GRAVES:
+            return CHEAT_KEY
+        if nxt != -1:
+            curses.ungetch(nxt)
+    return k
 CHEAT_SKIP = 40.0      # ignore what is already underfoot, so a repeat moves on
 CHEAT_RINGS = 200      # cells of search before giving up and saying so
 
@@ -26963,7 +26990,7 @@ def main(stdscr):
         _clock[0] = now
 
         # --- input -----------------------------------------------------
-        key = stdscr.getch()
+        key = read_key(stdscr)
         while key != -1:
             if key == curses.KEY_RESIZE:
                 _cache.clear()
@@ -27574,7 +27601,7 @@ def main(stdscr):
                     run = WALK_SPEED * RUN_MULTIPLIER
                     sky_v = -run if key == ord("H") else run
                     last["sky"], autopilot = now, False
-            key = stdscr.getch()
+            key = read_key(stdscr)
 
         # A held-down key repeats, but with gaps. Rather than moving once per
         # keypress (jerky), we keep moving for a moment after each one.

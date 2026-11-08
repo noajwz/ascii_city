@@ -75,6 +75,10 @@ def cases(run, report):
         [(b"a", .3), (b"d", .3)] + [(b"\x1bOD", .04)] * 25 + [(b" ", 4.0), (b"w", .3)]))
     ok &= report("panel open, arrows still walk", *run(
         [(b"`",.6),(b"\x1bOA",.4),(b"\x1bOC",.4),(b"\x1bOB",.4),(b"`",.4),(b"w",.4)]))
+    ok &= report("the panel from a dead-key ` (``, `c, a-grave) and from F1", *run(
+        [(b"``", .6), (b"\x1b", .4), (b"`c", .6), (b"\x1b", .4),
+         ("\u00e0".encode(), .6), (b"\x1b", .4), (b"\x1bOP", .6), (b"\x1b", .4),
+         (b"w", .4)]))
     ok &= report("panel keys then esc then play", *run(
         [(b"`",.5),(b"y",.7),(b"w",.4),(b"L",.6),(b"\x1b",.4),(b"w",.5),(b"a",.4)]))
     ok &= report("TERM=xterm (8 colours)", *run(
