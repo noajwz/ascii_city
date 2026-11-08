@@ -2439,6 +2439,10 @@ def taxi_net(home):
     segs += [(x, zt2, x, z2) for x in exits2]
     stands = [(x0 - 94.0, z0 + g * CELL) for g in GATE_JS]
     segs += [(sx, sz, xt, sz) for sx, sz in stands]
+    # The fuel pad, south of the stands, on the line of a turn-off from the
+    # runway: straight off it and in.
+    pad = (x0 - 70.0, z0 - 150.0)
+    segs.append((pad[0], pad[1], xt, pad[1]))
     edge = RUNWAY_W + 7.0
     holds = {"18": (rx - edge, z0 + h1 - 10.0, 1.0, 0.0),
              "36": (rx - edge, z0 - h1 + 10.0, 1.0, 0.0),
@@ -2446,7 +2450,9 @@ def taxi_net(home):
              "09": (rx - h2 + 10.0, z2 - edge, 0.0, 1.0)}
     hit = _rw_cache[key] = {"segs": segs, "stands": stands, "holds": holds, "xt": xt,
                             "zt2": zt2, "z2": z2, "rx": rx, "exits1": exits1,
-                            "exits2": exits2,
+                            "exits2": exits2, "pad": pad,
+                            "padbox": (pad[0] - 18.0, pad[0] + 18.0, pad[1] - 12.0,
+                                       pad[1] + 12.0),
                             "apron": (x0 - 112.0, xt, z0 - 110.0, z0 + 110.0)}
     return hit
 
@@ -2482,6 +2488,9 @@ def field_cell(i, j):
     a0, a1, b0, b1 = net["apron"]
     if xb >= a0 and xa <= a1 and zb >= b0 and za <= b1:
         feats.append(("apron", a0, a1, b0, b1))
+    a0, a1, b0, b1 = net["padbox"]
+    if xb >= a0 and xa <= a1 and zb >= b0 and za <= b1:
+        feats.append(("pad", a0, a1, b0, b1))
     hit = _field_cache[key] = tuple(feats)
     return hit
 
@@ -2534,6 +2543,13 @@ def field_point(feats, x, z):
         elif f[0] == "apron":
             _, a0, a1, b0, b1 = f
             if a0 <= x <= a1 and b0 <= z <= b1:
+                paved = True
+        elif f[0] == "pad":
+            # The fuel pad: tarmac in a yellow box.
+            _, a0, a1, b0, b1 = f
+            if a0 <= x <= a1 and b0 <= z <= b1:
+                if min(x - a0, a1 - x, z - b0, b1 - z) < 0.7:
+                    return "=", GOLD
                 paved = True
     return None if paved else False
 
@@ -6198,8 +6214,10 @@ PUSH_TIME = 10.0           # the tug: how long the push back from the stand take
 PUSH_BACK = 34.0           # and how far
 PILOT_READ = 20.0          # stopped: how long the report waits for you to read it
 PILOT_KEYS = ("s w nose  a d wings  + - power  g gear  f flaps  l light  p auto  "
+              "k fuel  "
               "r radio  m map  [ ] zoom  v outside  b brakes  x out")
-PILOT_KEYS_SHORT = ("s w nose  a d bank  +- power  g gear  f flaps  l light  p auto  "
+PILOT_KEYS_SHORT = ("s w nose  a d bank  +- thr  g gear  f flaps  l light  p auto  "
+                    "k fuel  "
                     "r radio  m map  v view  b brakes  x out")
 PILOT_SHEAR = 0.32     # how far the picture tilts, rows a column, at a bank of 1
 PILOT_LOOK = 3.0       # seconds ahead the terrain warning looks
@@ -6241,6 +6259,20 @@ BIRD_HIT = 0.55            # and when, in that, the engines take it
 BLOCK_ROLL = 5.0           # the truck, driving out onto the runway
 BLOCK_STAY = 150.0         # and how long it is there for
 _check_rides = [0]         # check rides booked: the instructor goes down the list
+PILOT_BURN = 1.0 / 160.0   # of a full tank a second, flat out on both: a long flight
+                           # plan takes two thirds of one, a short one a quarter
+PILOT_IDLE = 0.05          # and what the engines take just turning over
+PILOT_TAXI_BURN = 0.3      # on the wheels it sips: taxiing is a few per cent
+PILOT_FILL = 1.0 / 14.0    # filling up: of a tank a second, empty to full in 14
+PILOT_FUEL_PRICE = 60      # a full tank of kerosene, in dollars
+PILOT_LOW_FUEL = 0.1       # under this the panel says so
+PAD_R = 13.0               # how near the middle of the fuel pad counts as on it
+
+
+def gate_fuel(seed):
+    """What is in the tanks at the gate: a quarter to three quarters, by the
+    seed - enough for a short flight plan, not always for a long one."""
+    return 0.25 + (_mix(seed, 0, 7921) % 101) / 200.0
 
 
 def flight_trouble(seed):
@@ -6485,7 +6517,7 @@ class Cockpit:
     throttle, and a wing goes down for as long as a key keeps being pressed and
     comes back level by itself after."""
 
-    def __init__(self, home, now, dest=None, gate=None, trouble=None):
+    def __init__(self, home, now, dest=None, gate=None, trouble=None, fuel=None):
         self.home = home
         self.dest = dest                # where the flight plan says, or None
         self.rx, zn, zs = runway(*home)
@@ -6563,6 +6595,16 @@ class Cockpit:
         self.ditched = False
         self.callout, self.callout_at = None, -99.0
         self.called, self.last_feet = set(), 0.0
+        self.fuel = 1.0 if fuel is None else fuel   # of a full tank
+        self.fuelling = False           # the hose in, on the pad
+        self.fuel_bill = 0.0            # dollars of it, paid at the end
+        self.dry = self.fuel_told = self.dest_paid = False
+        if dest is not None and fuel is not None and self.fuel_range() < math.hypot(
+                runway(*dest)[0] - self.x, sum(runway(*dest)[1:]) / 2.0 - self.z
+                ) * 1.3 + 800.0:
+            self.said += (". The tanks are at %d%%, not enough for that: k after "
+                          "the push back takes you to the fuel pad"
+                          % round(self.fuel * 100))
 
     def key(self, what, now):
         self.clock = now
@@ -6614,6 +6656,8 @@ class Cockpit:
         elif what == "flaps":
             self.flaps = (self.flaps + 1) % 3
             self.said = ("flaps up", "flaps one", "flaps two")[self.flaps]
+        elif what == "fuel":
+            self._fuel_key(now)
         elif what == "autopilot":
             if self.state == "air":
                 self.ap = not self.ap
@@ -6628,6 +6672,7 @@ class Cockpit:
                 else:
                     self.said = "autopilot: taxiing you to %s" % (
                         "runway " + self.taxi_to[1] if self.taxi_to[0] == "runway"
+                        else "the fuel pad" if self.taxi_to[0] == "fuel"
                         else "gate %d" % (self.taxi_to[1] + 1))
             else:
                 self.said = "the autopilot is for the air, or for taxiing"
@@ -6852,7 +6897,8 @@ class Cockpit:
             return
         home = nearest_airport(self.x, self.z)
         if (self.state == "landed" and self.taxi is None and not self.parked
-                and self.v < 12.0 and self.ended is None):
+                and self.v < 12.0 and self.ended is None and not self.fuelling
+                and not self.on_pad(home)):
             self._taxi_in(home)
             self.said = "turn off at the next exit and taxi to gate %d" % (
                 self.taxi_to[1] + 1)
@@ -6872,7 +6918,11 @@ class Cockpit:
             seg = (bx - ax) ** 2 + (bz - az) ** 2
             past = seg > 0.0 and ((self.x - ax) * (bx - ax)
                                   + (self.z - az) * (bz - az)) / seg > 0.0
-            if math.hypot(ax - self.x, az - self.z) >= 12.0 and not past:
+            near = math.hypot(ax - self.x, az - self.z)
+            # Past it only counts near it: from off to one side of the route -
+            # the fuel pad - every point looked passed, and it cut across the
+            # grass into a hangar.
+            if near >= 12.0 and not (past and near < 45.0):
                 break
             self.taxi.pop(0)
             if self.taxi_to[0] == "runway" and len(self.taxi) == 1:
@@ -6891,6 +6941,10 @@ class Cockpit:
                     self.taxi_to[1])
                 if self.radio_on:
                     self.call(now, "TWR", self.takeoff_line(now))
+        elif self.taxi_to[0] == "fuel":
+            if d < 6.0 and self.v < 2.0:
+                self.taxi, self.ap, self.throttle = None, False, 0.0
+                self.said = "on the fuel pad: k to fill up"
         elif d < 3.0 and self.v < 1.5:
             self.taxi, self.parked, self.ended = None, True, now
             self.v = self.throttle = 0.0
@@ -7215,6 +7269,13 @@ class Cockpit:
             self._start_push(now)
         elif self.state == "push":
             self.call(now, "YOU", "AC 101, pushing back.")
+        elif self.fuelling or (self.on_pad(here) and not self.taxi):
+            self.call(now, "YOU", "%s, AC 101, on the fuel pad." % ground)
+            self.call(now, "TWR", "AC 101, roger. Call me when you are full.",
+                      PILOT_RADIO_LAG)
+        elif self.taxi and self.taxi_to[0] == "fuel":
+            self.call(now, "YOU", "%s, AC 101, request taxi to the fuel pad." % ground)
+            self.call(now, "TWR", "AC 101, taxi to the fuel pad via A.", PILOT_RADIO_LAG)
         elif (self.state == "ground" and self.taxi and self.taxi_to[0] == "runway"
               and self.on_departure(here)):
             # On the runway you were given, near enough lined up: whatever the
@@ -7297,6 +7358,18 @@ class Cockpit:
             self.atc_at = now
             return
         g = self.guide()
+        if (not self.fuel_told and not self.dry and self.engines
+                and self.fuel_range() < g["dist"] * 1.3 + 800.0):
+            # Not enough to get there, and somebody ought to say so.
+            self.fuel_told, self.atc_at = True, now
+            here = nearest_airport(self.x, self.z)
+            self.call(now, "TWR", "AC 101, on the fuel you have you will not make %s. "
+                      "%s is %.0f km, and it has a fuel pad." % (
+                          airport_name(g["home"]).title(),
+                          airport_name(here).title(), math.hypot(
+                              runway(*here)[0] - self.x,
+                              sum(runway(*here)[1:]) / 2.0 - self.z) / 200.0))
+            return
         fresh = g["wx"] is not None and g["wx"] not in self.wx_told
         if not fresh and now - self.atc_at < 7.0:
             return                          # a storm in the way will not wait
@@ -7424,17 +7497,121 @@ class Cockpit:
         out = RUNWAY_W * 2.5 * (1.0 - min(1.0, (now - since) / BLOCK_ROLL))
         return x - rx * out, z - rz * out
 
+    def fuel_range(self):
+        """How far the fuel goes at the cruise, in units."""
+        return (self.fuel / (PILOT_BURN * (PILOT_IDLE + 0.6))
+                * PILOT_CRUISE_SPEED * min(1, self.engines))
+
+    def on_pad(self, home=None):
+        """On the wheels, on the fuel pad."""
+        if self.state not in ("ground", "landed"):
+            return False
+        px, pz = taxi_net(home or nearest_airport(self.x, self.z))["pad"]
+        return math.hypot(px - self.x, pz - self.z) < PAD_R
+
+    def _fuel_key(self, now):
+        """k: on the pad and stopped, the hose in or out; anywhere else on the
+        ground, the way to the pad."""
+        if self.state in ("gate", "push"):
+            self.said = "the fuel is on its pad: push back (+), then k to taxi there"
+            return
+        if self.state not in ("ground", "landed") or self.belly:
+            self.said = "the fuel is at the pad by every terminal: land, and taxi there"
+            return
+        home = nearest_airport(self.x, self.z)
+        if self.on_pad(home):
+            if self.fuelling:
+                self.fuelling = False
+                self.said = "hose out at %d%%. k again for more" % (self.fuel * 100)
+            elif self.v > 1.5:
+                self.said = "stop on the pad first: b for the brakes"
+            elif self.fuel > 0.995:
+                self.said = "the tanks are full"
+            else:
+                self.fuelling, self.throttle, self.ap = True, 0.0, False
+                self.taxi = None
+                self.said = "the bowser plugs in: filling up"
+            return
+        net = taxi_net(home)
+        xt, (px, pz) = net["xt"], net["pad"]
+        pts = []
+        for p_ in self.taxi or ():
+            pts.append(p_)
+            if abs(p_[0] - xt) < 0.5:
+                break
+        else:
+            pts = []
+        pts = (pts or [(xt, self.z)]) + [(xt, pz), (px, pz)]
+        self.taxi, self.taxi_to = pts, ("fuel", None)
+        self.lined = self.lining = False
+        self.said = "taxi to the fuel pad: follow the greens, or p"
+        if self.radio_on:
+            self.call(now, "TWR", "AC 101, taxi to the fuel pad via A.",
+                      PILOT_RADIO_LAG)
+
+    def _burn(self, dt, now):
+        """The engines drink; on the pad the bowser fills them."""
+        if self.fuelling:
+            if self.v > 1.5 or not self.on_pad():
+                self.fuelling = False
+                self.said = "the hose came off. Back on the pad, and k"
+            else:
+                add = min(1.0 - self.fuel, PILOT_FILL * dt)
+                self.fuel += add
+                self.fuel_bill += add * PILOT_FUEL_PRICE
+                if self.fuel > 0.999:
+                    self._fuelled(now)
+            return
+        if self.engines and self.fuel > 0.0:
+            self.fuel = max(0.0, self.fuel - PILOT_BURN * (PILOT_IDLE + self.throttle)
+                            * self.engines / 2.0 * dt
+                            * (1.0 if self.state == "air" else PILOT_TAXI_BURN))
+            if self.fuel <= 0.0:
+                self._run_dry(now)
+
+    def _fuelled(self, now):
+        """Full: and out to the runway again, for wherever next."""
+        home = nearest_airport(self.x, self.z)
+        self.fuel, self.fuelling = 1.0, False
+        self.state, self.grade, self.report = "ground", None, None
+        self.ended, self.parked, self.belly = None, False, False
+        self._taxi_out(home)
+        self.said = ("Full: $%d of kerosene on the bill. Taxi out to runway %s - "
+                     "or p, and it is done for you." % (round(self.fuel_bill),
+                                                        self.taxi_to[1]))
+        if self.radio_on:
+            self.call(now, "TWR", "AC 101, taxi to holding point runway %s via A." % (
+                self.taxi_to[1]), PILOT_RADIO_LAG)
+
+    def _run_dry(self, now):
+        """Out of fuel: both of them stop, wherever you are."""
+        self.dry, self.engines, self.ap = True, 0, False
+        if self.state != "air":
+            self.v, self.ended = 0.0, now
+            self.said = "Out of fuel on the ground. A tug is coming for you."
+            return
+        here = nearest_airport(self.x, self.z)
+        self.radio_on = True
+        self.call(now, "YOU", "Mayday, mayday, mayday. AC 101, we are out of fuel. "
+                  "Both engines have stopped.")
+        self.call(now, "TWR", "AC 101, roger. %s is the nearest, %.0f km. Every runway "
+                  "is yours." % (airport_name(here).title(), math.hypot(
+                      runway(*here)[0] - self.x,
+                      sum(runway(*here)[1:]) / 2.0 - self.z) / 200.0),
+                  PILOT_RADIO_LAG)
+        self.said = ("OUT OF FUEL. Both engines have stopped: keep the speed, and "
+                     "glide it to a runway - or the water.")
+
     def _ditch(self, now):
         """Down on the water, in one piece: everyone out on the wings."""
         self.state, self.grade, self.ditched = "landed", "DITCHED", True
         self.v = self.vy = self.throttle = 0.0
         self.ended = now
         if self.trouble_at is not None:
-            self.pay = PILOT_SAVE_PAY
+            self.pay += PILOT_SAVE_PAY
             self.said = ("Down on the water, in one piece. Everyone is out on the "
                          "wings, and the boats are coming. $%d." % self.pay)
         else:
-            self.pay = 0
             self.said = ("Down on the water, on purpose. Everyone is out on the "
                          "wings, asking why.")
 
@@ -7466,6 +7643,11 @@ class Cockpit:
         if self.state == "push":
             self._push(now)
             return
+        self._burn(dt, now)
+        if self.ended is not None and self.state != "air" and self.dry:
+            return
+        if self.fuelling:
+            self.v, self.throttle = 0.0, 0.0
         if self.gear != self.gear_set:
             move = dt / PILOT_GEAR_TIME
             if self.gear_set > self.gear:
@@ -7638,12 +7820,12 @@ class Cockpit:
                        "the rest of it another.")
             return
         if self.gear < 0.99 and sink < PILOT_GRADES[-1][0]:
-            self.state, self.grade, self.pay, self.belly = "landed", "BELLY", 0, True
+            self.state, self.grade, self.belly = "landed", "BELLY", True
             self.home, self.throttle, self.pitch_set = home, 0.0, 0.0
             self.said = ("On its belly. Sparks, then a very long quiet. "
                          "Nobody is paying for that.")
             if self.trouble_at is not None:
-                self.pay = PILOT_SAVE_PAY
+                self.pay += PILOT_SAVE_PAY
                 self.said = ("On its belly, but down: everyone walks away from this "
                              "one. $%d." % self.pay)
             return
@@ -7651,10 +7833,12 @@ class Cockpit:
         grades = PILOT_GRADES[1:] if crab > 0.18 else PILOT_GRADES
         for most, grade, pay in grades:
             if sink <= most:
-                self.state, self.grade, self.pay = "landed", grade, pay
+                self.state, self.grade = "landed", grade
+                self.pay += pay
                 self.home, self.throttle, self.pitch_set = home, 0.0, 0.0
                 self.said = "%s. b for the brakes" % grade
-                if self.dest is not None and home == self.dest:
+                if self.dest is not None and home == self.dest and not self.dest_paid:
+                    self.dest_paid = True
                     self.pay += PILOT_DEST_PAY
                     self.said = "%s, at %s, as planned. b for the brakes" % (
                         grade, airport_name(home).title())
@@ -7685,6 +7869,10 @@ class Cockpit:
                 out.append("ENG %d FAIL" % (2 if self.dead_side > 0 else 1))
             elif self.blocker is not None:
                 out.append("GO AROUND")
+        if self.dry:
+            out.append("NO FUEL")
+        elif self.fuel < PILOT_LOW_FUEL:
+            out.append("LOW FUEL")
         if self.v < self.stall() + 4.0:
             out.append("STALL")
         if self.gear < 0.99 and self.alt < 25.0 and self.vy < -1.0:
@@ -7806,6 +7994,7 @@ def draw_runway_lights(ch, co, v, home, now):
                   ROU_GREEN if green else FLASH)
     if near_airport(v, 500.0) != tuple(home):
         draw_atc_tower(ch, co, v, walls, home, now, 0.0)    # else the street drew it
+        draw_fuel_farm(ch, co, v, walls, home, now)
     near = far < PILOT_NEAR_LIGHTS
     if far > 1500.0:
         # Far off a light is one cell whatever its size, so it gets a glow round
@@ -7940,15 +8129,24 @@ def draw_cockpit(ch, co, ck, now):
                  else "GEAR ..")
         words_ = [(gear_, ck.gear > 0.99), ("FLAPS %d" % ck.flaps, ck.flaps > 0),
                   ("AP", ck.ap), ("LIGHT", ck.light), ("RADIO", ck.radio_on)]
-        if ck.engines < 2:
+        if ck.engines < 2 and not ck.dry:
             words_.append(("ENG 1+2 OUT" if ck.engines == 0 else "ENG %d OUT" % (
                 2 if ck.dead_side > 0 else 1), None))
+        # The fuel, and how far it goes at the cruise: gold when it will not
+        # get you to where you are going, red when it is nearly gone.
+        far_ = ck.fuel_range() / 200.0
+        need_ = (ck.nav()[1] / 200.0 if ck.state not in ("landed", "crashed")
+                 else 0.0)
+        words_.append(("FUEL %d%% %dkm" % (round(ck.fuel * 100), far_),
+                       None if ck.fuel < PILOT_LOW_FUEL else
+                       "gold" if ck.fuel < 0.25 or far_ < need_ * 1.1 else True))
         for word, on in words_:
             if x_ + len(word) + 2 > edge_:
                 x_, row_ = 2, row_ + 1
             if row_ >= h - 1:
                 break
-            attr_ = ROU_GREEN if on else ROU_RED if on is None else CONCRETE
+            attr_ = (GOLD if on == "gold" else ROU_GREEN if on else
+                     ROU_RED if on is None else CONCRETE)
             if word == "GEAR ..":
                 attr_ = GOLD
             _text(ch, co, row_, x_, "[" + word + "]", attr_)
@@ -8517,11 +8715,15 @@ def taxi_words(ck):
         return "AT GATE %d" % (GATE_JS.index(ck.gate_g) + 1), "+ to push back"
     if ck.state == "push":
         return "PUSHING BACK", "the tug has you"
+    if ck.fuelling:
+        return "FUELLING %d%%" % (ck.fuel * 100), "$%d so far" % round(ck.fuel_bill)
+    if not ck.taxi and ck.on_pad() and ck.v < 1.5:
+        return "ON THE FUEL PAD", "k to fill up" if ck.fuel < 0.995 else "full"
     if not ck.taxi:
         return None
     kind, what = ck.taxi_to
-    to = ("TAXI to runway %s" % what if kind == "runway"
-          else "TAXI to gate %d" % (what + 1))
+    to = ("TAXI to runway %s" % what if kind == "runway" else
+          "TAXI to the fuel pad" if kind == "fuel" else "TAXI to gate %d" % (what + 1))
     tx, tz = ck.taxi[0]
     turn = _wrap_pi(math.atan2(tx - ck.x, tz - ck.z) - ck.heading)
     if kind == "runway" and len(ck.taxi) == 1:
@@ -8647,6 +8849,8 @@ def draw_nav_map(ch, co, ck, now, x0, y0, mw, mh):
                 run_ = s * PILOT_FIX / 8.0
                 p = spot(tx_ + ox_ * run_, tz_ + oz_ * run_)
                 put(p[0], p[1], ".", ROU_GREEN)
+        p_ = spot(*taxi_net(home)["pad"])
+        put(p_[0], p_[1], "F", GOLD)
         if mine:                            # only its name: five ran together
             name = airport_name(home).replace("THE ", "").split()[0][:8]
             mid = spot(*runways(*home)[0][:2])
@@ -9152,6 +9356,7 @@ def render_outside(width, height, now, ck):
     for home in airports_about(ck.x, ck.z, PILOT_LIGHTS):
         draw_runway_lights(ch, co, v, home, now)
     draw_blocker(ch, co, v, walls, ck, now)
+    draw_hose(ch, co, v, walls, ck, now)
     draw_jet(ch, co, v, walls, ck, now)
     pr = v.project(ck.x, ck.alt + 1.5, ck.z)
     focus = (width // 2, v.horizon) if pr is None else (int(pr[0]), v.horizon)
@@ -9201,6 +9406,7 @@ def render_cockpit(width, height, now, ck):
     for home in homes:
         draw_runway_lights(ch, co, v, home, now)
     draw_blocker(ch, co, v, walls, ck, now)
+    draw_hose(ch, co, v, walls, ck, now)
     if ck.birds_at is not None:
         # Out of the dark into the landing light, and over the top of you.
         draw_birds(ch, co, now - ck.birds_at, width // 2, v.horizon,
@@ -9378,6 +9584,63 @@ def near_airport(v, reach):
     return hi, hj
 
 
+def draw_fuel_farm(ch, co, v, walls, home, now):
+    """The fuel station by the pad: two round tanks, white with a band and a
+    red light on top, a lit FUEL sign at the pad's edge, and the bowser that
+    does the filling, parked with its light going round."""
+    px, pz = taxi_net(home)["pad"]
+    d = math.hypot(px - v.x, pz - v.z)
+    if d > 1600.0:
+        return
+    step = max(0.6, d * 0.012)
+    for tz in (pz - 10.0, pz + 10.0):
+        tx, r = px - 34.0, 6.0
+        for n in range(24):
+            a = n * math.tau / 24.0
+            x, z = tx + math.sin(a) * r, tz + math.cos(a) * r
+            y = 0.3
+            while y < 9.0:
+                g, attr = (("-", GOLD_DIM) if 4.0 < y < 5.2 else (":", CONCRETE))
+                put_point(ch, co, v, walls, x, y, z, g, attr)
+                y += step
+            put_point(ch, co, v, walls, x, 9.2, z, "=", ROOF)
+        if int(now * 1.2) % 2:
+            put_point(ch, co, v, walls, tx, 10.0, tz, "*", ROU_RED)
+    # The sign, on a post at the corner of the pad: letters side by side in
+    # screen space, the way the marquees are, or it is a smear.
+    sx_, sz_ = px - 18.0, pz + 13.0
+    for y in (0.5, 1.5, 2.5, 3.5):
+        put_point(ch, co, v, walls, sx_, y, sz_, "|", CONCRETE)
+    pr = v.project(sx_, 4.6, sz_)
+    if pr is not None and d < 700.0:
+        x0, y0 = int(round(pr[0])) - 2, int(round(pr[1]))
+        for n, c in enumerate("FUEL"):
+            put_cell(ch, co, v, walls, x0 + n, y0, pr[2], c, GOLD)
+    # The bowser, at the west end of the pad, facing in.
+    bx, bz = px - 15.0, pz - 2.0
+    if d < 600.0:
+        for dz in (-2.4, -1.2, 0.0, 1.2, 2.4):
+            for y in (0.5, 1.2, 1.9):
+                put_point(ch, co, v, walls, bx, y, bz + dz, "#",
+                          FLASH if y > 1.5 else CONCRETE)
+    put_point(ch, co, v, walls, bx, 2.6, bz + 2.0, "*",
+              GOLD if int(now * 3.0) % 2 else EMBER_HOT)
+
+
+def draw_hose(ch, co, v, walls, ck, now):
+    """Filling up: the hose from the bowser to the wing, sagging, and the
+    bowser's light going."""
+    if not ck.fuelling:
+        return
+    px, pz = taxi_net(nearest_airport(ck.x, ck.z))["pad"]
+    ax, az = px - 15.0, pz - 2.0
+    bx, bz = ck.x - math.cos(ck.heading) * 3.0, ck.z + math.sin(ck.heading) * 3.0
+    for n in range(1, 30):
+        u = n / 30.0
+        put_point(ch, co, v, walls, ax + (bx - ax) * u, 1.6 - math.sin(u * math.pi),
+                  az + (bz - az) * u, ".", GOLD_DIM)
+
+
 def draw_airport(ch, co, v, walls, home, now, wet):
     """Everything at the airport that is not a wall: the runway's lights -
     white down both edges, green across the end planes land at and red across
@@ -9422,6 +9685,7 @@ def draw_airport(ch, co, v, walls, home, now, wet):
     # The tower's beacon, green and white turning.
     tx, tz = (ci - 19 + 0.5) * CELL, (cj + 38 + 0.5) * CELL
     draw_atc_tower(ch, co, v, walls, (ci, cj), now, wet)
+    draw_fuel_farm(ch, co, v, walls, (ci, cj), now)
     put_lit(ch, co, v, walls, tx, ATC_TOP + 5.5, tz, "*",
             ROU_GREEN if int(now * 2) % 2 else FLASH, max(wet, 0.3), now)
     # The name over the terminal's front.
@@ -25734,7 +25998,9 @@ def main(stdscr):
                                           "ck": Cockpit(home_, now, flight_plan(
                                               home_, int(now)), gate=1,
                                               trouble=flight_trouble(
-                                                  int(now * 1000.0))), "last": now}
+                                                  int(now * 1000.0)),
+                                              fuel=gate_fuel(int(now * 1000.0))),
+                                    "last": now}
                             reading = False
                             poke = None
                             ledger["jumps"] += 1
@@ -25805,7 +26071,8 @@ def main(stdscr):
                             flight = dict(flight, phase="pilot", last=now,
                                           ck=Cockpit(flight["home"], now,
                                                      flight["dest"], gate=1,
-                                                     trouble=trouble_))
+                                                     trouble=trouble_,
+                                                     fuel=gate_fuel(int(now * 1000.0))))
                         else:
                             note, note_at = ("the keys are $%d" % PILOT_FARE), now
                 elif flight["phase"] == "pilot":
@@ -25839,6 +26106,7 @@ def main(stdscr):
                             ord("G"): "gear", ord("l"): "light", ord("L"): "light",
                             ord("v"): "view", ord("V"): "view", ord("m"): "map",
                             ord("M"): "map", ord("["): "zoom in",
+                            ord("k"): "fuel", ord("K"): "fuel",
                             ord("]"): "zoom out"}.get(key, ""), now)
                 else:
                     if key in (curses.KEY_LEFT, ord("a")):
@@ -26250,10 +26518,17 @@ def main(stdscr):
                 # Out of the doors of wherever you got to, one way or the other.
                 gx_, gz_ = gate_door(*nearest_airport(ck_.x, ck_.z))
                 cam_x, cam_z, yaw = gx_ + 3.0, gz_, math.pi / 2
-                wallet.give(ck_.pay)
+                # Paid for the flying, and the kerosene comes off it.
+                bill_ = int(round(ck_.fuel_bill))
+                if ck_.pay >= bill_:
+                    wallet.give(ck_.pay - bill_)
+                else:
+                    wallet.take(min(bill_ - ck_.pay, wallet.money))
                 note, note_at = ("you wake up at the terminal. nobody mentions it"
-                                 if ck_.state == "crashed"
+                                 if ck_.state == "crashed" or not ck_.grade
                                  else "%s - $%d" % (ck_.grade.lower(), ck_.pay)), now
+                if bill_:
+                    note += ", less $%d of fuel" % bill_
                 flight = None
         if flight is not None and flight["phase"] == "air":
             # Looking round eases, the way your head would.

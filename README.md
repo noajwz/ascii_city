@@ -205,6 +205,9 @@ the city is infinite, identical every time you walk back to it, and held in no m
   flight in eight, **something goes wrong**: an engine in the cruise, birds on the climb out (one
   engine, or now and then both), or a truck on the runway on short final. Book a **check ride**
   at the desk (`t`) and the instructor makes sure of it.
+- **A fuel tank** that the engines drink from, a gauge with the range it gives you, and a
+  **fuel pad** at every airport: `k` taxis you there and fills you up — before you go, or on a
+  stop along the way. Run it dry and you are a glider.
 - **Thunderstorms** out over the country that you can see from far off and fly into — or let the
   tower take you round.
 - **Other traffic** — airways full of flights at their own heights and every airport busy with
