@@ -1193,6 +1193,24 @@ the tallest roof, first. Flown: 40 whole flights in all weathers, 30 with a stor
 route (all went round, all warned), 24 with one on the airport, all landed. Storms cost about 2 ms
 a frame at 300x90; the street is untouched (frames identical).
 
+**Other traffic.** `airway_traffic()`: airways every `AIRWAY_GAP` each way, flights along them
+every `AIRWAY_EVERY` (with gaps), stateless; east-west and north-south on different
+`AIRWAY_LEVELS`, so they never meet each other, and none at `PILOT_CRUISE`, so the autopilot never
+meets them either. `traffic_about()` adds every airport's `plane_states()` - which now take
+`arrive`/`depart`, because **your jet starts exactly where the departures line up, and the
+arrivals touch down on top of it**: `ck.held()` is the tower holding that traffic for you (the
+airport you are on, any you are low over, and your destination; the street's `draw_airport` reads
+it off `v.held`). The exception is the one thing to do: landing on 18, the same way they take off,
+the departures carry on, and `runway_busy()` against `ck.eta()` (ground speed: a headwind made you
+late and a clearance turned into a go-around) gets you "number two", a late clearance, or sent
+round by `_sequence()` on short final, radio or not; it only clears you with 4 s spare either side.
+`draw_air_traffic()`: the street's airliner within 900, lights beyond (the side you see, the tail,
+landing lights, strobe, beacon). `nearest_traffic()` feeds the TFC line, the `TRAFFIC` warning
+(level and converging) and the tower's calls (`TRAFFIC_CALL`, once each - at 15 km it never
+stopped talking); flying into one is a crash (`TRAFFIC_HIT`). `key()` now sets `ck.clock`: a key
+before the first step judged the runway at the wrong moment. **`draw_plane` had its sides swapped**
+all along (its "right" was its left), so red was on the right wing in the street view too.
+
 **The approach had to be made flyable.** `approach_cap()` claimed to keep the town low but sky decks and
 landmarks ignored it, and it stopped 550 units out, under a slope that only cleared the tallest thing at
 1050: the first robot flight hit a building on final. Now it runs `APPROACH_LONG` cells off each end, no
