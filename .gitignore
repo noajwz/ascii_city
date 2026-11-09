@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .claude/
 History/
+tools/
+IDEAS.md
+ghostty.conf
