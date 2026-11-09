@@ -3445,7 +3445,7 @@ def lot(i, j):
         # and be invisible.
         b["club"] = b["casino"] = b["tower"] = b["cinema"] = None
         b["diner"] = b["billboard"] = b["arcade"] = b["exchange"] = None
-        b["bowling"] = b["karaoke"] = None
+        b["bowling"] = b["karaoke"] = b["minigolf"] = None
         b["temple"] = b["warehouse"] = None
         if d is INDUSTRIAL:
             wh = zone_warehouse(*zone_home("industrial", i, j))
@@ -3584,6 +3584,17 @@ def lot(i, j):
                                                       % len(KARAOKE_NAMES)],
                                 "seed": _mix(i, j, 2907) % 9973,
                                 "height": b["height"]}
+        elif (_mix(i, j, 3001) % GOLF_ODDS == 0 and not d["park"]
+              and d["name"] != "financial"):
+            # Open ground behind a low fence, its gate on the street.
+            face = _road_face(i, j, (_mix(i, j, 3003) >> 9) % 4)
+            if face is not None:
+                b["height"] = GOLF_H
+                b["minigolf"] = {"door": face, "u": CELL * 0.5, "i": i, "j": j,
+                                 "name": GOLF_NAMES[(_mix(i, j, 3005) >> 9)
+                                                    % len(GOLF_NAMES)],
+                                 "seed": _mix(i, j, 3007) % 9973,
+                                 "height": b["height"]}
         elif _mix(i, j, 3201) % TEMPLE_ODDS == 0 and d["name"] != "financial":
             # Stone among the shopfronts, with its front on a street, and
             # low: the rose window over the door has to be in sight from
@@ -3619,6 +3630,7 @@ def lot(i, j):
                 and b["cinema"] is None and b["diner"] is None
                 and b["arcade"] is None and b["exchange"] is None and not d["park"]
                 and b["bowling"] is None and b["karaoke"] is None
+                and b["minigolf"] is None
                 and b["temple"] is None and b["warehouse"] is None
                 and d["name"] in BILL_DISTRICTS and 8.0 <= b["height"] <= 12.0
                 and _mix(i, j, 2405) % BILL_ODDS == 0):
@@ -3632,14 +3644,14 @@ def lot(i, j):
         if cap is not None and cap < 18.0:
             b["club"] = b["casino"] = b["tower"] = b["cinema"] = b["diner"] = None
             b["arcade"] = b["bowling"] = b["exchange"] = b["temple"] = None
-            b["warehouse"] = b["billboard"] = b["karaoke"] = None
+            b["warehouse"] = b["billboard"] = b["karaoke"] = b["minigolf"] = None
             b["height"] = min(b["height"], cap)
         b["center"] = center_at(i, j)
         if b["center"] is not None:
             b["height"] = CENTER_H
             b["club"] = b["casino"] = b["cinema"] = b["diner"] = None
             b["arcade"] = b["billboard"] = b["tower"] = b["exchange"] = None
-            b["bowling"] = b["karaoke"] = None
+            b["bowling"] = b["karaoke"] = b["minigolf"] = None
             b["temple"] = b["warehouse"] = None
             b["tree"] = False
         lm = landmark_at(i, j)
@@ -3649,7 +3661,7 @@ def lot(i, j):
             b["height"] = LANDMARK_BASE if ring == 0 else LANDMARK_H
             b["club"] = b["casino"] = b["cinema"] = b["diner"] = None
             b["arcade"] = b["billboard"] = b["tower"] = b["exchange"] = None
-            b["bowling"] = b["karaoke"] = None
+            b["bowling"] = b["karaoke"] = b["minigolf"] = None
             b["temple"] = b["warehouse"] = None
             b["tree"] = False
             if (i, j) == lm["lobby"]:
@@ -10707,6 +10719,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     if b["karaoke"] is not None:
         return draw_karaoke_column(ch, co, v, sx, dist, b, face, u,
                                    r_lo, r_hi, edge, cont, now)
+    if b["minigolf"] is not None:
+        return draw_minigolf_column(ch, co, v, sx, dist, b, face, u,
+                                    r_lo, r_hi, edge, cont, now)
     if b["temple"] is not None:
         return draw_temple_column(ch, co, v, sx, dist, b, face, u,
                                   r_lo, r_hi, edge, cont, now)
@@ -11537,6 +11552,11 @@ def collect_glow(v, now, wet):
                 p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
                 _spill(glow, p[0], p[2], 6.0,
                        NEON[(b["karaoke"]["seed"] + int(now / 4.0)) % len(NEON)][1])
+                continue
+            if b["minigolf"] is not None:
+                if f == b["minigolf"]["door"]:
+                    p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
+                    _spill(glow, p[0], p[2], 5.0, BULB_DIM)
                 continue
             if b["arcade"] is not None:
                 # The pavement in front takes the colour of whatever the
@@ -16447,6 +16467,7 @@ def climbable(i, j, f):
             and b["casino"] is None and b["tower"] is None
             and b["arcade"] is None and b["exchange"] is None
             and b["bowling"] is None and b["karaoke"] is None
+            and b["minigolf"] is None
             and b["temple"] is None and b["warehouse"] is None):
         return False
     # And only off a roof that is the high point of its corner: climbed from
@@ -17982,6 +18003,565 @@ def draw_karaoke_front(ch, co, v, walls, bar, world, now):
                      NEON[(note * 2 + bar["seed"]) % n][0])
 
 
+# The minigolf course. Open air behind a low fence strung with bulbs, a
+# windmill turning over it and MINI GOLF lit up at the gate; inside, nine
+# holes seen from above, a real ball rolling on them - off the walls, slowed
+# in the sand, pushed down the slopes, lost in the water - and the windmill's
+# sails shutting the way through as they come round.
+GOLF_ODDS = 1000        # on its own hash, like the alley and the karaoke bar
+GOLF_COST = 5           # a round
+GOLF_H = 2.2            # the fence: the course is open, so you see over it
+GOLF_NAMES = ["PUTT PUTT PARADISE", "NEON GREENS", "THE NINETEENTH",
+              "WINDMILL WAY", "HOLE IN FUN", "MOONLIGHT MINI GOLF", "LUCKY PUTT"]
+GOLF_DT = 1.0 / 120.0   # the ball's step: a quarter of a cell at the fastest
+GOLF_FELT = 5.0         # cells a second, a second: how the felt slows the ball
+GOLF_SAND = 24.0        # and the sand
+GOLF_SLOPE = 7.0        # what a slope adds, the way it runs
+GOLF_CUP = 0.45         # the cup's reach from its middle, in cells
+GOLF_DROP = 8.0         # faster than this, the ball runs over the cup
+GOLF_MAX = 7            # strokes, and then you pick up
+GOLF_TURN = math.radians(3.0)        # a press of a or d
+GOLF_SWING = 1.6        # seconds the power meter takes there and back
+GOLF_SAILS = 2.4        # the windmill's turn: the gap is shut for part of it
+GOLF_OPEN = 1.1         # and open for this long
+# The holes, a cell a character: # wall, . felt, T the tee, O the cup, : sand,
+# ~ water, > < ^ v a slope running that way, W the windmill's gap. The par is
+# what a fair player takes.
+GOLF_HOLES = [
+    ("STRAIGHT START", 2, [
+        "##################################",
+        "#................................#",
+        "#..T.........................O...#",
+        "#................................#",
+        "##################################"]),
+    ("THE DOG LEG", 3, [
+        "##################################",
+        "#..........................#.....#",
+        "#..T.......................#..O..#",
+        "#..........................#.....#",
+        "#.....................######.....#",
+        "#................................#",
+        "#................................#",
+        "##################################"]),
+    ("THE WINDMILL", 3, [
+        "##################################",
+        "#...............###..............#",
+        "#...............###..............#",
+        "#..T............WWW..........O...#",
+        "#...............###..............#",
+        "#...............###..............#",
+        "##################################"]),
+    ("THE BUNKER", 3, [
+        "##################################",
+        "#...........::::::::.............#",
+        "#..T........::::::::.........O...#",
+        "#...........::::::::.............#",
+        "#...........::::::::.............#",
+        "#...........::::::::.............#",
+        "##################################"]),
+    ("THE MOAT", 3, [
+        "##################################",
+        "#..................~~~...........#",
+        "#..................~~~...........#",
+        "#..T.............................#",
+        "#............................O...#",
+        "#..................~~~...........#",
+        "##################################"]),
+    ("THE HILL", 3, [
+        "##################################",
+        "#...........vvvvvvvvvv...........#",
+        "#...........vvvvvvvvvv...........#",
+        "#..T.........................O...#",
+        "#...........^^^^^^^^^^...........#",
+        "#...........^^^^^^^^^^...........#",
+        "##################################"]),
+    ("THE BANK SHOT", 3, [
+        "##################################",
+        "#..................#.............#",
+        "#..T...............#.............#",
+        "#..................#.........O...#",
+        "#..................#.............#",
+        "#..................#######.......#",
+        "#................................#",
+        "##################################"]),
+    ("THE SNAKE", 4, [
+        "##################################",
+        "#..T.............................#",
+        "#................................#",
+        "#######################..........#",
+        "#................................#",
+        "#................................#",
+        "#..........#######################",
+        "#................................#",
+        "#.............................O..#",
+        "##################################"]),
+    ("THE VOLCANO", 4, [
+        "##################################",
+        "#................................#",
+        "#.......................^^^^^....#",
+        "#..T...................<<.O.>>...#",
+        "#.......................vvvvv....#",
+        "#..............~~~...............#",
+        "#................................#",
+        "##################################"]),
+]
+GOLF_SAY = ((-4, "UNDER PAR! THE COURSE IS YOURS"), (-1, "UNDER PAR"),
+            (0, "LEVEL PAR"), (5, "A FEW OVER"), (99, "THE WINDMILL WINS TONIGHT"))
+
+
+def golf_say(over):
+    """What the scorecard says about a round, by strokes over par."""
+    return next(word for most, word in GOLF_SAY if over <= most)
+
+
+def golf_par():
+    return sum(par for _, par, _ in GOLF_HOLES)
+
+
+class Minigolf:
+    """A round of minigolf. The ball rolls in cells - a hole's map is the
+    course - stepped at GOLF_DT on its own clock, so it goes the same however
+    fast the frames come. Aim with a and d; p sets the power meter going and
+    p again hits, the way the bowling alley's meters go, because curses sees
+    no key go up and nothing can ask you to hold one."""
+
+    def __init__(self):
+        self.playing = False
+        self.cards = []                  # strokes, a hole at a time
+        self.hole = 0
+        self.say = None                  # (what, when): IN THE WATER and so on
+        self.done_at = None
+
+    def start(self, now):
+        self.playing, self.cards, self.hole = True, [], 0
+        self.done_at = None
+        self.tee(now)
+
+    def tee(self, now):
+        rows = GOLF_HOLES[self.hole][2]
+        for y, row in enumerate(rows):
+            for x, c in enumerate(row):
+                if c == "T":
+                    self.x, self.y = x + 0.5, y + 0.5
+                if c == "O":
+                    self.cup = (x + 0.5, y + 0.5)
+        self.strokes = 0
+        self.vx = self.vy = 0.0
+        self.aim = math.atan2(self.cup[1] - self.y, self.cup[0] - self.x)
+        self.phase = "aim"           # aim, power, rolling, holed
+        self.clock = 0.0             # the course's own time: the sails go by it
+        self.last = now
+        self.swing_at = now
+        self.from_xy = (self.x, self.y)
+
+    def rows(self):
+        return GOLF_HOLES[self.hole][2]
+
+    def cell(self, x, y):
+        rows = self.rows()
+        i, j = int(math.floor(x)), int(math.floor(y))
+        if 0 <= j < len(rows) and 0 <= i < len(rows[j]):
+            return rows[j][i]
+        return "#"
+
+    def sails_open(self):
+        return self.clock % GOLF_SAILS < GOLF_OPEN
+
+    def solid(self, x, y):
+        c = self.cell(x, y)
+        return c == "#" or (c == "W" and not self.sails_open())
+
+    def power(self, now):
+        """Where the meter is: up and back, nought to one."""
+        f = ((now - self.swing_at) / GOLF_SWING) % 1.0
+        return 1.0 - abs(2.0 * f - 1.0)
+
+    def key(self, what, now):
+        if not self.playing or self.phase in ("rolling", "holed"):
+            return
+        if what in ("left", "right") and self.phase == "aim":
+            self.aim += GOLF_TURN * (-1 if what == "left" else 1)
+        elif what == "act" and self.phase == "aim":
+            self.phase, self.swing_at = "power", now
+        elif what == "act" and self.phase == "power":
+            self.hit(self.power(now), now)
+        elif what == "back" and self.phase == "power":
+            self.phase = "aim"
+
+    def hit(self, power, now):
+        speed = 3.0 + 27.0 * max(0.0, min(1.0, power))
+        self.vx, self.vy = math.cos(self.aim) * speed, math.sin(self.aim) * speed
+        self.strokes += 1
+        self.from_xy = (self.x, self.y)
+        self.phase = "rolling"
+        self.rolled = 0.0
+        self.last = now
+
+    def step(self):
+        """One GOLF_DT of the ball."""
+        self.clock += GOLF_DT
+        if self.phase != "rolling":
+            return
+        self.rolled += GOLF_DT
+        c = self.cell(self.x, self.y)
+        ax = ay = 0.0
+        slope = {">": (1, 0), "<": (-1, 0), "^": (0, -1), "v": (0, 1)}.get(c)
+        if slope:
+            ax, ay = slope[0] * GOLF_SLOPE, slope[1] * GOLF_SLOPE
+        self.vx += ax * GOLF_DT
+        self.vy += ay * GOLF_DT
+        speed = math.hypot(self.vx, self.vy)
+        drag = (GOLF_SAND if c == ":" else GOLF_FELT) * GOLF_DT
+        if speed > 0:
+            keep = max(0.0, speed - drag) / speed
+            self.vx *= keep
+            self.vy *= keep
+            speed *= keep
+        nx = self.x + self.vx * GOLF_DT
+        if self.solid(nx, self.y):
+            self.vx = -self.vx * 0.8
+        else:
+            self.x = nx
+        ny = self.y + self.vy * GOLF_DT
+        if self.solid(self.x, ny):
+            self.vy = -self.vy * 0.8
+        else:
+            self.y = ny
+        if math.hypot(self.x - self.cup[0], self.y - self.cup[1]) < GOLF_CUP:
+            if speed < GOLF_DROP:
+                self.x, self.y = self.cup
+                self.phase, self.holed_at = "holed", self.clock
+                if self.strokes == 1:
+                    self.say = ("HOLE IN ONE!", self.clock, "ace")
+                return
+        if self.cell(self.x, self.y) == "~":
+            self.strokes += 1                     # a stroke for the water
+            self.x, self.y = self.from_xy
+            self.vx = self.vy = 0.0
+            self.say = ("IN THE WATER  +1", self.clock, "wet")
+            self._rest()
+            return
+        # Still: on the flat, or held against a wall by a slope - or rolling
+        # longer than any putt does, which only a slope into a corner could.
+        if speed < 0.35:
+            on = {">": (1, 0), "<": (-1, 0), "^": (0, -1), "v": (0, 1)}.get(
+                self.cell(self.x, self.y))
+            if on is None or self.solid(self.x + on[0] * 0.6, self.y + on[1] * 0.6):
+                self._rest()
+                return
+        if self.rolled > 15.0:
+            self._rest()
+
+    def _rest(self):
+        self.vx = self.vy = 0.0
+        if self.strokes >= GOLF_MAX:
+            self.say = ("PICKED UP", self.clock, "up")
+            self.phase, self.holed_at = "holed", self.clock
+            return
+        self.phase = "aim"
+        self.aim = math.atan2(self.cup[1] - self.y, self.cup[0] - self.x)
+
+    def update(self, now):
+        if not self.playing:
+            self.last = now
+            return
+        steps = min(int((now - self.last) / GOLF_DT), 240)   # a stall loses time
+        for _ in range(steps):
+            self.step()
+        self.last += steps * GOLF_DT if steps < 240 else now - self.last
+        if self.phase == "holed" and self.clock - self.holed_at > 1.6:
+            self.cards.append(self.strokes)
+            if self.hole + 1 < len(GOLF_HOLES):
+                self.hole += 1
+                clock = self.clock
+                self.tee(now)
+                self.clock = clock
+            else:
+                self.playing, self.done_at = False, now
+
+    def total(self):
+        return sum(self.cards)
+
+    def over(self):
+        """Strokes over par for the holes played."""
+        return self.total() - sum(GOLF_HOLES[n][1] for n in range(len(self.cards)))
+
+
+GOLF_MILL = ("  /\\  ", " /  \\ ", " |[]| ", " |  | ", " |__| ")
+GOLF_SAIL = (("\\   /", "  X  ", "/   \\"), ("  |  ", "--+--", "  |  "))
+
+
+def render_minigolf(course, game, width, height, now, best=None):
+    """The hole from above, under the stars: green felt in its walls, bulbs
+    round the fence, the cup and its flag, the ball and the line it will go
+    off on, the sails over the windmill's gap. Under it the hole, the par and
+    the strokes, and the power meter when it is going. Between rounds, the
+    scorecard. Cells are two columns by one row, so the course is square to
+    the eye; bigger windows draw each cell bigger."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    name = course["name"]
+    if width < 40 or height < 14:
+        _text(ch, co, 0, 0, ("%s: too small to putt" % name)[:width], GOLD)
+        return ch, co
+    k = big_scale(width, height)
+    n = len(NEON)
+    for s in range(width * height // 90):               # the stars
+        m = _mix(s, course["seed"], 6301)
+        x, y = m % width, (m >> 10) % max(1, height // 3)
+        ch[y][x], co[y][x] = ".", STAR_DIM if (m >> 20) % 3 else STAR
+    if k > 1 and blocks_width(name, k - 1) + 4 < width:
+        _blocks(ch, co, 1, width // 2 - blocks_width(name, k - 1) // 2, name,
+                NEON[course["seed"] % n][0], k - 1, k - 1)
+        top = 3 + 5 * (k - 1)
+    else:
+        _text(ch, co, 1, width // 2 - len(name) // 2, name, NEON[course["seed"] % n][0])
+        top = 3
+    if not game.playing:
+        _golf_card(ch, co, game, width, height, top, now, k, best)
+        return ch, co
+    rows = game.rows()
+    hw, hh = len(rows[0]), len(rows)
+    s = max(1, min((width - 4) // (2 * hw), (height - top - 6) // hh, 2 * k))
+    cw = 2 * s
+    x0 = width // 2 - hw * cw // 2
+    y0 = top + max(0, (height - top - 5 - hh * s) // 2)
+    opened = game.sails_open()
+    for j, row in enumerate(rows):
+        for i, c in enumerate(row):
+            for dy in range(s):
+                for dx in range(cw):
+                    yy, xx = y0 + j * s + dy, x0 + i * cw + dx
+                    if not (0 <= yy < height and 0 <= xx < width):
+                        continue
+                    g, a = _golf_ground(c, i * cw + dx, j * s + dy, now, opened,
+                                        course["seed"])
+                    ch[yy][xx], co[yy][xx] = g, a
+    # Bulbs on the outer wall, chasing.
+    for i in range(hw):
+        for j in (0, hh - 1):
+            if chase(i * 0.5 + j, now):
+                xx, yy = x0 + i * cw + cw // 2, y0 + j * s + s // 2
+                if 0 <= yy < height and 0 <= xx < width:
+                    ch[yy][xx], co[yy][xx] = "o", NEON[(i + j) % n][0]
+    # The windmill's sails over its gap.
+    for j, row in enumerate(rows):
+        i = row.find("W")
+        if i >= 0 and (j == 0 or "W" not in rows[j - 1]):
+            sail = GOLF_SAIL[0 if opened else 1]
+            cx = x0 + (i + 1) * cw + cw // 2
+            for r, line in enumerate(sail):
+                _text(ch, co, y0 + j * s - 4 + r, cx - 2, line, BULB)
+    # The cup and its flag, and the ball.
+    cx = x0 + int(game.cup[0] * cw)
+    cy = y0 + int(game.cup[1] * s)
+    if 0 <= cy < height and 0 <= cx < width:
+        ch[cy][cx], co[cy][cx] = "O", GOLD
+        for r in range(1, 1 + 2 * s):
+            if cy - r >= 0:
+                ch[cy - r][cx], co[cy - r][cx] = "|", CURB
+    flap = ">" if int(now * 2.0) % 2 else ")"
+    if 0 <= cy - 2 * s < height and 0 <= cx + 1 < width:
+        ch[cy - 2 * s][cx + 1], co[cy - 2 * s][cx + 1] = flap, ROU_RED
+    if game.phase == "aim" or game.phase == "power":
+        reach = 3.0 + (game.power(now) * 9.0 if game.phase == "power" else 3.0)
+        for d in range(1, int(reach * 2)):
+            px = game.x + math.cos(game.aim) * d * 0.5
+            py = game.y + math.sin(game.aim) * d * 0.5
+            if game.solid(px, py):
+                break
+            xx, yy = x0 + int(px * cw), y0 + int(py * s)
+            if 0 <= yy < height and 0 <= xx < width:
+                ch[yy][xx], co[yy][xx] = ".", FLASH if d % 2 else GOLD
+    if game.phase != "holed":
+        bx, by = x0 + int(game.x * cw), y0 + int(game.y * s)
+        if 0 <= by < height and 0 <= bx < width:
+            ch[by][bx], co[by][bx] = "o", FLASH
+    # Under the hole: where you are in the round, and the meter.
+    hy = min(height - 3, y0 + hh * s + 1)
+    hname, par = GOLF_HOLES[game.hole][:2]
+    line = "HOLE %d  %s   PAR %d   STROKES %d   ROUND %+d" % (
+        game.hole + 1, hname, par, game.strokes, game.over())
+    _text(ch, co, hy, width // 2 - len(line) // 2, line[:width], HUD)
+    if game.phase == "power":
+        bar_w = min(40 * k, width - 12)
+        p = game.power(now)
+        bx0 = width // 2 - bar_w // 2
+        _text(ch, co, hy + 1, bx0 - 6, "POWER", GOLD)
+        for x in range(bar_w):
+            lit = x < int(p * bar_w)
+            ch[hy + 1][bx0 + x] = "#" if lit else "-"
+            hot = ROU_RED if x > bar_w * 0.75 else GOLD
+            co[hy + 1][bx0 + x] = hot if lit else CONCRETE
+    if game.say is not None and game.clock - game.say[1] < 1.6:
+        word = game.say[0]
+        attr = NEON[int(now * 6.0) % n][0] if game.say[2] == "ace" else GOLD
+        if k > 1 and blocks_width(word, k - 1) < width - 2:
+            _blocks(ch, co, y0 + max(0, hh * s // 2 - 2), width // 2
+                    - blocks_width(word, k - 1) // 2, word, attr, k - 1, k - 1)
+        else:
+            _text(ch, co, max(0, y0 - 1), width // 2 - len(word) // 2, word, attr)
+    return ch, co
+
+
+def _golf_ground(c, x, y, now, opened, seed):
+    """What a spot of a hole is drawn as: x and y count screen cells across the
+    hole, so the felt's texture and the water's ripple stay put as they are
+    drawn bigger."""
+    if c == "#":
+        return "#", BARK
+    if c == "W":
+        return (".", ROU_GREEN) if opened else ("X", CONCRETE)
+    if c == ":":
+        return (":" if (x + y) % 2 else ".", GOLD_DIM)
+    if c == "~":
+        return ("~" if (x + y + int(now * 3.0)) % 3 else "-", RAIN)
+    if c in "<>^v":
+        return (c if x % 4 == 1 and y % 2 == 0 else ".", GRASS)
+    return ("." if (x + 2 * y) % 4 == 0 else " ", ROU_GREEN)
+
+
+def _golf_card(ch, co, game, width, height, top, now, k, best):
+    """The scorecard: the nine holes, their par, your strokes, and the total -
+    in block letters on a big window - with what it says about the round. With
+    no round played yet, the card is empty and says how to start one."""
+    n = len(NEON)
+    for y in range(top, height):              # the stars stop where the card is
+        for x in range(max(0, width // 2 - 26), min(width, width // 2 + 26)):
+            ch[y][x], co[y][x] = " ", 0
+    y = top + 1
+    head = "HOLE " + "".join("%3d" % (h + 1) for h in range(len(GOLF_HOLES))) + "   TOT"
+    pars = ("PAR  " + "".join("%3d" % p for _, p, _ in GOLF_HOLES)
+            + "   %3d" % golf_par())
+    mine = "YOU  " + "".join("%3s" % (str(c) if c is not None else "-") for c in (
+        game.cards + [None] * (len(GOLF_HOLES) - len(game.cards))))
+    mine += "   %3s" % (game.total() if game.cards else "-")
+    x = width // 2 - len(head) // 2
+    for r, (line, attr) in enumerate(((head, GOLD), (pars, HUD), (mine, FLASH))):
+        _text(ch, co, y + r * (1 + (k > 1)), max(0, x), line[:width], attr)
+    y += 4 + 2 * (k > 1)
+    if len(game.cards) == len(GOLF_HOLES):
+        word = "%+d" % game.over()
+        if k > 1:
+            _blocks(ch, co, y, width // 2 - blocks_width(word, 2 * (k - 1)) // 2, word,
+                    GOLD, 2 * (k - 1), k - 1)
+            y += 5 * (k - 1) + 1
+        else:
+            _text(ch, co, y, width // 2 - len(word) // 2, word, GOLD)
+            y += 2
+        say = golf_say(game.over())
+        _text(ch, co, y, width // 2 - len(say) // 2, say, NEON[int(now * 4.0) % n][0])
+        y += 2
+    if best is not None:
+        b = "best tonight: %d" % best
+        _text(ch, co, y, width // 2 - len(b) // 2, b, HUD)
+        y += 2
+    ask = "p plays a round, $%d" % GOLF_COST
+    _text(ch, co, y, width // 2 - len(ask) // 2, ask, GOLD_DIM)
+    # The windmill on the card, turning.
+    sail = GOLF_SAIL[int(now * 2.0) % 2]
+    mx, my = width // 2 - 3, min(height - len(GOLF_MILL) - 1, y + 3)
+    for r, line in enumerate(sail):
+        _text(ch, co, my + r - 2, mx, line, BULB)
+    for r, line in enumerate(GOLF_MILL):
+        _text(ch, co, my + r + 1, mx - 1, line, ROU_RED if "[" in line else CURB)
+    gy = my + len(GOLF_MILL) + 1
+    if gy < height:
+        _text(ch, co, gy, mx - 12, ",,,.,,,.,,,.,,,.,,,.,,,.,,,.", ROU_GREEN)
+
+
+def draw_minigolf_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
+                         cont, now):
+    """One column of a minigolf course's fence: low pickets with the green
+    showing between them, a string of bulbs along the top chasing round, and
+    the gate lit. The course is open, so the fence is all there is of it."""
+    scale = v.fy / dist
+    golf = b["minigolf"]
+    n = len(NEON)
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    if edge:
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx], co[y][sx] = "|", FLASH if v.flash > 0.35 else CURB
+        return roof, None, foot, None, ()
+    prev_roof, _, prev_foot = cont[:3]
+    if r_lo <= roof <= r_hi:
+        lit = chase(u * 1.5, now)
+        ch[roof][sx], co[roof][sx] = ("o", NEON[int(u * 2.0) % n][0]) if lit else (
+            "-", CURB)
+    if abs(u - golf["u"]) < 0.9 and face == golf["door"]:
+        for y in range(max(r_lo, roof + 1), min(r_hi, foot - 1) + 1):
+            ch[y][sx], co[y][sx] = ":", BULB_DIM          # the gate, open
+    else:
+        picket = int(u * 3.0) % 2 == 0
+        for y in range(max(r_lo, roof + 1), min(r_hi, foot - 1) + 1):
+            if picket:
+                ch[y][sx], co[y][sx] = "|", CURB
+            elif y >= foot - max(1, (foot - roof) // 3):
+                ch[y][sx], co[y][sx] = ",", ROU_GREEN
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, None, foot, None, ()
+
+
+def draw_minigolf_front(ch, co, v, walls, golf, world, now):
+    """Over the gate: a windmill, its sails going round, MINI GOLF lit beside
+    it - big when you are near enough - the name under, and a flag. Screen
+    space, for the casino marquee's reason."""
+    pr = v.project(world[0], world[1], world[2])
+    if pr is None or pr[2] > 80.0:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    n = len(NEON)
+    word = "MINI GOLF"
+    big = dist < ARCADE_BIG and big_width(word) + 20 <= v.width
+    w = max((big_width(word) if big else len(word)) + 4, len(golf["name"]) + 4)
+    rows = 7 if big else 3
+    x0, y0 = sx - w // 2, sy - rows
+    tube = NEON[golf["seed"] % n]
+    for r in range(rows + 1):
+        for x in range(x0, x0 + w):
+            edge = r in (0, rows) or x in (x0, x0 + w - 1)
+            if edge:
+                lit = chase((x - x0 + r) * 0.4, now)
+                put_cell(ch, co, v, walls, x, y0 + r, dist, "o" if lit else ".",
+                         tube[0 if lit else 1])
+            else:
+                put_cell(ch, co, v, walls, x, y0 + r, dist, " ", GOLD_DIM)
+    if big:
+        lx = sx - big_width(word) // 2
+        for dx, dy, kk in big_cells(word):
+            put_cell(ch, co, v, walls, lx + dx, y0 + 1 + dy, dist, "#",
+                     ROU_GREEN if kk < 4 else FLASH)
+    else:
+        for kk, c in enumerate(word):
+            put_cell(ch, co, v, walls, sx - len(word) // 2 + kk, y0 + 1, dist, c,
+                     ROU_GREEN if kk < 4 else FLASH)
+    name = golf["name"]
+    for kk, c in enumerate(name):
+        put_cell(ch, co, v, walls, sx - len(name) // 2 + kk, y0 + rows - 1, dist, c,
+                 GOLD)
+    # The windmill, left of the board, standing on the fence.
+    mx = x0 - 9
+    foot = sy + 2
+    for r, line in enumerate(GOLF_MILL):
+        for kk, c in enumerate(line):
+            if c != " ":
+                put_cell(ch, co, v, walls, mx + kk, foot - len(GOLF_MILL) + 1 + r, dist,
+                         c, ROU_RED if c in "[]" else CURB)
+    sail = GOLF_SAIL[int(now * 2.0) % 2]
+    for r, line in enumerate(sail):
+        for kk, c in enumerate(line):
+            if c != " ":
+                put_cell(ch, co, v, walls, mx + kk + 1,
+                         foot - len(GOLF_MILL) - 2 + r, dist, c, BULB)
+    # And a flag the other side.
+    fx = x0 + w + 2
+    for r in range(4):
+        put_cell(ch, co, v, walls, fx, foot - r, dist, "|", CURB)
+    put_cell(ch, co, v, walls, fx + 1, foot - 3, dist,
+             ">" if int(now * 2.0) % 2 else ")", ROU_RED)
+
+
 # The case. One for a sitting, a trail through places you already know: each
 # says who to ask next, and a line on the screen says which way that is.
 CASE_NAME = "THE CASE OF THE LAST SLICE"
@@ -18884,8 +19464,8 @@ def fire_near(x, z):
 
 
 # What goes out in a blackout: anything on a facade that is lit by the mains.
-LIGHT_PROPS = {"arcade", "bowling", "karaoke", "blade", "bulb", "cinema", "diner",
-               "exchange",
+LIGHT_PROPS = {"arcade", "bowling", "karaoke", "minigolf", "blade", "bulb", "cinema",
+               "diner", "exchange",
                "hung",
                "lanterns", "lobby", "marquee", "overdoor", "ramenfront", "clubdoor",
                "bass"}
@@ -18933,6 +19513,12 @@ def draw_props(ch, co, v, walls, now, wet):
                 if f == b["karaoke"]["door"]:
                     w = face_point(i, j, f, CELL * 0.5, 0.5, FLOOR_H + 0.6)
                     props.append((_d2(v, w), "karaoke", b["karaoke"], w, (nx, nz)))
+                continue
+            if b["minigolf"] is not None:
+                if f == b["minigolf"]["door"]:
+                    w = face_point(i, j, f, CELL * 0.5, 0.5, GOLF_H + 0.4)
+                    props.append((_d2(v, w), "minigolf", b["minigolf"], w,
+                                  (nx, nz)))
                 continue
             if b["arcade"] is not None:
                 if f == b["arcade"]["door"]:
@@ -19025,6 +19611,8 @@ def draw_props(ch, co, v, walls, now, wet):
             draw_bowling_front(ch, co, v, walls, s, world, now)
         elif kind == "karaoke":
             draw_karaoke_front(ch, co, v, walls, s, world, now)
+        elif kind == "minigolf":
+            draw_minigolf_front(ch, co, v, walls, s, world, now)
         elif kind == "exchange":
             draw_exchange_front(ch, co, v, walls, s, world, now)
         elif kind == "diner":
@@ -21611,7 +22199,8 @@ def venue_at(x, z):
                 continue
             b = lot(i, j)
             for kind in ("casino", "club", "tower", "cinema", "diner", "arcade",
-                         "bowling", "karaoke", "temple", "exchange", "warehouse"):
+                         "bowling", "karaoke", "minigolf", "temple", "exchange",
+                         "warehouse"):
                 v = b[kind]
                 if v is None:
                     continue
@@ -23481,6 +24070,7 @@ CHEAT_HIDDEN = [
     ("_", "car park", "carpark"), ("<", "police car", "police"),
     (")", "highway", "highway"), ("o", "the woods", "woods"), ("~", "the lake", "lake"),
     ("t", "riverbank", "bank"), ("a", "karaoke bar", "karaoke"),
+    ("l", "mini golf", "minigolf"),
 ]
 CHEAT_TEST = 1                          # ctrl-a
 TEST_JUMPS = bool(os.environ.get("ASCII_CITY_TEST"))
@@ -24436,6 +25026,8 @@ def find_place(x, z, kind):
         return _doorway(x, z, 2801, "bowling", BOWL_ODDS)
     if kind == "karaoke":
         return _doorway(x, z, 2901, "karaoke", KARAOKE_ODDS)
+    if kind == "minigolf":
+        return _doorway(x, z, 3001, "minigolf", GOLF_ODDS)
     if kind == "temple":
         return _temple_spot(x, z)
     if kind in ("industrial", "site", "warehouse", "plot"):
@@ -26012,7 +26604,7 @@ TAXI_DESTS = [("the casino", "casino"), ("the club", "club"),
               ("the roof party", "roofparty"), ("the carnival", "carnival"),
               ("the lighthouse", "lighthousedoor"), ("the big bridge", "grand"),
               ("the riverbank", "bank"), ("the woods", "woods"), ("the lake", "lake"),
-              ("the karaoke bar", "karaoke")]
+              ("the karaoke bar", "karaoke"), ("the mini golf", "minigolf")]
 DRIVER_SAYS = ["Busy night.", "Where you headed, friend?", "Meter's running.",
                "You see the fireworks over the bay? I saw them once.",
                "I don't go into the woods after dark. Nobody does.",
@@ -26226,7 +26818,7 @@ CAB_KINDS = [("the casino", "casino"), ("the club", "club"),
              ("a sky deck", "tower"), ("the roof party", "roofparty"),
              ("the carnival", "carnival"), ("the riverbank", "bank"),
              ("the airport", "flight"), ("the bowling alley", "bowling"),
-             ("the karaoke bar", "karaoke")]
+             ("the karaoke bar", "karaoke"), ("the mini golf", "minigolf")]
 CAB_SAYS = {
     "plain": ["%s, please.", "Evening. %s.", "%s. Do you know it?",
               "Take me to %s.", "%s, thanks."],
@@ -28282,6 +28874,8 @@ EXCHANGE_HUD = (" on the trading floor  -  b buys, n sells, arrows pick, l lists
 BOWL_HUD = " %s  -  a d line up  -  p spin, p power  -  x stop playing "
 BOWL_OUT_HUD = " %s  -  p bowls a game  -  s walks out  -  q quit "
 KARA_HUD = " %s  -  j k l sing the notes, on the beat  -  x stops the song "
+GOLF_HUD = (" %s  -  a d aim  -  p the power, p again hits  -  x stops the round ")
+GOLF_OUT_HUD = " %s  -  p plays a round, $%d  -  s walks out  -  q quit "
 KARA_OUT_HUD = (" %s  -  p sings a song, $%d  -  n the next one  -  s walks out  "
                 "-  q quit ")
 ARCADE_HUD = (" in the %s arcade  -  ad choose a game  -  p plays  -  s walks out"
@@ -28379,6 +28973,9 @@ def main(stdscr):
     bowl_hi = {}                # your best at each, for the session
     at_kara = False
     kara = None                 # your room at the karaoke bar, while you are in it
+    at_golf = False
+    golf = None                 # a round of minigolf, while you are at the course
+    golf_best = {}              # your best round at each course, for the session
     at_temple = False
     striker = None              # the last strength tester you stood at
     at_striker = False
@@ -28809,7 +29406,7 @@ def main(stdscr):
                 oracle["said"] = said_[-20:]
                 oracle["at"], oracle["sung"] = now, word_
             elif ((wheel is not None or at_arcade or at_bar is not None or at_bowl
-                   or at_kara)
+                   or at_kara or at_golf)
                   and key in (ord("z"), ord("Z"))):
                 _big_screens[0] = not _big_screens[0]     # big screens, off and on
                 note, note_at = ("big screens " + ("on" if _big_screens[0]
@@ -28902,6 +29499,20 @@ def main(stdscr):
                     note, note_at = "a song is $%d" % KARAOKE_COST, now
             elif at_kara and key in (ord("n"), ord("N")):
                 kara.next_song()
+            elif at_golf and golf.playing:
+                if key in (ord("x"), ord("X")):
+                    golf.playing = False
+                else:
+                    golf.key({curses.KEY_LEFT: "left", ord("a"): "left",
+                              ord("A"): "left", curses.KEY_RIGHT: "right",
+                              ord("d"): "right", ord("D"): "right", ord("p"): "act",
+                              ord("P"): "act", ord(" "): "act",
+                              curses.KEY_DOWN: "back"}.get(key, ""), now)
+            elif at_golf and key in (ord("p"), ord("P")):
+                if wallet.take(GOLF_COST):
+                    golf.start(now)
+                else:
+                    note, note_at = "a round is $%d" % GOLF_COST, now
             elif at_arcade and play["game"] is not None:
                 # Playing: the keys are the game's, but for x, which leaves.
                 g_ = play["game"]
@@ -29272,6 +29883,11 @@ def main(stdscr):
             kara = None
         elif kara is None:
             kara = Karaoke(venue[1]["seed"])
+        at_golf = venue is not None and venue[0] == "minigolf"
+        if not at_golf:
+            golf = None
+        elif golf is None:
+            golf = Minigolf()
         at_temple = venue is not None and venue[0] == "temple"
         if venue is None or venue[0] != "telescope":
             scope_at = None             # step back and it starts again
@@ -29456,6 +30072,15 @@ def main(stdscr):
                                     bowl_hi.get(venue[1]["seed"], 0))
             hud = ((BOWL_HUD if bowl.playing else BOWL_OUT_HUD)
                    % venue[1]["name"].lower())
+        elif venue is not None and venue[0] == "minigolf":
+            golf.update(now)
+            seed = venue[1]["seed"]
+            if golf.done_at is not None and len(golf.cards) == len(GOLF_HOLES):
+                golf_best[seed] = min(golf_best.get(seed, 999), golf.total())
+            ch, co = render_minigolf(venue[1], golf, width, height, now,
+                                     golf_best.get(seed))
+            hud = (GOLF_HUD % venue[1]["name"].lower() if golf.playing
+                   else GOLF_OUT_HUD % (venue[1]["name"].lower(), GOLF_COST))
         elif venue is not None and venue[0] == "karaoke":
             kara.update(now)
             ch, co = render_karaoke(venue[1], kara, width, height, now)
