@@ -5,6 +5,17 @@ fly over, and go into, and get lost in.
 
 ![The city from across the river, on a clear night](docs/ASCII-CITY.png)
 
+<table>
+  <tr>
+    <td><img src="docs/street.svg" alt="A Chinatown street: neon signs in Chinese, NOODLES and RAMEN, people on the pavement"></td>
+    <td><img src="docs/arcade.svg" alt="Inside the arcade: six lit cabinets under the arcade's name in block letters"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/alley.svg" alt="A lit back alley: ramen and sake signs in Japanese, lanterns and people"></td>
+    <td><img src="docs/casino.svg" alt="A casino on the avenue: the DIAMOND marquee, the doorman and the red carpet"></td>
+  </tr>
+</table>
+
 ```bash
 git clone GitHub.com/noajwz/ascii_city
 python3 ascii_city.py
@@ -256,7 +267,8 @@ python3 tests/checks.py && python3 tests/pty_checks.py
 A few hundred assertions, no framework and nothing to install. The first renders frames and counts
 what landed where; the second forks a pty and actually plays the thing, six games at a time.
 
-The screenshots are generated the same way — `python3 tools/screenshot.py` renders real frames
+The four screenshots under the picture are generated the same way — `python3 tools/screenshot.py`
+renders real frames (a Chinatown street, inside the arcade, a lit alley, a casino on the avenue)
 and writes them out as text in an SVG, in the colours the renderer actually picked.
 
 ## Notes

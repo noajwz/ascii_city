@@ -123,15 +123,30 @@ def write(docs, name, ch, co, title):
     print("wrote docs/%s.svg" % name)
 
 
-def jet(home, x, z, heading, alt, now, outside=False, flaps=0, speed=70.0,
-        pitch=0.0, lag=0.0):
-    """A cockpit set up in the air, as if flown there, with nothing being said."""
-    ck = ac.Cockpit(home, 0.0)
-    ck.state, ck.alt, ck.v, ck.throttle, ck.flaps = "air", alt, speed, 0.6, flaps
-    ck.x, ck.z, ck.heading, ck.pitch, ck.outside = x, z, heading, pitch, outside
-    ck.said_at, ck.shown = -99.0, ck.said
-    ck.cam = [heading - lag, alt + 1.5 + ac.CHASE_UP, now]
-    return ac.render_cockpit(W, H, now, ck)
+def best_view(kind, backs=(0.0,), turns=(0.0,), hops=6, now=300.0):
+    """The most to look at of a kind of place: from the first few of them
+    round the start, a step or two back and a turn either way, whichever
+    frame carries the most signage - a CJK sign counts most, then letters."""
+    x0, z0 = ac.start_position()
+    best = None
+    for hop in range(hops):
+        sp = ac.find_place(x0 + hop * 700, z0 - hop * 500, kind)
+        if sp is None:
+            continue
+        for back in backs:
+            for turn in turns:
+                yaw = sp[2] + turn
+                x, z = sp[0] - math.sin(yaw) * back, sp[1] - math.cos(yaw) * back
+                if not ac.can_stand(x, z):
+                    continue
+                g, _, _ = ac.render_street(ac.View(x, z, yaw, W, H), now)
+                s = sum(40 if unicodedata.east_asian_width(c) in ("W", "F")
+                        else (3 if c.isalpha() else 1) for r in g for c in r if c != " ")
+                if best is None or s > best[0]:
+                    best = (s, x, z, yaw)
+    _, x, z, yaw = best
+    g, c, _ = ac.render_street(ac.View(x, z, yaw, W, H), now)
+    return g, c
 
 
 def main():
@@ -158,41 +173,29 @@ def main():
     g, c, _ = ac.render_street(ac.View(best[0], best[1], best[2], W, H), 300.0)
     write(docs, "street", g, c, "a street")
 
-    # The waterfront, on the clearest night with the milky way up.
-    night = max(range(300),
-                key=lambda k: ac.night(k * ac.NIGHT_LENGTH + 200)["clarity"]
-                + (0.3 if ac.night(k * ac.NIGHT_LENGTH + 200)["band"] else 0))
-    g, c = ac.render_skyline(140.0, W, H, night * ac.NIGHT_LENGTH + 200)
-    write(docs, "waterfront", g, c, "the waterfront")
+    # The rest under a sky held clear.
+    while ac.clouds_name() != "clear":
+        ac.cycle_clouds()
 
-    # The plane: on final to the first airport, from the seat and from behind,
-    # with no storm about to spoil the view.
-    home = ac.zone_home("airport", 100, 100)
-    rx, zn, zs = ac.runway(*home)
-    cells = ac.air_cells
-    ac.air_cells = lambda x, z, now, reach=0.0: []
-    g, c, _ = jet(home, rx + 2.0, zn + 350.0, math.pi, 30.0, 300.0, flaps=2,
-                  speed=48.0, pitch=-0.03)
-    write(docs, "cockpit", g, c, "on final")
-    g, c, _ = jet(home, rx + 4.0, zn + 700.0, math.pi, 58.0, 300.0, outside=True,
-                  flaps=2, speed=48.0, pitch=0.02, lag=-0.06)
-    write(docs, "outside", g, c, "the jet from outside")
-    ac.air_cells = cells
+    # A lit alley, and a casino out on the avenue.
+    g, c = best_view("yokocho", backs=(0.0, 4.0), turns=(0.0, math.pi))
+    write(docs, "alley", g, c, "a lit alley")
+    g, c = best_view("casino", backs=(0.0, 6.0, 12.0), turns=(0.0, -0.4, 0.4), hops=4)
+    write(docs, "casino", g, c, "a casino on the avenue")
 
-    # And a thunderstorm ahead, caught as it strikes.
-    cell = min(ac.air_cells(rx, zn, 300.0, 20000.0),
-               key=lambda cl: math.hypot(cl[0] - rx, cl[1] - zn))
-    now = next(300.0 + k * 0.05 for k in range(2000)
-               if (ac.air_strike(cell, 300.0 + k * 0.05) or (0.0,))[0] > 0.8)
-    ahead = 0.8
-    g, c, _ = jet(home, cell[0] - math.sin(ahead) * (cell[2] + 1200.0),
-                  cell[1] - math.cos(ahead) * (cell[2] + 1200.0), ahead, 135.0, now)
-    write(docs, "storm", g, c, "a storm ahead")
-
-    # Inside the casino, the wheel going round.
-    g, c = ac.render_casino_room(ac.Spin(500.0, "ROYALE"), W, H, 502.2,
-                                 ac.Slot(ac.Wallet(1000)))
-    write(docs, "casino", g, c, "the casino")
+    # Inside the arcade, at the moment its cabinets have the most lit.
+    sp = ac.find_place(x0, z0, "arcade")
+    arc = None
+    for k in range(40):
+        place = ac.venue_at(sp[0] + math.sin(sp[2]) * k * 0.3,
+                            sp[1] + math.cos(sp[2]) * k * 0.3)
+        if place and place[0] == "arcade":
+            arc = place[1]
+            break
+    now = max((300.0 + k * 0.37 for k in range(40)), key=lambda t: sum(
+        1 for r in ac.render_arcade(arc, W, H, t)[0] for ch in r if ch != " "))
+    g, c = ac.render_arcade(arc, W, H, now)
+    write(docs, "arcade", g, c, "inside the arcade")
 
 
 if __name__ == "__main__":
