@@ -3445,7 +3445,7 @@ def lot(i, j):
         # and be invisible.
         b["club"] = b["casino"] = b["tower"] = b["cinema"] = None
         b["diner"] = b["billboard"] = b["arcade"] = b["exchange"] = None
-        b["bowling"] = None
+        b["bowling"] = b["karaoke"] = None
         b["temple"] = b["warehouse"] = None
         if d is INDUSTRIAL:
             wh = zone_warehouse(*zone_home("industrial", i, j))
@@ -3572,6 +3572,18 @@ def lot(i, j):
                                                    % len(BOWL_NAMES)],
                                 "seed": _mix(i, j, 2807) % 9973,
                                 "height": b["height"]}
+        elif (_mix(i, j, 2901) % KARAOKE_ODDS == 0 and not d["park"]
+              and d["name"] not in ("financial", "residential")):
+            # Out where the night is: low, its rooms upstairs in sight from
+            # across the street, and its door on the street.
+            face = _road_face(i, j, (_mix(i, j, 2903) >> 9) % 4)
+            if face is not None:
+                b["height"] = KARAOKE_H
+                b["karaoke"] = {"door": face, "u": CELL * 0.5, "i": i, "j": j,
+                                "name": KARAOKE_NAMES[(_mix(i, j, 2905) >> 9)
+                                                      % len(KARAOKE_NAMES)],
+                                "seed": _mix(i, j, 2907) % 9973,
+                                "height": b["height"]}
         elif _mix(i, j, 3201) % TEMPLE_ODDS == 0 and d["name"] != "financial":
             # Stone among the shopfronts, with its front on a street, and
             # low: the rose window over the door has to be in sight from
@@ -3606,7 +3618,7 @@ def lot(i, j):
         if (b["club"] is None and b["casino"] is None and b["tower"] is None
                 and b["cinema"] is None and b["diner"] is None
                 and b["arcade"] is None and b["exchange"] is None and not d["park"]
-                and b["bowling"] is None
+                and b["bowling"] is None and b["karaoke"] is None
                 and b["temple"] is None and b["warehouse"] is None
                 and d["name"] in BILL_DISTRICTS and 8.0 <= b["height"] <= 12.0
                 and _mix(i, j, 2405) % BILL_ODDS == 0):
@@ -3620,14 +3632,14 @@ def lot(i, j):
         if cap is not None and cap < 18.0:
             b["club"] = b["casino"] = b["tower"] = b["cinema"] = b["diner"] = None
             b["arcade"] = b["bowling"] = b["exchange"] = b["temple"] = None
-            b["warehouse"] = b["billboard"] = None
+            b["warehouse"] = b["billboard"] = b["karaoke"] = None
             b["height"] = min(b["height"], cap)
         b["center"] = center_at(i, j)
         if b["center"] is not None:
             b["height"] = CENTER_H
             b["club"] = b["casino"] = b["cinema"] = b["diner"] = None
             b["arcade"] = b["billboard"] = b["tower"] = b["exchange"] = None
-            b["bowling"] = None
+            b["bowling"] = b["karaoke"] = None
             b["temple"] = b["warehouse"] = None
             b["tree"] = False
         lm = landmark_at(i, j)
@@ -3637,7 +3649,7 @@ def lot(i, j):
             b["height"] = LANDMARK_BASE if ring == 0 else LANDMARK_H
             b["club"] = b["casino"] = b["cinema"] = b["diner"] = None
             b["arcade"] = b["billboard"] = b["tower"] = b["exchange"] = None
-            b["bowling"] = None
+            b["bowling"] = b["karaoke"] = None
             b["temple"] = b["warehouse"] = None
             b["tree"] = False
             if (i, j) == lm["lobby"]:
@@ -10692,6 +10704,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     if b["bowling"] is not None:
         return draw_bowling_column(ch, co, v, sx, dist, b, face, u,
                                    r_lo, r_hi, edge, cont, now)
+    if b["karaoke"] is not None:
+        return draw_karaoke_column(ch, co, v, sx, dist, b, face, u,
+                                   r_lo, r_hi, edge, cont, now)
     if b["temple"] is not None:
         return draw_temple_column(ch, co, v, sx, dist, b, face, u,
                                   r_lo, r_hi, edge, cont, now)
@@ -11517,6 +11532,11 @@ def collect_glow(v, now, wet):
             if b["bowling"] is not None:
                 p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
                 _spill(glow, p[0], p[2], 6.0, NEON[b["bowling"]["seed"] % len(NEON)][1])
+                continue
+            if b["karaoke"] is not None:
+                p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
+                _spill(glow, p[0], p[2], 6.0,
+                       NEON[(b["karaoke"]["seed"] + int(now / 4.0)) % len(NEON)][1])
                 continue
             if b["arcade"] is not None:
                 # The pavement in front takes the colour of whatever the
@@ -16426,7 +16446,7 @@ def climbable(i, j, f):
             and not b["tree"] and b["club"] is None
             and b["casino"] is None and b["tower"] is None
             and b["arcade"] is None and b["exchange"] is None
-            and b["bowling"] is None
+            and b["bowling"] is None and b["karaoke"] is None
             and b["temple"] is None and b["warehouse"] is None):
         return False
     # And only off a roof that is the high point of its corner: climbed from
@@ -17536,6 +17556,430 @@ def draw_bowling_front(ch, co, v, walls, alley, world, now):
                          tube[0])
 
 
+# The karaoke bar. Long and low like the bowling alley, its private rooms
+# upstairs lit each a colour of its own, somebody singing in one now and then;
+# inside, a room of your own, a screen, a song book, and the machine that
+# scores you. The songs are the city's own.
+KARAOKE_ODDS = 900      # on its own hash, like the alley
+KARAOKE_COST = 3        # a song
+KARAOKE_H = 10.0        # two storeys, the rooms upstairs
+KARAOKE_NAMES = ["SING SING", "MIC DROP", "THE GOLDEN MIC", "ECHO ROOM",
+                 "NEON NOTES", "KARAOKE KING", "BOX 88", "STARDUST"]
+KARA_COUNT_IN = 4       # beats before the first word
+KARA_LINE = 8           # beats a line takes, the words a beat apart from its start
+KARA_GREAT = 0.09       # seconds either side of a note: great (a frame is 1/30)
+KARA_GOOD = 0.2         # and good
+KARA_SPEED = 26.0       # columns a second the notes come in at, at scale 1
+KARA_LANES = ("j", "k", "l")         # low, middle, high
+KARA_SHOW = 6.0         # seconds the score stays up after a song
+# Made up, every word: the city's songs. Each line is a line of the screen and
+# a bar of the tune; the melody goes round its own pattern of the three lanes.
+KARA_SONGS = [
+    {"title": "NEON RAIN", "by": "The Wet Pavements", "bpm": 112,
+     "tune": (1, 2, 3, 2, 1, 2, 2, 3),
+     "lines": ["the rain comes down on the neon street",
+               "i turn my collar and i count the beat",
+               "the signs all hum in a colour red",
+               "i should be home i should be in bed",
+               "but the noodle bar is open late",
+               "and the cook says friend you can wait",
+               "so i stand here singing in the rain",
+               "till the last train takes me home again"]},
+    {"title": "LAST TRAIN", "by": "Elevated", "bpm": 120,
+     "tune": (2, 1, 1, 2, 3, 3, 2, 1),
+     "lines": ["the last train rattles overhead",
+               "sparks come down like the stars instead",
+               "i missed it once i missed it twice",
+               "the platform man says it's not so nice",
+               "but the city hums and the city glows",
+               "and where it takes me nobody knows",
+               "so wait for me at the end of the line",
+               "the last train home is a friend of mine"]},
+    {"title": "TAXI TO NOWHERE", "by": "The Meter Runs", "bpm": 104,
+     "tune": (3, 2, 1, 1, 2, 3, 2, 2),
+     "lines": ["the meter's running and the night is young",
+               "the driver's humming with a song unsung",
+               "up the ramp and onto the highway",
+               "down the exit and a long way",
+               "he says the casino's paying out tonight",
+               "he says the woods aren't quite right",
+               "just drive i said just drive",
+               "taxi to nowhere and i feel alive"]},
+    {"title": "JACKPOT BABY", "by": "Seven Seven Seven", "bpm": 128,
+     "tune": (1, 1, 3, 3, 2, 2, 1, 3),
+     "lines": ["seven seven seven on the wheel",
+               "baby you don't know how good i feel",
+               "the lights go round and the bells all ring",
+               "the doorman dances the whole place sings",
+               "i'll buy you ramen i'll buy you a car",
+               "i'll buy the moon and a falling star",
+               "the house always wins they say",
+               "but not tonight baby not today"]},
+    {"title": "LIGHTHOUSE", "by": "The Headland", "bpm": 96,
+     "tune": (2, 3, 2, 1, 2, 3, 3, 2),
+     "lines": ["round and round your light goes by",
+               "over the bridge and the bay and sky",
+               "i climbed the stairs to see you shine",
+               "a hundred steps of a winding line",
+               "the fireworks go up over the water",
+               "every year they go up a little hotter",
+               "round and round and round you go",
+               "lighthouse lighthouse don't let go"]},
+]
+KARA_VERDICTS = ((95, "STAR OF THE NIGHT"), (80, "ENCORE!"), (60, "NOT BAD AT ALL"),
+                 (40, "THE ROOM IS BEING POLITE"), (0, "KEEP YOUR DAY JOB"))
+
+
+def kara_verdict(pct):
+    """What the machine says about a score out of a hundred."""
+    return next(word for least, word in KARA_VERDICTS if pct >= least)
+
+
+class Karaoke:
+    """A room at a karaoke bar: the song book, and a song being sung. A note
+    for every word, on the beat, in one of three lanes - low, middle, high,
+    j k l - and a press is judged against the nearest note still waiting in
+    its lane, the way the lighthouse show's beat bar judges. One key a note,
+    because curses never sees a key go up. The machine scores out of a
+    hundred, as they do."""
+
+    def __init__(self, seed):
+        self.sel = seed % len(KARA_SONGS)
+        self.singing = False
+        self.notes = []
+        self.points = self.combo = self.best = 0
+        self.score = None            # the last song's score, out of a hundred
+        self.ended_at = -1e9
+        self.flash = None            # (what, lane, when) of the last judgement
+
+    def song(self):
+        return KARA_SONGS[self.sel]
+
+    def next_song(self):
+        if not self.singing:
+            self.sel = (self.sel + 1) % len(KARA_SONGS)
+
+    def start(self, now):
+        song = self.song()
+        beat = 60.0 / song["bpm"]
+        self.t0, self.beat = now, beat
+        self.notes = []
+        for n, line in enumerate(song["lines"]):
+            for k, word in enumerate(line.split()):
+                lane = song["tune"][(n + k) % len(song["tune"])] - 1
+                self.notes.append({"t": now + (KARA_COUNT_IN + n * KARA_LINE + k) * beat,
+                                   "lane": lane, "word": word, "line": n, "k": k,
+                                   "hit": None})
+        self.end = now + (KARA_COUNT_IN + len(song["lines"]) * KARA_LINE) * beat
+        self.points = self.combo = self.best = 0
+        self.singing, self.score, self.flash = True, None, None
+
+    def press(self, lane, now):
+        if not self.singing:
+            return
+        waiting = [n for n in self.notes if n["hit"] is None and n["lane"] == lane
+                   and abs(n["t"] - now) <= KARA_GOOD]
+        if not waiting:
+            self.combo = 0
+            self.flash = ("flat", lane, now)       # a note nobody wrote
+            return
+        note = min(waiting, key=lambda n: abs(n["t"] - now))
+        great = abs(note["t"] - now) <= KARA_GREAT
+        note["hit"] = "great" if great else "good"
+        self.points += 100 if great else 60
+        self.combo += 1
+        self.best = max(self.best, self.combo)
+        self.flash = (note["hit"], lane, now)
+
+    def update(self, now):
+        if not self.singing:
+            return
+        for n in self.notes:
+            if n["hit"] is None and now - n["t"] > KARA_GOOD:
+                n["hit"] = "miss"
+                self.combo = 0
+        if now >= self.end:
+            self.singing = False
+            self.score = int(round(100.0 * self.points / max(1, 100 * len(self.notes))))
+            self.ended_at = now
+
+    def stop(self, now):
+        self.singing, self.score, self.ended_at = False, None, -1e9
+
+    def line_now(self, now):
+        """Which line of the song is being sung, or about to be."""
+        if not self.notes:
+            return 0
+        beats = (now - self.t0) / self.beat - KARA_COUNT_IN
+        return max(0, min(len(self.song()["lines"]) - 1, int(beats // KARA_LINE)))
+
+
+KARA_FRIEND = [" ,-. ", " (o) ", "/|#|\\", " / \\ "]
+KARA_SINGER = [" ,-.  ", " (o)/ ", "/|#|  ", " / \\  "]
+
+
+def render_karaoke(bar, game, width, height, now):
+    """Your room: a disco ball turning over it and throwing spots round the
+    walls, neon along the ceiling, the screen with the notes coming in on
+    their three lanes and the words underneath going bright as they are sung,
+    two friends on the couch swaying, and you at the mic. Before a song the
+    screen is the song book; after one, the machine's score."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    if width < 40 or height < 14:
+        _text(ch, co, 0, 0, ("%s: too small to sing" % bar["name"])[:width], GOLD)
+        return ch, co
+    k = big_scale(width, height)
+    n = len(NEON)
+    tube = NEON[bar["seed"] % n]
+    # The ceiling's neon, chasing, and the ball's spots going round the walls.
+    for x in range(width):
+        lit = chase(x * 0.3, now)
+        ch[0][x], co[0][x] = ("=", tube[0]) if lit else ("-", tube[1])
+    turn = int(now * 3.0)
+    for s in range(width * height // 70):
+        m = _mix(s, turn, 6201)
+        x, y = m % width, 2 + (m >> 10) % max(1, height - 4)
+        if ch[y][x] == " ":
+            ch[y][x], co[y][x] = ("*" if (m >> 20) & 1 else "."), NEON[(m >> 16) % n][0]
+    bx = width // 2
+    for dy, line in enumerate(("|", "(@)" if turn % 2 else "(o)")):
+        _text(ch, co, 1 + dy, bx - len(line) // 2, line, FLASH if dy else CONCRETE)
+    # The screen.
+    sw = min(width - 6, 110 * k)
+    sh = height - 6 - 5 * k                    # down to the heads on the couch
+    sx0, sy0 = (width - sw) // 2, 3
+    for y in range(sy0, sy0 + sh):
+        for x in range(sx0, sx0 + sw):
+            edge = y in (sy0, sy0 + sh - 1) or x in (sx0, sx0 + sw - 1)
+            ch[y][x], co[y][x] = ("#" if edge else " "), (CONCRETE if edge else 0)
+    ix0, ix1, iy0, iy1 = sx0 + 2, sx0 + sw - 3, sy0 + 1, sy0 + sh - 2
+    song = game.song()
+    if game.singing:
+        _draw_kara_song(ch, co, game, now, ix0, ix1, iy0, iy1, k)
+    elif game.score is not None and now - game.ended_at < KARA_SHOW:
+        word = "%d" % game.score
+        if k > 1:
+            tw = blocks_width(word, 2 * (k - 1))
+            _blocks(ch, co, iy0 + 1, (ix0 + ix1) // 2 - tw // 2, word, GOLD,
+                    2 * (k - 1), k - 1)
+            below = iy0 + 2 + 5 * (k - 1)
+        else:
+            _text(ch, co, iy0 + 1, (ix0 + ix1) // 2 - 6, "SCORE  %3d" % game.score, GOLD)
+            below = iy0 + 3
+        verdict = kara_verdict(game.score)
+        _text(ch, co, below, (ix0 + ix1) // 2 - len(verdict) // 2, verdict,
+              NEON[int(now * 4.0) % n][0])
+        best = "best run of notes: %d" % game.best
+        _text(ch, co, below + 2, (ix0 + ix1) // 2 - len(best) // 2, best, HUD)
+    else:
+        title = bar["name"]
+        if k > 1 and blocks_width(title, k - 1) < ix1 - ix0:
+            _blocks(ch, co, iy0, (ix0 + ix1) // 2 - blocks_width(title, k - 1) // 2,
+                    title, tube[0], k - 1, k - 1)
+            top = iy0 + 5 * (k - 1) + 1
+        else:
+            _text(ch, co, iy0, (ix0 + ix1) // 2 - len(title) // 2, title, tube[0])
+            top = iy0 + 2
+        _text(ch, co, top, ix0, "SONG BOOK", GOLD)
+        for r, s in enumerate(KARA_SONGS):
+            y = top + 1 + r
+            if y > iy1 - 1:
+                break
+            line = "%s %-18s %s" % (">" if r == game.sel else " ", s["title"], s["by"])
+            _text(ch, co, y, ix0, line[:ix1 - ix0], FLASH if r == game.sel else HUD)
+        _text(ch, co, iy1, ix0, ("p sings it, $%d   n the next song" % KARAOKE_COST)
+              [:ix1 - ix0], GOLD_DIM)
+    # The room under the screen: the couch with two friends, and you at the mic.
+    foot = height - 2
+    sway = int(now * (song["bpm"] / 60.0)) % 2 if game.singing else 0
+    pal = (NEON[(bar["seed"] + 2) % n][0], NEON[(bar["seed"] + 5) % n][0])
+    for f, fx in enumerate((width // 5, width // 5 + 7 * k)):
+        _bar_sprite(ch, co, KARA_FRIEND, lambda c, i, f=f: pal[f] if c == "#" else CURB,
+                    fx + (sway if f == 0 else -sway) * k, foot - k, k)
+    for x in range(width // 5 - 5 * k, width // 5 + 12 * k):
+        if 0 <= x < width:
+            ch[foot - k + 1][x], co[foot - k + 1][x] = "=", BARK
+    _bar_sprite(ch, co, KARA_SINGER, lambda c, i: GOLD if c == "#" else (
+        FLASH if c in "()/" else CURB), width // 2, foot, k)
+    _text(ch, co, foot - 4 * k - 1, width // 2 + 2 * k, "o", CONCRETE)   # the mic
+    if game.singing:
+        for f, fx in enumerate((width // 5, width // 5 + 7 * k)):
+            if game.combo >= 5 and int(now * 4.0 + f) % 2:
+                _text(ch, co, foot - 5 * k, fx - 1, "\\o/", pal[f])
+    return ch, co
+
+
+def _draw_kara_song(ch, co, game, now, ix0, ix1, iy0, iy1, k):
+    """The song on the screen: the title, the notes coming in from the right on
+    their lanes to the line they are sung at, each carrying its word, how the
+    last one went, and the line of the song with what has been sung bright."""
+    song = game.song()
+    n = len(NEON)
+    lane_c = (NEON[1][0], NEON[4][0], NEON[6][0])
+    _text(ch, co, iy0, ix0, ("%s  -  %s" % (song["title"], song["by"]))[:ix1 - ix0],
+          GOLD)
+    combo = "combo %d" % game.combo
+    _text(ch, co, iy0, ix1 - len(combo), combo, HUD)
+    gap = max(1 + k, (iy1 - iy0 - 8) // 5)      # the lanes take the screen's top
+    rows = [iy0 + 2 + (2 - lane) * gap for lane in range(3)]
+    hit_x = ix0 + 5
+    for lane, y in enumerate(rows):
+        _text(ch, co, y, ix0, KARA_LANES[lane], lane_c[lane])
+        for x in range(hit_x + 1, ix1 + 1):
+            if x % 3 == 0:
+                ch[y][x], co[y][x] = ".", CONCRETE
+        ch[y][hit_x], co[y][hit_x] = "|", FLASH
+    speed = KARA_SPEED * k
+    after = {}                     # where the next note along its lane starts
+    for note in reversed(game.notes):
+        x = hit_x + int(round((note["t"] - now) * speed))
+        room = after.get(note["lane"], ix1 + 2) - x - 1
+        after[note["lane"]] = x
+        if note["hit"] in ("great", "good") or x > ix1 or x < hit_x - len(note["word"]):
+            continue
+        y = rows[note["lane"]]
+        attr = CONCRETE if note["hit"] == "miss" else lane_c[note["lane"]]
+        # A word cut short where the next note starts, so two never run together.
+        label = ("<" + note["word"] + ">")[:max(1, room)]
+        for j, c in enumerate(label):
+            if ix0 + 2 <= x + j <= ix1:
+                ch[y][x + j], co[y][x + j] = c, attr
+    if game.flash is not None and now - game.flash[2] < 0.5:
+        what, lane, _ = game.flash
+        word = {"great": "GREAT", "good": "good", "flat": "flat"}[what]
+        _text(ch, co, rows[lane] - 1, hit_x - 2, word,
+              FLASH if what == "great" else GOLD if what == "good" else ROU_RED)
+    # The words, karaoke style: a line at a time, sung ones lit.
+    line = game.line_now(now)
+    ly = max(rows[0] + 2, (rows[0] + iy1) // 2)
+    for r, ln in enumerate((line, line + 1)):
+        if ln >= len(song["lines"]) or ly + r * (1 + (k > 1)) > iy1:
+            continue
+        x = (ix0 + ix1) // 2 - len(song["lines"][ln]) // 2
+        for note in game.notes:
+            if note["line"] != ln:
+                continue
+            sung = now >= note["t"] - 0.05
+            attr = (GOLD if note["hit"] in ("great", "good") else ROU_RED
+                    if note["hit"] == "miss" else FLASH) if sung else (
+                    HUD if r == 0 else CONCRETE)
+            _text(ch, co, ly + r * (1 + (k > 1)), x, note["word"][:ix1 - x], attr)
+            x += len(note["word"]) + 1
+    if game.notes and now < game.notes[0]["t"]:
+        count = int((game.notes[0]["t"] - now) / game.beat) + 1
+        _text(ch, co, iy1, (ix0 + ix1) // 2 - 3, "... %d" % count, NEON[count % n][0])
+
+
+def draw_karaoke_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge,
+                        cont, now):
+    """One column of a karaoke bar: low and dark, a band of neon under the
+    roof, the private rooms upstairs each a window lit its own colour - and in
+    one or two somebody at the mic - and the glass at the door."""
+    scale = v.fy / dist
+    bar = b["karaoke"]
+    n = len(NEON)
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    tube = NEON[bar["seed"] % n][0]
+    if edge:
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx], co[y][sx] = "|", FLASH if v.flash > 0.35 else tube
+        return roof, None, foot, None, ()
+    prev_roof, prev_awn, prev_foot = cont[:3]
+    awning = int(round(v.horizon - (FLOOR_H - v.eye) * scale))
+    facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "=",
+                roof_colour(b, dist, v.flash, v.cover))
+    facade_line(ch, co, sx, awning, prev_awn, r_lo, r_hi, "-",
+                FLASH if v.flash > 0.35 else tone_colour("dark", 0.3))
+    band = int(round(v.horizon - ((b["height"] - 0.6) - v.eye) * scale))
+    if r_lo <= band <= r_hi and chase(u, now):
+        ch[band][sx], co[band][sx] = "=", tube
+    # The rooms: a window to each bay, lit its own colour, the colours going
+    # round slowly the way a room's lights do.
+    bay = int(u / 1.25)
+    room = _mix(bar["seed"] + face * 7, bay, 6203)
+    inside = 0.25 < (u % 1.25) < 1.0
+    w_top = int(round(v.horizon - ((b["height"] - 1.4) - v.eye) * scale))
+    w_bot = int(round(v.horizon - ((FLOOR_H + 0.8) - v.eye) * scale))
+    if inside:
+        colour = NEON[(room + int(now / 4.0)) % n][0]
+        singer = (room >> 8) % 4 == 0 and abs((u % 1.25) - 0.62) < 0.18
+        for y in range(max(r_lo, w_top), min(r_hi, w_bot) + 1):
+            if singer and y >= w_bot - 2:
+                ch[y][sx], co[y][sx] = ("o" if y == w_bot - 2 else "|"), BARK
+            elif (y + int(now * 2.0)) % 3:
+                ch[y][sx], co[y][sx] = "#", colour
+            else:
+                ch[y][sx], co[y][sx] = ":", colour
+    # The glass: the door lit, the rest of the front dim and speckled.
+    top = awning + 1
+    if abs(u - bar["u"]) < 0.9 and face == bar["door"]:
+        for y in range(max(r_lo, top), min(r_hi, foot - 1) + 1):
+            ch[y][sx], co[y][sx] = "#", BULB
+    else:
+        for y in range(max(r_lo, top), min(r_hi, foot - 1) + 1):
+            m = _mix(int(u * 2.0) + face * 9, y, 6205)
+            if m % 4 == 0:
+                ch[y][sx], co[y][sx] = ".", NEON[(m >> 6) % n][(m >> 3) & 1]
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, awning, foot, None, ()
+
+
+KARA_MIC = (" ___ ", "(@@@)", " \\ / ", "  |  ", "  |  ", " _|_ ")
+
+
+def draw_karaoke_front(ch, co, v, walls, bar, world, now):
+    """KARAOKE over the door, big when you are near enough and each letter
+    taking its turn to light, the bar's name under it, a neon microphone one
+    side and notes going up off it the other. Screen space, for the casino
+    marquee's reason."""
+    pr = v.project(world[0], world[1], world[2])
+    if pr is None or pr[2] > 80.0:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    n = len(NEON)
+    word = "KARAOKE"
+    big = dist < ARCADE_BIG and big_width(word) + 12 <= v.width
+    w = max((big_width(word) if big else len(word)) + 6, len(bar["name"]) + 4)
+    rows = 7 if big else 3
+    x0, y0 = sx - w // 2, sy - rows
+    tube = NEON[bar["seed"] % n]
+    for r in range(rows + 1):
+        for x in range(x0, x0 + w):
+            if r in (0, rows) or x in (x0, x0 + w - 1):
+                lit = chase((x - x0 + r) * 0.4, now)
+                put_cell(ch, co, v, walls, x, y0 + r, dist, "o" if lit else ".",
+                         tube[0 if lit else 1])
+            else:
+                put_cell(ch, co, v, walls, x, y0 + r, dist, " ", GOLD_DIM)
+    turn = int(now * 3.0) % (len(word) + 3)
+    if big:
+        lx = sx - big_width(word) // 2
+        for dx, dy, kk in big_cells(word):
+            put_cell(ch, co, v, walls, lx + dx, y0 + 1 + dy, dist, "#",
+                     FLASH if kk == turn else NEON[(kk + bar["seed"]) % n][0])
+    else:
+        for kk, c in enumerate(word):
+            put_cell(ch, co, v, walls, sx - len(word) // 2 + kk, y0 + 1, dist, c,
+                     FLASH if kk == turn else tube[0])
+    name = bar["name"]
+    for kk, c in enumerate(name):
+        put_cell(ch, co, v, walls, sx - len(name) // 2 + kk, y0 + rows - 1, dist, c,
+                 GOLD)
+    for row, line in enumerate(KARA_MIC):
+        for kk, c in enumerate(line):
+            if c != " ":
+                put_cell(ch, co, v, walls, x0 - 7 + kk, y0 + rows - 5 + row, dist, c,
+                         FLASH if c == "@" else NEON[(bar["seed"] + 3) % n][0])
+    for note in range(3):
+        rise = (now * 1.5 + note * 0.9) % 3.0
+        nx, ny = x0 + w + 2 + note * 2, y0 + rows - int(rise * 2.0)
+        for kk, c in enumerate("d"):
+            put_cell(ch, co, v, walls, nx + kk, ny, dist, c,
+                     NEON[(note * 2 + bar["seed"]) % n][0])
+
+
 # The case. One for a sitting, a trail through places you already know: each
 # says who to ask next, and a line on the screen says which way that is.
 CASE_NAME = "THE CASE OF THE LAST SLICE"
@@ -18438,7 +18882,7 @@ def fire_near(x, z):
 
 
 # What goes out in a blackout: anything on a facade that is lit by the mains.
-LIGHT_PROPS = {"arcade", "bowling", "blade", "bulb", "cinema", "diner", "exchange",
+LIGHT_PROPS = {"arcade", "bowling", "karaoke", "blade", "bulb", "cinema", "diner", "exchange",
                "hung",
                "lanterns", "lobby", "marquee", "overdoor", "ramenfront", "clubdoor",
                "bass"}
@@ -18481,6 +18925,11 @@ def draw_props(ch, co, v, walls, now, wet):
                 if f == b["bowling"]["door"]:
                     w = face_point(i, j, f, CELL * 0.5, 0.5, FLOOR_H + 0.6)
                     props.append((_d2(v, w), "bowling", b["bowling"], w, (nx, nz)))
+                continue
+            if b["karaoke"] is not None:
+                if f == b["karaoke"]["door"]:
+                    w = face_point(i, j, f, CELL * 0.5, 0.5, FLOOR_H + 0.6)
+                    props.append((_d2(v, w), "karaoke", b["karaoke"], w, (nx, nz)))
                 continue
             if b["arcade"] is not None:
                 if f == b["arcade"]["door"]:
@@ -18571,6 +19020,8 @@ def draw_props(ch, co, v, walls, now, wet):
             draw_arcade_front(ch, co, v, walls, s, world, now)
         elif kind == "bowling":
             draw_bowling_front(ch, co, v, walls, s, world, now)
+        elif kind == "karaoke":
+            draw_karaoke_front(ch, co, v, walls, s, world, now)
         elif kind == "exchange":
             draw_exchange_front(ch, co, v, walls, s, world, now)
         elif kind == "diner":
@@ -21157,7 +21608,7 @@ def venue_at(x, z):
                 continue
             b = lot(i, j)
             for kind in ("casino", "club", "tower", "cinema", "diner", "arcade",
-                         "bowling", "temple", "exchange", "warehouse"):
+                         "bowling", "karaoke", "temple", "exchange", "warehouse"):
                 v = b[kind]
                 if v is None:
                     continue
@@ -23026,7 +23477,7 @@ CHEAT_HIDDEN = [
     ("=", "under the el", "el"), ("|", "fire escape", "escape"),
     ("_", "car park", "carpark"), ("<", "police car", "police"),
     (")", "highway", "highway"), ("o", "the woods", "woods"), ("~", "the lake", "lake"),
-    ("t", "riverbank", "bank"),
+    ("t", "riverbank", "bank"), ("a", "karaoke bar", "karaoke"),
 ]
 CHEAT_TEST = 1                          # ctrl-a
 TEST_JUMPS = bool(os.environ.get("ASCII_CITY_TEST"))
@@ -23980,6 +24431,8 @@ def find_place(x, z, kind):
         return _doorway(x, z, 2501, "arcade", ARCADE_ODDS)
     if kind == "bowling":
         return _doorway(x, z, 2801, "bowling", BOWL_ODDS)
+    if kind == "karaoke":
+        return _doorway(x, z, 2901, "karaoke", KARAOKE_ODDS)
     if kind == "temple":
         return _temple_spot(x, z)
     if kind in ("industrial", "site", "warehouse", "plot"):
@@ -25555,7 +26008,8 @@ TAXI_DESTS = [("the casino", "casino"), ("the club", "club"),
               ("the stock exchange", "exchange"), ("a sky deck", "tower"),
               ("the roof party", "roofparty"), ("the carnival", "carnival"),
               ("the lighthouse", "lighthousedoor"), ("the big bridge", "grand"),
-              ("the riverbank", "bank"), ("the woods", "woods"), ("the lake", "lake")]
+              ("the riverbank", "bank"), ("the woods", "woods"), ("the lake", "lake"),
+              ("the karaoke bar", "karaoke")]
 DRIVER_SAYS = ["Busy night.", "Where you headed, friend?", "Meter's running.",
                "You see the fireworks over the bay? I saw them once.",
                "I don't go into the woods after dark. Nobody does.",
@@ -25768,7 +26222,8 @@ CAB_KINDS = [("the casino", "casino"), ("the club", "club"),
              ("the temple", "temple"), ("the stock exchange", "exchange"),
              ("a sky deck", "tower"), ("the roof party", "roofparty"),
              ("the carnival", "carnival"), ("the riverbank", "bank"),
-             ("the airport", "flight"), ("the bowling alley", "bowling")]
+             ("the airport", "flight"), ("the bowling alley", "bowling"),
+             ("the karaoke bar", "karaoke")]
 CAB_SAYS = {
     "plain": ["%s, please.", "Evening. %s.", "%s. Do you know it?",
               "Take me to %s.", "%s, thanks."],
@@ -27820,6 +28275,9 @@ EXCHANGE_HUD = (" on the trading floor  -  b buys, n sells, arrows pick, l lists
                 "  s walks out  -  q quit ")
 BOWL_HUD = " %s  -  a d line up  -  p spin, p power  -  x stop playing "
 BOWL_OUT_HUD = " %s  -  p bowls a game  -  s walks out  -  q quit "
+KARA_HUD = " %s  -  j k l sing the notes, on the beat  -  x stops the song "
+KARA_OUT_HUD = (" %s  -  p sings a song, $%d  -  n the next one  -  s walks out  "
+                "-  q quit ")
 ARCADE_HUD = (" in the %s arcade  -  ad choose a game  -  p plays  -  s walks out"
               "  -  q quit ")
 GAME_HUD = " playing %s  -  %s  -  x leaves the cabinet  -  q quit "
@@ -27913,6 +28371,8 @@ def main(stdscr):
     case_over = False           # had one this sitting: that is your lot
     bowl = None                 # the game on your lane, while you are in the place
     bowl_hi = {}                # your best at each, for the session
+    at_kara = False
+    kara = None                 # your room at the karaoke bar, while you are in it
     at_temple = False
     striker = None              # the last strength tester you stood at
     at_striker = False
@@ -28277,7 +28737,8 @@ def main(stdscr):
                 return
             elif key == CHEAT_KEY:
                 cheats, note = True, ""
-            elif key in (ord("j"), ord("J")) and case is not None:
+            elif (key in (ord("j"), ord("J")) and case is not None
+                  and not (at_kara and kara.singing)):     # j is a note, singing
                 case["hide"] = not case["hide"]
             elif sewer is not None and sewer["lair"]:
                 if key in (ord("s"), ord("S"), ord("x"), ord("X"), curses.KEY_DOWN):
@@ -28341,7 +28802,8 @@ def main(stdscr):
                     said_[-1] += " " + word_
                 oracle["said"] = said_[-20:]
                 oracle["at"], oracle["sung"] = now, word_
-            elif ((wheel is not None or at_arcade or at_bar is not None or at_bowl)
+            elif ((wheel is not None or at_arcade or at_bar is not None or at_bowl
+                   or at_kara)
                   and key in (ord("z"), ord("Z"))):
                 _big_screens[0] = not _big_screens[0]     # big screens, off and on
                 note, note_at = ("big screens " + ("on" if _big_screens[0]
@@ -28422,6 +28884,18 @@ def main(stdscr):
                     bowl.start(now)
                 else:
                     note, note_at = "a game is $%d" % BOWL_COST, now
+            elif at_kara and kara.singing:
+                if key in (ord("x"), ord("X")):
+                    kara.stop(now)
+                elif key in (ord("j"), ord("k"), ord("l"), ord("J"), ord("K"), ord("L")):
+                    kara.press("jkl".index(chr(key).lower()), now)
+            elif at_kara and key in (ord("p"), ord("P")):
+                if wallet.take(KARAOKE_COST):
+                    kara.start(now)
+                else:
+                    note, note_at = "a song is $%d" % KARAOKE_COST, now
+            elif at_kara and key in (ord("n"), ord("N")):
+                kara.next_song()
             elif at_arcade and play["game"] is not None:
                 # Playing: the keys are the game's, but for x, which leaves.
                 g_ = play["game"]
@@ -28787,6 +29261,11 @@ def main(stdscr):
             bowl = None
         elif bowl is None:
             bowl = Bowling()
+        at_kara = venue is not None and venue[0] == "karaoke"
+        if not at_kara:
+            kara = None
+        elif kara is None:
+            kara = Karaoke(venue[1]["seed"])
         at_temple = venue is not None and venue[0] == "temple"
         if venue is None or venue[0] != "telescope":
             scope_at = None             # step back and it starts again
@@ -28971,6 +29450,11 @@ def main(stdscr):
                                     bowl_hi.get(venue[1]["seed"], 0))
             hud = ((BOWL_HUD if bowl.playing else BOWL_OUT_HUD)
                    % venue[1]["name"].lower())
+        elif venue is not None and venue[0] == "karaoke":
+            kara.update(now)
+            ch, co = render_karaoke(venue[1], kara, width, height, now)
+            hud = (KARA_HUD % venue[1]["name"].lower() if kara.singing
+                   else KARA_OUT_HUD % (venue[1]["name"].lower(), KARAOKE_COST))
         elif venue is not None and venue[0] == "cinema":
             ch, co = render_cinema(venue[1], width, height, now)
             hud = CINEMA_HUD % (venue[1]["title"].lower(), cam_x, cam_z)

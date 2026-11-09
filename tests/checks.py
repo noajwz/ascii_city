@@ -171,7 +171,8 @@ blind = []
 for _, name, kind in ac.CHEAT_PLACES + ac.CHEAT_HIDDEN:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
                 "diner", "billboard", "highway", "arcade", "claw", "roofparty",
-                "exchange", "metro", "bar", "lowroof", "bowling", "lair", "pilot"):
+                "exchange", "metro", "bar", "lowroof", "bowling", "lair", "pilot",
+                "karaoke"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -6508,6 +6509,98 @@ bw_smallz = "\n".join("".join(r_) for r_ in
                       ac.render_bowling(bw_alley, bw_g, 299, 87, 7.0)[0])
 check("the name in block letters big, and plain small", bw_alley["name"] not in bw_bigz
       and bw_alley["name"] in bw_smallz)
+
+# --- the karaoke bar -------------------------------------------------------------
+kb_sp = ac.find_place(x0, z0, "karaoke")
+kb_v = ac.venue_at(kb_sp[0], kb_sp[1])
+check("the taxi's karaoke bar puts you in its door", kb_v is not None
+      and kb_v[0] == "karaoke" and kb_v[1]["name"] in ac.KARAOKE_NAMES
+      and ("the karaoke bar", "karaoke") in ac.TAXI_DESTS)
+kb_all = [ac.lot(i_, j_)["karaoke"] for i_ in range(-400, 400) for j_ in range(-400, 400)
+          if not ac.is_open(i_, j_) and ac._mix(i_, j_, 2901) % ac.KARAOKE_ODDS == 0
+          and ac.lot(i_, j_)["karaoke"] is not None]
+check("a few about, by different names", len(kb_all) > 20
+      and len({a_["name"] for a_ in kb_all}) >= 6, str(len(kb_all)))
+kb = kb_v[1]
+
+
+def kb_sing(g_, t_, hit_):
+    """Sing the whole song from t_, pressing each note hit_(note) says to."""
+    while g_.singing:
+        for n_ in g_.notes:
+            if n_["hit"] is None and abs(n_["t"] - t_) < 1 / 60 and hit_(n_):
+                g_.press(n_["lane"], t_)
+        g_.update(t_)
+        t_ += 1 / 30
+    return t_
+
+
+kb_g = ac.Karaoke(kb["seed"])
+kb_g.start(0.0)
+check("a note for every word of the song", len(kb_g.notes)
+      == sum(len(l_.split()) for l_ in kb_g.song()["lines"]))
+kb_sing(kb_g, 0.0, lambda n_: True)
+check("every note on the beat is a hundred", kb_g.score == 100
+      and kb_g.best == len(kb_g.notes), str(kb_g.score))
+kb_g.start(0.0)
+kb_sing(kb_g, 0.0, lambda n_: n_["k"] % 2 == 0)
+check("half of them is about half", 30 <= kb_g.score <= 70, str(kb_g.score))
+kb_g.start(0.0)
+kb_sing(kb_g, 0.0, lambda n_: False)
+check("and singing nothing is nothing", kb_g.score == 0
+      and ac.kara_verdict(0) == "KEEP YOUR DAY JOB")
+kb_g.start(0.0)
+kb_g.press(0, 0.1)
+check("a press with no note near breaks the run", kb_g.combo == 0
+      and kb_g.flash[0] == "flat")
+kb_n = kb_g.notes[0]
+kb_g.press(kb_n["lane"], kb_n["t"] + 0.15)
+check("a bit late is good, not great", kb_n["hit"] == "good")
+kb_g.press(kb_n["lane"], kb_n["t"] + 0.15)
+check("and one note takes one press", kb_g.points == 60)
+kb_g.stop(1.0)
+kb_sel = kb_g.sel
+kb_g.next_song()
+check("n turns the page of the song book", kb_g.sel == (kb_sel + 1) % len(ac.KARA_SONGS))
+check("every song has its words", all(len(s_["lines"]) == 8 for s_ in ac.KARA_SONGS))
+for w_, h_ in ((80, 24), (60, 20), (44, 16), (40, 14), (39, 13), (20, 8), (110, 34),
+               (160, 45), (299, 87), (300, 90), (451, 133)):
+    for kb_s in range(len(ac.KARA_SONGS)):
+        kb_g = ac.Karaoke(kb_s)
+        ac.render_karaoke(kb, kb_g, w_, h_, 5.0)
+        kb_g.start(5.0)
+        for t_ in (5.0, 7.0, 12.0, 30.0):
+            kb_g.update(t_)
+            ac.render_karaoke(kb, kb_g, w_, h_, t_)
+        kb_sing(kb_g, 30.0, lambda n_: True)
+        ac.render_karaoke(kb, kb_g, w_, h_, kb_g.ended_at + 1.0)
+check("the room draws at every size, every song, every stage", True)
+kb_g = ac.Karaoke(0)
+kb_g.start(0.0)
+kb_n = kb_g.notes[3]
+kb_t = kb_n["t"] - 1.0
+kb_txt = "\n".join("".join(r_) for r_ in ac.render_karaoke(kb, kb_g, 160, 45, kb_t)[0])
+check("the words come in on the screen", "<" + kb_n["word"] in kb_txt
+      and kb_g.song()["lines"][0] in kb_txt)
+kb_book = "\n".join("".join(r_) for r_ in
+                     ac.render_karaoke(kb, ac.Karaoke(0), 160, 45, 1.0)[0])
+check("and before a song, the song book", all(s_["title"] in kb_book
+                                              for s_ in ac.KARA_SONGS))
+kb_big = "\n".join("".join(r_) for r_ in
+                    ac.render_karaoke(kb, ac.Karaoke(0), 300, 90, 1.0)[0])
+check("its name in block letters big, and plain small", kb["name"] not in kb_big
+      and kb["name"] in kb_book)
+# The front: the sign over the door from across the street.
+kb_x, kb_z, kb_yaw = kb_sp
+kb_best = 0
+for back_ in (6.0, 10.0, 14.0):
+    kb_xx = kb_x - math.sin(kb_yaw) * back_
+    kb_zz = kb_z - math.cos(kb_yaw) * back_
+    kb_ch, kb_co, _ = ac.render_street(ac.View(kb_xx, kb_zz, kb_yaw, 160, 45), 300.0)
+    kb_txt = "\n".join("".join(r_) for r_ in kb_ch)
+    if kb["name"] in kb_txt:
+        kb_best += 1
+check("the bar's name is up over its door", kb_best >= 2, str(kb_best))
 
 # --- the tunnels, and who is down there ------------------------------------------
 sw_start = next((i_, j_) for i_ in range(-20, 20) for j_ in range(-20, 20)

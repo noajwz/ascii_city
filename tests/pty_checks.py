@@ -313,6 +313,11 @@ def cases(run, report):
             [(b"`", .5), (b"k", 1.5), (b"p", .4), (b"d", .2), (b"a", .2), (b"p", .4),
              (b"p", 5.0), (b"p", .4), (b"p", .4), (b"z", .3), (b"x", .4)],
             cols=bw_size[0], rows=bw_size[1]))
+    for kb_size in ((110, 34), (300, 90)):
+        ok &= report("a song at the karaoke bar, %dx%d" % kb_size, *run(
+            [(b"`", .5), (b"\x01a", 1.5), (b"n", .3), (b"p", 3.0), (b"j", .2),
+             (b"k", .2), (b"l", .2), (b"z", .3), (b"x", .4), (b"s", .5)],
+            cols=kb_size[0], rows=kb_size[1]))
     ok &= report("a jump off a roof takes you off the roof", *run(
         [(b"`", .5), (b"\x01^", 1.5)] + [(b"\x1bOA", .3)] * 6
         + [(b"", 7.0), (b"`", .4), (b"\x01c", 1.0), (b"w", .3)], cols=110, rows=34))
