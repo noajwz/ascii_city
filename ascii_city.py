@@ -26608,9 +26608,12 @@ class Cab:
 
         for _ in range(n):
             r = ramp_at(*_cell_of(self.x + sx, self.z + sz))
-            if r is not None and ramp_height(r, self.z + sz) < 1.0:
+            if (r is not None and ramp_height(r, self.z + sz) < 1.0
+                    and can_stand(self.x + sx, self.z + sz)):
                 # Onto a ramp at its foot: up you go (or down it the wrong
-                # way, an exit driven up from the street).
+                # way, an exit driven up from the street). Clear of the walls
+                # beside it, like any step: sliding along a wall into the
+                # foot of one put the car's side into the building.
                 self.x, self.z, self.ramp = self.x + sx, self.z + sz, r
                 self.h = ramp_height(r, self.z)
                 self._move_up(sx, sz, n - 1, now)
