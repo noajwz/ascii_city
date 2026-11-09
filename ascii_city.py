@@ -17667,7 +17667,8 @@ class Karaoke:
         for n, line in enumerate(song["lines"]):
             for k, word in enumerate(line.split()):
                 lane = song["tune"][(n + k) % len(song["tune"])] - 1
-                self.notes.append({"t": now + (KARA_COUNT_IN + n * KARA_LINE + k) * beat,
+                at = now + (KARA_COUNT_IN + n * KARA_LINE + k) * beat
+                self.notes.append({"t": at,
                                    "lane": lane, "word": word, "line": n, "k": k,
                                    "hit": None})
         self.end = now + (KARA_COUNT_IN + len(song["lines"]) * KARA_LINE) * beat
@@ -17765,7 +17766,8 @@ def render_karaoke(bar, game, width, height, now):
                     2 * (k - 1), k - 1)
             below = iy0 + 2 + 5 * (k - 1)
         else:
-            _text(ch, co, iy0 + 1, (ix0 + ix1) // 2 - 6, "SCORE  %3d" % game.score, GOLD)
+            _text(ch, co, iy0 + 1, (ix0 + ix1) // 2 - 6, "SCORE  %3d" % game.score,
+                  GOLD)
             below = iy0 + 3
         verdict = kara_verdict(game.score)
         _text(ch, co, below, (ix0 + ix1) // 2 - len(verdict) // 2, verdict,
@@ -18882,7 +18884,8 @@ def fire_near(x, z):
 
 
 # What goes out in a blackout: anything on a facade that is lit by the mains.
-LIGHT_PROPS = {"arcade", "bowling", "karaoke", "blade", "bulb", "cinema", "diner", "exchange",
+LIGHT_PROPS = {"arcade", "bowling", "karaoke", "blade", "bulb", "cinema", "diner",
+               "exchange",
                "hung",
                "lanterns", "lobby", "marquee", "overdoor", "ramenfront", "clubdoor",
                "bass"}
@@ -28887,7 +28890,7 @@ def main(stdscr):
             elif at_kara and kara.singing:
                 if key in (ord("x"), ord("X")):
                     kara.stop(now)
-                elif key in (ord("j"), ord("k"), ord("l"), ord("J"), ord("K"), ord("L")):
+                elif key in tuple(map(ord, "jklJKL")):
                     kara.press("jkl".index(chr(key).lower()), now)
             elif at_kara and key in (ord("p"), ord("P")):
                 if wallet.take(KARAOKE_COST):
