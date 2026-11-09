@@ -4907,6 +4907,21 @@ def cab_robot(c_, now):
         want_ = 3.0 if abs(err_) > 0.6 or not r_ else 5.0 if bend_ else 16.0
         if c_.ramp is not None:
             want_ = 10.0                        # up or down a ramp, steady
+        if c_.h > 5.0:
+            # On the deck, or coming up onto it: look. Behind a car in the
+            # lane, its pace; one alongside where you would merge, let it by.
+            deck_ = ac.hwy_deck(c_.x)
+            if deck_ is not None:
+                for cz_, lx_, dd_, _ in ac.hwy_cars(deck_[0], deck_[1], c_.z, 14.0,
+                                                    now):
+                    if abs(lx_ - c_.x) > 1.6:
+                        continue
+                    ahead_ = (cz_ - c_.z) * math.copysign(1.0, math.cos(c_.heading))
+                    pace_ = abs(ac.hwy_pace(deck_[0], lx_, dd_))
+                    if 0.0 < ahead_ < 12.0:
+                        want_ = min(want_, max(2.0, pace_ - 1.0))
+                    elif -4.0 < ahead_ <= 0.0 and c_.ramp is not None:
+                        want_ = min(want_, 2.0)
         d_ = math.hypot(tgt_[0] - c_.x, tgt_[1] - c_.z)
         if d_ < 16.0:
             want_ = 0.0 if d_ < 6.0 else 3.0
@@ -4930,7 +4945,8 @@ for n_ in range(6):
         c_.step(1.0 / 30.0, t_)
         paid_ += c_.pay
         c_.pay = 0
-        legal_ = legal_ and ac.can_stand(c_.x, c_.z)
+        # On the ground; up on the deck the rails keep it, over the river too.
+        legal_ = legal_ and (c_.h > 0.5 or ac.can_stand(c_.x, c_.z))
         if c_.fare is not None:
             cab_said.add(c_.fare["state"])
     cab_res.append((c_.fares, paid_, c_.earned, legal_, t_))
