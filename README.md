@@ -45,7 +45,7 @@ on a big window that is a lot of coloured text. [Ghostty](https://ghostty.org) i
 and tested in; Kitty, WezTerm and Alacritty are built the same way. Older terminals work, but
 can fall behind once the window gets large.
 
-The settings that matter, from [`ghostty.conf`](ghostty.conf) — the rest of that file is taste:
+The settings that matter, for your Ghostty config (`~/.config/ghostty/config`):
 
 ```ini
 # Ligatures off: the walls are made of ==, |= and --, and a coding font
@@ -67,9 +67,6 @@ background = #000000
 window-width = 200
 window-height = 55
 ```
-
-To use the whole file, copy its lines into your Ghostty config (`~/.config/ghostty/config`), or
-add one line there pointing at it: `config-file = /path/to/ascii_city/ghostty.conf`.
 
 And two things outside the terminal:
 
@@ -243,9 +240,9 @@ python3 tests/checks.py && python3 tests/pty_checks.py
 A few hundred assertions, no framework and nothing to install. The first renders frames and counts
 what landed where; the second forks a pty and actually plays the thing, six games at a time.
 
-The four screenshots under the picture are generated the same way — `python3 tools/screenshot.py`
-renders real frames (a Chinatown street, inside the arcade, a lit alley, a casino on the avenue)
-and writes them out as text in an SVG, in the colours the renderer actually picked.
+The four screenshots under the picture are made the same way: real frames from the renderer
+(a Chinatown street, inside the arcade, a lit alley, a casino on the avenue), written out as text
+in an SVG, in the colours the renderer actually picked.
 
 ## Notes
 
