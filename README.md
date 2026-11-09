@@ -334,3 +334,6 @@ in an SVG, in the colours the renderer actually picked.
 
 `CLAUDE.md` is the long version: how the renderer works, why particular decisions were made, and
 the traps that cost time.
+
+Want to help? [`CONTRIBUTING.md`](CONTRIBUTING.md) says how to report a bug, suggest an idea or
+send a change.
