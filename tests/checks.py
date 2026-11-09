@@ -6516,7 +6516,8 @@ kb_v = ac.venue_at(kb_sp[0], kb_sp[1])
 check("the taxi's karaoke bar puts you in its door", kb_v is not None
       and kb_v[0] == "karaoke" and kb_v[1]["name"] in ac.KARAOKE_NAMES
       and ("the karaoke bar", "karaoke") in ac.TAXI_DESTS)
-kb_all = [ac.lot(i_, j_)["karaoke"] for i_ in range(-400, 400) for j_ in range(-400, 400)
+kb_all = [ac.lot(i_, j_)["karaoke"] for i_ in range(-400, 400)
+          for j_ in range(-400, 400)
           if not ac.is_open(i_, j_) and ac._mix(i_, j_, 2901) % ac.KARAOKE_ODDS == 0
           and ac.lot(i_, j_)["karaoke"] is not None]
 check("a few about, by different names", len(kb_all) > 20
@@ -6561,7 +6562,8 @@ check("and one note takes one press", kb_g.points == 60)
 kb_g.stop(1.0)
 kb_sel = kb_g.sel
 kb_g.next_song()
-check("n turns the page of the song book", kb_g.sel == (kb_sel + 1) % len(ac.KARA_SONGS))
+check("n turns the page of the song book",
+      kb_g.sel == (kb_sel + 1) % len(ac.KARA_SONGS))
 check("every song has its words", all(len(s_["lines"]) == 8 for s_ in ac.KARA_SONGS))
 for w_, h_ in ((80, 24), (60, 20), (44, 16), (40, 14), (39, 13), (20, 8), (110, 34),
                (160, 45), (299, 87), (300, 90), (451, 133)):
