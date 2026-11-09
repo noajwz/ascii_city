@@ -39,6 +39,91 @@ nothing saved.
   with a note, and things in the woods you will not like.
 
 
+## Install
+
+All it needs is **Python 3.9 or newer** (3.11+ draws a frame much faster) with its `curses`
+module, which macOS and Linux include, and a terminal. Nothing to `pip install`.
+
+### macOS
+
+Python 3 is already there as `/usr/bin/python3` (Apple's 3.9: it works, but slowly). For a newer
+one, install [Homebrew](https://brew.sh) and then:
+
+```bash
+brew install python git
+git clone https://github.com/noajwz/ascii_city
+cd ascii_city
+python3 ascii_city.py
+```
+
+The first time you type `git`, macOS may offer to install its command line tools: say yes.
+
+### Linux
+
+Most distributions come with Python 3. If `git` or `python3` is missing:
+
+```bash
+sudo apt install python3 git        # Debian, Ubuntu, Mint
+sudo dnf install python3 git        # Fedora
+sudo pacman -S python git           # Arch
+```
+
+Then:
+
+```bash
+git clone https://github.com/noajwz/ascii_city
+cd ascii_city
+python3 ascii_city.py
+```
+
+### Windows
+
+Windows' own Python has no `curses`, so run it in **WSL** (Linux inside Windows), in
+[Windows Terminal](https://aka.ms/terminal) (built into Windows 11). Once, in PowerShell opened
+as administrator:
+
+```powershell
+wsl --install
+```
+
+Restart when it asks, then open **Ubuntu** from the Start menu, pick a user name and password,
+and in that window:
+
+```bash
+sudo apt update && sudo apt install -y python3 git
+git clone https://github.com/noajwz/ascii_city
+cd ascii_city
+python3 ascii_city.py
+```
+
+Next time, open Ubuntu and run `cd ascii_city && python3 ascii_city.py`.
+
+### ChromeOS
+
+Turn on **Linux** under Settings → Advanced → Developers, open the Terminal app, and follow the
+Linux steps above.
+
+### Without git
+
+The game is one file, so you can also just download it and run it:
+
+```bash
+curl -O https://raw.githubusercontent.com/noajwz/ascii_city/main/ascii_city.py
+python3 ascii_city.py
+```
+
+Everything works but the library's Wikipedia reader and the Pokemon Center's PC, which live in
+`library/` (their shelves say they are empty). Or use **Code → Download ZIP** on GitHub, unzip it,
+and run `python3 ascii_city.py` inside the folder.
+
+### Updating
+
+Inside the `ascii_city` folder:
+
+```bash
+git pull
+```
+
 ## For the best experience
 
 **Use a GPU-accelerated terminal.** The city redraws the whole window many times a second, and
