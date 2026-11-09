@@ -29,8 +29,9 @@ nothing saved.
   district dark but for the cleaners' floor, the docks, the suburbs and the woods.
 - **Weather that runs itself** — rain that comes and goes, rare and violent storms, fog nights,
   snow, a blackout, and a night sky with its own character every night.
-- **Places to go into** — a casino, an arcade with six games, a bowling alley, a stock exchange,
-  a cinema, a club, a temple, a library, ramen shops, a diner, rooftop bars and more.
+- **Places to go into** — a casino, an arcade with six games, a bowling alley, a karaoke bar,
+  a stock exchange, a cinema, a club, a temple, a library, ramen shops, a diner, rooftop bars
+  and more.
 - **A plane to fly** — real handling, a full cockpit, a tower that talks you down, an autopilot,
   flight plans to other airports, crosswinds, and thunderstorms out there you can fly into.
 - **A river** with piers, rowing boats and a carnival, and a bay with a suspension bridge and a
@@ -170,8 +171,9 @@ And two things outside the terminal:
   district dark but for the cleaners' floor, the docks, the suburbs and the woods.
 - **Weather that runs itself** — rain that comes and goes, rare and violent storms, fog nights,
   snow, a blackout, and a night sky with its own character every night.
-- **Places to go into** — a casino, an arcade with six games, a bowling alley, a stock exchange,
-  a cinema, a club, a temple, a library, ramen shops, a diner, rooftop bars and more.
+- **Places to go into** — a casino, an arcade with six games, a bowling alley, a karaoke bar,
+  a stock exchange, a cinema, a club, a temple, a library, ramen shops, a diner, rooftop bars
+  and more.
 - **A plane to fly** — real handling, a full cockpit, a tower that talks you down, an autopilot,
   flight plans to other airports, crosswinds, and thunderstorms out there you can fly into.
 - **A river** with piers, rowing boats and a carnival, and a bay with a suspension bridge and a
@@ -238,6 +240,9 @@ the city is infinite, identical every time you walk back to it, and held in no m
   catching moths.
 - **A bowling alley** under the black light: ten frames, aim and spin, and ten real pins knocking
   into each other, so a strike is earned and so is a split.
+- **A karaoke bar**, its private rooms lit up the side of it, and one of your own inside: a
+  song book of the city's own songs, the notes coming in on three lanes with the words, and a
+  machine that scores you out of a hundred.
 - **A stock exchange**, its ticker running across the front in green and red, and inside a trading
   floor with sixteen made-up stocks to buy and sell as they move every thirty seconds — bull and
   bear markets, sectors and hot streaks.
