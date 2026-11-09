@@ -30,7 +30,7 @@ nothing saved.
 - **Weather that runs itself** — rain that comes and goes, rare and violent storms, fog nights,
   snow, a blackout, and a night sky with its own character every night.
 - **Places to go into** — a casino, an arcade with six games, a bowling alley, a karaoke bar,
-  a stock exchange, a cinema, a club, a temple, a library, ramen shops, a diner, rooftop bars
+  minigolf, a stock exchange, a cinema, a club, a temple, a library, ramen shops, a diner, rooftop bars
   and more.
 - **A plane to fly** — real handling, a full cockpit, a tower that talks you down, an autopilot,
   flight plans to other airports, crosswinds, and thunderstorms out there you can fly into.
@@ -172,7 +172,7 @@ And two things outside the terminal:
 - **Weather that runs itself** — rain that comes and goes, rare and violent storms, fog nights,
   snow, a blackout, and a night sky with its own character every night.
 - **Places to go into** — a casino, an arcade with six games, a bowling alley, a karaoke bar,
-  a stock exchange, a cinema, a club, a temple, a library, ramen shops, a diner, rooftop bars
+  minigolf, a stock exchange, a cinema, a club, a temple, a library, ramen shops, a diner, rooftop bars
   and more.
 - **A plane to fly** — real handling, a full cockpit, a tower that talks you down, an autopilot,
   flight plans to other airports, crosswinds, and thunderstorms out there you can fly into.
@@ -243,6 +243,9 @@ the city is infinite, identical every time you walk back to it, and held in no m
 - **A karaoke bar**, its private rooms lit up the side of it, and one of your own inside: a
   song book of the city's own songs, the notes coming in on three lanes with the words, and a
   machine that scores you out of a hundred.
+- **Minigolf** behind a fence of bulbs with a windmill turning over it: nine holes from above, a
+  real ball off the walls, through the sand, down the slopes and into the water, and the
+  windmill's sails shutting the way through.
 - **A stock exchange**, its ticker running across the front in green and red, and inside a trading
   floor with sixteen made-up stocks to buy and sell as they move every thirty seconds — bull and
   bear markets, sectors and hot streaks.

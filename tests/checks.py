@@ -9,6 +9,7 @@ no rendering at all.
 
 Runs a few hundred thousand simulated seconds of weather, so it takes a minute.
 """
+import copy
 import math
 import os
 import random
@@ -172,7 +173,7 @@ for _, name, kind in ac.CHEAT_PLACES + ac.CHEAT_HIDDEN:
     if kind in ("inside", "clubdoor", "club", "ramen", "tower", "escape", "cinema",
                 "diner", "billboard", "highway", "arcade", "claw", "roofparty",
                 "exchange", "metro", "bar", "lowroof", "bowling", "lair", "pilot",
-                "karaoke"):
+                "karaoke", "minigolf"):
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
@@ -6619,6 +6620,151 @@ for back_ in (6.0, 10.0, 14.0):
     if kb["name"] in kb_txt:
         kb_best += 1
 check("the bar's name is up over its door", kb_best >= 2, str(kb_best))
+
+# --- the minigolf course -----------------------------------------------------------
+mg_sp = ac.find_place(x0, z0, "minigolf")
+mg_v = ac.venue_at(mg_sp[0], mg_sp[1])
+check("the taxi's mini golf puts you at its gate", mg_v is not None
+      and mg_v[0] == "minigolf" and mg_v[1]["name"] in ac.GOLF_NAMES
+      and ("the mini golf", "minigolf") in ac.TAXI_DESTS)
+mg_all = [ac.lot(i_, j_)["minigolf"] for i_ in range(-400, 400)
+          for j_ in range(-400, 400)
+          if not ac.is_open(i_, j_) and ac._mix(i_, j_, 3001) % ac.GOLF_ODDS == 0
+          and ac.lot(i_, j_)["minigolf"] is not None]
+check("a few about, by different names", len(mg_all) > 20
+      and len({a_["name"] for a_ in mg_all}) >= 5, str(len(mg_all)))
+mg = mg_v[1]
+check("every hole is a box, with one tee and one cup",
+      all(len({len(r_) for r_ in rows_}) == 1 and "".join(rows_).count("T") == 1
+          and "".join(rows_).count("O") == 1 and set(rows_[0]) == {"#"}
+          and set(rows_[-1]) == {"#"} for _, _, rows_ in ac.GOLF_HOLES))
+
+
+def mg_roll(g_):
+    while g_.phase == "rolling":
+        g_.step()
+
+
+def mg_shot(g_):
+    """The best of a fan of shots: one that holes, or the nearest."""
+    best_ = None
+    base_ = math.atan2(g_.cup[1] - g_.y, g_.cup[0] - g_.x)
+    for da_ in range(-180, 180, 4):
+        for p_ in range(1, 21):
+            h_ = copy.copy(g_)
+            h_.aim = base_ + math.radians(da_)
+            h_.hit(p_ / 20.0, 0.0)
+            mg_roll(h_)
+            if h_.phase == "holed" and h_.strokes < ac.GOLF_MAX:
+                return h_
+            d_ = (math.hypot(h_.x - h_.cup[0], h_.y - h_.cup[1])
+                  + (h_.strokes - g_.strokes - 1) * 6)
+            if best_ is None or d_ < best_[0]:
+                best_ = (d_, h_)
+    return best_[1]
+
+
+mg_cards = []
+for n_ in range(len(ac.GOLF_HOLES)):
+    mg_g = ac.Minigolf()
+    mg_g.playing, mg_g.hole = True, n_
+    mg_g.tee(0.0)
+    while mg_g.phase != "holed":
+        mg_g = mg_shot(mg_g)
+    mg_cards.append(mg_g.strokes)
+check("every hole can be holed, inside its par", all(
+    c_ <= p_ for c_, (_, p_, _) in zip(mg_cards, ac.GOLF_HOLES)), str(mg_cards))
+mg_g = ac.Minigolf()
+mg_g.start(0.0)
+mg_g.hit(1.0, 0.0)
+mg_roll(mg_g)
+check("a putt flat out off the end wall comes back, and stops",
+      mg_g.phase in ("aim", "holed") and mg_g.vx == 0.0 and mg_g.x < 33.0)
+mg_g = ac.Minigolf()
+mg_g.start(0.0)
+mg_g.hole = 4
+mg_g.tee(0.0)
+mg_g.x, mg_g.y = 17.5, 1.5
+mg_g.aim = 0.0
+mg_g.hit(0.5, 0.0)
+mg_roll(mg_g)
+check("into the water is a stroke, and back where you hit from",
+      mg_g.strokes == 2 and (mg_g.x, mg_g.y) == (17.5, 1.5))
+mg_g = ac.Minigolf()
+mg_g.start(0.0)
+mg_g.hole = 3
+mg_g.tee(0.0)
+mg_g.aim = 0.0
+mg_g.hit(0.3, 0.0)
+mg_roll(mg_g)
+mg_sand = mg_g.x
+mg_g.hole = 0
+mg_g.tee(0.0)
+mg_g.aim = math.pi / 2 + 0.0001
+mg_g.aim = 0.0
+mg_g.y = 1.5
+mg_g.hit(0.3, 0.0)
+mg_roll(mg_g)
+check("the sand holds a ball the felt lets run", mg_sand < mg_g.x,
+      "%.1f %.1f" % (mg_sand, mg_g.x))
+mg_g = ac.Minigolf()
+mg_g.start(0.0)
+mg_g.hole = 2
+mg_g.tee(0.0)
+mg_shut = [mg_g.solid(17.5, 3.5) for mg_g.clock in [t_ / 10 for t_ in range(48)]]
+check("the windmill's gap opens and shuts", any(mg_shut) and not all(mg_shut))
+mg_g = ac.Minigolf()
+mg_g.start(0.0)
+mg_g.key("act", 0.0)
+check("p sets the meter going, there and back", mg_g.phase == "power"
+      and mg_g.power(0.0) == 0.0 and abs(mg_g.power(ac.GOLF_SWING / 2) - 1.0) < 1e-9)
+mg_g.key("act", ac.GOLF_SWING / 4)
+check("and p again hits it", mg_g.phase == "rolling" and mg_g.strokes == 1)
+for f_ in range(1, 900):
+    mg_g.update(ac.GOLF_SWING / 4 + f_ / 30.0)
+check("frames come and go, the ball goes on, and stops", mg_g.phase != "rolling")
+mg_g = ac.Minigolf()
+mg_g.start(0.0)
+for n_ in range(len(ac.GOLF_HOLES)):
+    mg_g.strokes = 3
+    mg_g.phase, mg_g.holed_at = "holed", mg_g.clock
+    mg_g.update(mg_g.last + 2.0)
+check("nine holes and the round is over, on the card", not mg_g.playing
+      and mg_g.cards == [3] * 9 and mg_g.over() == 27 - ac.golf_par())
+mg_g = ac.Minigolf()
+mg_g.start(0.0)
+mg_g.hit(0.02, 0.0)
+mg_g.strokes = ac.GOLF_MAX
+mg_roll(mg_g)
+check("seven and you pick up", mg_g.phase == "holed" and mg_g.say[0] == "PICKED UP")
+for w_, h_ in ((80, 24), (60, 20), (44, 16), (40, 14), (39, 13), (20, 8), (110, 34),
+               (160, 45), (299, 87), (300, 90), (451, 133)):
+    mg_g = ac.Minigolf()
+    ac.render_minigolf(mg, mg_g, w_, h_, 1.0)
+    mg_g.start(1.0)
+    for n_ in range(len(ac.GOLF_HOLES)):
+        mg_g.hole = n_
+        mg_g.tee(1.0)
+        ac.render_minigolf(mg, mg_g, w_, h_, 1.0)
+        mg_g.key("act", 1.0)
+        ac.render_minigolf(mg, mg_g, w_, h_, 1.5)
+        mg_g.say = ("HOLE IN ONE!", mg_g.clock, "ace")
+        ac.render_minigolf(mg, mg_g, w_, h_, 1.5)
+    mg_g.playing, mg_g.cards = False, [2] * 9
+    ac.render_minigolf(mg, mg_g, w_, h_, 2.0, 18)
+check("the course draws at every size, every hole", True)
+mg_txt = "\n".join("".join(r_) for r_ in ac.render_minigolf(mg, mg_g, 160, 45, 2.0)[0])
+check("the card: par, your strokes and what it says", "28" in mg_txt and "18" in mg_txt
+      and ac.golf_say(-10) in mg_txt)
+mg_x, mg_z, mg_yaw = mg_sp
+mg_seen = 0
+for back_ in (7.0, 11.0, 15.0):
+    mg_ch, _, _ = ac.render_street(ac.View(mg_x - math.sin(mg_yaw) * back_,
+                                           mg_z - math.cos(mg_yaw) * back_,
+                                           mg_yaw, 160, 45), 300.0)
+    if mg["name"] in "\n".join("".join(r_) for r_ in mg_ch):
+        mg_seen += 1
+check("the course's name is up over its gate", mg_seen >= 2, str(mg_seen))
 
 # --- the tunnels, and who is down there ------------------------------------------
 sw_start = next((i_, j_) for i_ in range(-20, 20) for j_ in range(-20, 20)
