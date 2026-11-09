@@ -13,7 +13,8 @@ fly over, and go into, and get lost in.
 </table>
 
 ```bash
-git clone GitHub.com/noajwz/ascii_city
+git clone https://github.com/noajwz/ascii_city
+cd ascii_city
 python3 ascii_city.py
 ```
 
