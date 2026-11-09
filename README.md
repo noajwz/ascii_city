@@ -10,10 +10,6 @@ fly over, and go into, and get lost in.
     <td><img src="docs/street.svg" alt="A Chinatown street: neon signs in Chinese, NOODLES and RAMEN, people on the pavement"></td>
     <td><img src="docs/arcade.svg" alt="Inside the arcade: six lit cabinets under the arcade's name in block letters"></td>
   </tr>
-  <tr>
-    <td><img src="docs/alley.svg" alt="A lit back alley: ramen and sake signs in Japanese, lanterns and people"></td>
-    <td><img src="docs/casino.svg" alt="A casino on the avenue: the DIAMOND marquee, the doorman and the red carpet"></td>
-  </tr>
 </table>
 
 ```bash
@@ -24,6 +20,22 @@ python3 ascii_city.py
 One file of stdlib-only Python — `curses` and some arithmetic. No dependencies, no build step,
 nothing saved. 
 
+## What is in it
+
+- **Two views** sharing one clock and one weather: the street, walked in first person, and the
+  waterfront, the whole skyline seen from across the river.
+- **Nine parts of town**, from downtown under the neon to Chinatown's night market, a financial
+  district dark but for the cleaners' floor, the docks, the suburbs and the woods.
+- **Weather that runs itself** — rain that comes and goes, rare and violent storms, fog nights,
+  snow, a blackout, and a night sky with its own character every night.
+- **Places to go into** — a casino, an arcade with six games, a bowling alley, a stock exchange,
+  a cinema, a club, a temple, a library, ramen shops, a diner, rooftop bars and more.
+- **A plane to fly** — real handling, a full cockpit, a tower that talks you down, an autopilot,
+  flight plans to other airports, crosswinds, and thunderstorms out there you can fly into.
+- **A river** with piers, rowing boats and a carnival, and a bay with a suspension bridge and a
+  lighthouse you can climb.
+- **Secrets** — tunnels under every street, somebody living down a manhole, a mystery that starts
+  with a note, and things in the woods you will not like.
 
 
 ## For the best experience
@@ -66,42 +78,6 @@ And two things outside the terminal:
 - **Run a recent Python.** It runs on 3.9, but 3.11 and newer draw a frame much faster. On a Mac,
   `/usr/bin/python3` is Apple's old 3.9; a Homebrew or python.org Python is the one to use.
 
-## Controls
-
-```
-  w s        walk            a d     turn        , .   sidestep
-  W S        run             + -     pace: normal, brisk, fast, very fast
-  t          hail a taxi     e       lift a manhole cover, or take the metro
-  tab        switch view     space   wander on its own
-  ` or F1    cheat menu      q       quit
-```
-
-In the cockpit:
-
-```
-  s w        nose up, down   a d     roll        W S   throttle (shift w, s)
-  A D        rudder (shift a, d): the nose round gently, the wings level
-  e          de-ice the wings: on, and the ice comes off (it costs fuel)
-  g          gear            f       flaps       b     brakes
-  r          radio           p       autopilot   l     landing light
-  c          swap frequency  i       wipers      k     fuel pad
-  m          map page        + -     map range   v     view from outside
-  enter      a tug in, after landing             x     hand it back
-             (at the gate, W pushes back; p taxis for you)
-```
-
-At the wheel of a cab (`t` on any street, then `d` when it pulls up):
-
-```
-  w s        speed up, down  a d     steer       space brakes
-  e          handbrake       m       the satnav  h     horn
-  l          headlights: on, high beam, off
-  x          pull over and get out
-```
-
-The cheat menu teleports you to anything worth looking at that a taxi will not take you to —
-it searches the city for what is already there rather than spawning it, so the rare things stay
-exactly as rare as they are. For the casino, the club, the diner and the rest, hail a cab.
 
 ## What is in it
 
@@ -275,5 +251,3 @@ and writes them out as text in an SVG, in the colours the renderer actually pick
 
 `CLAUDE.md` is the long version: how the renderer works, why particular decisions were made, and
 the traps that cost time.
-
-Written for fun, with [Claude Code](https://claude.com/claude-code).
