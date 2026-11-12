@@ -702,6 +702,26 @@ def district_at(i, j):
 
 
 HEADLAND = dict(WOODS, name="the headland", park=False)
+BEACH = dict(WOODS, name="the beach", park=False)
+SEAFRONT = dict(WOODS, name="the seafront", park=False)
+# What the hotels along the seafront are called, in neon.
+SEA_WORDS = ["HOTEL", "OCEAN", "SURF", "PALMS", "TIDES", "CABANA", "VACANCY",
+             "SEAVIEW", "CORAL", "MARINA", "BREEZE", "LIDO", "PACIFIC", "DUNES",
+             "SUNSET", "ROOMS", "BAR", "COLONY"]
+# The row of buildings that faces the sea: hotels, a few storeys of balconies
+# and lit rooms, every one with its name in neon over the road along the front.
+SEAFRONT_ROW = dict(key="", name="the seafront", weight=0, scale=0.7, lo=11.0, hi=24.0,
+                    dens=(0.45, 0.8), flat=0.95, hung=0.6, smoke=0.25, bulb=0.0,
+                    neon=None, lantern=0.0, park=False,
+                    glyphs="oO0=", band="=", mullion=False, ground="#", gap=3,
+                    pal="warm", roof="=", whole_floors=False, cjk=False,
+                    words=SEA_WORDS)
+HOTEL_DEEP = 2             # cells of them back from the road
+# The hall on the pier's head: three low storeys of lit windows, and what goes
+# on inside in neon along every side.
+PIER_HALL = dict(SEAFRONT_ROW, name="the pier", lo=7.5, hi=9.5, flat=1.0, hung=0.0,
+                 smoke=0.0, band=None, dens=(0.7, 0.95),
+                 words=["ARCADE", "DANCE", "BINGO", "PALAIS", "SHOWS", "MUSIC"])
 # The factories: low sheds in rust, a ridge of saw-tooth roofs, a few lit
 # windows high up for the night shift, roller doors, bare bulbs over them and
 # somebody on a break outside.
@@ -740,6 +760,17 @@ INDUSTRIAL = dict(key="", name="the factories", weight=0, scale=0.4, lo=5.5, hi=
 
 
 def district(i, j):
+    if COAST and i >= COAST_LAND:
+        kind = coast_kind(i, j)
+        if kind is not None:
+            if kind == "hall":
+                return PIER_HALL
+            return (SEAFRONT if kind in ("road", "walk", "bridge", "pier")
+                    else BEACH)
+        back = int(math.floor(coastline(j))) - i - COAST_STRIP
+        if (0 < back <= HOTEL_DEEP and not DISTRICTS[district_at(i, j)]["park"]
+                and not river_at(i, j)):
+            return SEAFRONT_ROW
     if woods_at(i, j):
         return WOODS
     if industrial_at(i, j):
@@ -1460,6 +1491,179 @@ def render_skyline(cam_x, width, height, now):
 #   - the odd cell inside a block is missing altogether: a yard you can stand in
 # ---------------------------------------------------------------------------
 
+# --- the coast -------------------------------------------------------------
+# East of the start the city stops at the sea. Every other way it is endless
+# as it ever was; this way there is a last row of buildings, a road along the
+# front, a boardwalk, a beach, and water to the horizon. The river runs out
+# into it.
+#
+# COAST is the one switch. False, and none of this exists: every function
+# below answers as it did before there was a coast, cell for cell - there is
+# a check that it does. West of COAST_LAND nothing changes either way.
+#
+# Things that are placed rather than picked - the woods, the factories, the
+# suburbs, the Strip, the airports, the universities, the big bridges, the
+# carnivals, the landmarks, the highways - do not stand in the sea or on the
+# sand. One that would is not there at all, rather than cut off at the water:
+# its home is said to be at DROWNED, a long way west of anywhere, so every
+# question about it comes back "not here".
+COAST = True           # False: no sea, the city endless every way again
+COAST_I = 368          # the shoreline's column, about: 1840 units east of the start
+COAST_WOB = 8          # how far either side of that it wanders, at most
+BEACH_DEEP = 5         # cells of sand from the boardwalk to the water
+COAST_STRIP = BEACH_DEEP + 3     # the sand, the boardwalk, two cells of road
+COAST_LAND = COAST_I - COAST_WOB - COAST_STRIP    # west of this, no sea at all
+MOUTH_REACH = 36       # cells from the sea over which the river opens out
+MOUTH_WIDEN = 1.4      # and by how much, on top of itself
+DROWNED = -(10 ** 7)   # where the home of a thing lost to the sea is said to be
+_shore_cache = {}
+_coast_cache = {}
+
+
+def _coast_wander(u):
+    """How far east of COAST_I the waterline is, u cells along the coast."""
+    return (4.5 * math.sin(u / 37.0 + 0.6) + 2.0 * math.sin(u / 13.0 + 2.1)
+            + 0.8 * math.sin(u / 5.3 + 4.0))
+
+
+def coastline(j):
+    """The waterline's column in row j, a float: it wanders, under half a
+    cell a row, so the road along the front never comes apart."""
+    hit = _shore_cache.get(j)
+    if hit is None:
+        _evict(_shore_cache, 20000)
+        hit = _shore_cache[j] = COAST_I + _coast_wander(j + 0.5)
+    return hit
+
+
+def shore_x(z):
+    """The same waterline in world units, at any z: what the sea and the sand
+    are drawn by, so the water's edge is a curve and not a staircase."""
+    return (COAST_I + _coast_wander(z / CELL)) * CELL
+
+
+def off_coast(i):
+    """Is this column far enough east to be the sea's business."""
+    return COAST and i >= COAST_LAND
+
+
+def past_mouth(i, out=0):
+    """Is this column of the river's line out past its mouth, more than
+    `out` cells into the sea: where the things that go down the river stop."""
+    return COAST and i >= COAST_LAND and i > coastline(int(river_centre(i))) + out
+
+
+def coast_kind(i, j):
+    """What the coast makes of this cell, or None for ordinary city. From the
+    water in: "sea"; "surf", the cell the waterline is in, which you can wade
+    into; "sand"; "walk", the boardwalk; "road", the road along the front.
+    Where the river comes through, "mouth" is its water across the beach and
+    "bridge" is the road and the boardwalk carried over it."""
+    if i < COAST_LAND or not COAST:
+        return None
+    key = i * 1048576 + j
+    hit = _coast_cache.get(key, 0)
+    if hit != 0:
+        return hit
+    _evict(_coast_cache, 80000)
+    d = int(math.floor(coastline(j))) - i
+    if d < 0:
+        hit = "sea"
+    elif d == 0:
+        hit = "surf"
+    elif d <= BEACH_DEEP:
+        hit = "sand"
+    elif d == BEACH_DEEP + 1:
+        hit = "walk"
+    elif d <= COAST_STRIP:
+        hit = "road"
+    else:
+        hit = None
+    if hit is not None and hit != "sea":
+        lo, hi = river_span(i)
+        if lo < j < hi:
+            hit = "bridge" if hit in ("walk", "road") else "mouth"
+    if hit in ("sea", "surf", "sand"):
+        hit = _pier_kind(i, j) or hit
+    _coast_cache[key] = hit
+    return hit
+
+
+# The pier: boards out over the sand and a long way over the sea, a good deal
+# wider than the river's piers, and at its end a head wider still, with a
+# hall on it and a wheel. One every PIER_GAP cells of coast, the nearest to
+# the river's mouth a little way north of it.
+PIER_GAP = 360         # cells of coast from one pier to the next
+PIER_ROW = 70          # the first row of the one nearest the origin
+PIER_BROAD = 5         # cells across
+PIER_OUT = 30          # cells out past the waterline
+PIER_HEAD = (12, 4)    # the head: cells long, and cells wider each side
+PIER_NAME = "OCEAN PIER"
+SEA_WHEEL_R = 18.0     # the wheel at the end of it: its radius, in units
+SEA_WHEEL_RPM = 0.9
+
+
+def sea_pier(j):
+    """(first row, first column of the head, last column) of the pier this
+    row is part of - shaft or head - or None."""
+    if not COAST:
+        return None
+    r0 = (j - PIER_ROW + PIER_HEAD[1]) // PIER_GAP * PIER_GAP + PIER_ROW
+    if not r0 - PIER_HEAD[1] <= j < r0 + PIER_BROAD + PIER_HEAD[1]:
+        return None
+    if abs(r0 - river_centre(COAST_I)) < 45:
+        return None                     # not across the river's mouth
+    end = int(math.floor(coastline(r0 + PIER_BROAD // 2))) + PIER_OUT
+    return r0, end - PIER_HEAD[0] + 1, end
+
+
+def _pier_kind(i, j):
+    """"pier" for the boards, "hall" for the building on the head, or None."""
+    pier = sea_pier(j)
+    if pier is None or i > pier[2]:
+        return None
+    r0, head, end = pier
+    if i >= head:
+        # The hall, on the north half of the head, a walk left all round it.
+        if r0 - PIER_HEAD[1] + 1 <= j <= r0 - 1 and head + 3 <= i <= end - 3:
+            return "hall"
+        return "pier"
+    return "pier" if r0 <= j < r0 + PIER_BROAD else None
+
+
+def sea_wheel(pier):
+    """Where the wheel stands on a pier's head: (x, z), in units."""
+    r0, head, end = pier
+    return (head + PIER_HEAD[0] * 0.5) * CELL, (r0 + PIER_BROAD + 2.0) * CELL
+
+
+def toggle_coast():
+    """The menu's switch: the sea off, and on again. True if it is now on."""
+    global COAST
+    COAST = not COAST
+    coast_reset()
+    return COAST
+
+
+def coast_reset():
+    """Forget everything worked out about the city: for turning COAST off or
+    on while it runs, which changes the answer to most of it."""
+    for name in ("_tunnel_cache", "_district_cache", "_river_cache", "_centre_cache",
+                 "_span_cache", "_grand_cache", "_car_park_cache", "_carnival_cache",
+                 "_headland_fair", "_pier_cache", "_open_cache", "_road_cache",
+                 "_yoko_cache", "_woods_cache", "_zone_cache", "_home_cache",
+                 "_field_cache", "_rw_cache", "_sub_road_cache", "_egg_cache",
+                 "_site_cache", "_plot_cache", "_warehouse_cache", "_road_at_cache",
+                 "_landmark_cache", "_core_cache", "_lots", "_chimney_blocks",
+                 "_far_blocks", "_ground_cache", "_diner_blocks", "_bill_blocks",
+                 "_ramp_cache", "_el_cache", "_hwy_cache", "_trip_cache",
+                 "_tower_blocks", "_cinema_blocks", "_wash_blocks", "_ramen_picks",
+                 "_ramen_firsts", "_vend_picks", "_vend_faces", "_sewer_cache",
+                 "_lair_cache", "_cab_seen", "_station_cache", "_center_cache",
+                 "_shore_cache", "_coast_cache", "_beach_blocks"):
+        globals()[name].clear()
+
+
 # --- the river -------------------------------------------------------------
 # It runs along i and wanders across j, so it cuts the street grid at an angle
 # and no two stretches of bank are alike. Water is the first cell in this city
@@ -1493,7 +1697,7 @@ def river_centre(i):
 def near_river(i, j):
     """Within reach of anything the river puts on its banks. Cheap, and
     the gate in front of every bank test: most of the city is nowhere near."""
-    return abs(j - river_centre(i)) < 48.0
+    return abs(j - river_centre(i)) < 48.0 and not (COAST and i >= COAST_LAND)
 
 
 _grand_cache = {}
@@ -1514,6 +1718,8 @@ def grand_avenue(i):
             if span is not None:
                 hit = span
                 break
+        if hit is not None and COAST and hit[0] + 50 >= COAST_LAND:
+            hit = None                  # its bay would be the sea's, or in it
         _grand_cache[k] = hit
     return hit
 
@@ -1601,6 +1807,10 @@ def river_span(i):
     if span is not None:
         d = (i - (span[0] + span[1] * 0.5)) / BAY_REACH
         half *= 1.0 + BAY_WIDEN * math.exp(-d * d)
+    if COAST and i > COAST_I - MOUTH_REACH:
+        # The mouth: it opens out over its last stretch to the sea.
+        half *= 1.0 + MOUTH_WIDEN * min(1.0, (i - COAST_I + MOUTH_REACH)
+                                        / float(MOUTH_REACH)) ** 2
     hit = (mid - half, mid + half)
     _span_cache[i] = hit
     return hit
@@ -1613,6 +1823,10 @@ def river_at(i, j):
         _evict(_river_cache, 60000)
         lo, hi = river_span(i)
         hit = lo < j < hi
+        if hit and COAST and i >= COAST_LAND:
+            # Across the beach it is the river still; past the waterline it
+            # is the sea, and nothing that keys on the river goes out there.
+            hit = coast_kind(i, j) in (None, "mouth", "bridge")
         _river_cache[key] = hit
     return hit
 
@@ -1628,7 +1842,7 @@ def pier_at(i, j):
     far side - the point of one is that it ends, and you stand at the end of it
     with the whole city behind you. That view does not otherwise exist from
     inside the street."""
-    if not river_at(i, j) or _mix(i // PIER_WIDE, 0, 457) % 19:
+    if not river_at(i, j) or _mix(i // PIER_WIDE, 0, 457) % 19 or off_coast(i):
         return False
     span = grand_avenue(i)
     if span is not None and abs(i - span[0]) < BAY_REACH * 2:
@@ -1642,6 +1856,10 @@ def pier_at(i, j):
 
 def deck_at(i, j):
     """Anything over the water you can put a foot on."""
+    if COAST and i >= COAST_LAND:
+        kind = coast_kind(i, j)
+        if kind is not None:
+            return kind in ("bridge", "pier")
     return bridge_at(i, j) or pier_at(i, j) or fair_pier_at(i, j)
 
 
@@ -1659,6 +1877,8 @@ def bridge_at(i, j):
     A footbridge: railings, warm lamps, a string of lights between them."""
     if not (river_at(i, j) and _is_road(i, XP, 91)):
         return False
+    if COAST and i >= COAST_LAND and coast_kind(i, j) is not None:
+        return False                    # the coast road's own bridge, not this
     if grand_at(i):
         return True
     # The big bridge is the only way onto the headland: no ordinary crossing
@@ -1697,6 +1917,7 @@ def car_park_at(i, j):
                and not any(zone_depth(k_, i, j) > -1.0 for k_ in ZONES)
                and not _is_road(i, XP, 91) and not _is_road(j, ZP, 137)
                and not woods_at(i, j) and not water_at(i, j)
+               and coast_kind(i, j) is None
                and not (near_river(i, j) and (fair_at(i, j) or prom_at(i, j)
                                               or headland_at(i, j))))
         _car_park_cache[key] = hit
@@ -1724,7 +1945,8 @@ def tunnel_run(i, j):
     _evict(_tunnel_cache, 40000)
     hit = None
     span = road_span(i, XP, 91)
-    if (span is not None and not woods_at(i, j) and not el_at(i) and not grand_at(i)
+    if (span is not None and not off_coast(i)
+            and not woods_at(i, j) and not el_at(i) and not grand_at(i)
             and not hwy_at(i) and not suburb_at(i, j) and not strip_at(i, j)
             and not airport_at(i, j) and not university_at(i, j)):
         a = span[0]
@@ -1827,6 +2049,8 @@ def carnival_col(i):
             hit = c
     if hit is None:
         hit = lo + 30 + _mix(k, 0, 1301) % (CARNIVAL_GAP - 70)
+    if COAST and hit + FAIR_LONG + 12 >= COAST_LAND:
+        hit = DROWNED                   # no fair on the beach, or in the sea
     _carnival_cache[k] = hit
     return hit
 
@@ -2067,8 +2291,10 @@ def woods_home(i, j):
     """Centre (ci, cj) of the woods in the tile this cell belongs to."""
     ti, tj = i // WOODS_TILE, j // WOODS_TILE
     m = _mix(ti, tj, 1201)
-    return (ti * WOODS_TILE + WOODS_TILE // 2 + (m & 63) - 32,
-            tj * WOODS_TILE + WOODS_TILE // 2 + ((m >> 6) & 63) - 32)
+    ci = ti * WOODS_TILE + WOODS_TILE // 2 + (m & 63) - 32
+    if COAST and ci + WOODS_HALF_I + 6 >= COAST_LAND:
+        ci = DROWNED                    # it would stand in the sea: there is none
+    return ci, tj * WOODS_TILE + WOODS_TILE // 2 + ((m >> 6) & 63) - 32
 
 
 def woods_depth(i, j):
@@ -2109,6 +2335,10 @@ ZONES = {
     "airport": dict(salt=3901, off_i=70, off_j=240, half_i=29, half_j=59),
     "university": dict(salt=4001, off_i=420, off_j=118, half_i=22, half_j=15),
 }
+# How far east of its home each reaches, at the most: one that would reach the
+# coast is not there (see DROWNED). The airport's is its crosswind runway.
+ZONE_EAST = {"industrial": 31, "suburbs": 43, "strip": 10, "airport": 64,
+             "university": 25}
 QUAD_HI, QUAD_HJ = 6, 5  # the quad's half size, in cells: deep enough to see the
                          # clock from across it, the camera not looking up
 PLANE_SCALE = 2.3      # an airliner, big enough to make out from the end of the runway
@@ -2138,6 +2368,8 @@ def zone_home(kind, i, j):
         m = _mix(ti, tj, z["salt"])
         hit = (ti * WOODS_TILE + z["off_i"] + (m & 31) - 16,
                tj * WOODS_TILE + z["off_j"] + ((m >> 5) & 7) - 4)
+        if COAST and hit[0] + ZONE_EAST[kind] >= COAST_LAND:
+            hit = (DROWNED, hit[1])
         _home_cache[key] = hit
     return hit
 
@@ -2902,6 +3134,10 @@ def lake_at(i, j):
 
 def water_at(i, j):
     """Anything you can see across but not stand on."""
+    if COAST and i >= COAST_LAND:
+        kind = coast_kind(i, j)
+        if kind is not None:
+            return kind in ("sea", "mouth", "bridge", "pier")
     return river_at(i, j) or moat_at(i, j) or lake_at(i, j) or strip_lake(i, j)
 
 
@@ -3023,7 +3259,8 @@ def yokocho_at(i, j):
     if hit is None:
         _evict(_yoko_cache, 40000)
         hit = False
-        if is_open(i, j) and not road_at(i, j) and not woods_at(i, j):
+        if (is_open(i, j) and not road_at(i, j) and not woods_at(i, j)
+                and coast_kind(i, j) is None):
             if _is_alley(i, j, XP, 91, 211) and _mix(i, j // 6, 331) % 4 == 0:
                 hit = True
             elif _is_alley(j, i, ZP, 137, 223) and _mix(j, i // 6, 337) % 4 == 0:
@@ -3040,6 +3277,8 @@ def face_kind(i, j):
         return "road"
     if suburb_at(i, j) or airport_at(i, j) or quad_at(i, j):
         return "road"            # a lawn, the apron, the quad: a front all the same
+    if coast_kind(i, j) == "pier":
+        return "road"            # and the pier's boards, for the hall on its head
     return "yokocho" if yokocho_at(i, j) else None
 
 
@@ -3057,7 +3296,9 @@ def road_at(i, j):
     hit = _road_at_cache.get(key)
     if hit is None:
         _evict(_road_at_cache, 60000)
-        if woods_at(i, j) or headland_at(i, j):
+        if COAST and i >= COAST_LAND and coast_kind(i, j) is not None:
+            hit = coast_kind(i, j) in ("road", "bridge")    # the road along the front
+        elif woods_at(i, j) or headland_at(i, j):
             hit = False
         elif suburb_at(i, j):
             hit = suburb_road(i, j)
@@ -3116,6 +3357,8 @@ def landmark_of(ti, tj):
                "name": LANDMARK_NAMES[m % len(LANDMARK_NAMES)],
                "lobby": ((i_lo + i1) // 2, j_hi), "seed": m % 9973}
         break
+    if hit is not None and COAST and hit["i1"] + 3 >= COAST_LAND:
+        hit = None                      # the sea's: and the tile gets no other
     if len(_landmark_cache) > 400:
         _landmark_cache.clear()
     _landmark_cache[key] = hit
@@ -3159,7 +3402,11 @@ def is_open(i, j):
     hit = _open_cache.get(key)
     if hit is None:
         _evict(_open_cache, 60000)
-        if water_at(i, j):
+        if COAST and i >= COAST_LAND and coast_kind(i, j) is not None:
+            # Sea, sand, boardwalk, the road along the front: all open. The
+            # hall on the pier's head is the one thing out there that is built.
+            hit = coast_kind(i, j) != "hall"
+        elif water_at(i, j):
             hit = True          # you can see across it; standing is elsewhere
         elif landmark_at(i, j) is not None:
             hit = False         # the landmark: solid, a whole block of it
@@ -3278,7 +3525,7 @@ def make_face(rng, height, d, kind):
     yoko = kind == "yokocho"
     words = (JP_SIGNS if (WIDE_OK and yoko)
              else CJK_SIGNS if (WIDE_OK and d["cjk"] and not yoko)
-             else SIGN_WORDS)
+             else d.get("words") or SIGN_WORDS)
 
     # Flat signs stay Latin whatever the district. They are painted along the
     # wall and squashed by perspective to one column a letter, and the facade
@@ -3286,7 +3533,7 @@ def make_face(rng, height, d, kind):
     # spills into - it would corrupt the row. The vertical hung signs are where
     # the Chinese and Japanese go, and they are the ones you can read anyway.
     if floors >= 3 and rng.random() < (0.7 if yoko else d["flat"]):
-        text = rng.choice(SIGN_WORDS)
+        text = rng.choice(SIGN_WORDS if yoko else d.get("words") or SIGN_WORDS)
         flicker = rng.random() < 0.25
         face["flat"] = {
             "text": text,
@@ -3756,6 +4003,9 @@ class View:
         self.air = False        # seen from the plane: its own storms, not the far one
         self.held = {}          # airports whose arrivals and departures are held
         self.my_gate = None     # (airport, stand) the jet you are in stands at
+        self.shore = {}         # the waterline this instant, by z: the sea's
+        self.moon_sx = None     # the column the moon's light lies down the sea in
+        self.moon_attr = None   # and its colour: the moon's, or the sunrise's
 
     def ray(self, sx):
         cam = 2.0 * sx / (self.width - 1) - 1.0
@@ -6388,8 +6638,8 @@ def flight_plan(home, seed):
             if (a, b) != (0, 0):
                 there = zone_home("airport", home[0] + a * WOODS_TILE,
                                   home[1] + b * WOODS_TILE)
-                if there != home and there not in picks:
-                    picks.append(there)
+                if there != home and there not in picks and there[0] != DROWNED:
+                    picks.append(there)     # and not one the sea has
     return picks[_mix(seed, home[0] * 7 + home[1], 5903) % len(picks)]
 
 
@@ -10938,7 +11188,8 @@ def far_block(bi, bj):
     d = district(i, j)
     hit = None
     if not (water_at(i, j) or d["park"] or d is WOODS or d is AIRPORT
-            or woods_at(i, j) or fair_at(i, j) or headland_at(i, j)):
+            or woods_at(i, j) or fair_at(i, j) or headland_at(i, j)
+            or coast_kind(i, j) is not None):
         base = 11.0 + _mix(bi, bj, 43) % 26
         h = max(d["lo"], min(d["hi"], base * 1.4 * d["scale"]))
         for cap in (seafront_cap(i, j), approach_cap(i, j)):
@@ -11393,6 +11644,7 @@ def draw_sky(ch, co, v, walls, wet, now):
     tops = walls[3]
     seen = set()
     last = None
+    coastal = COAST and v.x + 320.0 > (COAST_I - COAST_WOB) * CELL
 
     for sx in range(v.width):
         top = tops[sx]
@@ -11433,6 +11685,11 @@ def draw_sky(ch, co, v, walls, wet, now):
                 seen.add((y, sx))
         last = bearing
         empty = walls[0][sx] is None
+        if coastal:
+            # Looking out to sea there is no more city to be a haze of roofs:
+            # the sky comes down to the water.
+            if v.x + math.sin(rad) * 320.0 > shore_x(v.z + math.cos(rad) * 320.0):
+                continue
         deep = _mix(bearing // 3, 2, 17) % 7 if empty else 0
         for d in range(max(deep, _mix(bearing, 1, 3) % thin)):
             y = v.horizon - 1 - d
@@ -11456,6 +11713,21 @@ def draw_sky(ch, co, v, walls, wet, now):
                     g = dawn_glow(bearing, y, v.horizon, v.dawn)
                     if g is not None:
                         ch[y][sx], co[y][sx] = g
+    if coastal and v.dawn > 0.3 and clear > 0.05:
+        # The sun: only its top, coming up out of the sea, due east - and its
+        # light down the water the way the moon's lies.
+        sx = sky_col(v, math.pi * 0.5)
+        if (sx is not None
+                and v.x + math.sin(math.pi * 0.5) * 320.0 > shore_x(v.z)):
+            rows = ("  .-=#=-.  ", " (#######) ") if v.dawn > 0.65 else (" .-===-. ",)
+            for r, row in enumerate(rows):
+                y = v.horizon - len(rows) + r
+                for k, c in enumerate(row):
+                    x = sx - len(row) // 2 + k
+                    if c != " " and 0 <= x < v.width and 0 <= y < tops[x]:
+                        ch[y][x] = c
+                        co[y][x] = EMBER_HOT if c == "#" else GOLD
+            v.moon_sx, v.moon_attr = sx, GOLD
     if n["alien"] and not overcast_held():
         draw_sky_beams(ch, co, v, tops, now, seen)
         draw_mother(ch, co, v, tops, now, seen)
@@ -11465,6 +11737,8 @@ def draw_sky(ch, co, v, walls, wet, now):
     if clear > 0.15:
         draw_moon(ch, co, v, tops, now, seen)
         draw_meteor(ch, co, v, tops, now, seen)
+        if coastal and moon_face(n["phase"]):
+            v.moon_sx = sky_col(v, moon_dir(now)[0])
 
 
 GLOW_CELL = 1.6
@@ -11501,6 +11775,20 @@ def collect_glow(v, now, wet):
         (wx, wz), (cx, cz), _, _ = carnival_spots(c_)
         _spill(glow, wx, wz, 11.0, NEON[int(now * 5.0) % len(NEON)][1])
         _spill(glow, cx, cz, 4.0, GOLD_DIM)
+    if COAST and v.x + 70.0 > COAST_LAND * CELL:
+        # The seafront: its lamps on the boards, the fires and the bars on the sand.
+        cj_ = int(v.z / CELL + BIG) - BIG
+        for j in range(cj_ - 14, cj_ + 15):
+            if j % 3 == 0:
+                iw_ = int(math.floor(coastline(j))) - BEACH_DEEP - 1
+                if coast_kind(iw_, j) == "walk":
+                    _spill(glow, (iw_ + 1) * CELL - 0.4, (j + 0.5) * CELL, 3.6,
+                           BULB_DIM)
+        for kind_, bx_, bz_, _ in near_beach(v, 70.0):
+            if kind_ == "fire":
+                _spill(glow, bx_, bz_, 7.5, EMBER)
+            elif kind_ == "bar":
+                _spill(glow, bx_, bz_ + 0.8, 5.0, GOLD_DIM)
     for i, j, b in near_lots(v, 60.0):
         if v.blackout and b["temple"] is None and power_off(i, j, now):
             continue                    # nothing spills from a dark building
@@ -11642,8 +11930,8 @@ def draw_river_mist(ch, co, v, walls, now, wet):
             y = top - k
             if y <= v.horizon or y >= v.height:
                 continue
-            if ch[y][sx] != " " and k:
-                continue
+            if ch[y][sx] != " " and (k or (v.shore and ch[y][sx] not in "~-:.")):
+                continue            # and by the sea, not over what is on the sand
             if _mix(sx + drift, y, 97) % 100 >= 74 - k * 13:
                 continue
             ch[y][sx] = "-" if k else "~"
@@ -11789,8 +12077,8 @@ def near_buoys(v, reach):
     n = int(reach / CELL) + 1
     ci = int(v.x / CELL + BIG) - BIG
     for i in range(ci - n, ci + n + 1):
-        if _mix(i // 4, 0, 331) % 9:
-            continue
+        if _mix(i // 4, 0, 331) % 9 or past_mouth(i, 14):
+            continue                    # the last marker is a little way out
         lo, hi = river_span(i)
         m = _mix(i // 4, 1, 337)
         side = 0.28 if m & 1 else 0.72
@@ -11975,6 +12263,16 @@ def ground_cell(i, j):
     if hit is not None:
         return hit
     _evict(_ground_cache, 60000)
+    coast = coast_kind(i, j)
+    if coast is not None and coast != "hall":
+        # The sea's: sand, water, boards, or the road along the front - which
+        # is a street like any other, and has its pavement where it has walls.
+        hit = ((False, not is_open(i - 1, j), not is_open(i + 1, j),
+                not is_open(i, j - 1), not is_open(i, j + 1))
+               + (False,) * 11 + (None, None, None, False, False, False, None)
+               + (None if coast == "road" else coast,))
+        _ground_cache[key] = hit
+        return hit
     solid = not is_open(i, j)
     # Which neighbours are walls, asked once per cell rather than once per
     # point: on open ground - the riverbank, a fairground - the points
@@ -12015,12 +12313,119 @@ def ground_cell(i, j):
             lane = (1, (along_z[0] + along_z[1] * 0.5) * CELL)
     hit = (solid, wall_w, wall_e, wall_n, wall_s, wet_cell, deck, pier, woods, sub,
            quad, green, trail, fair, rock, tarmac, mh, apt, plot_, dirt, weeds,
-           hollow, lane)
+           hollow, lane, None)
     _ground_cache[key] = hit
     return hit
 
 
-def far_lights(ch, co, walls, y, d, k, bearings):
+def coast_ground(v, kind, x, z, y, sx, glow, now):
+    """What one point of the coast's ground is drawn as, (glyph, colour), or
+    None for nothing: the boards, the sand, the wash, the sea.
+
+    The sand and the sea go by shore_x(), the waterline as a curve, not by
+    the cell - and by where the water is this instant: it runs up the sand
+    and back, a line of foam at its edge, wet sand where it has just been.
+    Out from that, waves: crests in lines along the shore, coming in, white
+    where they break near the beach and grey further out, each broken into
+    stretches so they are waves and not ruled lines."""
+    if kind == "walk":
+        # Boards across the way you walk, like a pier's.
+        if (z * 1.4) % 1.0 < 0.2:
+            return "-", CURB
+        return (".", STREET) if _mix(int(x * 3.0), int(z * 3.0), 37) % 13 == 0 else None
+    if kind == "bridge":
+        if _mix(int(x * 3.0), int(z * 3.0), 7) % 3 == 0:
+            return ".", CURB
+        return None
+    if kind == "pier":
+        # Boards across the way you walk it, out to sea: the joints between
+        # them, in lengths, not ruled from rail to rail - looking down the
+        # pier a joint is a whole row of the screen.
+        if (x * 0.5) % 1.0 < 0.1 and _mix(int(x * 0.5), int(z * 0.4), 5705) % 3:
+            return "-", CURB
+        return (".", STREET) if _mix(int(x * 3.0), int(z * 3.0), 37) % 13 == 0 else None
+    if kind == "mouth":
+        # The river, still going the way it was going.
+        h = _mix(int(x * 2.0) - int(now * 1.6), int(z * 2.0), 29)
+        v.water.add((y, sx))
+        g = glow.get(((int(x / GLOW_CELL + BIG) - BIG) * 65536)
+                     + (int(z / GLOW_CELL + BIG) - BIG))
+        if g is not None and h % 3 == 0:
+            return ":", g
+        if h % 4 == 0:
+            return "~", RAIN_FAR
+        return ("-", STREET) if h % 11 == 0 else None
+    key = int(z * 2.0)
+    w = v.shore.get(key)
+    if w is None:
+        zz = key * 0.5
+        w = v.shore[key] = (shore_x(zz) + 1.8 * math.sin(now * 0.8 + zz * 0.045)
+                            + 0.6 * math.sin(now * 1.7 + zz * 0.13))
+    e = x - w
+    if e < 0.0:
+        if e > -0.9:
+            # The edge of the water, where it has run up to: foam.
+            return ("~" if _mix(int(x * 2.0), key, int(now * 3.0)) % 3 else "-"), SNOW
+        if e > -4.2:
+            # Wet sand: dark, and whatever is lit lies on it.
+            h = _mix(int(x * 3.0), int(z * 3.0), 5203)
+            if h % 4:
+                return None
+            g = glow.get(((int(x / GLOW_CELL + BIG) - BIG) * 65536)
+                         + (int(z / GLOW_CELL + BIG) - BIG))
+            return (":", g) if g is not None else (".", CURB)
+        h = _mix(int(x * 2.5), int(z * 2.5), 5201)
+        if h % 5 == 0:
+            g = glow.get(((int(x / GLOW_CELL + BIG) - BIG) * 65536)
+                         + (int(z / GLOW_CELL + BIG) - BIG))
+            return ".", (g if g is not None else GOLD_DIM)
+        return (",", BARK) if h % 43 == 1 else None
+    v.water.add((y, sx))
+    # The waves. Each crest keeps its number as it comes in, so the gaps in
+    # it come in with it.
+    n, f = divmod(e * 0.15 + now * 0.5 + 0.3 * math.sin(z * 0.08), 1.0)
+    if f < 0.17:
+        m = _mix(int(n), int(z * 0.3), 5207)
+        if e < 18.0:
+            if m % 4:
+                return "~", (SNOW if e < 10.0 else RAIN)
+        elif e < 70.0:
+            if m % 3 == 0:
+                return "~", RAIN_FAR
+        elif e < 160.0 and m % 7 == 0:
+            return "-", RAIN_FAR
+    h = _mix(int(x * 2.0), int(z * 2.0) + int(now * 1.3), 29)
+    if v.moon_sx is not None and abs(sx - v.moon_sx) <= 1 + (y - v.horizon) * 0.1:
+        if h % 2:
+            return (":" if h % 3 else "."), v.moon_attr or MOON
+    g = glow.get(((int(x / GLOW_CELL + BIG) - BIG) * 65536)
+                 + (int(z / GLOW_CELL + BIG) - BIG))
+    if g is not None and h % 3 == 0:
+        return ":", g
+    if h % 13 == 0:
+        return "-", STREET
+    return None
+
+
+def sea_row(v, d):
+    """Which columns of the ground's row at distance d are out at sea, or
+    None if none can be: for the lights of the far city, which stop there."""
+    if not COAST or v.x + d * 1.5 < COAST_LAND * CELL:
+        return None
+    width = v.width
+    rdx0, rdz0 = v.dx - v.plx, v.dz - v.plz
+    sdx, sdz = 2.0 * v.plx / (width - 1), 2.0 * v.plz / (width - 1)
+    lo = (COAST_I - COAST_WOB) * CELL
+    out, any_ = [], False
+    for sx in range(width):
+        x = v.x + (rdx0 + sdx * sx) * d
+        at_sea = x >= lo and x > shore_x(v.z + (rdz0 + sdz * sx) * d)
+        any_ = any_ or at_sea
+        out.append(at_sea)
+    return out if any_ else None
+
+
+def far_lights(ch, co, walls, y, d, k, bearings, sea=None):
     """One row of the city past where it is drawn, seen from up high: a
     carpet of lights - mostly the haze's dots, now and then a warmer one -
     thicker towards the horizon, where each row holds more of the city.
@@ -12034,6 +12439,8 @@ def far_lights(ch, co, walls, y, d, k, bearings):
     for sx, bearing in enumerate(bearings):
         if row_c[sx] != " " or hidden(walls, sx, y, d):
             continue                             # a building, standing in front
+        if sea is not None and sea[sx]:
+            continue                             # no city out there: the sea, dark
         m = _mix(bearing, k, 4601)
         if m % 1000 >= dens:
             continue
@@ -12072,7 +12479,8 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                     bearings = [int((v.yaw + math.atan((2.0 * sx / (width - 1) - 1.0)
                                                        * PLANE)) * 200.0)
                                 for sx in range(width)]
-                far_lights(ch, co, walls, y, d, y - v.horizon, bearings)
+                far_lights(ch, co, walls, y, d, y - v.horizon, bearings,
+                           sea_row(v, d))
             continue
         wx = v.x + rdx0 * d
         wz = v.z + rdz0 * d
@@ -12095,9 +12503,16 @@ def draw_ground(ch, co, v, walls, glow, wet, now):
                 x0, y0 = i * CELL, j * CELL
                 (solid, wall_w, wall_e, wall_n, wall_s, wet_cell, deck, pier, woods,
                  sub, quad, green, trail, fair, rock, tarmac, mh, apt, plot_, dirt,
-                 weeds, hollow, lane) = ground_cell(i, j)
+                 weeds, hollow, lane, coast) = ground_cell(i, j)
                 hollow = hollow and v.hollow is not None
             if solid:
+                continue
+            if coast is not None:
+                got = coast_ground(v, coast, x, z, y, sx, glow, now)
+                if got is not None:
+                    ch[y][sx], co[y][sx] = got
+                    if v.flash > 0.3 and _mix(int(x * 2.0), int(z * 2.0), 19) % 3 == 0:
+                        co[y][sx] = FLASH
                 continue
 
             # How far this point is from the nearest wall decides whether it is
@@ -14293,6 +14708,789 @@ def draw_promenade(ch, co, v, walls, s, now, wet):
                         ze + 0.9, 0.0, 1.75, 0.95, CURB)
 
 
+# --- the seafront, and the beach ------------------------------------------------
+# Along the boardwalk: a lamp every third cell, a string of coloured bulbs
+# from lamp to lamp, a palm between, a bench or somebody at the edge looking
+# at the water. On the sand, in stretches of BEACH_BLOCK cells with empty
+# sand between them: a bar under a thatched roof, a fire with people round
+# it, rows of parasols, a lifeguard's tower.
+BEACH_BLOCK = 10       # cells of coast one stretch of beach takes
+BEACH_SEEN = 120.0     # how far off the things on it are drawn
+PARASOL = [
+    " __/^\\__ ",
+    "/_______\\",
+    "    |    ",
+    "    |    ",
+]
+LOUNGER = [
+    "\\_____ ",
+    " |   | ",
+]
+GUARD_TOWER = [
+    " .------. ",
+    " | [__] | ",
+    " '------' ",
+    "  /\\  /\\  ",
+    " /  \\/  \\ ",
+    "/   /\\   \\",
+]
+TIKI_ROOF = [
+    "      __/\\__      ",
+    "   __/######\\__   ",
+    " _/############\\_ ",
+    "/################\\",
+    "                  ",
+    "                  ",
+    "                  ",
+    "                  ",
+]
+TIKI_BODY = [
+    "                  ",
+    "                  ",
+    "                  ",
+    "                  ",
+    " |              | ",
+    " |              | ",
+    " |==============| ",
+    " |  ||      ||  | ",
+]
+TIKI_BULBS = [
+    "                  ",
+    "                  ",
+    "                  ",
+    "                  ",
+    "  o  o  o  o  o   ",
+    "                  ",
+    "                  ",
+    "                  ",
+]
+TIKI_NAMES = ["TIKI", "LOW TIDE", "DRIFTWOOD", "THE SHACK", "SUNDOWN", "CORAL",
+              "HIGH WATER", "THE CONCH"]
+_beach_blocks = {}
+
+
+def beach_block(k):
+    """What is on the sand in stretch k of the coast: (kind, x, z, seed) - a
+    "bar", a "fire", "parasols" or a "guard" tower, where its middle is - or
+    None for bare sand, which is a third of them and every stretch the river
+    or anything else cuts into."""
+    hit = _beach_blocks.get(k, 0)
+    if hit != 0:
+        return hit
+    _evict(_beach_blocks, 4000)
+    hit = None
+    m = _mix(k, 0, 5305)
+    kind = ("bar", "bar", "fire", "fire", "parasols", "parasols", "parasols",
+            "guard", None, None)[m % 10]
+    rows = range(k * BEACH_BLOCK, (k + 1) * BEACH_BLOCK)
+    if kind is not None and COAST and all(
+            coast_kind(int(math.floor(coastline(j))) - d, j) == "sand"
+            for j in rows for d in range(1, BEACH_DEEP + 1)):
+        j = k * BEACH_BLOCK + BEACH_BLOCK // 2
+        back = {"bar": BEACH_DEEP, "fire": 2, "parasols": 3, "guard": 2}[kind]
+        hit = (kind, (int(math.floor(coastline(j))) - back + 0.5) * CELL,
+               (j + 0.5) * CELL, m >> 8)
+    _beach_blocks[k] = hit
+    return hit
+
+
+def near_beach(v, reach):
+    """The stretches of beach with something on them, in front of you."""
+    if not COAST or v.x + reach < COAST_LAND * CELL:
+        return
+    k0 = int((v.z - reach) // (BEACH_BLOCK * CELL))
+    for k in range(k0, int((v.z + reach) // (BEACH_BLOCK * CELL)) + 1):
+        b = beach_block(k)
+        if b is None:
+            continue
+        rx, rz = b[1] - v.x, b[2] - v.z
+        if rx * v.dx + rz * v.dz > -CELL * 2 and rx * rx + rz * rz < reach * reach:
+            yield b
+
+
+def beach_bar_near(x, z):
+    """The beach bar whose counter you are at, or None."""
+    if not COAST or x < COAST_LAND * CELL:
+        return None
+    b = beach_block(int(z // (BEACH_BLOCK * CELL)))
+    if b is not None and b[0] == "bar" and (b[1] - x) ** 2 + (b[2] - z) ** 2 < 2.7 ** 2:
+        return b
+    return None
+
+
+def draw_beach_fire(ch, co, v, walls, x, z, seed, now, wet):
+    """A fire on the sand and the people round it: driftwood, flames a good
+    deal bigger than a can's, sparks going up, and everybody lit by it."""
+    people = [(x - 2.6, z - 1.2, SITTER, 1.5), (x - 2.0, z + 2.1, SITTER, 1.5),
+              (x + 2.4, z - 1.9, SITTER, 1.5), (x + 2.9, z + 1.1, WARMER, 2.0)]
+    people = people[:3 + seed % 2]
+    for px, pz, art, h in sorted(people, key=lambda p: -((p[0] - v.x) ** 2
+                                                         + (p[1] - v.z) ** 2)):
+        blit_sprite(ch, co, v, walls, art, px, pz, 0.0, h, h * 0.62, EMBER)
+    for a in (-0.8, -0.3, 0.3, 0.8):
+        put_point(ch, co, v, walls, x + a, 0.15, z, "=", BARK)
+    for k in range(16):
+        a = now * 7.0 + k * 1.7
+        y = 0.3 + 0.17 * k + 0.08 * math.sin(a)
+        glyph = "^" if k < 5 else ("(" if math.sin(a) > 0 else ")")
+        put_lit(ch, co, v, walls, x + (0.7 - 0.04 * k) * math.sin(a * 1.3), y, z,
+                glyph, EMBER_HOT if k < 9 else GOLD, max(wet, 0.5), now)
+    for k in range(7):                      # sparks going up into the dark
+        t = (now * 0.6 + k * 0.15) % 1.0
+        put_point(ch, co, v, walls, x + 0.6 * math.sin(k * 2.0 + now * 0.7),
+                  3.0 + t * 4.5, z + 0.4 * math.cos(k * 1.3 + now), ".", EMBER_HOT)
+
+
+def draw_tiki_bar(ch, co, v, walls, x, z, seed, now, wet):
+    """A bar on the sand: a thatched roof on four posts, a counter, a string
+    of bulbs under the eave chasing round, its name in neon over the roof,
+    and a couple of people who have been there a while."""
+    n = len(NEON)
+    for pz, art in ((z - 3.6, LEANER), (z + 3.7, SMOKER_REST)):
+        blit_sprite(ch, co, v, walls, art, x - 0.8, pz, 0.0, 1.8, 0.95, CURB)
+    blit_sprite(ch, co, v, walls, TIKI_ROOF, x, z, 0.0, 4.4, 5.6, BARK)
+    blit_sprite(ch, co, v, walls, TIKI_BODY, x, z, 0.0, 4.4, 5.6, CURB)
+    blit_sprite(ch, co, v, walls, TIKI_BULBS, x, z, 0.0, 4.4, 5.6,
+                NEON[(seed + int(now * 2.0)) % n][0])
+    name = TIKI_NAMES[seed % len(TIKI_NAMES)]
+    tube = NEON[(seed >> 4) % n]
+    pr = v.project(x, 5.2, z)
+    if pr is not None and pr[2] < 90.0:
+        # The name, a letter a column, standing over the roof.
+        sx0 = int(round(pr[0])) - len(name) // 2
+        for k, c in enumerate(name):
+            if c != " ":
+                flick = (now * 1.3 + seed % 7) % 11.0 < 0.15 and k == seed % len(name)
+                put_cell(ch, co, v, walls, sx0 + k, int(round(pr[1])), pr[2], c,
+                         tube[1] if flick else tube[0])
+    put_lit(ch, co, v, walls, x, 2.2, z, "o", BULB, max(wet, 0.4), now)
+
+
+# --- at the beach bar -----------------------------------------------------
+# Walk up to the counter and you are sat at it, facing the sea: the thatch
+# hanging over you, the string of bulbs, the water coming in beyond the
+# counter, whoever is behind it, and the list. A number orders.
+TIKI_DRINKS = [("MAI TAI", 9, 4), ("BLUE LAGOON", 8, 2), ("PINA COLADA", 9, 7),
+               ("ZOMBIE", 12, 1), ("COCONUT WATER", 4, 5)]
+TIKI_LIMIT = 5         # and after that many it is water, whatever you ask for
+TIKI_HELLO = ["Evening. Sit anywhere, it is all sand.",
+              "You found us. Most people just follow the lights.",
+              "Shoes off if you like. Nobody is checking."]
+TIKI_SERVED = ["There. Mind the little umbrella, it is the expensive part.",
+               "The sea does that all night. You get used to it. You stop wanting to.",
+               "Somebody asked me once what is past the horizon. More of this.",
+               "A fire up the beach again. They never bring enough wood.",
+               "The pier lights went out once. Loveliest night we ever had.",
+               "That one is stronger than it looks. So is the tide.",
+               "I had a place in town. Then I looked this way one morning."]
+TIKI_WATER = "That is water. The sand is soft and the tide is going out: sleep it off."
+TIKI_HUD = " %s  -  1 to %d order  -  s walks back out  -  q quit "
+TIKI_MAN = [
+    "  ,--.  ",
+    " ( -- ) ",
+    "  \\__/  ",
+    " /|##|\\ ",
+    "/ |##| \\",
+]
+TIKI_SHAKE = [
+    "  ,--. o",
+    " ( -- )|",
+    "  \\__/ /",
+    " /|##|/ ",
+    "/ |##|  ",
+]
+TIKI_GLASS = [
+    " ,  _ ",
+    " |\\/_)",
+    "\\~~~~/",
+    " \\__/ ",
+    "  ||  ",
+    " _||_ ",
+]
+
+
+def new_tiki(seed):
+    """Your visit to a beach bar: what you have had, and what was said."""
+    return {"n": 0, "t": None, "drink": None,
+            "say": TIKI_HELLO[seed % len(TIKI_HELLO)]}
+
+
+def tiki_order(state, n, wallet, now):
+    """Order drink n: the note for the HUD if you cannot, or None."""
+    if state["t"] is not None and now - state["t"] < BAR_MIX:
+        return "still shaking the last one"
+    if state["n"] >= TIKI_LIMIT:
+        state.update(t=now, drink=4, say=TIKI_WATER)
+        return None
+    name, price, _ = TIKI_DRINKS[n]
+    if not wallet.take(price):
+        return "a %s is $%d" % (name.lower(), price)
+    state["n"] += 1
+    state.update(t=now, drink=n,
+                 say=TIKI_SERVED[(state["n"] * 3 + n) % len(TIKI_SERVED)])
+    return None
+
+
+def render_tiki(bar, state, width, height, now):
+    """Sat at a beach bar, looking out over the counter at the sea. The same
+    sea as outside: it comes in in lines, white where it breaks, the moon's
+    light down it if there is a moon. The thatch and the bulbs over you, the
+    posts, the bottles, the one behind the counter - shaking, while a drink is
+    being made - the list on its board, and your glass when it comes. On a big
+    window the same bar bigger: the drawings k times over, the name in block
+    letters, the list and what is said still words."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    name = TIKI_NAMES[bar["seed"] % len(TIKI_NAMES)]
+    mixing = state["t"] is not None and now - state["t"] < BAR_MIX
+    if width < 50 or height < 18:
+        _text(ch, co, height // 2 - 1, 1, ("~ at %s, on the sand ~" % name)[:width - 1],
+              GOLD)
+        _text(ch, co, height // 2 + 1, 1,
+              ("shaking..." if mixing else state["say"])[:width - 1], BULB)
+        return ch, co
+    k = big_scale(width, height)
+    n = len(NEON)
+    seed = bar["seed"]
+    top = 3 * k                         # under the thatch
+    counter = int(height * 0.78)
+    horizon = top + (counter - top) * 2 // 5
+
+    def stamp(x, y, art, attr):
+        """A drawing k times over, and nothing showing through it."""
+        for yy in range(y, y + len(art) * k):
+            for xx in range(x, x + len(art[0]) * k):
+                if 0 <= yy < height and 0 <= xx < width:
+                    ch[yy][xx], co[yy][xx] = " ", 0
+        _blow_up(ch, co, x, y, art, [[attr] * len(r) for r in art], k)
+
+    # The sky and the sea, between the thatch and the counter.
+    nt = night(now)
+    clear = nt["clarity"] * (1.0 - cloud_cover(now))
+    wet = rain_intensity(now)
+    for y in range(top, horizon):
+        for x in range(width):
+            m = _mix(x, y, 5401 + seed % 97)
+            if m % 1000 < 14 * clear:
+                ch[y][x], co[y][x] = star_look(m, nt["warmth"])
+    moon = moon_face(nt["phase"]) if clear > 0.15 else ""
+    mx = width * 5 // 8
+    if moon:
+        _text(ch, co, top + (horizon - top) // 3, mx, moon, MOON)
+    for y in range(horizon, counter):
+        d = y - horizon                 # rows down from the horizon: nearer
+        near = d / float(max(1, counter - horizon))
+        for x in range(width):
+            # Lines of swell coming in: closer together and slower far off.
+            ph = (near ** 0.5) * 9.0 - now * 0.45 + 0.25 * math.sin(x * 0.045 + y)
+            f = ph % 1.0
+            m = _mix(x // (3 + int(near * 5)), int(ph), 5403)
+            if f < 0.22 + 0.2 * near and m % 4:
+                ch[y][x] = "~"
+                co[y][x] = SNOW if near > 0.6 else RAIN if near > 0.3 else RAIN_FAR
+            elif (moon and abs(x - mx) <= 1 + d // 2
+                  and _mix(x, y + int(now * 3), 5405) % 2):
+                ch[y][x], co[y][x] = ":", MOON
+            elif _mix(x, y + int(now * 1.3), 5407) % 23 == 0:
+                ch[y][x], co[y][x] = "-", STREET
+    if d and wet > 0.1:
+        for x in range(width):
+            for y in range(top, counter):
+                if _mix(x, y - int(now * 20), 5409) % 100 < wet * 9:
+                    ch[y][x], co[y][x] = "/", RAIN_FAR
+    # The thatch, hanging over you, and the string of bulbs under it.
+    for y in range(top):
+        for x in range(width):
+            m = _mix(x // k, y // k, 5411)
+            if y // k < 2 or m % 3:
+                ch[y][x] = "\\|/"[(x // k + y // k) % 3] if m % 5 else "#"
+                co[y][x] = BARK
+    for x in range(2 * k, width - 2 * k, 4 * k):
+        lit = chase(x * 0.05, now, 0.8)
+        y = top + int(k * (1.0 - abs(((x // (4 * k)) % 6) / 2.5 - 1.0)))
+        tube = NEON[(x // (4 * k) + seed) % n]
+        _blow_up(ch, co, x, y, ["o" if lit else "."], [[tube[0] if lit else tube[1]]],
+                 1 if k == 1 else k - 1)
+    # The posts, either side.
+    for px in (width // 9, width - width // 9 - 2 * k):
+        for y in range(top, counter):
+            for x in range(px, px + 2 * k):
+                ch[y][x], co[y][x] = "|", BARK
+    # The name, over the middle.
+    if k > 1:
+        _blocks(ch, co, top + 1, width // 2 - blocks_width(name, k - 1) // 2, name,
+                NEON[(seed >> 4) % n][0], k - 1, k - 1)
+    else:
+        for y in (top, top + 1):
+            for x in range(width // 2 - len(name) // 2 - 2,
+                           width // 2 + len(name) // 2 + 3):
+                ch[y][x], co[y][x] = " ", 0
+        _text(ch, co, top + 1, width // 2 - len(name) // 2, name,
+              NEON[(seed >> 4) % n][0])
+    # Behind the counter: the bottles on their shelf, and whoever pours.
+    art = TIKI_SHAKE if mixing and int(now * 6.0) % 2 else TIKI_MAN
+    mh = len(art) * k
+    man_x = width // 2 - (width // 5)
+    stamp(man_x, counter - mh, art, CURB)
+    sx0 = width // 9 + 3 * k
+    for b in range(6):
+        tube = NEON[(seed + b * 3) % n][0]
+        stamp(sx0 + b * 2 * k, counter - 2 * k,
+              ["i " if b % 2 else "! ", "8 " if b % 3 else "A "], tube)
+    # The list, hung on the far post's side.
+    bw = 22
+    bx = width - width // 9 - 2 * k - bw - 2
+    by = top + 2 + (5 * (k - 1) if k > 1 else 0)
+    if bx > man_x + 10 * k and by + len(TIKI_DRINKS) + 2 < counter:
+        _box(ch, co, bx, by, bw, len(TIKI_DRINKS) + 2, GOLD_DIM)
+        for r, (dn, price, _) in enumerate(TIKI_DRINKS):
+            for x in range(bx + 1, bx + bw - 1):
+                ch[by + 1 + r][x], co[by + 1 + r][x] = " ", 0
+            _text(ch, co, by + 1 + r, bx + 1, "%d %-13s $%2d" % (r + 1, dn, price),
+                  GOLD if state["drink"] == r and not mixing else HUD)
+    # The counter, and the front of the bar down to the sand.
+    for y in range(counter, height):
+        for x in range(width):
+            if y < counter + k:
+                ch[y][x], co[y][x] = "=", GOLD_DIM
+            elif (x // k) % 4 == 0:
+                ch[y][x], co[y][x] = "|", BARK
+            elif _mix(x // k, y // k, 5413) % 9 == 0:
+                ch[y][x], co[y][x] = "-", BARK
+            else:
+                ch[y][x], co[y][x] = " ", 0
+    # Your glass, when it has come.
+    if state["drink"] is not None and not mixing:
+        tube = NEON[TIKI_DRINKS[state["drink"]][2] % n][0]
+        gh = len(TIKI_GLASS) * k
+        stamp(width // 2 - 3 * k, counter - gh + k, TIKI_GLASS, tube)
+    say = "*shk shk shk*" if mixing else state["say"]
+    for x in range(width):
+        ch[height - 2][x], co[height - 2][x] = " ", 0
+    _text(ch, co, height - 2, max(1, width // 2 - len(say) // 2), say[:width - 2], BULB)
+    return ch, co
+
+
+def draw_beach(ch, co, v, walls, now, wet):
+    """What is on the sand, farthest first."""
+    blocks = sorted(near_beach(v, BEACH_SEEN),
+                    key=lambda b: -((b[1] - v.x) ** 2 + (b[2] - v.z) ** 2))
+    for kind, x, z, seed in blocks:
+        if kind == "fire":
+            draw_beach_fire(ch, co, v, walls, x, z, seed, now, wet)
+        elif kind == "bar":
+            draw_tiki_bar(ch, co, v, walls, x, z, seed, now, wet)
+        elif kind == "guard":
+            blit_sprite(ch, co, v, walls, GUARD_TOWER, x, z, 0.0, 5.0, 3.6, CONCRETE)
+            put_point(ch, co, v, walls, x + 1.9, 5.2, z,
+                      ">" if int(now * 2.0) % 2 else ")", ROU_RED)
+        else:
+            # Two rows of them, shut for the night, a lounger by each.
+            spots = [(x + a * CELL, z + (r - 1.5) * 2.0 * CELL)
+                     for a in (-0.5, 0.5) for r in range(4)]
+            for px, pz in sorted(spots, key=lambda p: -((p[0] - v.x) ** 2
+                                                        + (p[1] - v.z) ** 2)):
+                tone = NEON[(seed + int(pz)) % len(NEON)][1]
+                blit_sprite(ch, co, v, walls, LOUNGER, px + 0.6, pz + 1.6, 0.0, 0.7,
+                            2.0, CURB)
+                blit_sprite(ch, co, v, walls, PARASOL, px, pz, 0.0, 2.6, 2.8, tone)
+
+
+STROLL_SLOT = 16.0     # units between places in a line of people on the boardwalk
+STROLL_PACE = 1.4      # and how fast the line goes
+SHIP_GAP = 1300.0      # units along the coast between one ship's place and the next
+SHIP_OUT = (650.0, 1500.0)      # how far out they pass
+
+
+def near_strollers(v, now):
+    """People walking the boardwalk, as (distance squared, x, z, stride phase,
+    hash): two lines of them, one each way, a place every STROLL_SLOT and some
+    of them filled by how busy the menu says the city is. Where they are is a
+    function of the time, as with everyone who walks here."""
+    odds = CROWD_ODDS.get(CROWDS[_crowd])
+    if odds is None or not COAST or v.x + BEACH_SEEN < COAST_LAND * CELL:
+        return []
+    out = []
+    for way, off in ((1, -1.1), (-1, 1.1)):
+        drift = way * now * STROLL_PACE
+        n0 = int((v.z - BEACH_SEEN - drift) // STROLL_SLOT)
+        for n in range(n0, n0 + int(2 * BEACH_SEEN / STROLL_SLOT) + 2):
+            g = _mix(n, way, 5501)
+            if g % odds:
+                continue
+            z = n * STROLL_SLOT + drift
+            j = int(z / CELL + BIG) - BIG
+            iw = int(math.floor(coastline(j))) - BEACH_DEEP - 1
+            if coast_kind(iw, j) not in ("walk", "bridge"):
+                continue
+            x = (iw + 0.5) * CELL + off
+            rx, rz = x - v.x, z - v.z
+            d2 = rx * rx + rz * rz
+            if rx * v.dx + rz * v.dz < 0.0 or d2 > BEACH_SEEN * BEACH_SEEN or d2 < 2.0:
+                continue
+            out.append((d2, x, z, (abs(drift) / 0.6 + n) % 2.0, g))
+    return out
+
+
+def draw_ships(ch, co, v, walls, now):
+    """Out on the horizon: a ship now and then, going along the coast, a row
+    of lights and one coloured one - red if it shows you its port side, green
+    the other. Each has a place along the coast and moves through it, so there
+    is always the odd one out there and never a convoy."""
+    if v.fog or v.x + 2000.0 < COAST_LAND * CELL:
+        return
+    k0 = int((v.z - 2600.0) // SHIP_GAP)
+    for k in range(k0, k0 + 6):
+        m = _mix(k, 0, 5601)
+        if m % 3:
+            continue
+        way = 1 if (m >> 3) & 1 else -1
+        pace = 4.0 + (m >> 5) % 5
+        z = k * SHIP_GAP + ((m >> 9) % 1000 + way * now * pace) % SHIP_GAP
+        x = shore_x(z) + SHIP_OUT[0] + (m >> 20) % int(SHIP_OUT[1] - SHIP_OUT[0])
+        pr = v.project(x, 2.5, z)
+        if pr is None or pr[2] < 150.0:
+            continue
+        sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+        long_ = max(3, int(70.0 * v.fx / dist))
+        # Which side of it you are looking at: its port side, going north.
+        side = ROU_RED if way * (v.x - x) < 0 else ROU_GREEN
+        for c in range(long_):
+            glyph, attr = ".", BULB_DIM
+            if c == long_ // 2:
+                glyph, attr = "o", BULB
+            elif c == (0 if way * (z - v.z) * (v.dx) < 0 else long_ - 1):
+                glyph, attr = "o", side
+            elif c % 2:
+                continue
+            put_cell(ch, co, v, walls, sx - long_ // 2 + c, sy, dist, glyph, attr)
+
+
+def draw_mouth_lights(ch, co, v, walls, now, wet):
+    """Where the river meets the sea: a post either side of the mouth with a
+    light on it, red one side and green the other, turn and turn about."""
+    if not COAST:
+        return
+    mj = int(river_centre(COAST_I))
+    i = int(math.floor(coastline(mj)))
+    lo, hi = river_span(i)
+    for z, attr, when in ((lo * CELL - 3.0, ROU_RED, 0), ((hi + 1) * CELL + 3.0,
+                                                          ROU_GREEN, 1)):
+        x = shore_x(z) - 2.0
+        if (x - v.x) ** 2 + (z - v.z) ** 2 > 400.0 ** 2:
+            continue
+        for h in (0.6, 1.5, 2.4, 3.3):
+            put_point(ch, co, v, walls, x, h, z, "|", CONCRETE)
+        if int(now * 0.8) % 2 == when:
+            put_lit(ch, co, v, walls, x, 4.1, z, "*", attr, max(wet, 0.5), now)
+        else:
+            put_point(ch, co, v, walls, x, 4.1, z, ".", attr)
+
+
+def coast_hint(x, z):
+    """What the HUD says on the sand."""
+    kind = coast_kind(int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG)
+    if kind in ("sand", "surf"):
+        return "  ~ the sea, coming in ~"
+    return ""
+
+
+def _beach_spot(x, z):
+    """On the boardwalk, looking out to sea: where there is a bar on the sand
+    if one is near, and anywhere there are boards if not. Along the coast from
+    where you are, so a second press is a different stretch of beach."""
+    if not COAST:
+        return None
+    cj = int(z / CELL + BIG) - BIG
+    plain = None
+    for step in range(0, 600):
+        j = cj + (step + 1) // 2 * (1 if step % 2 else -1)
+        iw = int(math.floor(coastline(j))) - BEACH_DEEP - 1
+        px, pz = (iw + 0.5) * CELL, (j + 0.5) * CELL
+        if (coast_kind(iw, j) != "walk" or not can_stand(px, pz)
+                or (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2):
+            continue
+        b = beach_block(j // BEACH_BLOCK)
+        if b is not None and b[0] == "bar" and abs(b[2] - pz) < 1.0:
+            return px, pz, math.pi * 0.5
+        if plain is None:
+            plain = (px, pz, math.pi * 0.5)
+        if step > 280 and plain is not None:
+            break                       # no bar for a long way: just the beach
+    return plain
+
+
+def near_sea_piers(v, reach):
+    """The piers within reach along the coast."""
+    if not COAST or v.x + reach < COAST_LAND * CELL:
+        return
+    j0 = int((v.z - reach) / CELL) - PIER_BROAD
+    k = (j0 - PIER_ROW) // PIER_GAP
+    while k * PIER_GAP + PIER_ROW <= (v.z + reach) / CELL + PIER_BROAD:
+        pier = sea_pier(k * PIER_GAP + PIER_ROW)
+        if pier is not None:
+            yield pier
+        k += 1
+
+
+def draw_sea_wheel(ch, co, v, walls, x, z, now, wet, far):
+    """The wheel on the pier's head: twice the carnival's, and facing the
+    shore, so from the beach it is the whole circle standing over the sea.
+    A ring of bulbs chasing round it, spokes, cabins that hang upright, an
+    A-frame under the hub. From a long way off, the ring and nothing else."""
+    r = SEA_WHEEL_R
+    hub = r + 1.6
+    turn = now * SEA_WHEEL_RPM * math.tau / 60.0
+    step = int(now * 5.0)
+    n = len(NEON)
+    if not far:
+        for h in range(0, int(hub * 2)):
+            y = h * 0.5
+            d = (hub - y) * 0.4
+            put_point(ch, co, v, walls, x, y, z - d, "/", CONCRETE)
+            put_point(ch, co, v, walls, x, y, z + d, "\\", CONCRETE)
+        for s_ in range(12):
+            a = turn + s_ * math.tau / 12.0
+            for k in range(1, int(r)):
+                put_point(ch, co, v, walls, x, hub + math.sin(a) * k,
+                          z + math.cos(a) * k,
+                          "-" if abs(math.cos(a)) > 0.7 else "|", CONCRETE)
+        put_point(ch, co, v, walls, x, hub, z, "O", GOLD)
+    bulbs = 48 if far else 96
+    for k in range(bulbs):
+        a = turn + k * math.tau / bulbs
+        put_lit(ch, co, v, walls, x, hub + math.sin(a) * r, z + math.cos(a) * r, "o",
+                NEON[(k * 8 // bulbs + step) % n][0], max(wet, 0.3), now)
+    if not far:
+        for s_ in range(12):
+            a = turn + s_ * math.tau / 12.0
+            y, zz = hub + math.sin(a) * r, z + math.cos(a) * r
+            put_point(ch, co, v, walls, x, y - 0.8, zz - 0.5, "[", CURB)
+            put_point(ch, co, v, walls, x, y - 0.8, zz + 0.5, "]", CURB)
+            put_point(ch, co, v, walls, x, y - 0.8, zz, "o", BULB_DIM)
+
+
+def draw_sea_pier(ch, co, v, walls, pier, now, wet):
+    """A pier out to sea: lamps and a string of bulbs down both rails all the
+    way out, its name in lights over the way on, a couple of stalls and
+    somebody fishing, and the wheel on its head. From far along the coast it
+    is the lamps and the wheel's ring: a line of lights going out over the
+    water with a circle at the end of it."""
+    r0, head, end = pier
+    z0, z1 = r0 * CELL, (r0 + PIER_BROAD) * CELL
+    root = (int(math.floor(coastline(r0 + PIER_BROAD // 2))) - BEACH_DEEP) * CELL
+    xh, x1 = head * CELL, (end + 1) * CELL
+    d2 = (min(max(v.x, root), x1) - v.x) ** 2 + (min(max(v.z, z0), z1) - v.z) ** 2
+    far = d2 > 230.0 ** 2
+    n = len(NEON)
+    step = int(now * 5.0)
+    # The rails of the shaft, and round the head.
+    hz0, hz1 = z0 - PIER_HEAD[1] * CELL, z1 + PIER_HEAD[1] * CELL
+    runs = [(root, z0 + 0.3, xh, z0 + 0.3), (root, z1 - 0.3, xh, z1 - 0.3),
+            (xh, hz0 + 0.3, x1 - 0.3, hz0 + 0.3), (xh, hz1 - 0.3, x1 - 0.3, hz1 - 0.3),
+            (x1 - 0.3, hz0 + 0.3, x1 - 0.3, hz1 - 0.3),
+            (xh, hz0 + 0.3, xh, z0 + 0.3), (xh, z1 - 0.3, xh, hz1 - 0.3)]
+    for ax, az, bx, bz in runs:
+        long_ = math.hypot(bx - ax, bz - az)
+        k = 0
+        while k * 1.25 <= long_:
+            t = k * 1.25 / long_
+            x, z = ax + (bx - ax) * t, az + (bz - az) * t
+            if k % 8 == 0:
+                # A lamp, every ten units.
+                if not far:
+                    for h in (1.0, 1.9, 2.8):
+                        put_point(ch, co, v, walls, x, h, z, "|", CONCRETE)
+                put_lit(ch, co, v, walls, x, 3.3, z, "o", BULB, max(wet, 0.4), now)
+            elif not far:
+                u = (k % 8) / 8.0
+                y = 3.1 - 0.6 * (1.0 - (2.0 * u - 1.0) ** 2)
+                lit = chase(k * 0.2, now)
+                tube = NEON[(k + step // 2) % n]
+                put_point(ch, co, v, walls, x, y, z, "o" if lit else ".",
+                          tube[0] if lit else tube[1])
+                if k % 2 == 0:
+                    put_point(ch, co, v, walls, x, 0.95, z, "-", CURB)
+            k += 1
+    wx, wz = sea_wheel(pier)
+    draw_sea_wheel(ch, co, v, walls, wx, wz, now, wet, far)
+    if far:
+        return
+    # Its name over the way on, a letter a light, read from the boardwalk.
+    for h in (0.8, 1.7, 2.6, 3.5, 4.4):
+        put_point(ch, co, v, walls, root, h, z0 + 0.3, "|", CONCRETE)
+        put_point(ch, co, v, walls, root, h, z1 - 0.3, "|", CONCRETE)
+    gap = 1.5
+    zs = (z0 + z1) * 0.5 + gap * (len(PIER_NAME) - 1) * 0.5
+    for k, c in enumerate(PIER_NAME):
+        if c != " ":
+            put_lit(ch, co, v, walls, root, 5.0, zs - k * gap, c,
+                    NEON[(k + step // 3) % n][0], max(wet, 0.3), now)
+    # A couple of stalls by the way on, and people fishing off the side.
+    for k, along in enumerate((16.0, 34.0)):
+        blit_sprite(ch, co, v, walls, STALL, root + along, z0 + 2.2, 0.0, 2.4, 2.3,
+                    NEON[(k * 3 + 2) % n][0])
+        put_lit(ch, co, v, walls, root + along, 1.2, z0 + 2.5, "*", BULB,
+                max(wet, 0.3), now)
+    for k in range(4):
+        m = _mix(r0, k, 5701)
+        ax = root + 45.0 + k * 30.0 + (m & 7)
+        if ax < xh - 4.0:
+            blit_sprite(ch, co, v, walls, ANGLER, ax,
+                        (z0 + 0.9) if m & 8 else (z1 - 0.9), 0.0, 1.8, 1.9, CURB)
+    for k in range(5):
+        m = _mix(r0, k, 5703)
+        blit_sprite(ch, co, v, walls, LOOK_UP, wx - 6.0 - (m & 7),
+                    wz - 6.0 + ((m >> 4) & 15) * 0.8, 0.0, SMOKER_H, SMOKER_W, CURB)
+
+
+SEA_WHEEL_FEE = 6      # a ride on the wheel
+SEA_WHEEL_RIDE = 50.0  # seconds, once round
+SEA_WHEEL_HUD = (" the big wheel  -  a d look round  -  once round, and it lets you "
+                 "off at the bottom ")
+
+
+def sea_wheel_near(x, z):
+    """The pier whose wheel you are standing at the foot of, or None."""
+    if not COAST or x < COAST_LAND * CELL:
+        return None
+    pier = sea_pier(int(z / CELL + BIG) - BIG)
+    if pier is None:
+        return None
+    wx, wz = sea_wheel(pier)
+    return pier if (wx - x) ** 2 + (wz - z) ** 2 < 6.0 ** 2 else None
+
+
+def wheel_seat(pier, t):
+    """(x, z, how high) of your cabin, t seconds into a ride: on at the
+    bottom, up the side towards the sea, over the top, and down."""
+    wx, wz = sea_wheel(pier)
+    a = -math.pi * 0.5 + math.tau * min(1.0, max(0.0, t / SEA_WHEEL_RIDE))
+    return (wx, wz + math.cos(a) * SEA_WHEEL_R,
+            SEA_WHEEL_R + 1.6 + math.sin(a) * SEA_WHEEL_R)
+
+
+def render_wheel_ride(pier, t, yaw, width, height, now):
+    """Out of a cabin of the big wheel, going round: the real coast, from as
+    high as the wheel takes you - the pier under you, the beach both ways,
+    the town behind it, the sea. The cabin's frame round the view, and how
+    high you are in the corner."""
+    x, z, y = wheel_seat(pier, t)
+    eye = y + 0.6
+    v = View(x - 0.8, z, yaw, width, height, eye=eye,
+             reach=ROOF_REACH if eye > 12.0 else MAX_VIEW)
+    ch, co, wet = render_street(v, now)
+    # The cabin: a rail under the window, a post each side, the roof's edge.
+    sway = int(round(math.sin(now * 0.9) * 1.2))
+    rail = height - 3
+    for xx in range(width):
+        ch[0][xx], co[0][xx] = "=", CONCRETE
+        ch[rail][xx], co[rail][xx] = "=", CONCRETE
+        for yy in range(rail + 1, height):
+            ch[yy][xx], co[yy][xx] = ("|", CURB) if (xx + sway) % 6 == 0 else (" ", 0)
+    for xx in (0, 1, width - 2, width - 1):
+        for yy in range(height):
+            ch[yy][xx], co[yy][xx] = "|", CONCRETE
+    _text(ch, co, 1, 3, "%d up" % int(y), GOLD)
+    return ch, co, v
+
+
+def _sea_pier_spot(x, z):
+    """On the boardwalk at the foot of the nearest pier, looking out along it."""
+    if not COAST:
+        return None
+    cj = int(z / CELL + BIG) - BIG
+    k0 = (cj - PIER_ROW) // PIER_GAP
+    best = None
+    for k in (k0 - 1, k0, k0 + 1, k0 + 2):
+        pier = sea_pier(k * PIER_GAP + PIER_ROW)
+        if pier is None:
+            continue
+        j = pier[0] + PIER_BROAD // 2
+        # Back on the road, to read the name over the way on.
+        px = (int(math.floor(coastline(j))) - BEACH_DEEP - 2) * CELL - 3.0
+        pz = (j + 0.5) * CELL
+        d = (px - x) ** 2 + (pz - z) ** 2
+        if d >= CHEAT_SKIP ** 2 and can_stand(px, pz) and (best is None or d < best[0]):
+            best = (d, px, pz)
+    return None if best is None else (best[1], best[2], math.pi * 0.5)
+
+
+def draw_seafront(ch, co, v, walls, now, wet):
+    """The boardwalk's furniture, row by row along the coast: lamps, the string
+    of bulbs between them, palms, benches, somebody at the edge - and the rails
+    and lamps of the bridge that carries it all over the river's mouth. From up
+    high only the lamps, which is the line the coast makes from the plane."""
+    high = v.eye >= 10.0
+    reach = 420.0 if high else BEACH_SEEN
+    if not COAST or v.x + reach < COAST_LAND * CELL:
+        return
+    cj = int(v.z / CELL + BIG) - BIG
+    n = int(reach / CELL)
+    colours = len(NEON)
+    for j in range(cj - n, cj + n + 1):
+        iw = int(math.floor(coastline(j))) - BEACH_DEEP - 1     # the boardwalk's cell
+        z = (j + 0.5) * CELL
+        rx, rz = (iw + 0.5) * CELL - v.x, z - v.z
+        d2 = rx * rx + rz * rz
+        if rx * v.dx + rz * v.dz < -CELL * 2 or d2 > reach * reach:
+            continue
+        kind = coast_kind(iw, j)
+        near = d2 < BEACH_SEEN * BEACH_SEEN and not high
+        xe = (iw + 1) * CELL - 0.4                  # the edge the sand is over
+        if kind == "bridge":
+            # The road's two cells and the boardwalk's, railed either side.
+            for xr in ((iw - 2) * CELL + 0.3, xe):
+                if near:
+                    for t in range(4):
+                        put_point(ch, co, v, walls, xr, 0.95, j * CELL + t * 1.25,
+                                  "-", CURB)
+                    put_point(ch, co, v, walls, xr, 0.5, z, "|", CURB)
+                if j % 3 == 0:
+                    put_lit(ch, co, v, walls, xr, 3.3, z, "o", BULB, max(wet, 0.3),
+                            now)
+            continue
+        if kind != "walk":
+            continue
+        if j % 3 == 0:
+            if near:
+                for h in (1.0, 1.9, 2.8):
+                    put_point(ch, co, v, walls, xe, h, z, "|", CONCRETE)
+            put_lit(ch, co, v, walls, xe, 3.3, z, "o", BULB, max(wet, 0.3), now)
+        if not near:
+            continue
+        # The string of bulbs, sagging from one lamp to the next, every colour.
+        for t in range(4):
+            zz = j * CELL + t * 1.25
+            u = ((zz / CELL - 0.5) % 3.0) / 3.0
+            if u < 0.06 or u > 0.94:
+                continue                            # the lamp itself is there
+            y = 3.1 - 0.6 * (1.0 - (2.0 * u - 1.0) ** 2)
+            tube = NEON[int(zz / 1.25) % colours]
+            lit = chase(zz * 0.16, now)
+            put_point(ch, co, v, walls, xe, y, zz, "o" if lit else ".",
+                      tube[0] if lit else tube[1])
+        m = _mix(j, 0, 5301)
+        if j % 3 == 1:
+            # A palm on the road's side of the boards, lit from under.
+            xp = iw * CELL + 0.5
+            lean = 0.35 * math.sin(j * 1.7)
+            for h in range(7):
+                put_point(ch, co, v, walls, xp + lean * h / 7.0, h * 0.9, z, "|", BARK)
+            for a, b_, g in ((-1.2, -0.5, "/"), (1.2, -0.5, "\\"), (-0.6, 0.2, "\\"),
+                             (0.6, 0.2, "/"), (0.0, 0.5, "|")):
+                for t in (0.3, 0.6, 1.0):
+                    put_point(ch, co, v, walls, xp + lean, 6.4 + b_ * t, z + a * t, g,
+                              GRASS)
+            put_lit(ch, co, v, walls, xp, 0.2, z, "*", EMBER, max(wet, 0.3), now)
+        elif j % 3 == 2 and m % 2:
+            blit_sprite(ch, co, v, walls, BENCH, (iw + 0.5) * CELL, z, 0.0, 0.9, 1.6,
+                        CURB)
+        if m % 9 == 0:
+            blit_sprite(ch, co, v, walls, LEANER, xe - 0.5, z + 1.2, 0.0, 1.75, 0.95,
+                        CURB)
+
+
 def ferry_spot(now, c):
     """Where the ferry is: it crosses the bay beside the big bridge, near
     bank to far bank and back, and waits a while at each end."""
@@ -14338,6 +15536,8 @@ def near_rowboats(v, now, reach):
         if abs(x - v.x) > reach:
             continue
         i = int(x / CELL + BIG) - BIG
+        if past_mouth(i, 18):
+            continue                    # out to sea, and gone
         lo, hi = river_span(i)
         side = 0.35 if _mix(n, 0, 1423) & 1 else 0.65
         z = (lo + (hi - lo) * side) * CELL
@@ -14366,6 +15566,8 @@ def draw_river_lanterns(ch, co, v, walls, now, wet):
         m = _mix(a, 0, 1427)
         x = a * CELL + now * LANTERN_DRIFT
         i = int(x / CELL + BIG) - BIG
+        if past_mouth(i, 40):
+            continue                    # they go out on the tide, a long way
         lo, hi = river_span(i)
         for k in range(4 + m % 3):
             s = (m >> (2 + 5 * k)) & 127
@@ -15213,6 +16415,8 @@ def hwy_span(k):
                     if span[1] >= 3 and not grand_at(span[0]):
                         hit = span
                     break
+        if hit is not None and off_coast(hit[0] + hit[1] + 2):
+            hit = None                  # nor a highway out over the sea
         _hwy_cache[k] = hit
     return hit
 
@@ -15528,8 +16732,8 @@ def draw_moon_river(ch, co, v, walls, now):
             i = (ci + sign * off) // step * step
             off += step
             pr = v.project(i * CELL, 0.0, river_centre(i) * CELL)
-            if pr is None:
-                prev = None
+            if pr is None or (COAST and i > coastline(int(river_centre(i)))):
+                prev = None             # behind you, or past its mouth: the sea
                 continue
             if prev is not None and not ((prev[0] < 0 and pr[0] < 0) or (
                     prev[0] >= width and pr[0] >= width)):
@@ -15967,6 +17171,8 @@ def el_span(k):
                 if span is not None:
                     hit = span
                     break
+        if hit is not None and off_coast(hit[0] + hit[1] + 2):
+            hit = None                  # no viaduct along the beach
         _el_cache[k] = hit
     return hit
 
@@ -18942,7 +20148,7 @@ def _washing_spot(x, z):
     """Down a street from a washing line, looking along the street at it."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
-    for i, j in _rings(ci, cj, CHEAT_RINGS):
+    for i, j in _rings(ci, cj, cheat_rings(ci)):
         if _mix(i, j, 5401) % WASH_ODDS:
             continue
         lines = wash_lines_at(i, j)
@@ -20746,6 +21952,34 @@ def render_street(v, now):
         draw_carnival(ch, co, v, walls, c_, now, wet)
     for s_ in near_promenades(v, 110.0):
         draw_promenade(ch, co, v, walls, s_, now, wet)
+    if COAST and v.x + 2000.0 > COAST_LAND * CELL:
+        draw_ships(ch, co, v, walls, now)
+    if COAST and v.x + 900.0 > COAST_LAND * CELL:
+        draw_seafront(ch, co, v, walls, now, wet)
+        for pier_ in near_sea_piers(v, 900.0):
+            draw_sea_pier(ch, co, v, walls, pier_, now, wet)
+        draw_beach(ch, co, v, walls, now, wet)
+        draw_mouth_lights(ch, co, v, walls, now, wet)
+        if not night(now)["alien"]:
+            for _, x_, z_, phase_, g_ in sorted(near_strollers(v, now), reverse=True):
+                coat_ = (CURB, BARK, tone_colour("warm", (g_ >> 8 & 15) / 15.0),
+                         tone_colour("cold", (g_ >> 12 & 15) / 15.0))[g_ >> 16 & 3]
+                if wet > 0.25 and (g_ >> 18) & 1:
+                    blit_sprite(ch, co, v, walls, UMBRELLA, x_, z_, 0.0,
+                                SMOKER_H * 1.25, SMOKER_W * 1.4, coat_)
+                else:
+                    blit_sprite(ch, co, v, walls,
+                                WALKER_A if phase_ < 1.0 else WALKER_B, x_, z_, 0.0,
+                                SMOKER_H, SMOKER_W, coat_)
+        # Gulls over the water's edge, going round.
+        for k_ in range(4):
+            m_ = _mix(k_, 0, 5503)
+            a_ = now * (0.09 + (m_ >> 4 & 7) * 0.011) + (m_ >> 8 & 255) / 40.0
+            gz_ = v.z + math.cos(a_) * (18.0 + (m_ & 15))
+            put_point(ch, co, v, walls,
+                      shore_x(gz_) + 6.0 + math.sin(a_) * 12.0,
+                      6.0 + (m_ >> 12 & 7) * 0.8 + math.sin(now * 0.8 + k_) * 0.6, gz_,
+                      "v" if math.sin(now * 3.0 + k_ * 2.0) > 0 else "^", MOON_DIM)
     for bx, bz in near_rowboats(v, now, 120.0):
         draw_rowboat(ch, co, v, walls, bx, bz, now, wet)
     ci_ = int(v.x / CELL + BIG) - BIG
@@ -22730,6 +23964,9 @@ def venue_at(x, z):
     room drawn around you."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
+    bar = beach_bar_near(x, z)
+    if bar is not None:
+        return "beachbar", {"seed": bar[3], "u": int(bar[2])}
     if zone_depth("suburbs", ci, cj) > -2.0:
         hh = zone_home("suburbs", ci, cj)
         for kind, egg in suburb_eggs(*hh).items():
@@ -24634,7 +25871,8 @@ CHEAT_HIDDEN = [
     ("_", "car park", "carpark"), ("<", "police car", "police"),
     (")", "highway", "highway"), ("o", "the woods", "woods"), ("~", "the lake", "lake"),
     ("t", "riverbank", "bank"), ("a", "karaoke bar", "karaoke"),
-    ("l", "mini golf", "minigolf"),
+    ("l", "mini golf", "minigolf"), ("1", "the beach", "beach"),
+    ("2", "the pier", "seapier"), ("3", "the pier's wheel", "seawheel"),
 ]
 CHEAT_TEST = 1                          # ctrl-a
 TEST_JUMPS = bool(os.environ.get("ASCII_CITY_TEST"))
@@ -24647,6 +25885,13 @@ CHEAT_GROUPS = [
     ("NIGHTLIFE", ["rave", "warehouse"]),
     ("VIEWS", ["billboard"]),
 ]
+
+
+def cheat_rings(ci):
+    """How far out a search for a place goes, in cells: CHEAT_RINGS, and twice
+    that from near the coast, where half of every ring is sea - from the
+    beach the nearest diner was past the usual limit, and the taxi had none."""
+    return CHEAT_RINGS * 2 if COAST and ci + CHEAT_RINGS > COAST_LAND else CHEAT_RINGS
 
 
 def _rings(ci, cj, limit):
@@ -24782,7 +26027,7 @@ def _district_spot(x, z, want):
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
     skip = CHEAT_SKIP ** 2
-    for i, j in _rings(ci, cj, CHEAT_RINGS):
+    for i, j in _rings(ci, cj, cheat_rings(ci)):
         if district_at(i, j) != want or not is_open(i, j):
             continue
         if sum(district_at(i + a, j + b) == want
@@ -24842,6 +26087,8 @@ def _water_spot(x, z, kind):
         # On the fairground, near the water, looking down the length of it.
         for k in range(-1, 3):
             c = carnival_col(ci + k * CARNIVAL_GAP)
+            if c == DROWNED:
+                continue
             # Looking down the length of it, from whichever end has room:
             # the bank slopes, and looking the way it runs out you look
             # into the river two steps on.
@@ -25125,7 +26372,7 @@ def _temple_spot(x, z):
     rose window and the door are what it is. Walking in is a few steps."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
-    for i, j in _rings(ci, cj, CHEAT_RINGS):
+    for i, j in _rings(ci, cj, cheat_rings(ci)):
         if _mix(i, j, 3201) % TEMPLE_ODDS or is_open(i, j):
             continue
         tp = lot(i, j)["temple"]
@@ -25147,7 +26394,7 @@ def _doorway(x, z, salt, key, odds=CLUB_ODDS):
     and ask to go in, you mean that club."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
-    for i, j in _rings(ci, cj, CHEAT_RINGS):
+    for i, j in _rings(ci, cj, cheat_rings(ci)):
         if _mix(i, j, salt) % odds or is_open(i, j):
             continue
         v = lot(i, j)[key]
@@ -25208,7 +26455,7 @@ def _diner_door(x, z):
     """In the diner's doorway - its own odds, so not _doorway()'s."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
-    for i, j in _rings(ci, cj, CHEAT_RINGS):
+    for i, j in _rings(ci, cj, cheat_rings(ci)):
         if _mix(i, j, 2401) % DINER_ODDS or is_open(i, j):
             continue
         dn = lot(i, j)["diner"]
@@ -25229,6 +26476,8 @@ def _claw_spot(x, z, where=None):
     ci = int(x / CELL + BIG) - BIG
     for k in range(-1, 3):
         c = carnival_col(ci + k * CARNIVAL_GAP)
+        if c == DROWNED:
+            continue
         bx, bz = (where or claw_spot)(c)
         px, pz = bx, bz - 1.2
         if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:
@@ -25322,7 +26571,7 @@ def _billboard_spot(x, z):
     """Across the wide street from a billboard, looking up at it."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
-    for i, j in _rings(ci, cj, CHEAT_RINGS):
+    for i, j in _rings(ci, cj, cheat_rings(ci)):
         if _mix(i, j, 2405) % BILL_ODDS or is_open(i, j):
             continue
         bb = lot(i, j)["billboard"]
@@ -25403,7 +26652,7 @@ def _escape_spot(x, z, want=None, cat=False):
     With `want`, one whose roof has that on it; with `cat`, one with the cat."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
-    for i, j in _rings(ci, cj, CHEAT_RINGS):
+    for i, j in _rings(ci, cj, cheat_rings(ci)):
         for f in range(4):
             if _mix(i, j * 4 + f, 1931) % CLIMB_ODDS or not climbable(i, j, f):
                 continue
@@ -25425,7 +26674,7 @@ def _tower_spot(x, z, bar=False):
     the door: one step forward and you are in the lift."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
-    for i, j in _rings(ci, cj, CHEAT_RINGS):
+    for i, j in _rings(ci, cj, cheat_rings(ci)):
         if _mix(i, j, 1907) % TOWER_ODDS or is_open(i, j):
             continue
         t = lot(i, j)["tower"]
@@ -25495,7 +26744,7 @@ def _vending_spot(x, z):
     the one you are at."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
-    for i, j in _rings(ci, cj, CHEAT_RINGS):
+    for i, j in _rings(ci, cj, cheat_rings(ci)):
         if not is_open(i, j) or road_at(i, j):
             continue
         run = lane_run(i, j)
@@ -25523,7 +26772,7 @@ def _ramen_spot(x, z):
     another."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
-    for i, j in _rings(ci, cj, CHEAT_RINGS):
+    for i, j in _rings(ci, cj, cheat_rings(ci)):
         if is_open(i, j):
             continue
         for f in range(4):
@@ -25547,7 +26796,7 @@ def _manhole_spot(x, z):
     it. Skips the one at hand, so a second press finds another."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
-    for i, j in _rings(ci, cj, CHEAT_RINGS):
+    for i, j in _rings(ci, cj, cheat_rings(ci)):
         if _mix(i, j, 3101) % MANHOLE_ODDS:
             continue
         mh = manhole_at(i, j)
@@ -25584,6 +26833,17 @@ def find_place(x, z, kind):
         return _ramen_spot(x, z)
     if kind == "vending":
         return _vending_spot(x, z)
+    if kind == "beach":
+        return _beach_spot(x, z)
+    if kind == "seapier":
+        return _sea_pier_spot(x, z)
+    if kind == "seawheel":
+        # At the foot of the wheel on the nearest pier's head, looking up at it.
+        sp = _sea_pier_spot(x, z)
+        if sp is None:
+            return None
+        wx, wz = sea_wheel(sea_pier(int(sp[1] / CELL + BIG) - BIG))
+        return wx - 4.5, wz, math.pi * 0.5
     if kind == "manhole":
         return _manhole_spot(x, z)
     if kind == "lair":
@@ -25705,7 +26965,7 @@ def find_place(x, z, kind):
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
     skip = CHEAT_SKIP ** 2
-    for i, j in _rings(ci, cj, CHEAT_RINGS):
+    for i, j in _rings(ci, cj, cheat_rings(ci)):
         if kind == "club":
             hit = _door_spot(i, j, 909, "club")
         elif kind == "casino":
@@ -25759,6 +27019,7 @@ def draw_cheats(ch, co, note):
            ("`", "close")]
     more = [("", "AND THE REST")] + [names[k] for k in CHEAT_MORE if k in names]
     more.append(("\\", "storm far ahead"))
+    more.append(("~", "the sea: " + ("on" if COAST else "off")))
     col = 18
     columns = (left, middle, more, sky)
     rows = max(len(c) for c in columns)
@@ -27199,7 +28460,8 @@ TAXI_DESTS = [("the casino", "casino"), ("the club", "club"),
               ("the roof party", "roofparty"), ("the carnival", "carnival"),
               ("the lighthouse", "lighthousedoor"), ("the big bridge", "grand"),
               ("the riverbank", "bank"), ("the woods", "woods"), ("the lake", "lake"),
-              ("the karaoke bar", "karaoke"), ("the mini golf", "minigolf")]
+              ("the karaoke bar", "karaoke"), ("the mini golf", "minigolf"),
+              ("the beach", "beach"), ("the pier", "seapier")]
 DRIVER_SAYS = ["Busy night.", "Where you headed, friend?", "Meter's running.",
                "You see the fireworks over the bay? I saw them once.",
                "I don't go into the woods after dark. Nobody does.",
@@ -27473,7 +28735,11 @@ def cab_ground(i, j):
     hit = _cab_seen.get(key, 0)
     if hit == 0:
         _evict(_cab_seen, 60000)
-        if not is_open(i, j) or (water_at(i, j) and not deck_at(i, j)):
+        if coast_kind(i, j) is not None:
+            # The road along the front, or the sand - and not the sea.
+            hit = {"road": "road", "bridge": "road", "sea": None,
+                   "mouth": None, "hall": None}.get(coast_kind(i, j), "rough")
+        elif not is_open(i, j) or (water_at(i, j) and not deck_at(i, j)):
             hit = None
         elif (road_at(i, j) or car_park_at(i, j) or bridge_at(i, j)
               or (not DISTRICTS[district_at(i, j)]["park"] and not woods_at(i, j)
@@ -28712,7 +29978,7 @@ def station_of_block(bi, bj):
     if key in _station_cache:
         return _station_cache[key]
     hit = None
-    if _mix(bi, bj, 4101) % METRO_ODDS == 0:
+    if _mix(bi, bj, 4101) % METRO_ODDS == 0 and not off_coast(bi * XP + XP + 2):
         for i in range(bi * XP, bi * XP + XP):
             for j in range(bj * ZP, bj * ZP + ZP):
                 if is_open(i, j) or woods_at(i, j) or any(
@@ -29583,6 +30849,8 @@ def main(stdscr):
     at_flyer = False
     lemon = {"glasses": 0, "at": -1e9}   # the kid's best customer
     vendor = None               # the vending machine whose glass you are at
+    tiki = None                 # sat at a beach bar: your tab, for this visit
+    ride = None                 # up on the pier's wheel: {"pier", "t0"}
     vendors = {}                # and the ones you have been at, by seed: their stock
     scope_at = None             # when you put your eye to the telescope
     # The temple's terminal: the verses so far, when the last word was asked
@@ -29605,7 +30873,7 @@ def main(stdscr):
         return (sewer is not None or taxi is not None or cab is not None
                 or metro is not None
                 or flight is not None or reading or poke is not None
-                or vendor is not None)
+                or vendor is not None or ride is not None)
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -29687,7 +30955,7 @@ def main(stdscr):
                             if skip_to_alien(now) else "no such night near")
                 elif key == ord(">"):
                     note = "traffic: " + cycle_traffic()
-                elif key == ord("a"):
+                elif key == ord("a") and not hidden_next:
                     note = "people: " + cycle_crowd()
                 elif key == ord("s"):
                     note = "sky: " + cycle_clouds()
@@ -29697,6 +30965,15 @@ def main(stdscr):
                 elif key == ord("!"):
                     note = ("fireworks over the bay tonight"
                             if skip_to_fireworks(now) else "no such night near")
+                elif key == ord("~") and not hidden_next:
+                    # The coast, off and on, to see the city both ways. If it
+                    # leaves you somewhere you cannot stand, back to the start.
+                    note = ("the sea: on - a taxi goes to the beach"
+                            if toggle_coast() else
+                            "the sea: off - the city is endless that way again")
+                    tiki = ride = None
+                    if not can_stand(cam_x, cam_z):
+                        cam_x, cam_z = start_position()
                 elif key == ord("+"):
                     wallet.give(1000)
                     note = "+$1000"
@@ -29787,6 +31064,14 @@ def main(stdscr):
                                 note = "-> the woods rave (starting)"
                                 note_at = now
                         break
+            elif ride is not None and key not in (ord("q"), CHEAT_KEY):
+                # Nothing to do up there but look round.
+                if key in (curses.KEY_LEFT, ord("a"), ord("A")):
+                    yaw -= 0.14
+                elif key in (curses.KEY_RIGHT, ord("d"), ord("D")):
+                    yaw += 0.14
+                elif key in (27, ord("x"), ord("X")):
+                    note, note_at = "it lets you off at the bottom", now
             elif vendor is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (27, ord("x"), ord("X")):
                     vendor = None
@@ -30073,8 +31358,13 @@ def main(stdscr):
                     said_[-1] += " " + word_
                 oracle["said"] = said_[-20:]
                 oracle["at"], oracle["sung"] = now, word_
+            elif (tiki is not None and venue is not None
+                  and ord("1") <= key < ord("1") + len(TIKI_DRINKS)):
+                said = tiki_order(tiki, key - ord("1"), wallet, now)
+                if said:
+                    note, note_at = said, now
             elif ((wheel is not None or at_arcade or at_bar is not None or at_bowl
-                   or at_kara or at_golf)
+                   or at_kara or at_golf or tiki is not None)
                   and key in (ord("z"), ord("Z"))):
                 _big_screens[0] = not _big_screens[0]     # big screens, off and on
                 note, note_at = ("big screens " + ("on" if _big_screens[0]
@@ -30227,6 +31517,16 @@ def main(stdscr):
                     autopilot = False
                 else:
                     note, note_at = "no cabs down here - stand in a street", now
+            elif (street and on_roof is None and sewer is None and venue is None
+                  and key in (ord("p"), ord("P"))
+                  and sea_wheel_near(cam_x, cam_z) is not None):
+                if wallet.take(SEA_WHEEL_FEE):
+                    ride = {"pier": sea_wheel_near(cam_x, cam_z), "t0": now}
+                    fwd = side = spin = 0.0
+                    autopilot = False
+                    yaw = -math.pi * 0.5        # facing the shore, and the town
+                else:
+                    note, note_at = "the wheel is $%d" % SEA_WHEEL_FEE, now
             elif (street and on_roof is None and sewer is None and venue is None
                   and key in (ord("p"), ord("P"))
                   and vending_near(cam_x, cam_z) is not None):
@@ -30536,6 +31836,10 @@ def main(stdscr):
             venue = None
         if venue is None or venue[0] not in ("ramen", "diner"):
             seated = None               # stood up: the next visit is a new bowl
+        if venue is None or venue[0] != "beachbar":
+            tiki = None                 # and off the stool: a new tab next time
+        elif tiki is None or tiki["seed"] != venue[1]["seed"]:
+            tiki = dict(new_tiki(venue[1]["seed"]), seed=venue[1]["seed"])
         # Paying for what you came in for, once a visit: a seat at the
         # pictures, the club's cover, the bowl, the coffee.
         here = None
@@ -30767,11 +32071,26 @@ def main(stdscr):
         elif venue is not None and venue[0] == "cinema":
             ch, co = render_cinema(venue[1], width, height, now)
             hud = CINEMA_HUD % (venue[1]["title"].lower(), cam_x, cam_z)
+        elif venue is not None and venue[0] == "beachbar" and tiki is not None:
+            ch, co = render_tiki(venue[1], tiki, width, height, now)
+            hud = TIKI_HUD % (TIKI_NAMES[venue[1]["seed"] % len(TIKI_NAMES)].lower(),
+                              len(TIKI_DRINKS))
         elif venue is not None and venue[0] == "ramen":
             if seated is None or seated[0] != venue[1]["seed"]:
                 seated = (venue[1]["seed"], now)    # sat down just now
             ch, co = render_ramen(venue[1], width, height, now, seated[1])
             hud = RAMEN_HUD % (cam_x, cam_z)
+        elif street and ride is not None:
+            if now - ride["t0"] >= SEA_WHEEL_RIDE:
+                ride = None
+                note, note_at = "back down on the boards", now
+                v = View(cam_x, cam_z, yaw, width, height)
+                ch, co, wet = render_street(v, now)
+                hud = ""
+            else:
+                ch, co, v = render_wheel_ride(ride["pier"], now - ride["t0"], yaw,
+                                              width, height, now)
+                hud = SEA_WHEEL_HUD
         elif street and vendor is not None:
             ch, co = render_vending(vendor, width, height, now)
             hud = VEND_HUD
@@ -30849,6 +32168,9 @@ def main(stdscr):
                 or ("  ~ a taxi is pulling up ~" if taxi is not None else "")
                 or ("  ~ a vending machine: p looks in ~"
                     if vending_near(cam_x, cam_z) is not None else "")
+                or ("  ~ the big wheel: p rides, $%d ~" % SEA_WHEEL_FEE
+                    if sea_wheel_near(cam_x, cam_z) is not None else "")
+                or coast_hint(cam_x, cam_z)
                 or ("  ~ the fog is in ~" if night(now)["fog"] else "")
                 or blackout_word(cam_x, cam_z, now)
                 or factory_hint(cam_x, cam_z)

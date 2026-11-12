@@ -371,6 +371,25 @@ def cases(run, report):
         cols=300, rows=90))
     ok &= report("the highway", *run([(b"`", .5), (b"\x01)", 1.2), (b"w", .5)],
                                      cols=100, rows=30))
+    ok &= report("the beach: to a bar on the sand, two drinks, back out, the surf", *run(
+        [(b"`", .5), (b"\x011", 1.5)] + [(b"w", .25)] * 2 + [(b"1", 3.2), (b"3", 3.2),
+         (b"z", .5), (b"s", .6), (b"s", .6), (b"d", .6)] + [(b"W", .5)] * 8
+        + [(b"a", .6), (b"w", .6)], cols=100, rows=30))
+    ok &= report("the beach bar, big, and small again on z", *run(
+        [(b"`", .5), (b"\x011", 1.5)] + [(b"w", .25)] * 2 + [(b"2", 3.2), (b"z", .6),
+         (b"z", .6), (b"s", .8)], cols=300, rows=90))
+    ok &= report("the pier: out along it at a run, and a look round", *run(
+        [(b"`", .5), (b"\x012", 1.5)] + [(b"W", .6)] * 10 + [(b"a", .5), (b"d", .9),
+         (b"s", .5)], cols=110, rows=34))
+    ok &= report("the pier's wheel: on, round a way, looking about", *run(
+        [(b"`", .5), (b"\x013", 1.5), (b"p", 4.0), (b"a", .4), (b"a", .4), (b"d", 3.0),
+         (b"x", 2.0)], cols=110, rows=34))
+    ok &= report("the wheel on a big window", *run(
+        [(b"`", .5), (b"\x013", 1.5), (b"p", 6.0), (b"d", .5)], cols=300, rows=90))
+    ok &= report("the sea off and on from the panel, standing on the beach", *run(
+        [(b"`", .5), (b"\x011", 1.5), (b"w", .5), (b"`", .5), (b"~", 1.2), (b"\x1b", .4),
+         (b"w", .6), (b"`", .5), (b"~", 1.2), (b"\x1b", .4), (b"w", .6)],
+        cols=110, rows=34))
     return ok
 
 
