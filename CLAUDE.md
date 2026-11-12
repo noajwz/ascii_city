@@ -2890,6 +2890,24 @@ none left - and it needs none: `t` works on any street, so the way in is two key
   1.1 to 1.3 rad/s from 16 up; a check holds it there. Slower steering needs feeding in rather
   than banging from lock to lock - the robot below weaved off the walls until it steered by how
   far the bend needed - and it wants corners taken slowly, which is what a cab does anyway.
+  **Then "the controls still feel a bit clunky and I wasn't able to properly drift"**
+  (2026-11-12), and both were the keyboard, not the car. **A terminal repeats only the last
+  key held, after a wait** (375 ms on the owner's Mac, 500 by default on Windows), and the
+  checks had been pressing two keys every frame, which no keyboard does:
+  - *A held turn started, let go and started again.* A fresh press held the wheel for
+    `TURN_FIRST` (0.32), shorter than the wait, so it went back to the middle before the
+    repeats came. Now a fresh press pushes the wheel over briefly (`steer_push`) and then it
+    **waits where it is** until the keyboard would have started repeating (`_bridge()`); a
+    shorter push the longer the wait, so a tap is `CAB_TAP` lock-seconds, five or six degrees,
+    on any keyboard. The wait is learned from the first key held (`_press()`, `_key_wait`).
+  - *Any second key killed the steering*: brake, handbrake or speed in a bend and the
+    steering key went quiet under your finger. Now a key pressed while the wheel is over
+    keeps it there while that key is down - and with the handbrake the wheel keeps going
+    over, which is what makes `d` then `e` a drift.
+  - **Shift and a steering key** (`A`, `D`, shift-arrows: "drift left/right") is the wheel
+    and the handbrake on one key.
+  `cab_keys()` and `held()` in the checks drive on a keyboard's real key stream; use them,
+  not a key every frame, for anything about how the controls feel.
 - **Walls and cars.** `_move()` steps the way `main()` walks, with `can_stand()`: into a wall at
   an angle it slides along it, and only if the wall took more than `0.45` of the step is that a
   bump - the first version called every graze one, and the robot driver was bumping three times
