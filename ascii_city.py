@@ -576,6 +576,7 @@ FEES = {"cinema": 12, "club": 20, "ramen": 14, "diner": 4}
 LIFT_FEES = {None: 15, "party": 30, "bar": 10}   # sky decks, the roof party, the bars
 SHOW_FEE = 50          # a show fired from the lighthouse
 CLAW_COST = 2
+VEND_COST = 2          # a can out of a vending machine
 STRIKE_COST = 1
 ARCADE_COST = 1
 SECTORS = ["TECH", "FOOD", "TRANSPORT", "LEISURE"]
@@ -11565,7 +11566,14 @@ def collect_glow(v, now, wet):
                 _spill(glow, p[0], p[2], 6.5, NEON[int(now * 2.0 + f) % len(NEON)][1])
                 continue
             fc = b["faces"][f]
-            if face_kind(i + nx, j + nz):
+            kind_ = face_kind(i + nx, j + nz)
+            if kind_ != "road":
+                vm = vending_at(i, j, f)
+                if vm is not None:
+                    # Lit from inside, so whatever the weather, like a bulb.
+                    p = vending_spot(vm, 1.3)
+                    _spill(glow, p[0], p[1], 3.6, NEON[vm[4]][1])
+            if kind_:
                 # Neon reaches the water whatever the weather - a river does
                 # not need rain to be wet.
                 if wet < 0.12 and not river_at(i + nx * 3, j + nz * 3):
@@ -19554,6 +19562,11 @@ def draw_props(ch, co, v, walls, now, wet):
                 props.append((_d2(v, w), "lanterns", (fc["lanterns"], i, j, f),
                               w, (nx, nz)))
             lit = face_kind(i + nx, j + nz)
+            if lit != "road":
+                vm = vending_at(i, j, f)
+                if vm is not None:
+                    w = face_point(i, j, f, vm[3], 0.45, 0.0)
+                    props.append((_d2(v, w), "vending", vm, w, (nx, nz)))
             if lit == "yokocho" and fc["pub"]:
                 w = face_point(i, j, f, CELL * 0.5, 0.5, 3.4)
                 ramen = ramen_at(i, j, f)
@@ -19594,6 +19607,8 @@ def draw_props(ch, co, v, walls, now, wet):
             draw_noren(ch, co, v, walls, world, normal, now)
         elif kind == "ramenfront":
             draw_ramen_front(ch, co, v, walls, *s, now, wet)
+        elif kind == "vending":
+            draw_vending(ch, co, v, walls, s, world, now)
         elif kind == "ladder":
             # The drop ladder down to the ground, which is what says this one
             # goes all the way up - the others stop at the first landing.
@@ -22238,6 +22253,153 @@ def ramen_at(i, j, f):
     return run is not None and ramen_pick(run) == (i, j, f)
 
 
+VEND_LANES = 4         # one stretch of alley in this many has a vending machine
+VEND_REACH = 2.4       # how near one you stand to buy from it
+VEND_H = 2.4           # how tall it stands: a head over the people
+VEND_W = 1.45
+VENDING = [
+    ".-----.",
+    "|     |",
+    "|     |",
+    "|     |",
+    "|=====|",
+    "| [_] |",
+    "'-----'",
+]
+# What is lit behind the glass, a row at a time, each its own colour.
+VENDING_ROWS = [
+    ["       ", " ooooo "],
+    ["       ", "       ", " ooooo "],
+    ["       ", "       ", "       ", " ooooo "],
+]
+VEND_DRINKS = ["black coffee, hot", "melon soda", "royal milk tea", "corn soup, hot",
+               "peach water", "grape jelly - shake it first", "lemon something",
+               "a can with a cat on it", "barley tea, cold", "strawberry milk",
+               "an energy drink called THUNDER", "sweet red bean soup, hot"]
+_vend_picks = {}
+_vend_faces = {}
+
+
+def vending_pick(run):
+    """The vending machine in a stretch of alley, as (i, j, f, u, tone,
+    seed) - the front it stands against, how far along it, its colour - or
+    None: one stretch in VEND_LANES has one, lit lane or dark, and never two.
+
+    One to a stretch for the reason the ramen counters are: a lit thing on
+    its own hash per front turns up in pairs facing each other. It goes
+    against the plain front with the lowest hash, never a counter you can
+    see into, at whichever end of the front the bin is not."""
+    hit = _vend_picks.get(run, 0)
+    if hit != 0:
+        return hit
+    _evict(_vend_picks, 20000)
+    hit = None
+    axis, lane, k = run
+    if _mix(lane * 2 + axis, k, 5101) % VEND_LANES == 0:
+        best = None
+        for i, j, f, oi, oj in lane_faces(run):
+            if (is_open(i, j) or not is_open(oi, oj) or road_at(oi, oj)
+                    or lane_run(oi, oj) != run or face_kind(oi, oj) == "road"
+                    or water_at(oi, oj) or woods_at(oi, oj) or tunnel_at(oi, oj)
+                    or district(oi, oj)["park"]):
+                continue
+            b = lot(i, j)
+            if not (plain_front(b) and b["warehouse"] is None
+                    and b["landmark"] is None and b["diner"] is None
+                    and b["cinema"] is None and b["tower"] is None
+                    and b.get("strip") is None and b.get("airport") is None
+                    and b.get("campus") is None and b.get("center") is None):
+                continue
+            fc = b["faces"][f]
+            if fc["pub"] and yokocho_at(oi, oj):
+                continue
+            m = _mix(i, j * 4 + f, 5103)
+            if best is None or m < best:
+                best = m
+                u = 1.0 if (m >> 8) & 1 else CELL - 1.0
+                if fc["bin"] is not None and abs(fc["bin"] - u) < 1.8:
+                    u = CELL - u
+                hit = (i, j, f, u, (m >> 12) % len(NEON), m)
+    _vend_picks[run] = hit
+    return hit
+
+
+def vending_at(i, j, f):
+    """The vending machine against this front, or None."""
+    key = (i * 1048576 + j) * 4 + f
+    hit = _vend_faces.get(key, 0)
+    if hit != 0:
+        return hit
+    _evict(_vend_faces, 40000)
+    hit = None
+    nx, nz = FACES[f]
+    oi, oj = i + nx, j + nz
+    if is_open(oi, oj) and not road_at(oi, oj):
+        run = lane_run(oi, oj)
+        if run is not None:
+            vm = vending_pick(run)
+            if vm is not None and vm[:3] == (i, j, f):
+                hit = vm
+    _vend_faces[key] = hit
+    return hit
+
+
+def vending_spot(vm, out=0.45):
+    """Where a machine stands, or a point `out` from the wall in front of it."""
+    p = face_point(vm[0], vm[1], vm[2], vm[3], out, 0.0)
+    return p[0], p[2]
+
+
+def vending_near(x, z):
+    """The vending machine you are standing at, or None. It may be against
+    a front of the next cell along: one stands a unit from the end of its."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    for i in (ci - 1, ci, ci + 1):
+        for j in (cj - 1, cj, cj + 1):
+            for f in range(4):
+                vm = vending_at(i, j, f)
+                if vm is not None:
+                    mx, mz = vending_spot(vm)
+                    if (mx - x) ** 2 + (mz - z) ** 2 < VEND_REACH ** 2:
+                        return vm
+    return None
+
+
+def vend(vm, wallet, now):
+    """Put the money in: what the HUD says came out, or why nothing did."""
+    if not wallet.take(VEND_COST):
+        return "the machine wants $%d" % VEND_COST
+    m = _mix(vm[5], int(now * 1000.0), 5107)
+    drink = VEND_DRINKS[m % len(VEND_DRINKS)]
+    if (m >> 8) % 12 == 0:
+        return "clunk, clunk. two cans of %s - you paid for one" % drink
+    return "clunk. " + drink
+
+
+def draw_vending(ch, co, v, walls, vm, world, now):
+    """A vending machine against an alley wall: a cabinet in its own colour
+    and three lit rows of cans behind the glass. It stays on all night and
+    past dawn, when the signs go off - and in a blackout it is a dark box."""
+    i, j, _, _, tone, seed = vm
+    x, z = world[0], world[2]
+    dead = v.blackout and power_off(i, j, now)
+    blit_sprite(ch, co, v, walls, VENDING, x, z, 0.0, VEND_H, VEND_W,
+                CURB if dead else NEON[tone][0])
+    if dead:
+        return
+    # One in six has a tube going, and stutters.
+    if seed % 6 == 0 and ((now * 2.3 + seed % 17) % 5.0 < 0.5
+                          and int(now * 13) % 3 == 0):
+        return
+    n = len(NEON)
+    for art, attr in zip(VENDING_ROWS, (FLASH, NEON[(tone + 3) % n][0],
+                                        NEON[(tone + 5) % n][0])):
+        rows = len(art)
+        blit_sprite(ch, co, v, walls, art, x, z,
+                    VEND_H * (1.0 - rows / float(len(VENDING))), VEND_H, VEND_W, attr)
+
+
 def ramen_door(i, j, f):
     """Where you stand to be at the counter: just out from the middle of it."""
     p = face_point(i, j, f, CELL * 0.5, 1.4, 0.0)
@@ -24148,6 +24310,7 @@ CHEAT_PLACES = [
     ("k", "bowling", "bowling"),
     ("t", "the turtles", "lair"),
     ("f", "fly the plane", "pilot"),
+    ("d", "vending machine", "vending"),
 ]
 
 # Off the panel, for the pty checks alone: with ASCII_CITY_TEST set, ctrl-a and
@@ -25021,6 +25184,35 @@ def _hwy_spot(x, z):
     return None
 
 
+def _vending_spot(x, z):
+    """Down the alley from the nearest vending machine, looking at it, a
+    short walk off. Not across the alley from it: the camera cannot tilt, and
+    from two units away you look straight over the top of the thing. Skips
+    the one you are at."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    for i, j in _rings(ci, cj, CHEAT_RINGS):
+        if not is_open(i, j) or road_at(i, j):
+            continue
+        run = lane_run(i, j)
+        vm = vending_pick(run) if run is not None else None
+        if vm is None:
+            continue
+        nx, nz = FACES[vm[2]]
+        if (vm[0] + nx, vm[1] + nz) != (i, j):
+            continue
+        mx, mz = vending_spot(vm)
+        if (mx - x) ** 2 + (mz - z) ** 2 < CHEAT_SKIP ** 2:
+            continue
+        ox, oz = vending_spot(vm, 3.3)
+        for along in (9.0, -9.0, 7.0, -7.0):
+            px, pz = ox - nz * along, oz + nx * along
+            yaw = math.atan2(mx - px, mz - pz)
+            if can_stand(px, pz) and probe(px, pz, yaw, abs(along)) >= abs(along) - 1.5:
+                return px, pz, yaw
+    return None
+
+
 def _ramen_spot(x, z):
     """Across the lane from the nearest ramen shop, facing it - a step or two
     in is the counter. Skips the one you are at, so a second press finds
@@ -25086,6 +25278,8 @@ def find_place(x, z, kind):
         return _doorway(x, z, 909, "club")
     if kind == "ramen":
         return _ramen_spot(x, z)
+    if kind == "vending":
+        return _vending_spot(x, z)
     if kind == "manhole":
         return _manhole_spot(x, z)
     if kind == "lair":
@@ -25225,7 +25419,7 @@ def find_place(x, z, kind):
 
 # The third column.
 CHEAT_MORE = ["university", "library", "metro", "flight", "pilot", "center", "bar",
-              "lowroof", "washing", "bowling", "lair"]
+              "lowroof", "washing", "bowling", "lair", "vending"]
 
 
 def draw_cheats(ch, co, note):
@@ -29031,6 +29225,7 @@ def main(stdscr):
     flyer = Flyer(wallet)       # and High Flyer, f
     at_flyer = False
     lemon = {"glasses": 0, "at": -1e9}   # the kid's best customer
+    vend_said, vend_at = "", -1e9        # what the last vending machine gave you
     scope_at = None             # when you put your eye to the telescope
     # The temple's terminal: the verses so far, when the last word was asked
     # for (to the nanosecond - it is what picks the next) and when.
@@ -29656,6 +29851,12 @@ def main(stdscr):
                     autopilot = False
                 else:
                     note, note_at = "no cabs down here - stand in a street", now
+            elif (street and on_roof is None and sewer is None and venue is None
+                  and key in (ord("p"), ord("P"))
+                  and vending_near(cam_x, cam_z) is not None):
+                # Said where the hint was: a note goes on the end of the HUD,
+                # and with the hint up that is off the side of most windows.
+                vend_said, vend_at = vend(vending_near(cam_x, cam_z), wallet, now), now
             elif (street and on_roof is None and key in (ord("e"), ord("E"))
                   and station_at(cam_x, cam_z) is not None
                   and manhole_under(cam_x, cam_z) is None):
@@ -30263,6 +30464,9 @@ def main(stdscr):
                 sky_word(now, wet),
                 show_hint(now, cam_x, cam_z)
                 or ("  ~ a taxi is pulling up ~" if taxi is not None else "")
+                or (("  ~ %s ~" % vend_said if now - vend_at < 4.0
+                     else "  ~ a vending machine: p buys a can, $%d ~" % VEND_COST)
+                    if vending_near(cam_x, cam_z) is not None else "")
                 or ("  ~ the fog is in ~" if night(now)["fog"] else "")
                 or blackout_word(cam_x, cam_z, now)
                 or factory_hint(cam_x, cam_z)

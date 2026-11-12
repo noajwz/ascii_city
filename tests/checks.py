@@ -710,6 +710,74 @@ bowl = sum(1 for y in range(12) for x in range(100) if fco[y][x] == ac.NEON[3][0
            and fch[y][x] != " ")
 check("and the bowl is up there in red neon, above the name", bowl >= 25, str(bowl))
 
+# --- vending machines -----------------------------------------------------
+# One stretch of alley in VEND_LANES has one, against a plain front, lit all
+# night: a cabinet in its own colour, three rows of cans, and its light on the
+# ground. p buys a can for VEND_COST.
+vspot = ac.find_place(x0, z0, "vending")
+check("the menu finds a vending machine, and stands you down the alley from it",
+      vspot is not None and ac.can_stand(vspot[0], vspot[1])
+      and ac.vending_near(vspot[0], vspot[1]) is None)
+wx_, wz_, steps_ = vspot[0], vspot[1], 0
+while (ac.vending_near(wx_, wz_) is None and steps_ < 60
+       and ac.can_stand(wx_ + math.sin(vspot[2]) * 0.25, wz_ + math.cos(vspot[2]) * 0.25)):
+    wx_ += math.sin(vspot[2]) * 0.25
+    wz_ += math.cos(vspot[2]) * 0.25
+    steps_ += 1
+vm_ = ac.vending_near(wx_, wz_)
+check("and walking straight at it gets you near enough to buy", vm_ is not None,
+      "%.1f units" % (steps_ * 0.25))
+vnext = ac.find_place(vspot[0], vspot[1], "vending")
+check("and a second press finds another", vnext is not None
+      and math.hypot(vnext[0] - vspot[0], vnext[1] - vspot[1]) > ac.CHEAT_SKIP * 0.5)
+vdrawn = []
+real_vend = ac.draw_vending
+ac.draw_vending = lambda *a: (vdrawn.append(a[4]), real_vend(*a))
+vch, vco = ac.render_street(ac.View(vspot[0], vspot[1], vspot[2], 120, 36), 5000.0)[:2]
+cab_ = ac.NEON[vm_[4]][0]
+cabinet_ = sum(1 for y in range(36) for x in range(120)
+               if vco[y][x] == cab_ and vch[y][x] in "|-.'=[]_")
+cans_ = sum(1 for y in range(36) for x in range(120) if vch[y][x] == "o"
+            and vco[y][x] in (ac.NEON[(vm_[4] + 3) % 8][0],
+                              ac.NEON[(vm_[4] + 5) % 8][0]))
+check("from there it is on screen: the cabinet, and the cans lit in it",
+      vm_ in vdrawn and cabinet_ >= 12 and cans_ >= 12,
+      "%d cabinet, %d cans" % (cabinet_, cans_))
+vglow = ac.collect_glow(ac.View(vspot[0], vspot[1], vspot[2], 120, 36), 5000.0, 0.0)
+check("and its light lies on the ground in front of it, dry or wet",
+      ac.NEON[vm_[4]][1] in vglow.values())
+ac.draw_vending = real_vend
+purse_ = ac.Wallet(5)
+said_ = [ac.vend(vm_, purse_, 100.0 + k_) for k_ in range(3)]
+check("a can is VEND_COST, and it says what came out",
+      purse_.money == 5 - 2 * ac.VEND_COST and all("clunk" in t_ for t_ in said_[:2])
+      and "wants" in said_[2], said_[0])
+machines_, vruns_, bad_ = [], set(), []
+for i in range(-150, 150):
+    for j in range(-150, 150):
+        if ac.is_open(i, j):
+            if not ac.road_at(i, j) and ac.lane_run(i, j) is not None:
+                vruns_.add(ac.lane_run(i, j))
+            continue
+        for f in range(4):
+            m_ = ac.vending_at(i, j, f)
+            if m_ is None:
+                continue
+            nx, nz = ac.FACES[f]
+            machines_.append(ac.lane_run(i + nx, j + nz))
+            fc_ = ac.lot(i, j)["faces"][f]
+            if (ac.road_at(i + nx, j + nz) or not ac.is_open(i + nx, j + nz)
+                    or ac.ramen_at(i, j, f) or not ac.plain_front(ac.lot(i, j))
+                    or (fc_["pub"] and ac.yokocho_at(i + nx, j + nz))
+                    or (fc_["bin"] is not None and abs(fc_["bin"] - m_[3]) < 1.0)):
+                bad_.append((i, j, f))
+check("they stand in alleys: never on a street, a counter's window or a bin",
+      machines_ and not bad_, str(bad_[:4]))
+check("one to a stretch, in about one stretch in four",
+      len(set(machines_)) == len(machines_)
+      and 0.1 < len(machines_) / float(len(vruns_)) < 0.3,
+      "%d in %d" % (len(machines_), len(vruns_)))
+
 # --- people walking ------------------------------------------------------
 while ac.weather_name() != "dry":
     ac.cycle_weather()
