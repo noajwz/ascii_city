@@ -576,7 +576,6 @@ FEES = {"cinema": 12, "club": 20, "ramen": 14, "diner": 4}
 LIFT_FEES = {None: 15, "party": 30, "bar": 10}   # sky decks, the roof party, the bars
 SHOW_FEE = 50          # a show fired from the lighthouse
 CLAW_COST = 2
-VEND_COST = 2          # a can out of a vending machine
 STRIKE_COST = 1
 ARCADE_COST = 1
 SECTORS = ["TECH", "FOOD", "TRANSPORT", "LEISURE"]
@@ -22289,10 +22288,6 @@ VENDING_ROWS = [
     ["       ", "       ", " ooooo "],
     ["       ", "       ", "       ", " ooooo "],
 ]
-VEND_DRINKS = ["black coffee, hot", "melon soda", "royal milk tea", "corn soup, hot",
-               "peach water", "grape jelly - shake it first", "lemon something",
-               "a can with a cat on it", "barley tea, cold", "strawberry milk",
-               "an energy drink called THUNDER", "sweet red bean soup, hot"]
 _vend_picks = {}
 _vend_faces = {}
 
@@ -22383,15 +22378,307 @@ def vending_near(x, z):
     return None
 
 
-def vend(vm, wallet, now):
-    """Put the money in: what the HUD says came out, or why nothing did."""
-    if not wallet.take(VEND_COST):
-        return "the machine wants $%d" % VEND_COST
-    m = _mix(vm[5], int(now * 1000.0), 5107)
-    drink = VEND_DRINKS[m % len(VEND_DRINKS)]
-    if (m >> 8) % 12 == 0:
-        return "clunk, clunk. two cans of %s - you paid for one" % drink
-    return "clunk. " + drink
+# --- at the glass ---------------------------------------------------------
+# p beside a vending machine and you are looking into it: four shelves, snacks
+# on the top two and drinks under them, a code and a price on every one, the
+# display and the buttons down the side, and the tray at the bottom that what
+# you buy falls into.
+VEND_COLS, VEND_ROWS = 5, 4
+VEND_TURN = 0.35       # seconds the coil turns before the thing lets go
+VEND_FALL = 0.45       # and falls to the tray
+VEND_TAKE = 7.0        # it lies in the tray this long, and then you have taken it
+VEND_STUCK = 9         # one sale in this many hangs on the coil
+VEND_TWO = 14          # and one in this many, two come out
+# (name, the shape it is, the price, what it is like)
+VEND_SNACKS = [
+    ("shrimp chips", "bag", 2, "the bag is mostly air. the rest is very good."),
+    ("seaweed crisps", "bag", 2, "salt, and the sea."),
+    ("choco sticks", "box", 3, "you were going to save some."),
+    ("rice crackers", "bag", 2, "loud enough to wake the alley."),
+    ("melon bread", "bag", 3, "soft. no melon in it, there never is."),
+    ("chocolate bar", "bar", 2, "cold from the machine, and snaps."),
+    ("cup noodles", "cup", 4, "no hot water for a mile. you keep it."),
+    ("gummy bears", "bag", 2, "the green ones first."),
+    ("wasabi peas", "bag", 2, "your nose finds out before you do."),
+    ("matcha wafer", "bar", 3, "green, and a little bitter."),
+    ("mints", "box", 1, "for later."),
+    ("mystery capsule", "ball", 5, ""),
+]
+VEND_DRINKS = [
+    ("melon soda", "can", 2, "greener than anything that grows."),
+    ("black coffee, hot", "can", 2, "the can warms both hands."),
+    ("royal milk tea", "bottle", 3, "sweet, and gone too soon."),
+    ("corn soup, hot", "can", 2, "shake it, or the corn stays in the can."),
+    ("peach water", "bottle", 2, "water that once stood near a peach."),
+    ("grape jelly drink", "can", 3, "you chew it. that is the idea."),
+    ("lemon fizz", "can", 2, "it bites back."),
+    ("barley tea", "bottle", 2, "tastes like summer in somebody's kitchen."),
+    ("strawberry milk", "bottle", 3, "pink, and proud of it."),
+    ("THUNDER energy", "can", 4, "you can hear your own eyelids."),
+    ("red bean soup, hot", "can", 2, "a dessert, in a can, at this hour."),
+    ("cola", "can", 2, "cold, and what you wanted."),
+]
+VEND_CAPSULES = ["a tiny plastic lighthouse", "a keyring of the landmark tower",
+                 "a rubber pigeon", "a frog in a taxi driver's cap",
+                 "a very small bowl of ramen", "one die, all sixes",
+                 "a glow-in-the-dark moon", "a turtle in a red mask",
+                 "a capsule with another capsule in it"]
+# Five wide and three high, the first letter of its name where the % is.
+VEND_ART = {
+    "can": (" .-. ", " |%| ", " '-' "),
+    "bottle": ("  n  ", " (%) ", " |_| "),
+    "bag": ("/~~~\\", "| % |", "\\___/"),
+    "bar": ("     ", "[=%=]", "     "),
+    "box": (".---.", "| % |", "'---'"),
+    "cup": (".___.", "\\ % /", " \\_/ "),
+    "ball": (" .-. ", "( ? )", " '-' "),
+}
+VEND_HUD = (" a vending machine  -  wasd or arrows choose  -  p buys  -  "
+            "x steps back ")
+
+
+class Vending:
+    """One vending machine, while you stand at its glass: what is on each
+    shelf and how many are left, which one you are pointing at, the thing
+    falling to the tray, and what it has said. What it stocks is the
+    machine's own, by its seed; how many are left is for as long as you are
+    in the city tonight."""
+
+    def __init__(self, vm):
+        self.seed, self.tone = vm[5], vm[4]
+        rng = random.Random("vend|%d" % self.seed)
+        self.items = (rng.sample(VEND_SNACKS, VEND_COLS * 2)
+                      + rng.sample(VEND_DRINKS, VEND_COLS * 2))
+        self.colours = [rng.randrange(len(NEON)) for _ in self.items]
+        # A few bought out before you came, as a few always are.
+        self.stock = [0 if rng.random() < 0.12 else rng.randint(1, 6)
+                      for _ in self.items]
+        self.sel = VEND_COLS * 2            # the first of the drinks
+        self.stuck = set()                  # slots with one hanging on the coil
+        self.sales = 0
+        self.drop = None                    # (slot, since when, how many)
+        self.said, self.said_at = "", -1e9
+
+    def code(self, slot):
+        return "ABCD"[slot // VEND_COLS] + str(slot % VEND_COLS + 1)
+
+    def busy(self, now):
+        return self.drop is not None and now - self.drop[1] < VEND_TURN + VEND_FALL
+
+    def key(self, what, wallet, now):
+        r, c = divmod(self.sel, VEND_COLS)
+        if what == "left":
+            c = (c - 1) % VEND_COLS
+        elif what == "right":
+            c = (c + 1) % VEND_COLS
+        elif what == "up":
+            r = (r - 1) % VEND_ROWS
+        elif what == "down":
+            r = (r + 1) % VEND_ROWS
+        elif what == "buy":
+            self.buy(wallet, now)
+        self.sel = r * VEND_COLS + c
+
+    def buy(self, wallet, now):
+        if self.busy(now):
+            return
+        slot = self.sel
+        name, _, price, like = self.items[slot]
+        if not self.stock[slot] and slot not in self.stuck:
+            self.said, self.said_at = "%s: SOLD OUT" % self.code(slot), now
+            return
+        if not wallet.take(price):
+            self.said, self.said_at = "it wants $%d. you have not got it." % price, now
+            return
+        m = _mix(self.seed, self.sales, 5107)
+        self.sales += 1
+        many = 1
+        if slot in self.stuck:
+            # The one that hung, and the one you have just paid for.
+            self.stuck.discard(slot)
+            many = 2 if self.stock[slot] else 1
+            self.stock[slot] = max(0, self.stock[slot] - 1)
+            self.said = ("clunk, clunk. both of them: %s, twice." % name if many == 2
+                         else "clunk. it lets go at last: %s." % name)
+        elif m % VEND_STUCK == 0:
+            self.stock[slot] -= 1
+            self.stuck.add(slot)
+            self.said, self.said_at = ("the coil turns... and it hangs there. of "
+                                       "course it does. p again might shift it."), now
+            return
+        elif (m >> 8) % VEND_TWO == 0 and self.stock[slot] >= 2:
+            self.stock[slot] -= 2
+            many = 2
+            self.said = "clunk, clunk. two of them - you paid for one."
+        else:
+            self.stock[slot] -= 1
+            if name == "mystery capsule":
+                like = "inside: %s." % VEND_CAPSULES[(m >> 12) % len(VEND_CAPSULES)]
+            self.said = "clunk. %s. %s" % (name, like)
+        self.said_at = now
+        self.drop = (slot, now, many)
+
+
+def vend_size(k):
+    """The machine at the glass, at scale k: (width, height, a slot's width
+    and height, the side panel's width)."""
+    cw, chh = 7 * k, 3 * k + 1
+    pw = 18 if k == 1 else 20 * (k - 1) + 6
+    return (VEND_COLS * cw + pw + 3, VEND_ROWS * chh + 3 * k + 4, cw, chh, pw)
+
+
+def _vend_item(ch, co, x, y, item, colour, k, attr=None):
+    """One thing off the shelf, its first letter on it, k times over."""
+    name, kind = item[0], item[1]
+    art = [line.replace("%", name[0].upper()) for line in VEND_ART[kind]]
+    a = NEON[colour][0] if attr is None else attr
+    _blow_up(ch, co, x, y, art, [[a] * len(line) for line in art], k)
+
+
+def _vend_wrap(text, w):
+    """Words broken into lines no wider than w."""
+    lines, line = [], ""
+    for word in text.split():
+        if line and len(line) + 1 + len(word) > w:
+            lines.append(line)
+            line = word
+        else:
+            line = (line + " " + word).strip()
+    return lines + [line] if line else lines
+
+
+def render_vending(vd, width, height, now):
+    """At the glass of a vending machine: the shelves behind it with what is
+    on them, the one you are pointing at marked, the display and the buttons
+    down the side, the tray under, and the thing you bought turning off its
+    coil and falling into it. On a big window the same machine bigger - the
+    things on the shelves k times over, the code and the price in block
+    letters, the words still words."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    k = big_scale(width, height)
+    while k > 1 and (vend_size(k)[0] + 2 > width
+                     or vend_size(k)[1] + 5 * (k - 1) + 3 > height):
+        k -= 1
+    w, h, cw, chh, pw = vend_size(k)
+    sel = vd.sel
+    name, _, price, _ = vd.items[sel]
+    said = vd.said if now - vd.said_at < VEND_TAKE else ""
+    if width < w + 2 or height < h + 1:
+        # No room for the machine: what you are pointing at, in words.
+        left = ("SOLD OUT" if not vd.stock[sel] and sel not in vd.stuck
+                else "$%d" % price)
+        _text(ch, co, height // 2 - 1, 1, ("VENDING  %s  %s  %s" % (
+            vd.code(sel), name, left))[:width - 1], GOLD)
+        _text(ch, co, height // 2 + 1, 1, said[:width - 1], HUD)
+        return ch, co
+    body = NEON[vd.tone][0]
+    title = "SNACKS & DRINKS"
+    x0 = (width - w) // 2
+    y0 = 1 + max(0, (height - 1 - h) // 2)
+    if k > 1:
+        y0 = max(y0, 2 + 5 * (k - 1))
+        _blocks(ch, co, y0 - 5 * (k - 1) - 1, width // 2
+                - blocks_width(title, k - 1) // 2, title, body, k - 1, k - 1)
+    # The cabinet, and the glass in it.
+    _box(ch, co, x0, y0, w, h, body)
+    for x in range(1, w - 1):
+        lit = chase(x * 0.3, now)
+        ch[y0][x0 + x], co[y0][x0 + x] = ("=", body if lit else GOLD_DIM)
+    def plain(y, x, text, attr):
+        """Words with their spaces: _text() leaves what is under a space."""
+        for n, c in enumerate(text):
+            ch[y][x + n], co[y][x + n] = c, attr
+
+    if k == 1:
+        plain(y0, x0 + (w - len(title) - 2) // 2, " " + title + " ", FLASH)
+    gx, gy = x0 + 2, y0 + 2
+    gw, gh = VEND_COLS * cw, VEND_ROWS * chh
+    _box(ch, co, gx - 1, gy - 1, gw + 2, gh + 2, CURB)
+    drop = vd.drop
+    for slot, item in enumerate(vd.items):
+        r, c = divmod(slot, VEND_COLS)
+        sx, sy = gx + c * cw, gy + r * chh
+        chosen = slot == sel
+        # The shelf's edge, with the code and the price on it.
+        for x in range(cw):
+            ch[sy + 3 * k][sx + x], co[sy + 3 * k][sx + x] = "=", CURB
+        label = "%s $%d" % (vd.code(slot), item[2])
+        if chosen:
+            label = ">" + label + "<"
+        plain(sy + 3 * k, sx + (cw - len(label)) // 2, label,
+              FLASH | curses.A_BOLD if chosen else HUD)
+        if chosen:
+            for y in range(3 * k):
+                on = int(now * 3.0) % 2 == 0
+                ch[sy + y][sx], co[sy + y][sx] = "[", FLASH if on else GOLD
+                ch[sy + y][sx + cw - 1] = "]"
+                co[sy + y][sx + cw - 1] = FLASH if on else GOLD
+        turning = (drop is not None and drop[0] == slot
+                   and now - drop[1] < VEND_TURN)
+        if slot in vd.stuck:
+            # Hanging off the end of the coil, and not coming down.
+            _vend_item(ch, co, sx + k + (1 if int(now * 2.0) % 2 else 0), sy, item,
+                       vd.colours[slot], k,
+                       FLASH if int(now * 4.0) % 2 else None)
+        elif vd.stock[slot] or turning:
+            _vend_item(ch, co, sx + k + (int(now * 20.0) % 2 if turning else 0), sy,
+                       item, vd.colours[slot], k)
+        else:
+            _text(ch, co, sy + (3 * k) // 2 - (1 if k > 1 else 0),
+                  sx + (cw - 4) // 2, "SOLD", CURB)
+            _text(ch, co, sy + (3 * k) // 2 + 1, sx + (cw - 3) // 2, "OUT", CURB)
+    # The tray, and what is lying in it or on its way down.
+    ty = gy + gh + 1
+    for y in range(ty, ty + 3 * k):
+        ch[y][gx - 1], co[y][gx - 1] = "|", CURB
+        ch[y][gx + gw], co[y][gx + gw] = "|", CURB
+    if drop is not None and now - drop[1] < VEND_TAKE:
+        slot, t0, many = drop
+        r, c = divmod(slot, VEND_COLS)
+        for n in range(many):
+            t = now - t0 - VEND_TURN - 0.12 * n
+            if t < 0.0:
+                continue
+            f = min(1.0, t / VEND_FALL)
+            fy = gy + r * chh + int((ty - gy - r * chh) * f * f)
+            _vend_item(ch, co, gx + c * cw + k + n * 2 * k, fy, vd.items[slot],
+                       vd.colours[slot], k)
+    else:
+        _text(ch, co, ty + (3 * k) // 2, gx + (gw - 4) // 2, "PUSH", CONCRETE)
+    # Down the side: the display, the buttons, the coin slot, what it said.
+    px, py, inner = gx + gw + 2, y0 + 1, pw - 3
+    stock = vd.stock[sel]
+    left = ("stuck!" if sel in vd.stuck else "sold out" if not stock
+            else "%d left" % stock)
+    if k == 1:
+        _box(ch, co, px - 1, py, pw - 1, 6, GOLD_DIM)
+        _text(ch, co, py + 1, px, vd.code(sel), ROU_GREEN)
+        _text(ch, co, py + 1, px + inner - len("$%d" % price), "$%d" % price,
+              ROU_GREEN)
+        for n, line in enumerate(_vend_wrap(name, inner)[:2]):
+            _text(ch, co, py + 2 + n, px, line, ROU_GREEN)
+        _text(ch, co, py + 4, px, left, GOLD_DIM)
+        by = py + 7
+    else:
+        dh = 5 * (k - 1) + 5
+        _box(ch, co, px - 1, py, pw - 1, dh, GOLD_DIM)
+        word = "%s $%d" % (vd.code(sel), price)
+        _blocks(ch, co, py + 1, px + (inner - blocks_width(word, k - 1)) // 2, word,
+                ROU_GREEN, k - 1, k - 1)
+        _text(ch, co, py + 5 * (k - 1) + 2, px, name[:inner], ROU_GREEN)
+        _text(ch, co, py + 5 * (k - 1) + 3, px, left, GOLD_DIM)
+        by = py + dh + 1
+    pad = (".-------.", "| 1 2 3 |", "| 4 5 6 |", "| 7 8 9 |", "'-------'")
+    if by + len(pad) + 2 < y0 + h - 1:
+        for n, line in enumerate(pad):
+            _text(ch, co, by + n, px + (inner - len(line)) // 2, line, CURB)
+        _text(ch, co, by + len(pad), px + (inner - 9) // 2, "[coins] o", CURB)
+        by += len(pad) + 2
+    for n, line in enumerate(_vend_wrap(said, inner)):
+        if by + n < y0 + h - 1:
+            _text(ch, co, by + n, px, line, GOLD)
+    return ch, co
 
 
 def draw_vending(ch, co, v, walls, vm, world, now):
@@ -29295,7 +29582,8 @@ def main(stdscr):
     flyer = Flyer(wallet)       # and High Flyer, f
     at_flyer = False
     lemon = {"glasses": 0, "at": -1e9}   # the kid's best customer
-    vend_said, vend_at = "", -1e9        # what the last vending machine gave you
+    vendor = None               # the vending machine whose glass you are at
+    vendors = {}                # and the ones you have been at, by seed: their stock
     scope_at = None             # when you put your eye to the telescope
     # The temple's terminal: the verses so far, when the last word was asked
     # for (to the nanosecond - it is what picks the next) and when.
@@ -29316,7 +29604,8 @@ def main(stdscr):
         than a flag, so it is never out of date within a frame."""
         return (sewer is not None or taxi is not None or cab is not None
                 or metro is not None
-                or flight is not None or reading or poke is not None)
+                or flight is not None or reading or poke is not None
+                or vendor is not None)
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -29498,6 +29787,21 @@ def main(stdscr):
                                 note = "-> the woods rave (starting)"
                                 note_at = now
                         break
+            elif vendor is not None and key not in (ord("q"), CHEAT_KEY):
+                if key in (27, ord("x"), ord("X")):
+                    vendor = None
+                    note, note_at = "you step back from the machine", now
+                elif key in (ord("z"), ord("Z")):
+                    _big_screens[0] = not _big_screens[0]     # big screens, off and on
+                else:
+                    vendor.key({curses.KEY_UP: "up", ord("w"): "up", ord("W"): "up",
+                                curses.KEY_DOWN: "down", ord("s"): "down",
+                                ord("S"): "down", curses.KEY_LEFT: "left",
+                                ord("a"): "left", ord("A"): "left",
+                                curses.KEY_RIGHT: "right", ord("d"): "right",
+                                ord("D"): "right", ord("p"): "buy", ord("P"): "buy",
+                                10: "buy", 13: "buy", curses.KEY_ENTER: "buy",
+                                ord(" "): "buy"}.get(key, ""), wallet, now)
             elif poke is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (27, ord("x"), ord("X")):
                     # Back out the way you came in, a few steps clear of the
@@ -29926,9 +30230,13 @@ def main(stdscr):
             elif (street and on_roof is None and sewer is None and venue is None
                   and key in (ord("p"), ord("P"))
                   and vending_near(cam_x, cam_z) is not None):
-                # Said where the hint was: a note goes on the end of the HUD,
-                # and with the hint up that is off the side of most windows.
-                vend_said, vend_at = vend(vending_near(cam_x, cam_z), wallet, now), now
+                # Up to the glass: its shelves, until x steps back.
+                vm_ = vending_near(cam_x, cam_z)
+                if vm_[5] not in vendors:
+                    vendors[vm_[5]] = Vending(vm_)
+                vendor = vendors[vm_[5]]
+                fwd = side = spin = 0.0
+                autopilot = False
             elif (street and on_roof is None and key in (ord("e"), ord("E"))
                   and station_at(cam_x, cam_z) is not None
                   and manhole_under(cam_x, cam_z) is None):
@@ -30464,6 +30772,9 @@ def main(stdscr):
                 seated = (venue[1]["seed"], now)    # sat down just now
             ch, co = render_ramen(venue[1], width, height, now, seated[1])
             hud = RAMEN_HUD % (cam_x, cam_z)
+        elif street and vendor is not None:
+            ch, co = render_vending(vendor, width, height, now)
+            hud = VEND_HUD
         elif street and poke is not None:
             ch, co = render_center(width, height, now, poke,
                                    note if now - note_at < 4.0 else "")
@@ -30536,8 +30847,7 @@ def main(stdscr):
                 sky_word(now, wet),
                 show_hint(now, cam_x, cam_z)
                 or ("  ~ a taxi is pulling up ~" if taxi is not None else "")
-                or (("  ~ %s ~" % vend_said if now - vend_at < 4.0
-                     else "  ~ a vending machine: p buys a can, $%d ~" % VEND_COST)
+                or ("  ~ a vending machine: p looks in ~"
                     if vending_near(cam_x, cam_z) is not None else "")
                 or ("  ~ the fog is in ~" if night(now)["fog"] else "")
                 or blackout_word(cam_x, cam_z, now)

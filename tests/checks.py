@@ -713,7 +713,7 @@ check("and the bowl is up there in red neon, above the name", bowl >= 25, str(bo
 # --- vending machines -----------------------------------------------------
 # One stretch of alley in VEND_LANES has one, against a plain front, lit all
 # night: a cabinet in its own colour, three rows of cans, and its light on the
-# ground. p buys a can for VEND_COST.
+# ground. p beside one looks in through the glass: see below.
 vspot = ac.find_place(x0, z0, "vending")
 check("the menu finds a vending machine, and stands you down the alley from it",
       vspot is not None and ac.can_stand(vspot[0], vspot[1])
@@ -747,11 +747,104 @@ vglow = ac.collect_glow(ac.View(vspot[0], vspot[1], vspot[2], 120, 36), 5000.0, 
 check("and its light lies on the ground in front of it, dry or wet",
       ac.NEON[vm_[4]][1] in vglow.values())
 ac.draw_vending = real_vend
-purse_ = ac.Wallet(5)
-said_ = [ac.vend(vm_, purse_, 100.0 + k_) for k_ in range(3)]
-check("a can is VEND_COST, and it says what came out",
-      purse_.money == 5 - 2 * ac.VEND_COST and all("clunk" in t_ for t_ in said_[:2])
-      and "wants" in said_[2], said_[0])
+# At the glass: four shelves, snacks over drinks, each with a code and a price;
+# what you buy turns off its coil and falls into the tray.
+vd_ = ac.Vending(vm_)
+vd2_ = ac.Vending(vm_)
+names_ = [it_[0] for it_ in vd_.items]
+check("a machine stocks ten snacks over ten drinks, its own, the same every time",
+      len(names_) == 20 and len(set(names_)) == 20
+      and all(it_ in ac.VEND_SNACKS for it_ in vd_.items[:10])
+      and all(it_ in ac.VEND_DRINKS for it_ in vd_.items[10:])
+      and names_ == [it_[0] for it_ in vd2_.items] and vd_.stock == vd2_.stock
+      and [vd_.code(n_) for n_ in (0, 4, 5, 19)] == ["A1", "A5", "B1", "D5"])
+check("every shape on the shelves is five by three",
+      all(len(a_) == 3 and all(len(l_) == 5 for l_ in a_) for a_ in ac.VEND_ART.values())
+      and all(it_[1] in ac.VEND_ART for it_ in ac.VEND_SNACKS + ac.VEND_DRINKS))
+for key_, want_ in (("right", 11), ("down", 16), ("down", 1), ("left", 0), ("left", 4),
+                    ("up", 19)):
+    vd_.key(key_, ac.Wallet(0), 50.0)
+    names_.append(vd_.sel == want_)
+check("the keys go round the shelves, and off one edge is on at the other",
+      all(names_[20:]), str(names_[20:]))
+purse_ = ac.Wallet(1000)
+vd_.sel = next(n_ for n_ in range(20) if vd_.stock[n_] >= 3)
+had_, price_ = vd_.stock[vd_.sel], vd_.items[vd_.sel][2]
+out_, t_, stuck_, twos_ = 0, 100.0, 0, 0
+while vd_.stock[vd_.sel] or vd_.sel in vd_.stuck:
+    was_ = (vd_.stock[vd_.sel], vd_.sel in vd_.stuck)
+    vd_.buy(purse_, t_)
+    if vd_.sel in vd_.stuck and not was_[1]:
+        stuck_ += 1
+    elif vd_.drop[1] == t_:
+        out_ += vd_.drop[2]
+        twos_ += vd_.drop[2] == 2 and not was_[1]
+    t_ += 2.0
+check("you get what you paid for, at its price, till the slot is empty",
+      out_ == had_ and 1000 - purse_.money == price_ * (had_ - twos_)
+      and "clunk" in vd_.said, "%d out for $%d" % (out_, 1000 - purse_.money))
+vd_.buy(purse_, t_)
+check("and then it is sold out, and keeps your money in your pocket",
+      "SOLD OUT" in vd_.said and 1000 - purse_.money == price_ * (had_ - twos_))
+vd_.sel = next(n_ for n_ in range(20) if vd_.stock[n_] and n_ != vd_.sel)
+vd_.buy(ac.Wallet(0), t_)
+check("with no money it says what it wants", "wants $" in vd_.said, vd_.said)
+hung_ = paid_twice_ = 0
+for seed_ in range(40):
+    vx_ = ac.Vending((0, 0, 0, 1.0, seed_ % 8, 7000 + seed_))
+    px_ = ac.Wallet(10 ** 6)
+    for n_ in range(20):
+        if vx_.stock[n_] < 2:
+            continue
+        vx_.sel, before_ = n_, vx_.stock[n_]
+        vx_.buy(px_, 10.0 * n_)
+        if n_ in vx_.stuck:
+            hung_ += 1
+            vx_.buy(px_, 10.0 * n_ + 5.0)
+            paid_twice_ += (vx_.drop == (n_, 10.0 * n_ + 5.0, 2)
+                            and vx_.stock[n_] == before_ - 2 and n_ not in vx_.stuck)
+check("now and then one hangs on the coil, and the next one brings both down",
+      hung_ > 10 and paid_twice_ == hung_, "%d hung, %d freed" % (hung_, paid_twice_))
+vd_ = ac.Vending(vm_)
+vd_.sel = next(n_ for n_ in range(20) if vd_.stock[n_])
+vtxt_ = "\n".join("".join(r_) for r_ in ac.render_vending(vd_, 110, 34, 5.0)[0])
+check("at the glass: the shelves, a code and a price on each, the one chosen marked",
+      "SNACKS & DRINKS" in vtxt_ and all(c_ in vtxt_ for c_ in ("A1 $", "D5 $", "PUSH"))
+      and ">%s $%d<" % (vd_.code(vd_.sel), vd_.items[vd_.sel][2]) in vtxt_
+      and vd_.items[vd_.sel][0].split()[0] in vtxt_)
+push_ = next(y_ for y_, r_ in enumerate(ac.render_vending(vd_, 110, 34, 5.0)[0])
+             if "PUSH" in "".join(r_))
+vd_.buy(ac.Wallet(100), 10.0)
+tray_ = []
+for t_ in (10.1, 10.0 + ac.VEND_TURN + ac.VEND_FALL + 0.3, 10.0 + ac.VEND_TAKE + 1.0):
+    vrows_ = ["".join(r_) for r_ in ac.render_vending(vd_, 110, 34, t_)[0]]
+    tray_.append(("PUSH" in vrows_[push_],
+                  sum(len(vrows_[y_].split("|")[2].strip()) > 0
+                      for y_ in range(push_ - 1, push_ + 2))))
+check("what you buy turns on its coil, falls, lies in the tray, and is taken",
+      tray_ == [(False, 0), (False, 3 - (vd_.items[vd_.sel][1] == "bar") * 2),
+                (True, 1)] or vd_.sel in vd_.stuck, str(tray_))
+check("a window with no room for the machine says what you are pointing at",
+      "VENDING" in "".join(ac.render_vending(vd_, 40, 12, 11.5)[0][5])
+      and vd_.code(vd_.sel) in "".join(ac.render_vending(vd_, 40, 12, 11.5)[0][5]))
+for w_, h_ in ((20, 8), (57, 24), (58, 24), (80, 24), (110, 34), (160, 45), (299, 87),
+               (300, 88), (301, 91), (449, 131), (451, 133), (600, 200), (300, 60),
+               (120, 140)):
+    for vx_ in (vd_, ac.Vending((0, 0, 0, 1.0, 3, 99))):
+        for t_ in (10.1, 10.6, 11.5, 30.0):
+            ac.render_vending(vx_, w_, h_, t_)
+check("it draws at every size, small, big and odd", True)
+small_ = sum(r_.count("#") for r_ in ac.render_vending(vd_, 299, 87, 30.0)[0])
+big_ = ["".join(r_) for r_ in ac.render_vending(vd_, 300, 90, 30.0)[0]]
+wide_ = [len(r_.strip()) for r_ in big_ if "=" * 30 in r_]
+check("big on a big window: the title and the price in block letters, the shelves twice over",
+      small_ == 0 and sum(r_.count("#") for r_ in big_) > 100
+      and max(wide_) >= ac.vend_size(2)[0] and "SNACKS & DRINKS" not in "".join(big_))
+ac._big_screens[0] = False
+check("and z gives the small machine back",
+      "SNACKS & DRINKS" in "".join("".join(r_) for r_ in ac.render_vending(vd_, 300, 90,
+                                                                             30.0)[0]))
+ac._big_screens[0] = True
 machines_, vruns_, bad_ = [], set(), []
 for i in range(-150, 150):
     for j in range(-150, 150):
