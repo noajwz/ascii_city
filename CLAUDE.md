@@ -2445,7 +2445,11 @@ around par; the windmill is the one that bites, since it wants timing.
 
 `render_minigolf()` draws a cell 2 columns by 1 row so the course is square to the eye, bigger as
 the window allows (up to `2 * big_scale()` a cell), the name in `_blocks()` big; the scorecard
-between rounds, the score over par in `_blocks()` big.
+between rounds, the score over par in `_blocks()` big. **The aim line is a line**: a stroke in
+every screen cell it crosses (`-` `|` `/` `\` by the way it leans), bold, white and gold
+running out along it, a `+` at its end, eight cells long while you aim and as long as the shot
+is hard with the meter going. It was a dot every half cell on felt that is itself dots, and the
+owner could not make it out.
 
 ## The rooftop bar
 

@@ -6896,6 +6896,33 @@ check("the tunnels draw at every size", True)
 sw_t = "\n".join("".join(r_) for r_ in ac.render_tunnels(sw_s, 110, 34, 600.0)[0])
 check("brick and water", "~" in sw_t and "-" in sw_t)
 
+# The line the ball will go off on: a stroke in every cell it crosses, not
+# a dot here and there on felt that is dots already.
+mg_g = ac.Minigolf()
+mg_g.start(1.0)
+strokes_ = {}
+for aim_, want_ in ((0.0, "-"), (math.pi / 2, "|"), (0.8, "\\"), (-0.8, "/")):
+    mg_g.aim = aim_
+    mch_, mco_ = ac.render_minigolf(mg, mg_g, 160, 45, 1.0)
+    mg_g.phase = "rolling"              # the same picture with no line on it
+    strokes_[want_] = sum(r_.count(want_) for r_ in mch_) - sum(
+        r_.count(want_) for r_ in ac.render_minigolf(mg, mg_g, 160, 45, 1.0)[0])
+    mg_g.phase = "aim"
+mg_g.aim = 0.0
+mch_, mco_ = ac.render_minigolf(mg, mg_g, 160, 45, 1.0)
+row_ = next("".join(r_) for r_ in mch_ if "o--" in "".join(r_))
+check("the aim line is a line: unbroken from the ball, ending in a +",
+      "o" + "-" * 8 in row_ and "-+" in row_ and min(strokes_.values()) >= 1,
+      str(strokes_))
+mg_g.key("act", 1.0)
+long_ = "".join(next(r_ for r_ in ac.render_minigolf(mg, mg_g, 160, 45, 1.0 + ac.GOLF_SWING
+                                                     * 0.5)[0] if "o--" in "".join(r_)))
+short_ = "".join(next(r_ for r_ in ac.render_minigolf(mg, mg_g, 160, 45, 1.02)[0]
+                      if "o--" in "".join(r_)))
+check("and with the meter going it is as long as the shot is hard",
+      long_.count("-") > short_.count("-") + 10,
+      "%d against %d" % (long_.count("-"), short_.count("-")))
+
 # --- the mystery -------------------------------------------------------------------
 cs_c = ac.new_case("menu", x0, z0, 600.0)
 check("a note starts it, and says to go to a diner", "diner" in cs_c["said"]
