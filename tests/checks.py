@@ -5232,6 +5232,73 @@ check("it leaves marks on the road, screeches, and comes straight again",
       "%d marks" % len(hb1_.skids))
 check("and it costs you speed, which the throttle gives back after",
       hb1_.speed > 15.0, "%.1f" % hb1_.speed)
+
+
+# The same, on the keys as a keyboard really sends them. A terminal repeats
+# only the last key held, after a wait: hold d, then e as well, and d goes
+# quiet. The first drifting did nothing for anyone with ten fingers ("I wasn't
+# able to properly drift") while the check above, pressing both every frame,
+# passed.
+def cab_keys(events, speed=20.0, secs=3.0):
+    """Drive on open ground from a list of (when, key): the cab, how far
+    round it came, the most it slipped, and the wheel at every frame."""
+    stand_ = ac.can_stand
+    ac.can_stand = lambda x_, z_: True
+    try:
+        c_ = ac.Cab(cb_x, cb_z, cb_y, 1000.0, 1)
+        c_.call_at, c_.speed, c_.want = 1e9, speed, speed
+        ev_, t_, k_, most_, wheel_ = sorted(events), 1000.0, 0, 0.0, []
+        for _ in range(int(secs * 30)):
+            t_ += 1.0 / 30.0
+            while k_ < len(ev_) and 1000.0 + ev_[k_][0] <= t_:
+                c_.key(ev_[k_][1], t_)
+                k_ += 1
+            c_.step(1.0 / 30.0, t_)
+            most_ = max(most_, abs(c_.slip))
+            wheel_.append(c_.steer)
+    finally:
+        ac.can_stand = stand_
+    return c_, ac._wrap(c_.heading - cb_y), most_, wheel_
+
+
+def held(key, t0, secs, wait=0.375, every=0.083):
+    """A key held down: once, a wait, and then the keyboard repeating it."""
+    out_, t_ = [(t0, key)], t0 + wait
+    while t_ < t0 + secs:
+        out_.append((t_, key))
+        t_ += every
+    return out_
+
+
+for wait_, every_, name_ in ((0.375, 0.083, "a Mac's"), (0.5, 0.033, "Windows'")):
+    ac._key_wait[0] = ac.CAB_WAIT_KEY
+    cab_keys(held("right", 0.1, 1.4, wait_, every_))    # it learns the wait
+    learned_ = ac._key_wait[0]
+    _, turn_, _, wheel_ = cab_keys(held("right", 0.1, 1.4, wait_, every_))
+    check("a held turn on %s repeat: the wheel never lets go and starts again" % name_,
+          all(b_ >= a_ - 1e-9 for a_, b_ in zip(wheel_[:40], wheel_[1:41]))
+          and wheel_[40] > 0.9 and abs(learned_ - wait_) < 0.07,
+          "wait %.2f, %.2f rad" % (learned_, turn_))
+    _, tap_, _, wheel_ = cab_keys([(0.1, "right")])
+    check("and a tap is still a nudge: a few degrees, a fifth of lock",
+          0.06 < tap_ < 0.14 and max(wheel_) < 0.3,
+          "%.1f deg, %.2f of lock" % (math.degrees(tap_), max(wheel_)))
+ac._key_wait[0] = 0.375
+dr_, dr_turn, dr_slip, _ = cab_keys(held("right", 0.1, 0.6) + held("handbrake", 0.7, 1.0))
+check("hold d, then e as well: d goes quiet, the wheel stays over, and it drifts",
+      dr_slip > 0.6 and len(dr_.skids) > 8 and "drift" in dr_.said,
+      "slip %.2f, %d marks" % (dr_slip, len(dr_.skids)))
+dr_, dr_turn, dr_slip, _ = cab_keys(held("drift right", 0.1, 1.2))
+check("shift and d: the wheel and the handbrake on the one key, and it drifts",
+      dr_slip > 0.6 and len(dr_.skids) > 8 and dr_turn > 1.5,
+      "slip %.2f, %.2f rad" % (dr_slip, dr_turn))
+_, _, _, wheel_ = cab_keys(held("right", 0.1, 0.6) + [(0.7, "slower")])
+check("the speed touched in a bend: the wheel waits where it was, then lets go",
+      wheel_[int(0.9 * 30)] > 0.5 and wheel_[-1] == 0.0,
+      "%.2f" % wheel_[int(0.9 * 30)])
+check("and the keys along the dash say so", "A D drift" in ac.CAB_KEYS
+      and "AD drift" in ac.CAB_KEYS_SHORT)
+ac._key_wait[0] = ac.CAB_WAIT_KEY
 sk_c = ac.Cab(cb_x, cb_z, cb_y, 1000.0, 1)
 sk_c.skids = [(cb_x + math.sin(cb_y) * d_ + math.cos(cb_y) * 0.3 * math.sin(d_),
                cb_z + math.cos(cb_y) * d_) for d_ in range(6, 20)]

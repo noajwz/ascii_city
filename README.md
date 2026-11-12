@@ -205,8 +205,8 @@ the city is infinite, identical every time you walk back to it, and held in no m
 - **Drive the cab yourself.** The driver hands you the keys and goes for a coffee: dispatch
   finds you fares waving at the kerb, the satnav shows the way, and they pay on the meter and
   tip on the ride - the one honest way to earn money in town. Some are in a hurry, some want it
-  gentle, and nobody likes the kerb. Hold the handbrake into a corner and the back steps out:
-  drift it, and leave the marks on the road. Speed past a police car and its lights go on in
+  gentle, and nobody likes the kerb. Hold the handbrake (`e`) into a corner, or shift with the
+  steering key, and the back steps out: drift it, and leave the marks on the road. Speed past a police car and its lights go on in
   your mirror - pull over for a ticket, or lose them. Take the on-ramps up onto the highway, the
   quick way across town, and come down an exit.
 - **Billboards** hung out over the wide streets, selling soda in neon.

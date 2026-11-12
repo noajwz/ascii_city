@@ -27078,6 +27078,8 @@ CAB_R_FAST = 0.7       # and how much wider that gets a unit of speed
 CAB_STEER = 1.2        # how fast the wheel goes over, a second
 CAB_CENTRE = 6.0       # and comes back by itself
 CAB_GRACE = 0.16       # a steering key holds the wheel over this long after it
+CAB_TAP = 0.065        # what one tap of the wheel comes to, in lock-seconds
+CAB_WAIT_KEY = 0.50    # a keyboard's wait before a held key repeats, till it is seen
 CAB_DENT = 9.0         # hit something faster than this: a crash, not a bump
 CAB_CAR = 2.6          # a car this near is a car hit
 CAB_HWY_DENT = 9.0     # on the highway, coming up behind one this much faster: a crash
@@ -27169,10 +27171,11 @@ _cars_off = set()       # the traffic's police car that pulled out after you
 _cars_extra = []        # and where it is now, for the street to draw like any car
 _cars_lift = {}         # and how high, by its seed: up a ramp after you
 CAB_HUD = " driving the cab  -  %s "
-CAB_KEYS = ("w s speed  a d steer  space brakes  e handbrake  l lights  m map  h horn  "
-            "x pull over")
-CAB_KEYS_SHORT = "ws speed  ad steer  spc brake  e handbrake  l m h x"
+CAB_KEYS = ("w s speed  a d steer  A D drift  space brakes  e handbrake  l lights  "
+            "m map  h horn  x pull over")
+CAB_KEYS_SHORT = "ws speed  ad steer  AD drift  spc brake  e handbrake  l m h x"
 _cab_seen = {}
+_key_wait = [CAB_WAIT_KEY]     # this keyboard's wait before a held key repeats
 
 
 def cab_ground(i, j):
@@ -27351,6 +27354,8 @@ class Cab:
         self.speed = self.want = 0.0
         self.steer = self.steer_in = 0.0
         self.steer_until = self.brake_until = 0.0
+        self.steer_push = 0.0       # till when the wheel is still going over
+        self.key_was = (None, -1e9, False)      # the last key: what, when, a repeat
         self.rng = random.Random(seed)
         self.clock = now
         self.fare = None            # who you have, waiting or in the back
@@ -27369,6 +27374,7 @@ class Cab:
         self.blocked = False
         self.slip = 0.0             # the way it goes less the way it points
         self.hb_until = 0.0         # the handbrake, held while the key repeats
+        self.first_gap = 0.0        # a held key's wait before its first repeat
         self.drift_t = 0.0          # how long this slide has gone on
         self.skids = []             # the marks it has left: (x, z)
         self.cop = None             # the police car after you, if one is
@@ -27382,7 +27388,45 @@ class Cab:
         self.lights = 1             # l: the headlights - off, on, high beam
 
     # --- the controls ----------------------------------------------------
+    def _bridge(self):
+        """How long a fresh press is taken to be held: this keyboard's wait
+        before it starts repeating, and a frame."""
+        return _key_wait[0] + 0.06
+
+    def _press(self, what, now):
+        """Is this key a fresh press, or the keyboard repeating a held one -
+        and, from a held one, how long this keyboard waits before it starts:
+        the first repeat comes that long after the press, the rest fast."""
+        was, at, rep = self.key_was
+        again = what == was and now - at < 0.8
+        if again and not rep and 0.12 < now - at:
+            self.first_gap = now - at           # perhaps the wait: see the next
+        elif again and now - at < 0.15 and self.first_gap:
+            _key_wait[0] = max(0.15, min(0.7, self.first_gap))
+            self.first_gap = 0.0
+        elif not again:
+            self.first_gap = 0.0
+        self.key_was = (what, now, again)
+        return not again
+
     def key(self, what, now):
+        if what in ("drift left", "drift right"):
+            # Shift and a steering key: the wheel and the handbrake on one
+            # key, since a keyboard only repeats the last key held.
+            self.key(what[6:], now)
+            what = "handbrake"
+        fresh = self._press(what, now)
+        steering = self.steer_in != 0.0 and now <= self.steer_until
+        if steering and what not in ("left", "right"):
+            # A terminal repeats only the last key held: touch the brake, the
+            # handbrake or the speed in a bend and the steering key under
+            # your other finger goes quiet, though you never let go of it.
+            # So the wheel stays where it is while this key is down - and
+            # with the handbrake it keeps going over, which is the drift.
+            self.steer_until = max(self.steer_until,
+                                   now + (self._bridge() if fresh else CAB_GRACE))
+            if what == "handbrake":
+                self.steer_push = self.steer_until
         if what == "faster":
             self.want = min(CAB_TOP, self.want + CAB_STEP)
         elif what == "slower":
@@ -27392,16 +27436,24 @@ class Cab:
         elif what in ("left", "right"):
             d = -1.0 if what == "left" else 1.0
             if d != self.steer_in or now > self.steer_until:
-                # A fresh press holds long enough to bridge the wait before
-                # the keyboard starts repeating, as the walking turn does.
-                self.steer_until = now + TURN_FIRST
+                # A fresh press. The keyboard says nothing more until it
+                # starts repeating, so till then a tap and a hold look the
+                # same: the wheel goes over for a moment and then waits where
+                # it is - not back to the middle, which made every held turn
+                # start, let go and start again. A shorter push the longer
+                # the wait, so a tap comes to the same CAB_TAP either way.
+                w = self._bridge()
+                self.steer_until = now + w
+                self.steer_push = now + w - math.sqrt(
+                    max(0.0, w * w - 2.0 * CAB_TAP / CAB_STEER))
             else:
                 self.steer_until = max(self.steer_until, now + CAB_GRACE)
+                self.steer_push = max(self.steer_push, now + CAB_GRACE)
             self.steer_in = d
         elif what == "handbrake":
-            fresh = now > self.hb_until
-            self.hb_until = (now + TURN_FIRST if fresh
-                             else max(self.hb_until, now + CAB_GRACE))
+            self.hb_until = max(self.hb_until,
+                                now + (self._bridge() if now > self.hb_until
+                                       else CAB_GRACE))
         elif what == "map":
             self.map_on = not self.map_on
         elif what == "lights":
@@ -27423,8 +27475,9 @@ class Cab:
         if now > self.steer_until:
             self.steer_in = 0.0
         if self.steer_in:
-            self.steer += max(-CAB_STEER * dt, min(CAB_STEER * dt,
-                                                   self.steer_in - self.steer))
+            if now <= self.steer_push:
+                self.steer += max(-CAB_STEER * dt, min(CAB_STEER * dt,
+                                                       self.steer_in - self.steer))
         else:
             self.steer += max(-CAB_CENTRE * dt, min(CAB_CENTRE * dt, -self.steer))
         wet = max(rain_intensity(now), snow_cover(now))
@@ -29586,8 +29639,10 @@ def main(stdscr):
                              ord("W"): "faster", curses.KEY_DOWN: "slower",
                              ord("s"): "slower", ord("S"): "slower",
                              curses.KEY_LEFT: "left", ord("a"): "left",
-                             ord("A"): "left", curses.KEY_RIGHT: "right",
-                             ord("d"): "right", ord("D"): "right",
+                             ord("A"): "drift left", curses.KEY_SLEFT: "drift left",
+                             curses.KEY_RIGHT: "right", ord("d"): "right",
+                             ord("D"): "drift right",
+                             curses.KEY_SRIGHT: "drift right",
                              ord(" "): "brake", ord("b"): "brake", ord("B"): "brake",
                              ord("m"): "map", ord("M"): "map", ord("h"): "horn",
                              ord("H"): "horn", ord("l"): "lights", ord("L"): "lights",
