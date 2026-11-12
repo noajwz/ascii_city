@@ -17,6 +17,20 @@ import sys
 
 from harness import ac
 
+# Everything down to "the coast" is about the city as it is endless: it walks
+# east as readily as west and counts things over squares miles across. So it
+# runs with the sea switched off - which is also the check that the switch
+# gives the old city back - and the coast's own section, at the end, turns it
+# on, checks the coast, and checks that the city west of it is cell for cell
+# the same city.
+ac.COAST = False
+# And the ways to the coast come off the lists till then: with no sea there
+# is no beach for the taxi or the checks' jumps to find.
+COAST_KINDS = ("beach", "seapier", "seawheel")
+coast_jumps_ = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] in COAST_KINDS]
+coast_fares_ = [p_ for p_ in ac.TAXI_DESTS if p_[1] in COAST_KINDS]
+ac.CHEAT_HIDDEN[:] = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] not in COAST_KINDS]
+ac.TAXI_DESTS[:] = [p_ for p_ in ac.TAXI_DESTS if p_[1] not in COAST_KINDS]
 
 ok = True
 def check(name, cond, detail=""):
@@ -1795,7 +1809,7 @@ check("nowhere a taxi goes is on the panel, nor its FUN, EAT, AROUND TOWN",
       and not {"FUN", "EAT", "AROUND TOWN", "OUT OF TOWN"}
       & {g_ for g_, _ in ac.CHEAT_GROUPS} and "AROUND TOWN" not in text)
 panel_keys_ = ([k_ for k_, _, _ in ac.CHEAT_PLACES] + [d_["key"] for d_ in ac.DISTRICTS]
-               + list("wLsa>nuz!@&#/+%\\mc`"))
+               + list("wLsa>nuz!@&#/+%\\mc`~"))
 check("every key on the panel does one thing: no place hides a part of town",
       len(panel_keys_) == len(set(panel_keys_)),
       " ".join(sorted({k_ for k_ in panel_keys_ if panel_keys_.count(k_) > 1})))
@@ -9229,6 +9243,397 @@ check("and things in the city have prices",
       and ac.LIFT_FEES[None] > 0 and ac.SHOW_FEE > 0)
 ta = "\n".join("".join(r) for r in ac.render_turned_away("club", 80, 24, 1.0)[0])
 check("and if you cannot pay, you are turned away", "not tonight" in ta)
+
+
+# --- the coast ----------------------------------------------------------------
+# East of the start the city ends at the sea: a row of hotels, a road along the
+# front, a boardwalk, a beach, water to the horizon, the river running out into
+# it, and a pier. One switch, ac.COAST, and everything above ran with it off.
+def cells_(i0, i1, j0, j1, step=3):
+    """What the generator says of a patch of cells: open, street, water, the
+    part of town, and how tall anything built there is."""
+    out = {}
+    for i_ in range(i0, i1, step):
+        for j_ in range(j0, j1, step):
+            open_ = ac.is_open(i_, j_)
+            out[(i_, j_)] = (open_, ac.road_at(i_, j_), ac.water_at(i_, j_),
+                             ac.district(i_, j_)["name"],
+                             None if open_ else round(ac.lot(i_, j_)["height"], 3))
+    return out
+
+
+west_off = cells_(-150, 330, -150, 150)
+far_off = cells_(360, 420, -60, 60)
+check("with the sea off there is none: the city goes on east as it always did",
+      not any(ac.coast_kind(i_, j_) for i_ in range(340, 460, 7)
+              for j_ in range(-300, 300, 13))
+      and any(not v_[0] for v_ in far_off.values())
+      and ac.find_place(x0, z0, "beach") is None)
+ac.COAST = True
+ac.coast_reset()
+ac.CHEAT_HIDDEN += coast_jumps_
+ac.TAXI_DESTS += coast_fares_
+west_on = cells_(-150, 330, -150, 150)
+moved_ = [k_ for k_ in west_off if west_off[k_] != west_on[k_]]
+check("with it on, the city west of it is cell for cell the same city",
+      not moved_, "%d of %d cells differ %s" % (len(moved_), len(west_off), moved_[:3]))
+shore_ = [ac.coastline(j_) for j_ in range(-2000, 2000)]
+check("the shore wanders, a little, and never more than half a cell a row",
+      ac.COAST_I - ac.COAST_WOB < min(shore_) and max(shore_) < ac.COAST_I + ac.COAST_WOB
+      and max(shore_) - min(shore_) > 8.0
+      and max(abs(a_ - b_) for a_, b_ in zip(shore_, shore_[1:])) < 0.5,
+      "%.1f to %.1f" % (min(shore_), max(shore_)))
+order_ = []
+jc_ = -150                              # a stretch with no river, no pier
+sc_ = int(math.floor(ac.coastline(jc_)))
+for i_ in range(sc_ - 10, sc_ + 3):
+    order_.append(ac.coast_kind(i_, jc_))
+check("from the town out: the road, the boardwalk, the sand, the surf, the sea",
+      order_ == [None, None] + ["road"] * 2 + ["walk"] + ["sand"] * ac.BEACH_DEEP
+      + ["surf"] + ["sea"] * 2, str(order_))
+stand_ = {k_: ac.can_stand((sc_ - d_ + 0.5) * ac.CELL, (jc_ + 0.5) * ac.CELL)
+          for k_, d_ in (("road", 7), ("walk", 6), ("sand", 3), ("surf", 0), ("sea", -1))}
+check("you can walk all of it and wade into the surf, and no further",
+      stand_ == {"road": True, "walk": True, "sand": True, "surf": True, "sea": False},
+      str(stand_))
+check("the HUD knows the seafront from the beach",
+      ac.district(sc_ - 7, jc_)["name"] == "the seafront"
+      and ac.district(sc_ - 2, jc_)["name"] == "the beach"
+      and "sea" in ac.coast_hint((sc_ - 2 + 0.5) * ac.CELL, (jc_ + 0.5) * ac.CELL)
+      and ac.coast_hint(x0, z0) == "")
+sea_ = [(i_, j_) for i_ in range(ac.COAST_I + ac.COAST_WOB + 1, ac.COAST_I + 700, 23)
+        for j_ in range(-700, 700, 31)]
+check("east of that it is sea, and only sea, for ever",
+      all(ac.coast_kind(i_, j_) in ("sea", "pier", "hall") for i_, j_ in sea_)
+      and all(ac.water_at(i_, j_) for i_, j_ in sea_ if ac.coast_kind(i_, j_) == "sea")
+      and all(ac.coast_kind(10 ** 6, j_) == "sea" for j_ in (-999, 0, 5000)))
+lost_ = []
+for i_, j_ in sea_ + [(i_, j_) for i_ in range(ac.COAST_LAND, ac.COAST_I + 9)
+                     for j_ in range(-400, 400, 7)]:
+    if ac.coast_kind(i_, j_) is None:
+        continue
+    if (ac.woods_at(i_, j_) or any(ac.zone_depth(k_, i_, j_) > 0 for k_ in ac.ZONES)
+            or ac.landmark_at(i_, j_) is not None or ac.hwy_at(i_) and ac.coast_kind(
+                i_, j_) != "road" or ac.el_at(i_) and ac.coast_kind(i_, j_) != "road"
+            or ac.tunnel_at(i_, j_) or ac.car_park_at(i_, j_) or ac.yokocho_at(i_, j_)
+            or ac.prom_at(i_, j_) or ac.fair_at(i_, j_) or ac.headland_at(i_, j_)
+            or ac.pier_at(i_, j_) or ac.bridge_at(i_, j_)
+            or (ac.manhole_at(i_, j_) and ac.coast_kind(i_, j_) != "road")):
+        lost_.append((i_, j_))
+check("nothing of the city stands in it or on the sand: no woods, zone, landmark, "
+      "viaduct, tunnel, car park, lane or fair", not lost_, str(lost_[:4]))
+check("no highway or elevated runs along the beach, and no metro comes up on it",
+      not any(ac.hwy_at(i_) or ac.el_at(i_) for i_ in range(ac.COAST_LAND - 2,
+                                                             ac.COAST_I + 300))
+      and not any(ac.station_of_block(bi_, bj_) for bi_ in range(
+          ac.COAST_LAND // ac.XP, ac.COAST_LAND // ac.XP + 30) for bj_ in range(-20, 20)))
+check("the big bridge, the fairs and the placed parts of town out there are gone, "
+      "not half in the water",
+      ac.grand_avenue(700) is None and ac.grand_avenue(0) is not None
+      and ac.carnival_col(450) == ac.DROWNED and ac.carnival_col(250) != ac.DROWNED
+      and ac.zone_home("university", 400, 100)[0] == ac.DROWNED
+      and ac.zone_home("airport", 600, 240)[0] == ac.DROWNED
+      and ac.zone_home("airport", 100, 240)[0] != ac.DROWNED
+      and ac.woods_home(700, 240)[0] == ac.DROWNED
+      and not ac.woods_at(700, 240) and not ac.university_at(420, 118))
+home_ = ac.zone_home("airport", 100, 240)
+check("and no flight is given an airport the sea has",
+      all(ac.flight_plan(home_, n_)[0] != ac.DROWNED for n_ in range(60)))
+mj_ = int(ac.river_centre(ac.COAST_I))
+mi_ = int(math.floor(ac.coastline(mj_)))
+kinds_ = [ac.coast_kind(i_, mj_) for i_ in range(mi_ - ac.COAST_STRIP, mi_ + 2)]
+check("the river runs out to the sea: across the beach as water, the road and "
+      "the boards carried over it",
+      kinds_ == ["bridge"] * 3 + ["mouth"] * (ac.BEACH_DEEP + 1) + ["sea"]
+      and all(ac.river_at(i_, int(ac.river_centre(i_))) for i_ in range(300, mi_ - 9))
+      and not ac.river_at(mi_ + 3, mj_), str(kinds_))
+lo_a, hi_a = ac.river_span(ac.COAST_I - ac.MOUTH_REACH - 5)
+lo_b, hi_b = ac.river_span(ac.COAST_I - 2)
+check("and opens out as it gets there", hi_b - lo_b > hi_a - lo_a + 2.0,
+      "%.1f cells across, from %.1f" % (hi_b - lo_b, hi_a - lo_a))
+# Along the front on foot, north of the mouth to south of it, over the bridge.
+seen_ = {(int(math.floor(ac.coastline(mj_ + 60))) - 7, mj_ + 60)}
+todo_ = list(seen_)
+while todo_:
+    i_, j_ = todo_.pop()
+    for a_, b_ in ((i_ + 1, j_), (i_ - 1, j_), (i_, j_ + 1), (i_, j_ - 1)):
+        if ((a_, b_) not in seen_ and abs(b_ - mj_) <= 61
+                and ac.coast_kind(a_, b_) in ("road", "bridge")
+                and ac.can_stand((a_ + 0.5) * ac.CELL, (b_ + 0.5) * ac.CELL)):
+            seen_.add((a_, b_))
+            todo_.append((a_, b_))
+check("the road along the front is one road, from one side of the river to the other",
+      min(b_ for _, b_ in seen_) == mj_ - 61 and max(b_ for _, b_ in seen_) == mj_ + 61,
+      "%d cells of it" % len(seen_))
+# From a street in town down to the water.
+ti_, tj_ = sc_ - 30, jc_
+while not (ac.is_open(ti_, tj_) and ac.road_at(ti_, tj_)):
+    tj_ += 1
+seen_ = {(ti_, tj_)}
+todo_ = [(ti_, tj_)]
+wet_feet = False
+while todo_ and not wet_feet and len(seen_) < 20000:
+    i_, j_ = todo_.pop(0)
+    wet_feet = ac.coast_kind(i_, j_) == "surf"
+    for a_, b_ in ((i_ + 1, j_), (i_ - 1, j_), (i_, j_ + 1), (i_, j_ - 1)):
+        if ((a_, b_) not in seen_ and abs(a_ - sc_) < 45 and abs(b_ - jc_) < 45
+                and ac.can_stand((a_ + 0.5) * ac.CELL, (b_ + 0.5) * ac.CELL)):
+            seen_.add((a_, b_))
+            todo_.append((a_, b_))
+check("and from a street in town you can walk down to the water", wet_feet,
+      "%d cells explored" % len(seen_))
+hotels_ = [ac.lot(i_, j_) for j_ in range(-300, 300)
+           for i_ in (int(math.floor(ac.coastline(j_))) - ac.COAST_STRIP - 1,)
+           if not ac.is_open(i_, j_) and ac.district(i_, j_) is ac.SEAFRONT_ROW]
+signs_ = [f_["flat"]["text"] for b_ in hotels_ for f_ in b_["faces"] if f_["flat"]]
+check("the row that faces the sea is hotels: a few storeys, their names in neon",
+      len(hotels_) > 150 and all(11.0 <= b_["height"] <= 24.0 for b_ in hotels_)
+      and len(signs_) > 100
+      and sum(t_ in ac.SEA_WORDS for t_ in signs_) > 0.9 * len(signs_),
+      "%d hotels, %d signs" % (len(hotels_), len(signs_)))
+check("a car can drive the front and onto the sand, and not into the sea",
+      ac.cab_ground(sc_ - 7, jc_) == "road" and ac.cab_ground(sc_ - 3, jc_) == "rough"
+      and ac.cab_ground(sc_ + 2, jc_) is None)
+
+# What it looks like. From the wet sand, looking straight out.
+bx_, bz_ = (sc_ - 1 + 0.5) * ac.CELL, (jc_ + 0.5) * ac.CELL
+clear_t = next(t_ * 37.0 for t_ in range(4000)
+               if ac.rain_intensity(t_ * 37.0) < 0.05 and not ac.night(t_ * 37.0)["fog"]
+               and ac.snow_cover(t_ * 37.0) == 0 and ac.dawn(t_ * 37.0) == 0
+               and not ac.night(t_ * 37.0)["alien"] and not ac.night(t_ * 37.0)["mist"])
+ac.SNOW, ac.GOLD_DIM = 981, 982
+bv_ = ac.View(bx_, bz_, math.pi / 2, 120, 36)
+sch_, sco_, _ = ac.render_street(bv_, clear_t)
+below_ = [(y_, x_) for y_ in range(bv_.horizon + 1, 36) for x_ in range(120)]
+foam_ = sum(1 for y_, x_ in below_ if sco_[y_][x_] == 981 and sch_[y_][x_] in "~-")
+back_ch, back_co, _ = ac.render_street(ac.View(bx_, bz_, -math.pi / 2, 120, 36), clear_t)
+sand_ = sum(1 for y_, x_ in below_ if back_co[y_][x_] == 982 and back_ch[y_][x_] == ".")
+check("from the wet sand: white water breaking and the sea beyond, the sand behind you",
+      len(bv_.water) > 800 and foam_ > 20 and sand_ > 5,
+      "%d cells of sea, %d of foam, %d of sand" % (len(bv_.water), foam_, sand_))
+sch2_, _, _ = ac.render_street(ac.View(bx_, bz_, math.pi / 2, 120, 36), clear_t + 1.3)
+moved_ = sum(1 for y_, x_ in below_ if sch_[y_][x_] != sch2_[y_][x_])
+check("and it moves: the waves come in", moved_ > 60, "%d cells changed" % moved_)
+ac.SNOW, ac.GOLD_DIM = 1, 1
+real_ground, real_ships, real_mirror = ac.coast_ground, ac.draw_ships, ac.reflect_river
+ac.coast_ground = lambda *a_: None
+ac.draw_ships = lambda *a_: None
+ac.reflect_river = lambda *a_: None
+stray_ = 0
+for yaw_ in (math.pi / 2 - 0.4, math.pi / 2, math.pi / 2 + 0.4):
+    for t_ in (clear_t, clear_t + 2.0):
+        v_ = ac.View((sc_ + 0.5) * ac.CELL, bz_, yaw_, 120, 36)
+        g_ = ac.render_street(v_, t_)[0]
+        stray_ += sum(1 for y_ in range(v_.horizon + 1, 36) for x_ in range(120)
+                      if g_[y_][x_] != " ")
+for eye_ in (40.0, 85.0):
+    v_ = ac.View(ac.shore_x(bz_) + 700.0, bz_, math.pi / 2, 120, 36, eye=eye_,
+                 reach=ac.ROOF_REACH)
+    g_ = ac.render_street(v_, clear_t)[0]
+    stray_ += sum(1 for y_ in range(v_.horizon + 1, 36) for x_ in range(120)
+                  if g_[y_][x_] != " ")
+ac.coast_ground, ac.draw_ships, ac.reflect_river = real_ground, real_ships, real_mirror
+check("out there is only water: with the sea not drawn, nothing is - from the "
+      "surf, from a roof's height, from the plane's", stray_ == 0, "%d cells" % stray_)
+ships_, rows_ = [], set()
+real_put = ac.put_cell
+no_walls_ = ([None] * 120, [36] * 120, [-1] * 120, [36] * 120, [[] for _ in range(120)])
+for k_ in range(30):
+    hits_ = []
+    ac.put_cell = lambda *a_: (hits_.append(a_[5]), real_put(*a_))
+    ac.draw_ships([[" "] * 120 for _ in range(36)], [[0] * 120 for _ in range(36)],
+                  ac.View(bx_, bz_ + k_ * 700.0, math.pi / 2, 120, 36), no_walls_, clear_t)
+    ac.put_cell = real_put
+    ships_.append(len(hits_))
+    rows_ |= set(hits_)
+check("but for a ship's lights here and there, along the horizon",
+      0 in ships_ and max(ships_) >= 3 and rows_ <= {bv_.horizon - 1, bv_.horizon,
+                                                    bv_.horizon + 1},
+      "%s lights, rows %s" % (sorted(set(ships_)), sorted(rows_)))
+
+# The beach, and what is on it.
+blocks_ = [ac.beach_block(k_) for k_ in range(-200, 200)]
+count_ = {k_: sum(1 for b_ in blocks_ if b_ and b_[0] == k_)
+          for k_ in ("bar", "fire", "parasols", "guard")}
+check("on the sand: bars, fires, parasols, a lifeguard's tower - and bare sand between",
+      all(n_ > 15 for n_ in count_.values()) and blocks_.count(None) > 60,
+      "%s, %d bare" % (count_, blocks_.count(None)))
+check("each of them on dry sand", all(
+    ac.coast_kind(int(b_[1] // ac.CELL), int(b_[2] // ac.CELL)) == "sand"
+    and ac.can_stand(b_[1], b_[2]) for b_ in blocks_ if b_))
+beach_ = ac.find_place(x0, z0, "beach")
+bar_ = next(b_ for b_ in blocks_ if b_ and b_[0] == "bar"
+            and abs(b_[2] - beach_[1]) < 1.0)
+check("the taxi's beach is the boardwalk by a bar, looking out to sea",
+      ("the beach", "beach") in ac.TAXI_DESTS and ac.can_stand(beach_[0], beach_[1])
+      and ac.coast_kind(int(beach_[0] // ac.CELL), int(beach_[1] // ac.CELL)) == "walk"
+      and abs(beach_[2] - math.pi / 2) < 1e-9 and ac.venue_at(beach_[0], beach_[1]) is None)
+again_ = ac.find_place(beach_[0], beach_[1], "beach")
+check("and a second press is another stretch of it",
+      again_ is not None and abs(again_[1] - beach_[1]) > ac.CHEAT_SKIP)
+drawn_ = {"bar": 0, "fire": 0}
+real_bar, real_fire = ac.draw_tiki_bar, ac.draw_beach_fire
+ac.draw_tiki_bar = lambda *a_: (drawn_.__setitem__("bar", drawn_["bar"] + 1), real_bar(*a_))
+ac.draw_beach_fire = lambda *a_: (drawn_.__setitem__("fire", drawn_["fire"] + 1),
+                                  real_fire(*a_))
+for yaw_ in (0.0, math.pi / 2, math.pi):
+    ac.render_street(ac.View(beach_[0], beach_[1], yaw_, 120, 36), clear_t)
+ac.draw_tiki_bar, ac.draw_beach_fire = real_bar, real_fire
+glow_ = ac.collect_glow(ac.View(beach_[0], beach_[1], math.pi / 2, 120, 36), clear_t, 0.0)
+check("from there the bar is in front of you, lit, and its light on the sand",
+      drawn_["bar"] >= 1 and glow_, str(drawn_))
+walk_ = 0.0
+while ac.venue_at(beach_[0] + walk_, beach_[1]) is None and walk_ < 8.0:
+    walk_ += 0.25
+ven_ = ac.venue_at(beach_[0] + walk_, beach_[1])
+check("a few steps on and you are at its counter",
+      ven_ is not None and ven_[0] == "beachbar" and walk_ < 5.0, "%.2f" % walk_)
+tk_ = ac.new_tiki(ven_[1]["seed"])
+purse_ = ac.Wallet(1000)
+said_ = [ac.tiki_order(tk_, 0, purse_, 10.0), ac.tiki_order(tk_, 1, purse_, 10.5)]
+check("a number orders, the price comes off, and the next waits for the shaker",
+      said_[0] is None and "shaking" in said_[1] and tk_["n"] == 1
+      and purse_.money == 1000 - ac.TIKI_DRINKS[0][1])
+check("with no money it says what it costs",
+      "$" in ac.tiki_order(ac.new_tiki(1), 3, ac.Wallet(0), 0.0))
+for n_ in range(ac.TIKI_LIMIT + 2):
+    ac.tiki_order(tk_, n_ % 4, purse_, 20.0 + n_ * 5.0)
+spent_ = purse_.money
+ac.tiki_order(tk_, 3, purse_, 90.0)
+check("and after enough of them it is water, on the house",
+      tk_["n"] == ac.TIKI_LIMIT and tk_["say"] == ac.TIKI_WATER and purse_.money == spent_)
+ttxt_ = "\n".join("".join(r_) for r_ in ac.render_tiki(ven_[1], tk_, 110, 34, 200.0)[0])
+check("sat at it: the thatch, the list, the one behind the counter, your glass, the sea",
+      all(d_[0] in ttxt_ for d_ in ac.TIKI_DRINKS) and "( -- )" in ttxt_
+      and "\\~~~~/" in ttxt_ and ttxt_.count("~") > 60
+      and ac.TIKI_NAMES[ven_[1]["seed"] % len(ac.TIKI_NAMES)] in ttxt_)
+tk2_ = ac.new_tiki(5)
+ac.tiki_order(tk2_, 2, ac.Wallet(100), 300.0)
+shake_ = {"".join("".join(r_) for r_ in ac.render_tiki(ven_[1], tk2_, 110, 34,
+                                                         300.0 + n_ / 12.0)[0]).count("o")
+          for n_ in range(8)}
+check("while it is being made the shaker goes, and there is no glass yet",
+      "\\~~~~/" not in "".join("".join(r_) for r_ in ac.render_tiki(
+          ven_[1], tk2_, 110, 34, 300.5)[0]))
+for w_, h_ in ((20, 8), (49, 18), (50, 18), (80, 24), (110, 34), (160, 45), (299, 87),
+               (300, 88), (301, 91), (449, 131), (451, 133), (600, 200), (120, 140)):
+    for st_ in (tk_, tk2_, ac.new_tiki(3)):
+        for t_ in (300.3, 310.0):
+            ac.render_tiki(ven_[1], st_, w_, h_, t_)
+check("it draws at every size, small, big and odd", True)
+small_ = sum(r_.count("#") for r_ in ac.render_tiki(ven_[1], tk_, 299, 87, 200.0)[0])
+big_ = sum(r_.count("#") for r_ in ac.render_tiki(ven_[1], tk_, 300, 90, 200.0)[0])
+ac._big_screens[0] = False
+back_ = sum(r_.count("#") for r_ in ac.render_tiki(ven_[1], tk_, 300, 90, 200.0)[0])
+ac._big_screens[0] = True
+check("big on a big window - its name in block letters - and z gives the small one back",
+      big_ > back_ + 100, "%d against %d" % (big_, back_))
+crowd_ = []
+for name_ in ("some", "busy", "none"):
+    while ac.crowd_name() != name_:
+        ac.cycle_crowd()
+    crowd_.append(sum(len(ac.near_strollers(ac.View(beach_[0], beach_[1] + k_ * 200.0, 0.0,
+                                                    120, 36), clear_t))
+                      for k_ in range(8)))
+while ac.crowd_name() != "some":
+    ac.cycle_crowd()
+sv_ = ac.View(beach_[0], beach_[1], 0.0, 120, 36)
+a_ = sorted((round(z_ - clear_t * 0, 1)) for _, _, z_, _, _ in ac.near_strollers(sv_, clear_t))
+b_ = sorted((round(z_, 1)) for _, _, z_, _, _ in ac.near_strollers(sv_, clear_t + 2.0))
+check("people walk the boardwalk, as many as the menu's crowd says, and they move",
+      crowd_[1] > crowd_[0] > 0 and crowd_[2] == 0 and a_ != b_, str(crowd_))
+
+# The pier.
+pier_ = ac.sea_pier(ac.PIER_ROW + 2)
+r0_, head_, end_ = pier_
+check("there is a pier: out over the sand and a long way over the sea, with a head on it",
+      end_ - int(math.floor(ac.coastline(r0_ + 2))) == ac.PIER_OUT
+      and all(ac.coast_kind(i_, r0_ + 2) == "pier"
+              for i_ in range(int(math.floor(ac.coastline(r0_ + 2))) - ac.BEACH_DEEP,
+                              end_ + 1))
+      and ac.coast_kind(end_ + 1, r0_ + 2) == "sea"
+      and ac.coast_kind(head_ + 2, r0_ - ac.PIER_HEAD[1]) == "pier"
+      and ac.sea_pier(r0_ + 40) is None)
+pspot_ = ac.find_place(x0, z0, "seapier")
+seen_ = {(int(pspot_[0] // ac.CELL), int(pspot_[1] // ac.CELL))}
+todo_ = list(seen_)
+while todo_:
+    i_, j_ = todo_.pop()
+    for a_, b_ in ((i_ + 1, j_), (i_ - 1, j_), (i_, j_ + 1), (i_, j_ - 1)):
+        if ((a_, b_) not in seen_ and ac.coast_kind(a_, b_) in ("road", "walk", "pier")
+                and abs(b_ - r0_) < 12
+                and ac.can_stand((a_ + 0.5) * ac.CELL, (b_ + 0.5) * ac.CELL)):
+            seen_.add((a_, b_))
+            todo_.append((a_, b_))
+check("the taxi's pier is its foot, and from there you can walk to the very end",
+      ("the pier", "seapier") in ac.TAXI_DESTS and ac.can_stand(pspot_[0], pspot_[1])
+      and (end_, r0_ + 2) in seen_, "%d cells of boards" % len(seen_))
+hall_ = [(i_, j_) for i_ in range(head_, end_ + 1)
+         for j_ in range(r0_ - ac.PIER_HEAD[1], r0_ + ac.PIER_BROAD + ac.PIER_HEAD[1])
+         if ac.coast_kind(i_, j_) == "hall"]
+words_ = {f_["flat"]["text"] for i_, j_ in hall_ for f_ in ac.lot(i_, j_)["faces"]
+          if f_["flat"]}
+check("the hall on its head is a building, lit, with what is on inside in neon",
+      len(hall_) >= 12 and not any(ac.is_open(i_, j_) for i_, j_ in hall_)
+      and words_ and words_ <= set(ac.PIER_HALL["words"])
+      and ac.face_kind(hall_[0][0] - 1, hall_[0][1]) == "road", str(sorted(words_)))
+ac.NEON = [(300 + n_, 400 + n_) for n_ in range(8)]
+south_ = int(math.floor(ac.coastline(r0_ + 35))) - 1
+pv_ = ac.View((south_ + 0.5) * ac.CELL, (r0_ + 35.5) * ac.CELL,
+              math.atan2(ac.sea_wheel(pier_)[0] - (south_ + 0.5) * ac.CELL,
+                         ac.sea_wheel(pier_)[1] - (r0_ + 35.5) * ac.CELL), 200, 55)
+pch_, pco_, _ = ac.render_street(pv_, clear_t)
+ring_ = [(y_, x_) for y_ in range(pv_.horizon) for x_ in range(200)
+         if pch_[y_][x_] == "o" and 300 <= pco_[y_][x_] < 308]
+low_ = [(y_, x_) for y_ in range(pv_.horizon + 1, 55) for x_ in range(200)
+        if pch_[y_][x_] == ":" and 300 <= pco_[y_][x_] < 308]
+ac.NEON = [(100 + n_, 200 + n_) for n_ in range(8)]
+check("from the sand along the coast: the wheel, a ring of lights standing over the sea",
+      len(ring_) > 15 and max(y_ for y_, _ in ring_) - min(y_ for y_, _ in ring_) >= 6,
+      "%d bulbs, %d rows tall" % (len(ring_), max(y_ for y_, _ in ring_)
+                                  - min(y_ for y_, _ in ring_) + 1))
+check("and the pier's lights lying on the water", len(low_) > 10, "%d" % len(low_))
+wspot_ = ac.find_place(x0, z0, "seawheel")
+check("at the wheel's foot it says so", ac.sea_wheel_near(wspot_[0], wspot_[1]) == pier_
+      and ac.can_stand(wspot_[0], wspot_[1]) and ac.sea_wheel_near(x0, z0) is None)
+seat_ = [ac.wheel_seat(pier_, t_ * ac.SEA_WHEEL_RIDE / 4.0)[2] for t_ in range(5)]
+check("a ride is once round: on at the bottom, over the top, off at the bottom",
+      abs(seat_[0] - 1.6) < 0.01 and abs(seat_[4] - 1.6) < 0.01
+      and abs(seat_[2] - (2 * ac.SEA_WHEEL_R + 1.6)) < 0.01, str([round(a_) for a_ in seat_]))
+top_ = ac.render_wheel_ride(pier_, ac.SEA_WHEEL_RIDE / 2.0, -math.pi / 2, 150, 44, clear_t)
+low_ = ac.render_wheel_ride(pier_, 1.0, -math.pi / 2, 150, 44, clear_t)
+check("from the top you look down on the town's roofs, the beach and the sea",
+      top_[2].eye > 30.0 and low_[2].eye < 5.0 and len(top_[2].water) > 300
+      and "up" in "".join(top_[0][1]))
+for w_, h_ in ((20, 8), (80, 24), (110, 34), (300, 90), (451, 133)):
+    for t_ in (0.0, 9.0, 25.0, 49.9):
+        ac.render_wheel_ride(pier_, t_, t_ * 0.3, w_, h_, clear_t)
+check("and the ride draws at every size", True)
+
+# The ways there, and back.
+bad_ = []
+for sx_c, sz_c in ((x0, z0), (beach_[0], beach_[1])):
+    for _, name_, kind_ in ac.CHEAT_PLACES + ac.CHEAT_HIDDEN:
+        sp_ = ac.find_place(sx_c, sz_c, kind_)
+        if sp_ is None or not ac.can_stand(sp_[0], sp_[1]):
+            bad_.append(name_)
+check("with the sea there, every place on the menus is still somewhere you can stand - "
+      "from the start, and from the beach", not bad_, ",".join(bad_))
+check("the taxi goes everywhere it went, and to the beach and the pier",
+      len(ac.taxi_dests(x0, z0)) == len(ac.TAXI_DESTS)
+      and len(ac.taxi_dests(beach_[0], beach_[1])) == len(ac.TAXI_DESTS))
+check("~ on the panel is the switch", ac.toggle_coast() is False
+      and ac.coast_kind(sc_ + 5, jc_) is None and ac.find_place(x0, z0, "beach") is None
+      and cells_(360, 420, -60, 60) == far_off
+      and ac.toggle_coast() is True and ac.coast_kind(sc_ + 5, jc_) == "sea")
+panel_ = ([[" "] * 100 for _ in range(30)], [[0] * 100 for _ in range(30)])
+ac.draw_cheats(panel_[0], panel_[1], "")
+check("and the panel says which way it is", "the sea: on" in "".join(
+    "".join(r_) for r_ in panel_[0]))
+std_ = ([[" "] * 80 for _ in range(24)], [[0] * 80 for _ in range(24)])
+ac.draw_cheats(std_[0], std_[1], "-> somewhere")
+check("which still opens on an 80x24 terminal", any("close" in "".join(r_)
+                                                     for r_ in std_[0]))
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

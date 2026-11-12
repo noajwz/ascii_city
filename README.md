@@ -36,6 +36,8 @@ nothing saved.
   flight plans to other airports, crosswinds, and thunderstorms out there you can fly into.
 - **A river** with piers, rowing boats and a carnival, and a bay with a suspension bridge and a
   lighthouse you can climb.
+- **A coast** — east of where you start the city ends at the sea: hotels in neon along the front,
+  a boardwalk, a beach with bars and fires on it, and a pier with a big wheel at the end.
 - **Secrets** — tunnels under every street, somebody living down a manhole, a mystery that starts
   with a note, and things in the woods you will not like.
 
@@ -178,6 +180,8 @@ And two things outside the terminal:
   flight plans to other airports, crosswinds, and thunderstorms out there you can fly into.
 - **A river** with piers, rowing boats and a carnival, and a bay with a suspension bridge and a
   lighthouse you can climb.
+- **A coast** — east of where you start the city ends at the sea: hotels in neon along the front,
+  a boardwalk, a beach with bars and fires on it, and a pier with a big wheel at the end.
 - **Secrets** — tunnels under every street, somebody living down a manhole, a mystery that starts
   with a note, and things in the woods you will not like.
 
@@ -304,6 +308,15 @@ the city is infinite, identical every time you walk back to it, and held in no m
   round over all of it. Climb it, and up on its gallery `f` lights a fireworks show that you fire,
   one shell for every press on the beat.
 - One night in a dozen the river is lanterns, and now and then there are fireworks over the bay.
+- **The sea.** A long way east the river runs out into it. Along the front: a row of hotels with
+  their names in neon, a road, a boardwalk under a string of coloured bulbs, palms, and a beach
+  — waves coming in, the moon's light lying on the water, a ship on the horizon now and then.
+  A taxi goes to **the beach** and to **the pier**.
+- **On the sand**: bars under thatched roofs (walk up to the counter and a number orders),
+  fires with people round them, parasols shut for the night, a lifeguard's tower. Walk into
+  the surf if you like.
+- **The pier**: out over the sea, lights the length of it, a hall at the end and a **big wheel**
+  — `p` at its foot rides it once round, over the whole coast.
 
 ### Weather and the sky
 
