@@ -18372,15 +18372,32 @@ def render_minigolf(course, game, width, height, now, best=None):
     if 0 <= cy - 2 * s < height and 0 <= cx + 1 < width:
         ch[cy - 2 * s][cx + 1], co[cy - 2 * s][cx + 1] = flap, ROU_RED
     if game.phase == "aim" or game.phase == "power":
-        reach = 3.0 + (game.power(now) * 9.0 if game.phase == "power" else 3.0)
-        for d in range(1, int(reach * 2)):
-            px = game.x + math.cos(game.aim) * d * 0.5
-            py = game.y + math.sin(game.aim) * d * 0.5
+        # The line it will go off on. It was a dot every half cell, in white
+        # and gold, on felt that is itself green dots: "the shooting line
+        # doesn't seem to be that clear". Now it is a line - a stroke in every
+        # screen cell it crosses, leaning the way it goes, white and gold
+        # running out along it - with a + at its end.
+        reach = 3.0 + (game.power(now) * 9.0 if game.phase == "power" else 5.0)
+        ca, sa = math.cos(game.aim), math.sin(game.aim)
+        lean = abs(math.degrees(math.atan2(sa, ca))) % 180.0
+        stroke = ("-" if lean < 22.5 or lean > 157.5 else "|" if 67.5 < lean < 112.5
+                  else "\\" if ca * sa > 0 else "/")
+        n_ = max(1, int(reach * max(abs(ca) * cw, abs(sa) * s)))
+        last, march = None, int(now * 8.0)
+        for d in range(1, n_ + 1):
+            px = game.x + ca * reach * d / n_
+            py = game.y + sa * reach * d / n_
             if game.solid(px, py):
                 break
             xx, yy = x0 + int(px * cw), y0 + int(py * s)
+            if (xx, yy) == (x0 + int(game.x * cw), y0 + int(game.y * s)):
+                continue
             if 0 <= yy < height and 0 <= xx < width:
-                ch[yy][xx], co[yy][xx] = ".", FLASH if d % 2 else GOLD
+                ch[yy][xx] = stroke
+                co[yy][xx] = (FLASH if (d - march) % 6 < 3 else GOLD) | curses.A_BOLD
+                last = (xx, yy)
+        if last is not None:
+            ch[last[1]][last[0]], co[last[1]][last[0]] = "+", FLASH | curses.A_BOLD
     if game.phase != "holed":
         bx, by = x0 + int(game.x * cw), y0 + int(game.y * s)
         if 0 <= by < height and 0 <= bx < width:
