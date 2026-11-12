@@ -22122,23 +22122,120 @@ def draw_blackjack(ch, co, bj, x0, y0, now):
               FLASH if flash else GOLD if win else ROU_RED)
 
 
-RAMEN_ODDS = 3         # one yokocho counter in this many is a ramen shop
+LANE_RUN = 6           # cells in one stretch of alley: lit, dark or missing as one
 RAMEN_SERVE = 4.5      # seconds from sitting down to the bowl in front of you
 RAMEN_MENU = [("SHOYU", 850), ("MISO", 900), ("SHIO", 850),
               ("TONKOTSU", 980), ("TANTANMEN", 1050), ("GYOZA", 450)]
 
 
-def ramen_at(i, j, f):
-    """Is the place behind this face a ramen counter.
+def lane_run(i, j):
+    """The stretch of alley this open cell is in, as (axis, lane, run): the
+    alleys are cut in runs of LANE_RUN cells, and a run is lit or dark as
+    one. Axis 0 runs along z in column `lane`, axis 1 along x in row `lane`.
+    None if the cell is not in an alley at all."""
+    if _is_alley(i, j, XP, 91, 211):
+        return 0, i, j // LANE_RUN
+    if _is_alley(j, i, ZP, 137, 223):
+        return 1, j, i // LANE_RUN
+    return None
 
-    A yokocho pub, one in RAMEN_ODDS, by a hash of the face - the hash first,
-    because it is the cheap test and the lot is not."""
-    if _mix(i, j * 4 + f, 1601) % RAMEN_ODDS:
-        return False
+
+def lane_faces(run):
+    """Every front giving onto a stretch of alley, both sides: (i, j, f), and
+    the alley cell it looks out on."""
+    axis, lane, k = run
+    for n in range(k * LANE_RUN, (k + 1) * LANE_RUN):
+        if axis == 0:
+            yield lane - 1, n, 1, lane, n
+            yield lane + 1, n, 0, lane, n
+        else:
+            yield n, lane - 1, 3, n, lane
+            yield n, lane + 1, 2, n, lane
+
+
+def plain_front(b):
+    """A building with ordinary fronts: not a tree, and not one of the places
+    whose front is all its own."""
+    return not (b["tree"] or b["club"] is not None or b["casino"] is not None
+                or b["arcade"] is not None or b["bowling"] is not None
+                or b["karaoke"] is not None or b["minigolf"] is not None
+                or b["temple"] is not None or b["exchange"] is not None)
+
+
+RAMEN_APART = 60.0     # no two ramen shops nearer each other than this
+_ramen_picks = {}
+_ramen_firsts = {}
+
+
+def _ramen_first(run):
+    """The counter a stretch of lit lane would make its ramen shop, as
+    (hash, i, j, f), or None: the one with the lowest hash."""
+    hit = _ramen_firsts.get(run, 0)
+    if hit != 0:
+        return hit
+    _evict(_ramen_firsts, 20000)
+    hit = None
+    for i, j, f, oi, oj in lane_faces(run):
+        if is_open(i, j) or not yokocho_at(oi, oj):
+            continue
+        b = lot(i, j)
+        if not plain_front(b) or not b["faces"][f]["pub"]:
+            continue
+        m = _mix(i, j * 4 + f, 1601)
+        if hit is None or m < hit[0]:
+            hit = (m, i, j, f)
+    _ramen_firsts[run] = hit
+    return hit
+
+
+def ramen_pick(run):
+    """The one ramen counter of a lit lane, as (i, j, f), or None.
+
+    One a lane, and none near another. It was one yokocho counter in three,
+    each on its own hash, which came to two a stretch, often side by side or
+    facing each other across five units of lane - and a ramen shop is a neon
+    bowl, a vent and a cloud of steam, so two of them were the whole lane.
+    Now each lit stretch puts one counter forward, its lowest hash, and that
+    one is a ramen shop unless another stretch's - the lane round the corner,
+    the one crossing it - is within RAMEN_APART with a lower hash still."""
+    hit = _ramen_picks.get(run, 0)
+    if hit != 0:
+        return hit
+    _evict(_ramen_picks, 20000)
+    first = _ramen_first(run)
+    hit = None
+    if first is not None:
+        m, i, j, f = first
+        hit = (i, j, f)
+        n = int(RAMEN_APART / CELL)
+        seen = {run}
+        for a in range(i - n, i + n + 1):
+            for b in range(j - n, j + n + 1):
+                if not yokocho_at(a, b):
+                    continue
+                other = lane_run(a, b)
+                if other is None or other in seen:
+                    continue
+                seen.add(other)
+                o = _ramen_first(other)
+                if (o is not None and o[0] < m
+                        and (o[1] - i) ** 2 + (o[2] - j) ** 2 <= n * n):
+                    hit = None
+                    break
+            if hit is None:
+                break
+    _ramen_picks[run] = hit
+    return hit
+
+
+def ramen_at(i, j, f):
+    """Is the place behind this face a ramen counter: its lane's one."""
     nx, nz = FACES[f]
-    if not is_open(i + nx, j + nz) or face_kind(i + nx, j + nz) != "yokocho":
+    oi, oj = i + nx, j + nz
+    if not is_open(oi, oj) or not yokocho_at(oi, oj):
         return False
-    return lot(i, j)["faces"][f]["pub"]
+    run = lane_run(oi, oj)
+    return run is not None and ramen_pick(run) == (i, j, f)
 
 
 def ramen_door(i, j, f):
@@ -24934,7 +25031,7 @@ def _ramen_spot(x, z):
         if is_open(i, j):
             continue
         for f in range(4):
-            if _mix(i, j * 4 + f, 1601) % RAMEN_ODDS or not ramen_at(i, j, f):
+            if not ramen_at(i, j, f):
                 continue
             px, pz = ramen_door(i, j, f)
             if (px - x) ** 2 + (pz - z) ** 2 < CHEAT_SKIP ** 2:

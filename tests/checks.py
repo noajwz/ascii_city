@@ -623,7 +623,7 @@ check("and the dealer's second card is face down until you stand",
       (":::" in text) == (bj2.phase == "player"))
 
 # --- the ramen counter ---------------------------------------------------
-# A yokocho pub, one in RAMEN_ODDS, that you can sit down at. The menu stands
+# A yokocho pub, one to a lit lane, that you can sit down at. The menu stands
 # you across the lane from one, a couple of steps in is the counter, and the
 # bowl comes after a while.
 front = ac.find_place(x0, z0, "ramen")
@@ -645,7 +645,11 @@ check("it is on a lit lane", ac.yokocho_at(si, sj))
 again = ac.find_place(shop[0], shop[1], "ramen")
 check("and a second press finds another",
       again is not None and math.hypot(again[0] - shop[0], again[1] - shop[1]) > ac.CHEAT_SKIP)
-pubs = shops = 0
+# One a lane: it was one counter in three, which was two a stretch, side by
+# side or across the lane from each other ("showing up too many times and
+# sometimes right across each other on a very narrow road").
+pubs = 0
+shops, lanes = [], set()
 for i in range(-150, 150):
     for j in range(-150, 150):
         if ac.is_open(i, j):
@@ -655,9 +659,17 @@ for i in range(-150, 150):
             if (ac.is_open(i + nx, j + nz) and ac.face_kind(i + nx, j + nz) == "yokocho"
                     and ac.lot(i, j)["faces"][f]["pub"]):
                 pubs += 1
-                shops += ac.ramen_at(i, j, f)
-check("about one yokocho counter in three is ramen",
-      0.2 < shops / float(max(1, pubs)) < 0.47, "%d of %d" % (shops, pubs))
+                lanes.add(ac.lane_run(i + nx, j + nz))
+                if ac.ramen_at(i, j, f):
+                    shops.append((ac.lane_run(i + nx, j + nz), ac.ramen_door(i, j, f)))
+check("a ramen counter is one counter in ten or so, not one in three",
+      0.03 < len(shops) / float(max(1, pubs)) < 0.2, "%d of %d" % (len(shops), pubs))
+check("never two in one stretch of lane",
+      len({r_ for r_, _ in shops}) == len(shops))
+near_ = min(math.hypot(a_[0] - b_[0], a_[1] - b_[1])
+            for n_, (_, a_) in enumerate(shops) for _, b_ in shops[n_ + 1:])
+check("nor two near each other, round a corner or across a lane",
+      near_ >= ac.RAMEN_APART - 2.0 * ac.CELL, "%.0f" % near_)
 room, _ = ac.render_ramen(ven[1], 110, 32, 101.0, 100.0)
 text = "\n".join("".join(r) for r in room)
 check("inside: the noren, the menu, the cook", "RAMEN" in text and "SHOYU" in text

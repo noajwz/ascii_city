@@ -2125,8 +2125,14 @@ and red when it has gone, what your stake is worth, four others at the table cas
 
 ## The ramen counter
 
-The third way into a building. One yokocho pub in `RAMEN_ODDS` is a ramen shop (`ramen_at()`,
-hash of the face first because the lot is the expensive test), and from the lane it says so: the
+The third way into a building. **One yokocho pub to a lit lane** is a ramen shop
+(`ramen_at()`), and none within `RAMEN_APART` (60) of another. It was one pub in three, each on
+its own hash - two a stretch, side by side or facing each other across the lane - and the owner
+found them "showing up too many times and sometimes right across each other on a very narrow
+road". Now each stretch of lit lane (`lane_run()`: the `LANE_RUN` cells an alley is cut in) puts
+forward its lowest-hash pub (`_ramen_first()`), and `ramen_pick()` makes that one the shop unless
+a nearby stretch's - round the corner, crossing it - has a lower hash still: about a third as
+many as before, in two lit stretches in five. Both are cached per stretch. From the lane it says so: the
 sign over the door reads ラーメン instead of the pub's usual word, a split red **noren** hangs over
 the door, and steam comes out from under it. `venue_at()` treats its door like the casino's —
 stand within `CASINO_REACH` and `render_ramen()` draws the room round you.
