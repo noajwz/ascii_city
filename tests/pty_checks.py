@@ -201,6 +201,9 @@ def cases(run, report):
     ok &= report("the suburbs: to them, walk a curving street, a taxi out", *run(
         [(b"`", .5), (b"0", 1.5), (b"w", 1.0), (b"W", 1.0), (b"a", .5), (b"w", 1.0),
          (b"t", 3.6), (b"\x1b", .4)], cols=100, rows=30))
+    ok &= report("a vending machine: to it, walk up, buy two cans", *run(
+        [(b"`", .5), (b"d", 1.5)] + [(b"w", .25)] * 14 + [(b"p", .6), (b"p", 1.0)],
+        cols=100, rows=30))
     ok &= report("lemonade at 3am: buy three, and the stargazer's telescope", *run(
         [(b"`", .5), (b";", 1.5), (b"w", .4), (b"p", .4), (b"p", .4), (b"p", 1.0),
          (b"s", .6), (b"`", .5), (b"?", 1.5), (b"w", .4), (b"x", 10.0), (b"s", .6)],

@@ -2159,6 +2159,29 @@ walking out and back in is a new bowl. It is all ASCII inside: the room is drawn
 across the lane from a shop, looking at the front — a step or two in is the counter — and a
 second press finds another.
 
+## Vending machines
+
+Asked for on 2026-11-12: "some vending machines maybe in the alleys". **One stretch of alley in
+`VEND_LANES` (4) has one** (`vending_pick()`), lit lane or dark, against the plain front with the
+lowest hash - never a pub's window, a venue's front or a face on a street - at whichever end of
+the front the bin is not. One to a stretch for the reason the ramen counters are: a lit thing on
+its own hash per front turns up in pairs. `vending_at(i, j, f)` is the cached per-face answer
+`draw_props()` and `collect_glow()` ask, and only of alley faces.
+
+`draw_vending()` is two kinds of sprite on one spot: the cabinet (`VENDING`) in the machine's own
+neon colour, and three rows of cans (`VENDING_ROWS`), each row its own colour, blitted over the
+top part of the same box so the rows line up. It is `VEND_H` 2.4 tall, a head over the people.
+One in six stutters. It stays lit past dawn, when the signs go off, and in a blackout it is a
+dark box (it is not in `LIGHT_PROPS`, which would make it vanish). Its light lies on the ground
+whatever the weather, like a bare bulb's.
+
+`p` beside one (`vending_near()`, within `VEND_REACH` - it looks at the cells next door too, a
+machine stands a unit from the end of its front) buys a can for `VEND_COST`: `vend()` says what
+came out, **where the hint was** (`vend_said` in `main()`), not as a note - a note goes on the
+end of the HUD, and with the hint up that is off the side of a 100-column window. `d` in the
+menu stands you **down the alley** from the nearest, not across from it: the camera cannot tilt,
+and from two units away you look straight over the top of the thing.
+
 ## Manholes, and the tunnels under the streets
 
 One street cell in `MANHOLE_ODDS` has a manhole in it (`manhole_at()`: a proper street only,
