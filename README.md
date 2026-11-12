@@ -214,8 +214,8 @@ the city is infinite, identical every time you walk back to it, and held in no m
   ones, a fire in a can.
 - **Dark alleys**, some of which dead-end, and lit ones lined with tiny bars — and fire escapes
   you can climb to the roof.
-- **Vending machines** glowing in the alleys, a couple of dollars a can — you never know quite
-  what comes out.
+- **Vending machines** glowing in the alleys: step up to the glass and pick from four shelves of
+  snacks and drinks. Sometimes two drop; sometimes one hangs on the coil.
 - **Up on the roofs**, some with somebody's something on them: a pigeon loft to feed and send
   notes from, a garden, a line of washing — and across the residential streets, more washing.
 - **Sky decks**: ride the lift to the roof of the tallest towers and look out over the whole city,

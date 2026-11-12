@@ -201,9 +201,13 @@ def cases(run, report):
     ok &= report("the suburbs: to them, walk a curving street, a taxi out", *run(
         [(b"`", .5), (b"0", 1.5), (b"w", 1.0), (b"W", 1.0), (b"a", .5), (b"w", 1.0),
          (b"t", 3.6), (b"\x1b", .4)], cols=100, rows=30))
-    ok &= report("a vending machine: to it, walk up, buy two cans", *run(
-        [(b"`", .5), (b"d", 1.5)] + [(b"w", .25)] * 14 + [(b"p", .6), (b"p", 1.0)],
-        cols=100, rows=30))
+    ok &= report("a vending machine: up to the glass, buy two, step back", *run(
+        [(b"`", .5), (b"d", 1.5)] + [(b"w", .25)] * 14 + [(b"p", .8), (b"d", .3),
+         (b"s", .3), (b"p", 1.5), (b"w", .3), (b"a", .3), (b"\r", 1.5), (b"x", .5),
+         (b"w", .4)], cols=100, rows=30))
+    ok &= report("the vending machine, big, and small again on z", *run(
+        [(b"`", .5), (b"d", 1.5)] + [(b"w", .25)] * 14 + [(b"p", .8), (b"p", 1.5),
+         (b"z", .6), (b"z", .6), (b"x", .5)], cols=300, rows=90))
     ok &= report("lemonade at 3am: buy three, and the stargazer's telescope", *run(
         [(b"`", .5), (b";", 1.5), (b"w", .4), (b"p", .4), (b"p", .4), (b"p", 1.0),
          (b"s", .6), (b"`", .5), (b"?", 1.5), (b"w", .4), (b"x", 10.0), (b"s", .6)],
