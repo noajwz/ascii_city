@@ -426,6 +426,18 @@ def cases(run, report):
         print("    did not get aboard, or not back ashore")
         hb_ok = False
     ok &= hb_ok
+    # The speedboat: hire one, open her up, turn, slide, the horn, back.
+    sb_st, sb_out = run([(F1, .5), (b"+", .4), (b"\x018", 1.5), (b"p", 1.0)]
+                        + [(b"w", .2)] * 6 + [(b"", 2.0), (b"a", .3), (b"d", .3),
+                                              (b"A", .4), (b"h", .4), (b"x", 1.2),
+                                              (b"w", .5)], cols=300, rows=60)
+    sb_plain = ANSI.sub(b"", sb_out).decode("utf-8", "replace")
+    sb_ok = report("the speedboat: out, a turn, back to the quay", sb_st, sb_out)
+    if sb_ok and sb_out and not ("she is yours" in sb_plain and "KNOTS" in sb_plain
+                                 and "back at the quay" in sb_plain):
+        print("    did not get her out, or not back")
+        sb_ok = False
+    ok &= sb_ok
     return ok
 
 

@@ -1,8 +1,7 @@
 # The harbour, and the cruise ship
 
 Asked for on 2026-11-13, from a list of coast ideas: "a harbor where the cruiseship docks and
-where you can get on", and where you get on the speedboat to drive it (see the speedboat, below,
-when it is in).
+where you can get on", and where you get on the speedboat to drive it (see the speedboat, below).
 
 **Where**: one every `HARBOUR_GAP` (720) rows, the first at `HARBOUR_ROW0` (610) - so with the
 piers every 360 rows from 70 and the space centres every 720 from 250 the three never crowd:
@@ -53,3 +52,32 @@ ctrl-a `6` the harbour, `7` the gangway, for the checks.
 
 **What it costs**, at 300x90: on the beach with her in view 26 ms; from her rail 29 to 36 -
 it is a view from 26 units up, roof-like, all coast; a ride, nothing to steer, so left as is.
+
+## The speedboat
+
+**The hire stand** (`marina()`, `marina_near()`): on the quay's south edge, near its foot, the
+side away from the ship - a booth, BOAT HIRE in lights, three boats tied up below it on the
+water (`draw_marina()`; one fewer while yours is out, `_boat_out`). `p` there, `BOAT_FEE`, and
+you are at the wheel just off the quay, pointing out to sea; the top bar says so.
+
+**`Boat` is a `Cab`**: the same keys and the same wheel - a tap is a nudge, a held key turns,
+the repeat-delay bridging - which is what was asked for when the cab's steering was "way too
+sharp" and is not to be worked out again for a boat. `Boat.key()` gives her own throttle (the
+cab's key holds no more than the cab's top speed); `Boat.step()` is a boat: no brakes but the
+water (`BOAT_DRAG`, space doubles it), turns wider the faster she goes (`BOAT_R_FAST`, wider
+than the cab's), and she slides - the way she goes comes round to the way she points slowly
+(`BOAT_GRIP`), and `e` or a shifted steering key (the cab's handbrake) lets the stern go.
+
+**Where she can be** (`boat_water()`, `boat_clear()` round her by `BOAT_BODY`): coast kinds
+`"sea"` and `"mouth"` only - not the surf, the pier, the jetty, the pad, the quay - and not in
+the cruise ship, docked or sailing (her hull's box, from `liner_pose()`). Into anything she
+glances along it if she can, or stops and bounces back a little; BUMP on the dash.
+
+**At the helm** (`render_boat()`): `render_street()` from just over the water, her eye
+(`Boat.eye()`) riding the swell and slamming harder the faster she goes; the bow out in front,
+white, narrowing to its point; spray off it at speed; the windscreen's frame; the cab's
+wheel; knots and her heading, the knots in block letters on a big window (the dash grows with
+it, or the word KNOTS fell off the bottom at 300x90). `x` anywhere: back at the stand.
+
+**What it costs**, at 300x90: 22 to 27 ms a frame at the helm.
+ctrl-a `8` for the checks: the hire stand.
