@@ -765,6 +765,8 @@ def district(i, j):
         if kind is not None:
             if kind == "hall":
                 return PIER_HALL
+            if kind == "control":
+                return MISSION_CTRL
             return (SEAFRONT if kind in ("road", "walk", "bridge", "pier", "jetty")
                     else BEACH)
         back = int(math.floor(coastline(j))) - i - COAST_STRIP
@@ -1596,6 +1598,8 @@ def coast_kind(i, j):
             hit = "bridge" if hit in ("walk", "road") else "mouth"
     if hit in ("sea", "surf", "sand"):
         hit = _pier_kind(i, j) or _launch_kind(i, j) or hit
+    if hit == "sand" and d >= 2 and control_row(j):
+        hit = "control"                 # mission control, on the sand
     _coast_cache[key] = hit
     return hit
 
@@ -3288,8 +3292,9 @@ def face_kind(i, j):
         return "road"
     if suburb_at(i, j) or airport_at(i, j) or quad_at(i, j):
         return "road"            # a lawn, the apron, the quad: a front all the same
-    if coast_kind(i, j) == "pier":
-        return "road"            # and the pier's boards, for the hall on its head
+    if coast_kind(i, j) in ("pier", "walk", "sand", "jetty"):
+        return "road"            # the pier's boards for the hall on its head, and
+                                 # the boardwalk and sand round mission control
     return "yokocho" if yokocho_at(i, j) else None
 
 
@@ -3416,7 +3421,7 @@ def is_open(i, j):
         if COAST and i >= COAST_LAND and coast_kind(i, j) is not None:
             # Sea, sand, boardwalk, the road along the front: all open. The
             # hall on the pier's head is the one thing out there that is built.
-            hit = coast_kind(i, j) != "hall"
+            hit = coast_kind(i, j) not in ("hall", "control")
         elif water_at(i, j):
             hit = True          # you can see across it; standing is elsewhere
         elif landmark_at(i, j) is not None:
@@ -12275,7 +12280,7 @@ def ground_cell(i, j):
         return hit
     _evict(_ground_cache, 60000)
     coast = coast_kind(i, j)
-    if coast is not None and coast != "hall":
+    if coast is not None and coast not in ("hall", "control"):
         # The sea's: sand, water, boards, or the road along the front - which
         # is a street like any other, and has its pavement where it has walls.
         hit = ((False, not is_open(i - 1, j), not is_open(i + 1, j),
@@ -15648,6 +15653,9 @@ def launch_hint(x, z, now):
             best = (d2, site)
     if best is None:
         return ""
+    dx, dz = control_door(best[1])
+    if (dx - x) ** 2 + (dz - z) ** 2 < 12.0 ** 2:
+        return "  ~ mission control: walk in ~"
     t = launch_t(best[1], now)
     if t < -60.0 or t >= LAUNCH_DOWN + 8.0:
         if best[0] > 400.0 ** 2:
@@ -15805,9 +15813,12 @@ def draw_rocket_up(ch, co, v, walls, x, base, z, long_, nose, attr, now, hot=0.0
                 if glyph == " ":
                     continue
             put_cell(ch, co, v, walls, c, y, dist, glyph, a)
-        # The name, a letter at a time down the middle of the booster.
+        # The name down the middle of the booster, each letter once: on the
+        # row its middle falls in, or up close it ran down the side as AAASS.
         k = int((u - long_ * 0.42) / (long_ * 0.06))
-        if nose and 0 <= k < len(letters) and u >= long_ * 0.42 and c1 - c0 >= 2:
+        mid_u = long_ * (0.42 + 0.06 * (k + 0.5))
+        if (nose and 0 <= k < len(letters) and u >= long_ * 0.42 and c1 - c0 >= 2
+                and abs(u - mid_u) <= 0.5 * long_ / span):
             put_cell(ch, co, v, walls, int(round(sx)), y, dist, letters[k], GOLD)
 
 
@@ -15967,6 +15978,7 @@ def _draw_launch_pad(ch, co, v, walls, site, px, pz, t, now, wet, far):
     _draw_gantry(ch, co, v, walls, px, pz, t, now, far)
     if far:
         return
+    _draw_control(ch, co, v, walls, site, now, wet)
     # The launch mount the rocket stands on.
     for k in (-1, 0, 1):
         y = 0.4 + k * 0.4
@@ -16099,6 +16111,407 @@ def draw_launch_site(ch, co, v, walls, site, now, wet):
          CURB if burn else STREET)
     if burn:
         _plume(ch, co, v, walls, base, (fwd[0], fwd[1], 0.0), 10.0, 5.0, now)
+
+
+# --- mission control ------------------------------------------------------------
+# Asked for once the launch was in: a building by the pad to launch it from,
+# and a screen in it like a launch webcast - the numbers for both stages, the
+# clock, what comes next along a line, which booster it is - with cameras to
+# switch between: on the pad, tracking it from the beach, on the rocket, on
+# the booster coming home. A low glass block on the sand just north of the
+# causeway, its door off the boardwalk, its name on the roof.
+LAUNCH_CTRL = (7, 3)   # its rows: from this many north of the causeway to this many
+MISSION_CTRL = dict(SEAFRONT_ROW, name="mission control", lo=9.0, hi=11.0, flat=1.0,
+                    hung=0.0, smoke=0.0, band=None, mullion=True, pal="cold",
+                    glyphs="#=", dens=(0.75, 0.95), neon=(2,),
+                    words=["MISSION", "CONTROL", "FLIGHT", "LAUNCH"])
+MISSION_NAME = "MISSION CONTROL"
+MISSION_ROCKET = "ASCII ONE"
+MISSION_PAYLOADS = ["CITYSAT 7", "LANTERN-3", "NEON RELAY 12", "HARBOUR LIGHT",
+                    "NIGHTOWL 4", "GULL WEATHER 2", "TIDEWATCH", "SKYLINE 9",
+                    "BEACON 21", "NIGHT BUS 5"]
+# What the webcast's numbers say, second by second: (t, km/h, km) for each
+# stage. Not the world's own units - a launch here is a couple of kilometres
+# of sky - but what a launch's numbers look like, keyed to the same events, so
+# that MECO on the screen is MECO in the sky.
+TELEM_ONE = [(0.0, 0, 0.0), (2.0, 0, 0.0), (10.0, 420, 0.7), (20.0, 1580, 4.1),
+             (30.0, 3300, 12.5), (40.0, 6000, 29.0), (45.0, 8100, 41.0),
+             (48.0, 7950, 47.0), (59.0, 2300, 71.0), (72.0, 2700, 96.0),
+             (80.0, 4900, 64.0), (86.0, 2300, 36.0), (100.0, 1050, 4.5),
+             (110.0, 0, 0.0)]
+TELEM_TWO = [(48.0, 7950, 47.0), (49.0, 8000, 48.0), (60.0, 9900, 74.0),
+             (90.0, 15200, 121.0), (130.0, 22100, 163.0), (165.0, 27400, 190.0)]
+MISSION_EVENTS = [(0.0, "LIFTOFF"), (24.0, "MAX-Q"), (LAUNCH_MECO, "MECO"),
+                  (LAUNCH_SEP, "STAGE SEP"), (LAUNCH_SEP + 3.0, "BOOSTBACK"),
+                  (80.0, "ENTRY BURN"), (LAUNCH_HOME, "LANDING BURN"),
+                  (LAUNCH_DOWN, "LANDING"), (165.0, "SECO - ORBIT")]
+MISSION_CAMS = ["PAD CAM", "TRACKING", "ONBOARD", "BOOSTER CAM"]
+MISSION_DESKS = ["FLIGHT", "PROP", "GNC", "WEATHER", "RANGE", "RECOVERY", "COMMS"]
+MISSION_HUD = (" mission control  -  l launch  -  c or 1-%d cameras  -  z big screen"
+               "  -  s walks back out  -  q quit ")
+
+
+def control_row(j):
+    """Is row j one of mission control's."""
+    r0 = (j - LAUNCH_ROW0 + LAUNCH_CTRL[0]) // LAUNCH_GAP * LAUNCH_GAP + LAUNCH_ROW0
+    return (r0 - LAUNCH_CTRL[0] <= j <= r0 - LAUNCH_CTRL[1]
+            and _launch_at(r0) is not None)
+
+
+def control_door(site):
+    """Its door, (x, z), in the middle of the side that faces the boardwalk."""
+    j = site[0] - (LAUNCH_CTRL[0] + LAUNCH_CTRL[1]) // 2
+    return (int(math.floor(coastline(j))) - BEACH_DEEP) * CELL, (j + 0.5) * CELL
+
+
+def mission_near(x, z):
+    """The space centre whose mission control's door you are in, or None."""
+    if not COAST or x < COAST_LAND * CELL:
+        return None
+    cj = int(z / CELL + BIG) - BIG
+    r0 = (cj - LAUNCH_ROW0 + 20) // LAUNCH_GAP * LAUNCH_GAP + LAUNCH_ROW0
+    site = _launch_at(r0)
+    if site is None:
+        return None
+    dx, dz = control_door(site)
+    return site if (dx - 0.8 - x) ** 2 + (dz - z) ** 2 < CASINO_REACH ** 2 else None
+
+
+def _mission_spot(x, z):
+    """On the boardwalk a few steps from mission control's door, facing it."""
+    if not COAST:
+        return None
+    cj = int(z / CELL + BIG) - BIG
+    k0 = (cj - LAUNCH_ROW0) // LAUNCH_GAP
+    best = None
+    for k in (k0 - 1, k0, k0 + 1, k0 + 2):
+        site = _launch_at(k * LAUNCH_GAP + LAUNCH_ROW0)
+        if site is None:
+            continue
+        dx, dz = control_door(site)
+        px = dx - 4.0
+        d = (px - x) ** 2 + (dz - z) ** 2
+        if d >= CHEAT_SKIP ** 2 and can_stand(px, dz) and (best is None or d < best[0]):
+            best = (d, px, dz)
+    return None if best is None else (best[1], best[2], math.pi * 0.5)
+
+
+def _draw_control(ch, co, v, walls, site, now, wet):
+    """Mission control from outside: its name on the roof in the agency's
+    blue, letters on a frame you can read from the boardwalk and the beach,
+    and the door lit."""
+    dx, dz = control_door(site)
+    j = int(dz / CELL)
+    i = int(math.floor(coastline(j))) - (BEACH_DEEP + 2) // 2
+    roof = lot(i, j)["height"]
+    x = (i + 0.5) * CELL
+    gap = 1.25
+    zs = dz + gap * (len(MISSION_NAME) - 1) * 0.5
+    for k, c in enumerate(MISSION_NAME):
+        if c != " ":
+            put_lit(ch, co, v, walls, x, roof + 2.2, zs - k * gap, c,
+                    NEON[2][0] if int(now * 0.4 + k * 0.7) % 11 else NEON[2][1],
+                    max(wet, 0.3), now)
+    for z in (zs + 0.6, zs - (len(MISSION_NAME) - 1) * gap - 0.6):
+        for h in (0.6, 1.4, 2.2):
+            put_point(ch, co, v, walls, x, roof + h, z, "|", CONCRETE)
+    for h in (0.3, 0.9, 1.5, 2.1):
+        put_point(ch, co, v, walls, dx - 0.05, h, dz - 0.9, "|", BULB)
+        put_point(ch, co, v, walls, dx - 0.05, h, dz + 0.9, "|", BULB)
+        put_point(ch, co, v, walls, dx - 0.05, h, dz, ":", BULB_DIM)
+    put_point(ch, co, v, walls, dx - 0.05, 2.6, dz, "=", BULB)
+
+
+def _telem(keys, t):
+    """(km/h, km) at t from a list of key moments, eased between them."""
+    if t <= keys[0][0]:
+        return keys[0][1], keys[0][2]
+    for (t0, s0, a0), (t1, s1, a1) in zip(keys, keys[1:]):
+        if t < t1:
+            f = (t - t0) / (t1 - t0)
+            f = f * f * (3.0 - 2.0 * f)
+            return s0 + (s1 - s0) * f, a0 + (a1 - a0) * f
+    return keys[-1][1], keys[-1][2]
+
+
+def telemetry(t):
+    """What the screen says of each stage: ((km/h, km), (km/h, km)). Together
+    till they part; the booster nothing once it is down."""
+    one = (0.0, 0.0) if t < 0.0 or t >= LAUNCH_DOWN else _telem(TELEM_ONE, t)
+    two = one if t < LAUNCH_SEP else _telem(TELEM_TWO, t)
+    return one, two
+
+
+def mission_info(site, now):
+    """(payload, booster, which flight of it) for the launch this pad is on:
+    each site has four boosters and flies them in turn."""
+    n = int((now + _launch_shift[0] + _mix(site[0], 0, 5801) % 997) // LAUNCH_EVERY)
+    booster = "B%d" % (1040 + _mix(site[0], 0, 5853) % 40 + n % 4)
+    return (MISSION_PAYLOADS[_mix(n, site[0], 5851) % len(MISSION_PAYLOADS)], booster,
+            3 + (n // 4) % 17)
+
+
+def launch_from_control(site, now):
+    """l at mission control, and what the flight director says. Between
+    launches - and once the booster is back, when the next rocket is rolled
+    straight out - the poll and forty seconds of countdown; in a countdown,
+    on to T-10; only while one is in the air, nothing. A launch takes more
+    than half of every five minutes, and at first l was refused through all
+    of it, so that it mostly said no."""
+    t = launch_t(site, now)
+    if 0.0 <= t < LAUNCH_DOWN:
+        return "FLIGHT: it is in the air - watch it"
+    if -10.0 <= t < 0.0:
+        return "FLIGHT: T-%d and counting" % (int(-t) + 1)
+    if -60.0 <= t < -10.0:
+        _launch_shift[0] += -10.0 - t
+        return "FLIGHT: we are go - picking up the count at T-10"
+    _launch_shift[0] += (-40.0 - t) % LAUNCH_EVERY
+    return "FLIGHT: all stations, poll for launch - we are go"
+
+
+def mission_cam_view(site, cam, t, width, height):
+    """The View for one of the cameras, and what is on the edges of its
+    picture: "hull" for the rocket's side and "fire" for its engines."""
+    px, pz = launch_pad_xz(site)
+    if cam == 0:
+        # Out on a mast past the pad's far corner, looking back at the
+        # rocket with the coast and the town behind it.
+        cx, cz = px + 55.0, pz + 40.0
+        return View(cx, cz, math.atan2(px - cx, pz - cz), width, height, eye=22.0,
+                    reach=ROOF_REACH), None, False
+    if cam == 1:
+        # Down the beach, on a long lens: it turns to follow.
+        cz = pz - 260.0
+        cx = shore_x(cz) - 14.0
+        if t < 70.0:
+            x, h, _ = rocket_path(max(0.0, t))
+        else:
+            x, h = booster_at(min(t, LAUNCH_DOWN))
+        return (View(cx, cz, math.atan2(px + x - cx, pz - cz), width, height), None,
+                False)
+    if cam == 2 or t < LAUNCH_SEP:
+        # On the second stage, looking back at the land: the coast going away
+        # under it. Before it lets go, the booster's camera is this one too.
+        x, h, lean = rocket_path(max(0.0, t))
+        eye = min(900.0, h + ROCKET_H * 0.8 + 1.2)
+        fire = 0.0 <= t < LAUNCH_MECO or LAUNCH_SEP + 1.0 <= t < 165.0
+        return View(px + x + math.sin(lean) * 30.0, pz - ROCKET_R - 1.0, -math.pi * 0.5,
+                    width, height, eye=eye, reach=ROOF_REACH if eye > 12.0 else MAX_VIEW
+                    ), "hull", fire
+    # On the booster, coming home: looking at the pad while it is out over
+    # the sea, and then down onto it.
+    bx, bh = booster_at(min(t, LAUNCH_DOWN))
+    eye = min(900.0, bh + 20.0)
+    return (View(px + bx - 4.0, pz + ROCKET_R + 1.0, -math.pi * 0.5, width, height,
+                 eye=eye,
+                 reach=ROOF_REACH if eye > 12.0 else MAX_VIEW), "hull",
+            t < LAUNCH_DOWN and booster_burn(t) is not None)
+
+
+def _clock_blocks(ch, co, y, x, t, attr, sx, sy):
+    """T- or T+ and minutes:seconds in block letters, the colon two dots."""
+    sign = "-" if t < 0.0 else "+"
+    m, s = divmod(int(abs(t)), 60)
+    x = _text_blocks(ch, co, y, x, "T" + sign, attr, sx, sy) + sx * 2
+    x = _text_blocks(ch, co, y, x, "%02d" % m, attr, sx, sy) + sx
+    for r in (1, 3):
+        for yy in range(sy):
+            for xx in range(sx):
+                if 0 <= y + r * sy + yy < len(ch) and 0 <= x + xx < len(ch[0]):
+                    ch[y + r * sy + yy][x + xx], co[y + r * sy + yy][x + xx] = "#", attr
+    return _text_blocks(ch, co, y, x + sx * 2, "%02d" % s, attr, sx, sy)
+
+
+def _text_blocks(ch, co, y, x, text, attr, sx, sy):
+    """_blocks(), but "+" as a cross, which the font has not got."""
+    for c in text:
+        if c == "+":
+            for r in range(5):
+                for dx in range(3):
+                    if (r == 2 or dx == 1) and 0 < r < 4:
+                        for yy in range(sy):
+                            for xx in range(sx):
+                                y_, x_ = y + r * sy + yy, x + dx * sx + xx
+                                if 0 <= y_ < len(ch) and 0 <= x_ < len(ch[0]):
+                                    ch[y_][x_], co[y_][x_] = "#", attr
+            x += 4 * sx
+        else:
+            x = _blocks(ch, co, y, x, c, attr, sx, sy) + sx
+    return x - sx
+
+
+def _panel(ch, co, x0, y0, w, h):
+    """A dark box to put numbers on, so the picture does not show through."""
+    for y in range(y0, y0 + h):
+        for x in range(x0, x0 + w):
+            if 0 <= y < len(ch) and 0 <= x < len(ch[0]):
+                edge = y in (y0, y0 + h - 1) or x in (x0, x0 + w - 1)
+                ch[y][x] = ("+" if y in (y0, y0 + h - 1) and x in (x0, x0 + w - 1)
+                            else "-" if y in (y0, y0 + h - 1) else "|" if edge else " ")
+                co[y][x] = STREET if edge else 0
+
+
+CONSOLE = [
+    " .-------.    ",
+    " |       |  o ",
+    " '---+---' /|\\",
+    "=====|=====/=\\",
+]
+
+
+def render_mission(site, cam, width, height, now):
+    """Inside mission control: the big screen on the wall with the webcast on
+    it - the live picture from whichever camera, the clock, both stages' speed
+    and height, what comes next along a line, the payload and the booster -
+    and under it the room, a row of desks and the people at them, each
+    saying GO when the flight director polls them."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    t = launch_t(site, now)
+    if width < 60 or height < 20:
+        _text(ch, co, height // 2 - 1, 1, "~ mission control ~"[:width - 1], GOLD)
+        (s1, a1), (s2, a2) = telemetry(t)
+        _text(ch, co, height // 2 + 1, 1, ("T%+.0f  %d km/h  %.1f km" % (t, s1, a1))
+              [:width - 1], BULB)
+        return ch, co
+    k = big_scale(width, height)
+    room = len(CONSOLE) * k + 2
+    sx0, sy0 = 2, 1
+    sw, sh = width - 4, height - room - 2
+    # The picture.
+    v, edge, fire = mission_cam_view(site, cam, t, sw, sh)
+    g, c, _ = render_street(v, now)
+    for (yy, xx) in v.wide:
+        g[yy][xx] = "#"                 # the blit here is not the street's
+    for y in range(sh):
+        ch[sy0 + y][sx0:sx0 + sw] = g[y]
+        co[sy0 + y][sx0:sx0 + sw] = c[y]
+    tick = int(now * 10.0)
+    if edge == "hull":
+        # The side of the rocket the camera is on, down the right of the picture,
+        # and the engines' fire coming up from under the bottom of it.
+        hw = max(3, sw // 14)
+        for y in range(sh):
+            for x in range(sw - hw, sw):
+                ch[sy0 + y][sx0 + x] = "|" if x == sw - hw else (
+                    ":" if (x + y // 4) % 5 == 0 else " ")
+                co[sy0 + y][sx0 + x] = ROU_BLACK if x == sw - hw else CURB
+        if fire:
+            # Coming up from under the picture towards the middle, above the
+            # numbers along the bottom, wider and whiter the lower it is.
+            deep = max(3, sh // 4)
+            bot = sh - (7 if k == 1 else 3 + 5 * k) - 2
+            for y in range(bot - deep, bot):
+                f = (y - (bot - deep)) / float(deep)
+                half_ = (sw - hw) * (0.06 + 0.22 * f)
+                for x in range(int((sw - hw) / 2 - half_), int((sw - hw) / 2 + half_)):
+                    m = _mix(x, y, tick)
+                    if m % 3 == 0:
+                        continue
+                    ch[sy0 + y][sx0 + x] = "#" if f > 0.6 else "*" if f > 0.25 else "'"
+                    co[sy0 + y][sx0 + x] = (FLASH if f > 0.6 and m & 4 else GOLD
+                                            if f > 0.3 else EMBER_HOT)
+    # The frame round the screen.
+    for x in range(sx0 - 1, sx0 + sw + 1):
+        for y in (sy0 - 1, sy0 + sh):
+            ch[y][x], co[y][x] = "=", CONCRETE
+    for y in range(sy0, sy0 + sh):
+        for x in (sx0 - 1, sx0 + sw):
+            ch[y][x], co[y][x] = "|", CONCRETE
+    # The webcast over it. The camera and LIVE, top left.
+    _text(ch, co, sy0 + 1, sx0 + 2, "* LIVE", ROU_RED if tick % 10 < 7 else STREET)
+    _text(ch, co, sy0 + 1, sx0 + 10, "CAM %d  %s" % (cam + 1, MISSION_CAMS[cam]), HUD)
+    payload, booster, flight = mission_info(site, now)
+    right = sx0 + sw - 2
+    for r, (s, a) in enumerate((("%s  |  %s" % (MISSION_ROCKET, payload), FLASH),
+                                ("BOOSTER %s  -  FLIGHT %d  -  LANDS ON THE PAD"
+                                 % (booster, flight), HUD))):
+        _text(ch, co, sy0 + 1 + r, right - len(s), s, a)
+    # Each stage's speed and height in a box, bottom left and bottom right.
+    (s1, a1), (s2, a2) = telemetry(t)
+    bw, bh = (16 * k + 8, 3 + 5 * k) if k > 1 else (24, 7)
+    by = sy0 + sh - bh - 1
+    for n, (x0, title, speed, alt) in enumerate(
+            ((sx0 + 2, "STAGE 1", s1, a1), (sx0 + sw - bw - 2, "STAGE 2", s2, a2))):
+        _panel(ch, co, x0, by, bw, bh)
+        down = n == 0 and t >= LAUNCH_DOWN
+        _text(ch, co, by + 1, x0 + 2, title + ("  ON THE PAD" if down else
+                                              "  IN ORBIT" if n and t >= 165.0 else ""),
+              GOLD)
+        if k > 1:
+            _blocks(ch, co, by + 2, x0 + 2, "%d" % speed, FLASH, k - 1, k - 1)
+            _text(ch, co, by + 2 + 5 * (k - 1), x0 + 2, "KM/H", HUD)
+            _text(ch, co, by + 2 + 5 * (k - 1), x0 + 10, "%.1f KM UP" % alt, FLASH)
+        else:
+            _text(ch, co, by + 2, x0 + 2, "SPEED", HUD)
+            _text(ch, co, by + 2, x0 + 11, "%6d KM/H" % speed, FLASH)
+            _text(ch, co, by + 3, x0 + 2, "ALTITUDE", HUD)
+            _text(ch, co, by + 3, x0 + 11, "%6.1f KM" % alt, FLASH)
+    # The clock in the middle, and the line of what happens when under it, on
+    # a box of their own: over the smoke at liftoff they could not be read.
+    mid = sx0 + sw // 2
+    cx0 = sx0 + 2 + bw + 2
+    _panel(ch, co, cx0, by, sx0 + sw - bw - 4 - cx0, bh)
+    if k > 1:
+        cw = (2 + 2 + 2) * 4 * (k - 1) + 4 * (k - 1)
+        _clock_blocks(ch, co, by, mid - cw // 2, t, FLASH, k - 1, k - 1)
+        ly = by + 5 * (k - 1) + 2
+    else:
+        clock = "T%s%02d:%02d" % ((("-" if t < 0 else "+"),) + divmod(int(abs(t)), 60))
+        _text(ch, co, by + 1, mid - len(clock) // 2, clock, FLASH)
+        ly = by + 3
+    half = max(10, (sw - 2 * bw - 16) // 2)
+    span = 90.0                         # seconds either side of now, along the line
+    for x in range(mid - half, mid + half + 1):
+        ch[ly][x], co[ly][x] = "-", STREET
+    ch[ly][mid], co[ly][mid] = "|", FLASH
+    if -60.0 <= t < 170.0:
+        ends = [-1, -1]                 # where the names on each row reach to
+        for when, name in MISSION_EVENTS:
+            x = mid + int(round((when - t) / span * half))
+            if mid - half <= x <= mid + half:
+                done = t >= when
+                ch[ly][x], co[ly][x] = ("@" if done else "o"), (GOLD if done else HUD)
+                x0 = max(mid - half, min(x - len(name) // 2, mid + half - len(name)))
+                for r in (0, 1):        # under the last, if it would run into it
+                    if x0 > ends[r] and ly + 1 + r < by + bh - 1:
+                        _text(ch, co, ly + 1 + r, x0, name, GOLD if done else HUD)
+                        ends[r] = x0 + len(name)
+                        break
+        for when, name in MISSION_EVENTS:
+            if 0.0 <= t - when < 3.0:
+                # What just happened, across the top of the picture, on a
+                # dark box: over the tower's lattice it could not be read.
+                w_ = len(name) * 4 * (k - 1) if k > 1 else len(name)
+                h_ = 5 * (k - 1) if k > 1 else 1
+                _panel(ch, co, mid - w_ // 2 - 2, sy0 + 3, w_ + 4, h_ + 2)
+                if k > 1:
+                    _blocks(ch, co, sy0 + 4, mid - w_ // 2, name, GOLD, k - 1, k - 1)
+                else:
+                    _text(ch, co, sy0 + 4, mid - w_ // 2, name, GOLD)
+    elif t < -60.0:
+        s = "NEXT LAUNCH IN %d:%02d  -  l TO LAUNCH NOW" % divmod(int(-t), 60)
+        _text(ch, co, ly + 1, mid - len(s) // 2, s, HUD)
+    # The room: the desks, the people at them, what each said.
+    ry = height - room
+    step = len(CONSOLE[0]) * k + 2
+    for n, desk in enumerate(MISSION_DESKS):
+        x0 = 2 + n * step
+        if x0 + len(CONSOLE[0]) * k >= width:
+            break
+        lit = [[(NEON[2][0] if (r == 1 and 1 < x < 9 and _mix(n, x, tick // 3) % 4)
+                 else CURB if r < 3 else CONCRETE)
+                for x in range(len(CONSOLE[0]))] for r in range(len(CONSOLE))]
+        screen = [row[:2] + ("".join("=:-."[_mix(n, x, tick // 4) % 4]
+                                      for x in range(7)) if r == 1 else row[2:9])
+                  + row[9:] for r, row in enumerate(CONSOLE)]
+        _blow_up(ch, co, x0, ry, screen, lit, k)
+        go = -38.0 + n * 1.4 <= t < LAUNCH_DOWN + 8.0
+        _text(ch, co, ry + len(CONSOLE) * k, x0 + 1, desk, HUD)
+        _text(ch, co, ry + len(CONSOLE) * k, x0 + 2 + len(desk),
+              "GO" if go else "STBY", ROU_GREEN if go else STREET)
+    return ch, co
 
 
 def draw_seafront(ch, co, v, walls, now, wet):
@@ -24666,6 +25079,9 @@ def venue_at(x, z):
     bar = beach_bar_near(x, z)
     if bar is not None:
         return "beachbar", {"seed": bar[3], "u": int(bar[2])}
+    site = mission_near(x, z)
+    if site is not None:
+        return "mission", {"seed": site[0], "site": site}
     if zone_depth("suburbs", ci, cj) > -2.0:
         hh = zone_home("suburbs", ci, cj)
         for kind, egg in suburb_eggs(*hh).items():
@@ -26572,7 +26988,7 @@ CHEAT_HIDDEN = [
     ("t", "riverbank", "bank"), ("a", "karaoke bar", "karaoke"),
     ("l", "mini golf", "minigolf"), ("1", "the beach", "beach"),
     ("2", "the pier", "seapier"), ("3", "the pier's wheel", "seawheel"),
-    ("4", "the launch pad", "launchpad"),
+    ("4", "the launch pad", "launchpad"), ("5", "mission control", "mission"),
 ]
 CHEAT_TEST = 1                          # ctrl-a
 TEST_JUMPS = bool(os.environ.get("ASCII_CITY_TEST"))
@@ -27539,6 +27955,8 @@ def find_place(x, z, kind):
         return _sea_pier_spot(x, z)
     if kind == "launchpad":
         return _launch_spot(x, z)
+    if kind == "mission":
+        return _mission_spot(x, z)
     if kind == "seawheel":
         # At the foot of the wheel on the nearest pier's head, looking up at it.
         sp = _sea_pier_spot(x, z)
@@ -29442,7 +29860,7 @@ def cab_ground(i, j):
         if coast_kind(i, j) is not None:
             # The road along the front, or the sand - and not the sea.
             hit = {"road": "road", "bridge": "road", "sea": None, "jetty": "road",
-                   "mouth": None, "hall": None,
+                   "mouth": None, "hall": None, "control": None,
                    "pad": None}.get(coast_kind(i, j), "rough")
         elif not is_open(i, j) or (water_at(i, j) and not deck_at(i, j)):
             hit = None
@@ -31603,6 +32021,8 @@ def main(stdscr):
     golf = None                 # a round of minigolf, while you are at the course
     golf_best = {}              # your best round at each course, for the session
     at_temple = False
+    at_mission = False
+    mission_cam = 0             # which camera mission control's screen is on
     striker = None              # the last strength tester you stood at
     at_striker = False
     seated = None               # (which ramen counter, since when)
@@ -32052,6 +32472,12 @@ def main(stdscr):
                     lemon["at"] = now
                 else:
                     note, note_at = "the kid wants a dollar", now
+            elif at_mission and key in (ord("c"), ord("C")):
+                mission_cam = (mission_cam + 1) % len(MISSION_CAMS)
+            elif at_mission and ord("1") <= key < ord("1") + len(MISSION_CAMS):
+                mission_cam = key - ord("1")
+            elif at_mission and key in (ord("l"), ord("L")):
+                note, note_at = launch_from_control(venue[1]["site"], now), now
             elif at_temple and key in (ord("c"), ord("C")):
                 booth = {"t0": now, "text": "", "said": [
                     ("priest", "Bless you. Tell me what is on your mind.", now + 1.4)]}
@@ -32075,7 +32501,7 @@ def main(stdscr):
                 if said:
                     note, note_at = said, now
             elif ((wheel is not None or at_arcade or at_bar is not None or at_bowl
-                   or at_kara or at_golf or tiki is not None)
+                   or at_kara or at_golf or tiki is not None or at_mission)
                   and key in (ord("z"), ord("Z"))):
                 _big_screens[0] = not _big_screens[0]     # big screens, off and on
                 note, note_at = ("big screens " + ("on" if _big_screens[0]
@@ -32582,6 +33008,7 @@ def main(stdscr):
         elif golf is None:
             golf = Minigolf()
         at_temple = venue is not None and venue[0] == "temple"
+        at_mission = venue is not None and venue[0] == "mission"
         if venue is None or venue[0] != "telescope":
             scope_at = None             # step back and it starts again
         if not at_temple:
@@ -32784,6 +33211,9 @@ def main(stdscr):
         elif venue is not None and venue[0] == "cinema":
             ch, co = render_cinema(venue[1], width, height, now)
             hud = CINEMA_HUD % (venue[1]["title"].lower(), cam_x, cam_z)
+        elif venue is not None and venue[0] == "mission":
+            ch, co = render_mission(venue[1]["site"], mission_cam, width, height, now)
+            hud = MISSION_HUD % len(MISSION_CAMS)
         elif venue is not None and venue[0] == "beachbar" and tiki is not None:
             ch, co = render_tiki(venue[1], tiki, width, height, now)
             hud = TIKI_HUD % (TIKI_NAMES[venue[1]["seed"] % len(TIKI_NAMES)].lower(),

@@ -402,6 +402,18 @@ def cases(run, report):
         print("    no launch from the panel, or no LIFTOFF on the top bar")
         lp_ok = False
     ok &= lp_ok
+    # Mission control: in at the door, l, every camera, big and small, out.
+    mc_st, mc_out = run([(b"`", .5), (b"\x015", 1.5), (b"w", .4), (b"w", .4),
+                         (b"w", 1.5), (b"l", 1.2), (b"c", .8), (b"3", .8), (b"4", .8),
+                         (b"1", .8), (b"z", .8), (b"z", .8), (b"s", .6), (b"s", .6)],
+                        cols=160, rows=48)
+    mc_plain = ANSI.sub(b"", mc_out).decode("utf-8", "replace")
+    mc_ok = report("mission control: launch it, every camera, out", mc_st, mc_out)
+    if mc_ok and mc_out and not ("LIVE" in mc_plain and "FLIGHT:" in mc_plain
+                                 and "BOOSTER CAM" in mc_plain):
+        print("    no webcast, no launch from the desk, or no booster camera")
+        mc_ok = False
+    ok &= mc_ok
     return ok
 
 

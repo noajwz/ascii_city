@@ -26,7 +26,7 @@ from harness import ac
 ac.COAST = False
 # And the ways to the coast come off the lists till then: with no sea there
 # is no beach for the taxi or the checks' jumps to find.
-COAST_KINDS = ("beach", "seapier", "seawheel", "launchpad")
+COAST_KINDS = ("beach", "seapier", "seawheel", "launchpad", "mission")
 coast_jumps_ = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] in COAST_KINDS]
 coast_fares_ = [p_ for p_ in ac.TAXI_DESTS if p_[1] in COAST_KINDS]
 ac.CHEAT_HIDDEN[:] = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] not in COAST_KINDS]
@@ -9736,6 +9736,83 @@ check("and with the sea off there is none", ac.launch_site(r0_) is None
       and ac.launch_hint(spot_[0], spot_[1], lift_) == ""
       and ac.find_place(x0, z0, "launchpad") is None)
 ac.toggle_coast()
+
+# Mission control: a glass block on the sand by the causeway, the rocket
+# launched from it, and a launch webcast on its wall - the clock, both stages'
+# speed and height, what comes next, the booster - from four cameras.
+door_ = ac.control_door(site_)
+di_, dj_ = int(door_[0] / ac.CELL), int(door_[1] / ac.CELL)
+row_ = [ac.coast_kind(i_, dj_) for i_ in range(di_ - 1, di_ + 4)]
+check("mission control: a building on the sand by the causeway, door to the boardwalk",
+      row_ == ["walk"] + ["control"] * 4 and not ac.is_open(di_, dj_)
+      and ac.district(di_, dj_)["name"] == "mission control"
+      and 9.0 <= ac.lot(di_, dj_)["height"] <= 11.0
+      and ac.LAUNCH_ROW0 - dj_ in range(ac.LAUNCH_CTRL[1], ac.LAUNCH_CTRL[0] + 1),
+      str(row_))
+mspot_ = ac.find_place(x0, z0, "mission")
+check("its door is a way in, from a few steps along the boardwalk",
+      mspot_ is not None and ac.can_stand(mspot_[0], mspot_[1])
+      and ac.venue_at(mspot_[0], mspot_[1]) is None
+      and ac.venue_at(mspot_[0] + 3.0, mspot_[1])[0] == "mission"
+      and "mission control" in ac.launch_hint(mspot_[0], mspot_[1], lift_ - 100.0))
+idle_ = lift_ - 100.0
+said_ = [ac.launch_from_control(site_, idle_)]
+t_went_ = [ac.launch_t(site_, idle_)]
+said_.append(ac.launch_from_control(site_, idle_ + 5.0))
+t_went_.append(ac.launch_t(site_, idle_ + 5.0))
+said_.append(ac.launch_from_control(site_, idle_ + 15.0))
+t_went_.append(ac.launch_t(site_, idle_ + 15.0))
+ac._launch_shift[0] = 0.0
+said_.append(ac.launch_from_control(site_, lift_ + ac.LAUNCH_DOWN + 2.0))
+t_went_.append(ac.launch_t(site_, lift_ + ac.LAUNCH_DOWN + 2.0))
+ac._launch_shift[0] = 0.0
+check("l in there: the poll and the count; in a count, on to T-10; in the air, no",
+      "poll" in said_[0] and abs(t_went_[0] + 40.0) < 0.01
+      and "T-10" in said_[1] and abs(t_went_[1] + 10.0) < 0.01
+      and "in the air" in said_[2] and abs(t_went_[2]) < 0.01
+      and "poll" in said_[3] and abs(t_went_[3] + 40.0) < 0.01, str(said_))
+tel_ = [ac.telemetry(t_ * 0.5) for t_ in range(-20, 360)]
+check("the numbers: up to MECO, the booster back to nothing, the second stage to orbit",
+      7900 < ac.telemetry(ac.LAUNCH_MECO)[0][0] < 8300
+      and ac.telemetry(ac.LAUNCH_DOWN)[0] == (0.0, 0.0)
+      and ac.telemetry(170.0)[1][0] > 27000 and ac.telemetry(-5.0) == ((0.0, 0.0),) * 2
+      and max(abs(b2_[n_][0] - a2_[n_][0]) for a2_, b2_ in zip(tel_, tel_[1:])
+              for n_ in (0, 1)) < 700)
+bad_ = []
+for w_, h_ in ((60, 20), (100, 30), (160, 48), (211, 67), (300, 90), (450, 132)):
+    for cam_ in range(len(ac.MISSION_CAMS)):
+        for t_ in (-100.0, -30.0, 1.0, 30.0, 50.0, 90.0, 105.0, 140.0):
+            try:
+                g_, c_ = ac.render_mission(site_, cam_, w_, h_, lift_ + t_)
+                txt_ = "".join("".join(r_) for r_ in g_)
+                if len(g_) != h_ or len(g_[0]) != w_ or "LIVE" not in txt_:
+                    bad_.append((w_, h_, cam_, t_))
+            except Exception as e_:
+                bad_.append((w_, h_, cam_, t_, repr(e_)))
+check("the webcast at every size, on every camera, all through a launch",
+      not bad_, str(bad_[:3]))
+small_ = ["".join("".join(r_) for r_ in ac.render_mission(site_, c2_, 160, 48,
+                                                          lift_ + 30.0)[0])
+          for c2_ in range(len(ac.MISSION_CAMS))]
+check("each camera is its own picture, and the webcast says which",
+      len(set(small_)) == len(ac.MISSION_CAMS)
+      and all("CAM %d" % (n_ + 1) in s_ for n_, s_ in enumerate(small_))
+      and "STAGE 1" in small_[0] and "T+00:30" in small_[0] and "MAX-Q" in small_[0])
+big_ = "".join("".join(r_) for r_ in ac.render_mission(site_, 0, 300, 90,
+                                                        lift_ + 30.0)[0])
+ac._big_screens[0] = False
+unbig_ = "".join("".join(r_) for r_ in ac.render_mission(site_, 0, 300, 90,
+                                                          lift_ + 30.0)[0])
+ac._big_screens[0] = True
+check("big on a big window - the numbers in block letters - and z gives the small one",
+      "SPEED" not in big_ and "KM/H" in big_ and "SPEED" in unbig_
+      and "T+00:30" in unbig_ and "T+00:30" not in big_)
+desks_ = ["".join("".join(r_) for r_ in ac.render_mission(site_, 0, 160, 48,
+                                                          lift_ + t_)[0])
+          for t_ in (-100.0, -20.0)]
+check("the desks: standing by, and GO once the flight director has polled them",
+      desks_[0].count("STBY") >= 5 and desks_[1].count("STBY") == 0
+      and desks_[1].count("GO") >= 5)
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
