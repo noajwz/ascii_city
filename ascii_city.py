@@ -16960,10 +16960,13 @@ def draw_harbour(ch, co, v, walls, h, now, wet):
             for z in (z0 + 0.4, z1 - 0.4):
                 for y_ in (0.8, 1.7, 2.6, 3.5, 4.4):
                     put_point(ch, co, v, walls, root, y_, z, "|", CONCRETE)
+            # Read from the land or from a boat: the letters are points, so
+            # their order is turned round for whichever side you are on.
             gap = (z1 - z0 - 2.0) / max(1, len(HARBOUR_NAME) - 1)
-            zs = (z0 + z1) * 0.5 + gap * (len(HARBOUR_NAME) - 1) * 0.5
+            way = -1.0 if v.x < root else 1.0
+            zs = (z0 + z1) * 0.5 - way * gap * (len(HARBOUR_NAME) - 1) * 0.5
             for k, c in enumerate(HARBOUR_NAME):
-                put_lit(ch, co, v, walls, root, 5.0, zs - k * gap, c, NEON[4][0],
+                put_lit(ch, co, v, walls, root, 5.0, zs + way * k * gap, c, NEON[4][0],
                         max(wet, 0.3), now)
             if h not in _liner_trips:
                 # The gangway, up from the quay to the door in her side.
@@ -16976,6 +16979,7 @@ def draw_harbour(ch, co, v, walls, h, now, wet):
                     put_point(ch, co, v, walls, gx - 0.8, 0.9 + 6.0 * f, zz, "\\", CURB)
                     put_point(ch, co, v, walls, gx + 0.8, 0.9 + 6.0 * f, zz, "\\", CURB)
                 put_lit(ch, co, v, walls, gx, 8.4, hull + 0.1, "o", BULB, 0.3, now)
+            draw_marina(ch, co, v, walls, h, now, wet, _boat_out[0] == h)
     if _aboard[0] == h:
         return
     lx, lz, head = liner_pose(h, now)
@@ -17026,6 +17030,8 @@ def harbour_hint(x, z, now):
     if gangway_near(x, z) is not None:
         return "  ~ the %s: p boards, $%d - a cruise down the coast ~" % (
             LINER_NAME.title(), LINER_FEE)
+    if marina_near(x, z) is not None:
+        return "  ~ boat hire: p takes a speedboat out, $%d ~" % BOAT_FEE
     return "  ~ the harbour ~"
 
 
@@ -27488,6 +27494,7 @@ CHEAT_HIDDEN = [
     ("2", "the pier", "seapier"), ("3", "the pier's wheel", "seawheel"),
     ("4", "the launch pad", "launchpad"), ("5", "mission control", "mission"),
     ("6", "the harbour", "harbour"), ("7", "the gangway", "gangway"),
+    ("8", "boat hire", "marina"),
 ]
 CHEAT_TEST = 1                          # ctrl-a
 TEST_JUMPS = bool(os.environ.get("ASCII_CITY_TEST"))
@@ -28460,6 +28467,8 @@ def find_place(x, z, kind):
         return _harbour_spot(x, z)
     if kind == "gangway":
         return _gangway_spot(x, z)
+    if kind == "marina":
+        return _marina_spot(x, z)
     if kind == "seawheel":
         # At the foot of the wheel on the nearest pier's head, looking up at it.
         sp = _sea_pier_spot(x, z)
@@ -31480,6 +31489,244 @@ def draw_mirror(ch, co, cab, now, x0, y0, mw, mh):
         ch[y0 + mh][x], co[y0 + mh][x] = "-", CURB
 
 
+# --- the speedboat ---------------------------------------------------------------
+# From the harbour's quay, the other side from the ship: a hire stand and the
+# boats tied up under it, and p takes one out. Driven like the cab - the same
+# keys, the same gentle wheel, which was asked for there - on the sea: she
+# slides through a turn, she bounces harder the faster you go, and she will not
+# go up the beach, through a pier, the quay, the launch pad or the ship.
+BOAT_FEE = 20          # an hour, as far as anybody is counting
+BOAT_TOP = 40.0        # the most w will hold: fast - about seventy-five knots
+BOAT_STEP = 5.0        # what each w or s adds or takes off
+BOAT_BACK = -5.0       # and astern
+BOAT_ACCEL = 9.0       # getting up to it, units a second every second
+BOAT_DRAG = 3.0        # the water slowing her with the throttle off
+BOAT_R = 6.0           # the tightest circle she turns, all but stopped
+BOAT_R_FAST = 0.9      # and how much wider that gets a unit of speed: wider than
+                       # the cab's, a hull in water and not tyres on a road
+BOAT_GRIP = 2.5        # how fast the way she goes comes round to the way she points
+BOAT_SLIDE = 0.6       # and with e held, which lets the stern go
+BOAT_BODY = 1.6        # how close to anything she can come
+BOAT_KNOTS = 1.9       # knots to a unit a second
+BOAT_HUD = (" speedboat  -  w s throttle  -  a d steer  -  e or shift slide"
+            "  -  space slows  -  h horn  -  x back to the quay  -  %s  %d knots ")
+_boat_out = [None]     # the harbour whose boat you have out
+BOAT_MOORED = [
+    "  ___    ",
+    "_/___\\__ ",
+    "\\_______/",
+]
+
+
+def marina(h):
+    """The hire stand on the quay's south edge, near its foot: (x, z)."""
+    r0, end = h
+    root = (int(math.floor(coastline(r0 + QUAY_BROAD // 2))) - BEACH_DEEP) * CELL
+    return root + 32.0, (r0 + QUAY_BROAD) * CELL - 1.2
+
+
+def marina_near(x, z):
+    """The harbour whose boat hire you are standing at, or None."""
+    if not COAST or x < COAST_LAND * CELL:
+        return None
+    h = harbour_site(int(z / CELL + BIG) - BIG)
+    if h is None:
+        return None
+    mx, mz = marina(h)
+    return h if (mx - x) ** 2 + (mz - z) ** 2 < 4.0 ** 2 else None
+
+
+def _marina_spot(x, z):
+    """At the hire stand of the nearest harbour, facing the boats."""
+    sp = _harbour_spot(x, z)
+    if sp is None:
+        return None
+    h = harbour_site(int(sp[1] / CELL + BIG) - BIG)
+    mx, mz = marina(h)
+    return mx, mz - 1.0, 0.0
+
+
+def boat_water(x, z):
+    """Can she be here: open sea or the river's mouth, and not in the ship."""
+    i, j = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    if coast_kind(i, j) not in ("sea", "mouth"):
+        return False
+    for h_ in near_harbours(x, z, 120.0):
+        lx, lz, head = liner_pose(h_, _clock[0])
+        hx, hz = math.sin(head), math.cos(head)
+        a = (x - lx) * hx + (z - lz) * hz
+        b = (x - lx) * -hz + (z - lz) * hx
+        if abs(a) < LINER_L * 0.5 + 2.0 and abs(b) < LINER_B * 0.5 + 2.0:
+            return False
+    return True
+
+
+def boat_clear(x, z):
+    return all(boat_water(x + dx, z + dz) for dx, dz in
+               ((BOAT_BODY, 0.0), (-BOAT_BODY, 0.0), (0.0, BOAT_BODY),
+                (0.0, -BOAT_BODY)))
+
+
+class Boat(Cab):
+    """The speedboat, with you at the wheel: the cab's controls - its keys,
+    its wheel that a tap nudges and a held key turns - and a boat's ways:
+    no brakes but the water, a slide in every turn, and the sea under her."""
+
+    def __init__(self, x, z, heading, now, seed):
+        super().__init__(x, z, heading, now, seed)
+        self.call_at = float("inf")     # nobody hails a speedboat
+        self.map_on = False
+        self.bump_at = -1e9
+
+    def key(self, what, now):
+        """The cab's controls, with a boat's throttle: the cab's key holds
+        no more than the cab's top speed."""
+        was = self.want
+        super().key(what, now)
+        if what == "faster":
+            self.want = min(BOAT_TOP, was + BOAT_STEP)
+        elif what == "slower":
+            self.want = max(BOAT_BACK, was - BOAT_STEP)
+
+    def step(self, dt, now):
+        dt = max(0.0, min(0.1, dt))
+        self.clock = now
+        if now > self.steer_until:
+            self.steer_in = 0.0
+        if self.steer_in:
+            if now <= self.steer_push:
+                self.steer += max(-CAB_STEER * dt, min(CAB_STEER * dt,
+                                                       self.steer_in - self.steer))
+        else:
+            self.steer += max(-CAB_CENTRE * dt, min(CAB_CENTRE * dt, -self.steer))
+        want = 0.0 if now < self.brake_until else max(BOAT_BACK, min(BOAT_TOP,
+                                                                    self.want))
+        if abs(want) > abs(self.speed) and want * self.speed >= 0.0:
+            rate = BOAT_ACCEL * (1.0 if want >= 0.0 else 0.5)
+        else:
+            rate = BOAT_DRAG * (2.5 if now < self.brake_until else 1.0)
+        self.speed += max(-rate * dt, min(rate * dt, want - self.speed))
+        yaw = 0.0
+        if abs(self.speed) > 0.05:
+            yaw = self.steer * self.speed / (BOAT_R + BOAT_R_FAST * abs(self.speed))
+            self.heading = _wrap(self.heading + yaw * dt)
+        slide = now < self.hb_until
+        self.slip -= yaw * dt
+        self.slip *= math.exp(-(BOAT_SLIDE if slide else BOAT_GRIP) * dt)
+        self.slip = max(-1.0, min(1.0, self.slip))
+        go = self.heading + self.slip
+        nx = self.x + math.sin(go) * self.speed * dt
+        nz = self.z + math.cos(go) * self.speed * dt
+        if boat_clear(nx, nz):
+            self.x, self.z = nx, nz
+        elif boat_clear(nx, self.z):
+            self.x = nx                 # along it, the way a hull glances off
+            self.speed *= 0.9
+        elif boat_clear(self.x, nz):
+            self.z = nz
+            self.speed *= 0.9
+        else:
+            if abs(self.speed) > 6.0 and now - self.bump_at > 1.0:
+                self.said = "BUMP - that will come out of the deposit"
+                self.said_at = now
+            self.bump_at = now
+            self.speed *= -0.3
+            self.want = 0.0
+
+    def status(self):
+        return ""
+
+    def eye(self, now):
+        """How high your eyes are over the water: she rides the swell, and the
+        faster she goes the harder she slams across it."""
+        fast = min(1.0, abs(self.speed) / BOAT_TOP)
+        return (1.7 + 0.25 * math.sin(now * 1.4 + self.x * 0.03)
+                + fast * 0.55 * abs(math.sin(now * (4.0 + 6.0 * fast) + self.z * 0.05)))
+
+
+def draw_marina(ch, co, v, walls, h, now, wet, out):
+    """The hire stand on the quay - a booth, BOAT HIRE over it - and the boats
+    tied up under it on the water, one fewer while you have one out."""
+    mx, mz = marina(h)
+    if (mx - v.x) ** 2 + (mz - v.z) ** 2 > 260.0 ** 2:
+        return
+    blit_sprite(ch, co, v, walls, PAY_BOOTH, mx + 3.0, mz - 1.5, 0.0, 2.6, 2.4, CURB)
+    for k, c in enumerate("BOAT HIRE"):
+        if c != " ":
+            put_lit(ch, co, v, walls, mx + 3.0, 3.3, mz - 1.5 + 1.6 - k * 0.4, c,
+                    NEON[2][0], max(wet, 0.3), now)
+    for k in range(3 - (1 if out else 0)):
+        bx = mx - 4.0 + k * 6.5
+        bob = 0.15 * math.sin(now * 1.3 + k)
+        blit_sprite(ch, co, v, walls, BOAT_MOORED, bx, mz + 4.5, bob, 1.5 + bob, 4.5,
+                    (FLASH, NEON[4][0], ROU_RED)[k % 3])
+        put_point(ch, co, v, walls, bx + 2.2, 0.4, mz + 2.0, "\\", CURB)    # the line
+
+
+def render_boat(boat, width, height, now):
+    """At the helm: the sea and the coast as they are, from just over the
+    water, rising and falling; her bow going out in front of you, white,
+    spray off it when she is going; the windscreen's frame; the wheel; the
+    speed in knots and which way she heads."""
+    v = View(boat.x, boat.z, boat.heading, width, height, eye=boat.eye(now))
+    ch, co, wet = render_street(v, now)
+    if width < 40 or height < 14:
+        _text(ch, co, height - 1, 0, (" %d knots" % int(abs(boat.speed) * BOAT_KNOTS)
+                                      )[:width], GOLD)
+        return ch, co, v
+    k = big_scale(width, height)
+    mx = width // 2
+    fast = min(1.0, abs(boat.speed) / BOAT_TOP)
+    tip = int(height * (0.79 - 0.04 * fast) + 1.5 * math.sin(now * 3.0) * fast)
+    deck = height - (5 + 6 * (k - 1))   # room for the knots in block letters
+    # The bow: a white deck narrowing to its point, a rail down each side.
+    for y in range(tip, deck):
+        f = (y - tip) / float(max(1, deck - tip))
+        hw = int(f * width * 0.22) + 1
+        for x in range(mx - hw, mx + hw + 1):
+            if 0 <= x < width:
+                edge = x in (mx - hw, mx + hw)
+                ch[y][x] = ("/" if x < mx else "\\") if edge else (
+                    "=" if (y - tip) % 3 == 0 else " ")
+                co[y][x] = ROU_BLACK if edge else (CURB if (y - tip) % 3 == 0 else 0)
+    put = int(1 + fast * 8)
+    tick = int(now * 12.0)
+    if fast > 0.15:
+        # Spray, thrown up off the bow to either side.
+        for n in range(put * 6):
+            m = _mix(n, tick, 6201)
+            side_ = 1 if m & 1 else -1
+            f = ((m >> 2) & 63) / 63.0
+            y = tip + int(f * (deck - tip)) - ((m >> 8) & 3)
+            x = mx + side_ * (int(f * width * 0.22) + 2 + ((m >> 10) & 7))
+            if 0 <= y < height and 0 <= x < width:
+                ch[y][x], co[y][x] = ("'" if m & 4 else "."), SNOW
+    # The windscreen's frame, and under it the dash.
+    for x in range(width):
+        ch[deck][x], co[deck][x] = "=", ROU_BLACK
+        for y in range(deck + 1, height):
+            ch[y][x], co[y][x] = " ", 0
+    for y in range(max(1, tip - 6), deck):
+        for x in (int(width * 0.12), width - 1 - int(width * 0.12)):
+            ch[y][x], co[y][x] = "|", CURB
+    rx = max(5, width // 13)
+    draw_wheel(ch, co, int(width * 0.32), deck + 1, rx, max(2, min(int(rx * 0.4),
+                                                                   height - deck - 2)),
+               boat.steer * 1.8)
+    knots = int(round(abs(boat.speed) * BOAT_KNOTS))
+    if k > 1:
+        _blocks(ch, co, deck + 1, int(width * 0.55), "%d" % knots, GOLD, k - 1, k - 1)
+        _text(ch, co, deck + 2 + 5 * (k - 1), int(width * 0.55), "KNOTS", HUD)
+    else:
+        _text(ch, co, deck + 1, int(width * 0.55), "%3d KNOTS" % knots, GOLD)
+    _text(ch, co, deck + 2, int(width * 0.75), compass_word(boat.heading).upper(), HUD)
+    if now - boat.horn_at < 0.6:
+        _text(ch, co, deck + 3, int(width * 0.55), "PAAARP", FLASH)
+    elif now - boat.said_at < 2.5 and boat.said:
+        _text(ch, co, deck + 3, int(width * 0.55), boat.said[:width // 2], ROU_RED)
+    return ch, co, v
+
+
 def draw_driver(ch, co, cab, now, wet, k=1):
     """From the driver's seat: the roof and the pillars, the mirror with the
     dice, the wipers in the wet, the dashboard with the speed and the meter,
@@ -32491,6 +32738,7 @@ def main(stdscr):
     tiki = None                 # sat at a beach bar: your tab, for this visit
     ride = None                 # up on the pier's wheel: {"pier", "t0"}
     cruise = None               # aboard the cruise ship: {"h", "look"}
+    boat = None                 # at the wheel of a speedboat: a Boat
     vendors = {}                # and the ones you have been at, by seed: their stock
     scope_at = None             # when you put your eye to the telescope
     # The temple's terminal: the verses so far, when the last word was asked
@@ -32513,7 +32761,8 @@ def main(stdscr):
         return (sewer is not None or taxi is not None or cab is not None
                 or metro is not None
                 or flight is not None or reading or poke is not None
-                or vendor is not None or ride is not None or cruise is not None)
+                or vendor is not None or ride is not None or cruise is not None
+                or boat is not None)
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -32617,7 +32866,8 @@ def main(stdscr):
                     note = ("the sea: on - a taxi goes to the beach"
                             if toggle_coast() else
                             "the sea: off - the city is endless that way again")
-                    tiki = ride = cruise = None
+                    tiki = ride = cruise = boat = None
+                    _boat_out[0] = None
                     _liner_trips.clear()
                     if not can_stand(cam_x, cam_z):
                         cam_x, cam_z = start_position()
@@ -32711,6 +32961,29 @@ def main(stdscr):
                                 note = "-> the woods rave (starting)"
                                 note_at = now
                         break
+            elif boat is not None and key not in (ord("q"), CHEAT_KEY):
+                if key in (27, ord("x"), ord("X")):
+                    # Back to the stand, however far out: they come and get it.
+                    h_ = _boat_out[0]
+                    if h_ is not None:
+                        mx_, mz_ = marina(h_)
+                        cam_x, cam_z, yaw = mx_, mz_ - 1.0, 0.0
+                    boat = None
+                    _boat_out[0] = None
+                    note, note_at = "back at the quay - they tie her up", now
+                else:
+                    boat.key({curses.KEY_UP: "faster", ord("w"): "faster",
+                              ord("W"): "faster", curses.KEY_DOWN: "slower",
+                              ord("s"): "slower", ord("S"): "slower",
+                              curses.KEY_LEFT: "left", ord("a"): "left",
+                              ord("A"): "drift left", curses.KEY_SLEFT: "drift left",
+                              curses.KEY_RIGHT: "right", ord("d"): "right",
+                              ord("D"): "drift right",
+                              curses.KEY_SRIGHT: "drift right",
+                              ord(" "): "brake", ord("b"): "brake",
+                              ord("h"): "horn", ord("H"): "horn",
+                              ord("e"): "handbrake",
+                              ord("E"): "handbrake"}.get(key, ""), now)
             elif cruise is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (curses.KEY_LEFT, ord("a"), ord("A")):
                     cruise["look"] -= 0.14
@@ -33185,6 +33458,19 @@ def main(stdscr):
                     note, note_at = "no cabs down here - stand in a street", now
             elif (street and on_roof is None and sewer is None and venue is None
                   and key in (ord("p"), ord("P"))
+                  and marina_near(cam_x, cam_z) is not None):
+                if wallet.take(BOAT_FEE):
+                    h_ = marina_near(cam_x, cam_z)
+                    mx_, mz_ = marina(h_)
+                    boat = Boat(mx_, mz_ + 5.5, math.pi * 0.5, now, int(now * 1000.0))
+                    _boat_out[0] = h_
+                    fwd = side = spin = 0.0
+                    autopilot = False
+                    note, note_at = "she is yours - w opens her up", now
+                else:
+                    note, note_at = "a speedboat is $%d" % BOAT_FEE, now
+            elif (street and on_roof is None and sewer is None and venue is None
+                  and key in (ord("p"), ord("P"))
                   and gangway_near(cam_x, cam_z) is not None):
                 if wallet.take(LINER_FEE):
                     h_ = gangway_near(cam_x, cam_z)
@@ -33416,6 +33702,8 @@ def main(stdscr):
                     cam_x, cam_z, yaw)
                 cruise = None
                 note, note_at = "back alongside - down the gangway", now
+        if boat is not None:
+            boat.step(now - boat.clock, now)
         if cab is not None:
             cab.step(now - cab.clock, now)
             if cab.pay:
@@ -33773,6 +34061,10 @@ def main(stdscr):
                 seated = (venue[1]["seed"], now)    # sat down just now
             ch, co = render_ramen(venue[1], width, height, now, seated[1])
             hud = RAMEN_HUD % (cam_x, cam_z)
+        elif street and boat is not None:
+            ch, co, v = render_boat(boat, width, height, now)
+            hud = BOAT_HUD % (compass_word(boat.heading),
+                              int(round(abs(boat.speed) * BOAT_KNOTS)))
         elif street and cruise is not None:
             ch, co, v = render_cruise(cruise["h"], cruise["look"], width, height, now)
             hud = LINER_HUD + launch_hint(v.x, v.z, now).strip()

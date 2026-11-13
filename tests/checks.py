@@ -27,7 +27,7 @@ ac.COAST = False
 # And the ways to the coast come off the lists till then: with no sea there
 # is no beach for the taxi or the checks' jumps to find.
 COAST_KINDS = ("beach", "seapier", "seawheel", "launchpad", "mission",
-               "harbour", "gangway")
+               "harbour", "gangway", "marina")
 coast_jumps_ = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] in COAST_KINDS]
 coast_fares_ = [p_ for p_ in ac.TAXI_DESTS if p_[1] in COAST_KINDS]
 ac.CHEAT_HIDDEN[:] = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] not in COAST_KINDS]
@@ -9890,6 +9890,73 @@ ac._launch_shift[0] = 0.0
 ac.ROU_RED = old_red_
 check("from the beach she is there at the quay, red funnel and all - and then not",
       fun_ > 10 and gone_ < fun_ // 3, "%d funnel cells, then %d" % (fun_, gone_))
+
+# The speedboat: from the hire stand on the quay's other side, driven like
+# the cab - the same keys, the same gentle wheel - on the sea and only there.
+ms_ = ac.find_place(x0, z0, "marina")
+mx_, mz_ = ac.marina(hb_)
+check("boat hire on the quay's south edge: a stand to step up to, p takes one",
+      ms_ is not None and ac.can_stand(ms_[0], ms_[1])
+      and ac.marina_near(ms_[0], ms_[1]) == hb_
+      and "speedboat" in ac.harbour_hint(ms_[0], ms_[1], 0.0)
+      and ac.coast_kind(int(mx_ / ac.CELL), int((mz_ + 5.5) / ac.CELL)) == "sea")
+
+
+def drive_(bt_, t_, secs_, keys_=(), every_=0.1):
+    """secs_ of her, pressing keys_ every every_ seconds; where she went."""
+    went_ = []
+    n_ = 0
+    while n_ < int(secs_ * 30):
+        if keys_ and n_ % max(1, int(every_ * 30)) == 0:
+            for k_ in keys_:
+                bt_.key(k_, t_)
+        t_ += 1.0 / 30.0
+        ac._clock[0] = t_
+        bt_.step(1.0 / 30.0, t_)
+        went_.append((bt_.x, bt_.z))
+        n_ += 1
+    return t_, went_
+
+
+bt_ = ac.Boat(mx_, mz_ + 5.5, math.pi * 0.5, 100.0, 1)
+for _ in range(10):
+    bt_.key("faster", 100.0)
+tb_, out_ = drive_(bt_, 100.0, 10.0)
+check("w opens her up: out to sea and fast, faster than the cab will go",
+      bt_.x - mx_ > 250.0 and ac.CAB_TOP < bt_.speed <= ac.BOAT_TOP
+      and all(ac.boat_clear(x_, z_) for x_, z_ in out_),
+      "%.0f units out, %.0f a second" % (bt_.x - mx_, bt_.speed))
+tap_ = ac.Boat(mx_ + 200.0, mz_ + 40.0, math.pi * 0.5, 200.0, 2)
+for _ in range(6):
+    tap_.key("faster", 200.0)
+t2_, _ = drive_(tap_, 200.0, 3.0)
+h0_ = tap_.heading
+tap_.key("left", t2_)
+t2_, _ = drive_(tap_, t2_, 1.5)
+check("a tap of the wheel is a nudge, the way the cab's is",
+      0.01 < abs(tap_.heading - h0_) < 0.35, "%.2f rad" % abs(tap_.heading - h0_))
+beach_b_ = ac.Boat(mx_ + 60.0, mz_ + 40.0, -math.pi * 0.5, 300.0, 3)
+for _ in range(10):
+    beach_b_.key("faster", 300.0)
+_, ash_ = drive_(beach_b_, 300.0, 15.0)
+check("she will not go up the beach: straight at it, she stops at the water",
+      all(ac.boat_water(x_, z_) for x_, z_ in ash_)
+      and min(x_ - ac.shore_x(z_) for x_, z_ in ash_) > -1.0)
+ram_ = ac.Boat(lbx_, lbz_ - ac.LINER_B * 0.5 - 8.0, 0.0, 400.0, 4)
+for _ in range(10):
+    ram_.key("faster", 400.0)
+_, rammed_ = drive_(ram_, 400.0, 6.0)
+check("nor through the ship: she stops against the hull",
+      all(abs(z_ - lbz_) > ac.LINER_B * 0.5 for _, z_ in rammed_))
+bad_ = []
+for w_, h_ in ((40, 14), (60, 20), (100, 30), (211, 67), (300, 90)):
+    try:
+        g_, _, _ = ac.render_boat(bt_, w_, h_, tb_)
+        if "KNOT" not in "".join("".join(r_) for r_ in g_):
+            bad_.append((w_, h_))
+    except Exception as e_:
+        bad_.append((w_, h_, repr(e_)))
+check("at the helm, at any size: the bow, the wheel, the knots", not bad_, str(bad_))
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
