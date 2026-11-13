@@ -3,7 +3,9 @@
 **`t` on any street hails a cab** — a proper street (`road_at()`), dry, not in a venue, the sewer
 or on a roof; anywhere else the HUD says to stand in a street. `taxi` in `main()` is a state like
 the lift's, and nothing moves you while it is set. `hail`: `draw_taxi_coming()` brings it along
-the street's own axis towards you over `TAXI_ARRIVE`, slowing, three sprites by distance, and
+the street's own axis towards you over `TAXI_ARRIVE`, slowing - a sprite in the world the size
+of a car (`TAXI_COMING`, its sign `TAXI_SIGN` in red, headlights), where it was three fixed little
+drawings and asked on 2026-11-13 to be bigger: on a big window it was a few characters wide - and
 stops **6.5 units off** — at 3.2 it pulled up under the bottom of the screen, the camera not being
 able to look down. `menu`: you are in, and `taxi_dests()` has found the nearest of each of
 `TAXI_DESTS` with `find_place()` (about 60 ms, once) and priced it, `FARE_BASE` plus `FARE_PER`

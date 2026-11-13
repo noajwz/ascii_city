@@ -29620,9 +29620,26 @@ def taxi_ride_at(route, u):
     return ax, z0 + sign * length * e, 0.0 if sign > 0 else math.pi
 
 
+TAXI_COMING = [
+    "  [TAXI]  ",
+    " .------. ",
+    "/_|__|__|\\",
+    "'o------o'",
+]
+TAXI_SIGN = [
+    "  [TAXI]  ",
+    "          ",
+    "          ",
+    "          ",
+]
+
+
 def draw_taxi_coming(ch, co, v, axis, t):
     """The cab pulling up along the street towards you, t seconds after you
-    hailed it: yellow, the TAXI light on, headlights, slowing to a stop."""
+    hailed it: yellow, the TAXI light on, headlights, slowing to a stop. The
+    size of a car in the street - a sprite in the world like the traffic -
+    where it was a fixed little drawing, a few characters wide whatever the
+    window, and on a big one it was asked to be bigger (2026-11-13)."""
     u = min(1.0, t / TAXI_ARRIVE)
     e = 1.0 - (1.0 - u) ** 2
     d = 6.5 + 24.0 * (1.0 - e)      # nearer, and it is under the bottom of the screen
@@ -29631,20 +29648,13 @@ def draw_taxi_coming(ch, co, v, axis, t):
         ax, az = -ax, -az
     sx_, sz_ = -az, ax                                   # the kerb side
     wx, wz = v.x + ax * d + sx_ * 1.4, v.z + az * d + sz_ * 1.4
-    pr = v.project(wx, 0.0, wz)
-    if pr is None:
-        return
-    x, y, dist = pr
-    art = ([" _[TAXI]_ ", "/=|==|==\\", "(O)----(O)"] if dist < 8.0 else
-           ["_TAXI_", "[o==o]"] if dist < 18.0 else ["[==]"])
-    top = int(round(y)) - len(art) + 1
-    for r, line in enumerate(art):
-        for k, c in enumerate(line):
-            cx_ = int(round(x)) - len(line) // 2 + k
-            if c != " " and 0 <= top + r < v.height and 0 <= cx_ < v.width:
-                ch[top + r][cx_] = c
-                co[top + r][cx_] = (FLASH if c in "Oo" and r == len(art) - 1
-                                    else ROU_RED if c in "TAXI" else GOLD)
+    walls = v.walls
+    blit_sprite(ch, co, v, walls, TAXI_COMING, wx, wz, 0.0, 1.75, 1.9, GOLD)
+    blit_sprite(ch, co, v, walls, TAXI_SIGN, wx, wz, 0.0, 1.75, 1.9, ROU_RED)
+    ex, ez = wx - ax * 1.9, wz - az * 1.9           # its front, towards you
+    for s in (-0.75, 0.75):
+        put_lit(ch, co, v, walls, ex - az * s, 0.55, ez + ax * s, "o", FLASH,
+                max(v.wet, 0.3), time.monotonic())
 
 
 def draw_cab(ch, co, now, wet, top_line, meter, says):
