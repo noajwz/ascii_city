@@ -4948,14 +4948,21 @@ mco = [[0] * 100 for _ in range(30)]
 ac.draw_taxi_menu(mch, mco, tdests, 1, 5.0)
 mtext = "\n".join("".join(r) for r in mch)
 check("where to? with the fares", "WHERE TO?" in mtext and "> " + tdests[1][0] in mtext)
-cv_ = ac.View(sx_, sz_, 0.0, 100, 30)
 seen_ = []
-for t_ in (0.2, 1.5, 2.9):
-    tch, _, _ = ac.render_street(cv_, 300.0)
-    ac.draw_taxi_coming(tch, [[0] * 100 for _ in range(30)], cv_, (0.0, 1.0), t_)
-    seen_.append("\n".join("".join(r) for r in tch))
-check("and you see it pull up, bigger as it comes",
-      "TAXI" in seen_[-1] and "(O)" in seen_[-1])
+old_gold_, ac.GOLD = ac.GOLD, 4242
+for w_, h_ in ((100, 30), (300, 90)):
+    for t_ in (0.2, 1.5, 2.9):
+        cv_ = ac.View(sx_, sz_, 0.0, w_, h_)
+        tch, tco, _ = ac.render_street(cv_, 300.0)
+        ac.draw_taxi_coming(tch, tco, cv_, (0.0, 1.0), t_)
+        body_ = [y_ for y_ in range(h_) for x_ in range(w_) if tco[y_][x_] == 4242]
+        seen_.append((len(body_), max(body_) - min(body_) + 1 if body_ else 0,
+                      "X" in "".join("".join(r) for r in tch)))
+ac.GOLD = old_gold_
+check("and you see it pull up, bigger as it comes - the size of a car, big window too",
+      seen_[0][0] < seen_[1][0] < seen_[2][0]
+      and seen_[3][0] < seen_[4][0] < seen_[5][0]
+      and seen_[2][2] and seen_[2][1] >= 5 and seen_[5][1] >= 14, str(seen_))
 for w_, h_ in ((20, 8), (40, 14), (240, 70)):
     g_ = [[" "] * w_ for _ in range(h_)]
     c_ = [[0] * w_ for _ in range(h_)]
