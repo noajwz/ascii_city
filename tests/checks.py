@@ -26,7 +26,8 @@ from harness import ac
 ac.COAST = False
 # And the ways to the coast come off the lists till then: with no sea there
 # is no beach for the taxi or the checks' jumps to find.
-COAST_KINDS = ("beach", "seapier", "seawheel", "launchpad", "mission")
+COAST_KINDS = ("beach", "seapier", "seawheel", "launchpad", "mission",
+               "harbour", "gangway")
 coast_jumps_ = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] in COAST_KINDS]
 coast_fares_ = [p_ for p_ in ac.TAXI_DESTS if p_[1] in COAST_KINDS]
 ac.CHEAT_HIDDEN[:] = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] not in COAST_KINDS]
@@ -9417,8 +9418,11 @@ moved_ = sum(1 for y_, x_ in below_ if sch_[y_][x_] != sch2_[y_][x_])
 check("and it moves: the waves come in", moved_ > 60, "%d cells changed" % moved_)
 ac.SNOW, ac.GOLD_DIM = 1, 1
 real_ground, real_ships, real_mirror = ac.coast_ground, ac.draw_ships, ac.reflect_river
+real_harbour, real_launch = ac.draw_harbour, ac.draw_launch_site
 ac.coast_ground = lambda *a_: None
-ac.draw_ships = lambda *a_: None
+ac.draw_ships = lambda *a_: None            # and the cruise ship and the rocket,
+ac.draw_harbour = lambda *a_: None          # which are out there on purpose
+ac.draw_launch_site = lambda *a_: None
 ac.reflect_river = lambda *a_: None
 stray_ = 0
 for yaw_ in (math.pi / 2 - 0.4, math.pi / 2, math.pi / 2 + 0.4):
@@ -9434,6 +9438,7 @@ for eye_ in (40.0, 85.0):
     stray_ += sum(1 for y_ in range(v_.horizon + 1, 36) for x_ in range(120)
                   if g_[y_][x_] != " ")
 ac.coast_ground, ac.draw_ships, ac.reflect_river = real_ground, real_ships, real_mirror
+ac.draw_harbour, ac.draw_launch_site = real_harbour, real_launch
 check("out there is only water: with the sea not drawn, nothing is - from the "
       "surf, from a roof's height, from the plane's", stray_ == 0, "%d cells" % stray_)
 ships_, rows_ = [], set()
@@ -9814,6 +9819,77 @@ desks_ = ["".join("".join(r_) for r_ in ac.render_mission(site_, 0, 160, 48,
 check("the desks: standing by, and GO once the flight director has polled them",
       desks_[0].count("STBY") >= 5 and desks_[1].count("STBY") == 0
       and desks_[1].count("GO") >= 5)
+
+# The harbour: a quay out into the sea, a cruise ship alongside it, and p at
+# her gangway takes you on a cruise down the coast and back.
+hb_ = ac._harbour_at(ac.HARBOUR_ROW0 - ac.HARBOUR_GAP)
+hmid_ = hb_[0] + ac.QUAY_BROAD // 2
+hfoot_ = int(math.floor(ac.coastline(hmid_))) - ac.BEACH_DEEP
+qk_ = [ac.coast_kind(i_, hmid_) for i_ in range(hfoot_ - 1, hb_[1] + 2)]
+check("the harbour: a quay from the boardwalk out over the sea, that you can walk",
+      qk_ == ["walk"] + ["quay"] * (hb_[1] - hfoot_ + 1) + ["sea"]
+      and all(ac.can_stand((i_ + 0.5) * ac.CELL, (hmid_ + 0.5) * ac.CELL)
+              for i_ in range(hfoot_, hb_[1]))
+      and ac.cab_ground(hfoot_ + 5, hmid_) == "road", str(qk_[:3] + qk_[-3:]))
+hrows_ = [j_ for j_ in range(-6000, 6000) if ac.harbour_site(j_) is not None]
+check("one every HARBOUR_GAP rows, clear of the piers, the space centres, the river",
+      len({ac.harbour_site(j_)[0] for j_ in hrows_}) >= 14
+      and min(abs(a_ - b_) for a_ in hrows_ for b_ in piers_ + rows_) > 100
+      and all(abs(j_ - ac.river_centre(ac.COAST_I)) > 50 for j_ in hrows_))
+gw_ = ac.find_place(x0, z0, "gangway")
+lbx_, lbz_ = ac.liner_berth(hb_)
+check("she lies alongside its north side, and the gangway's foot is on the quay",
+      gw_ is not None and ac.can_stand(gw_[0], gw_[1])
+      and ac.gangway_near(gw_[0], gw_[1]) == hb_
+      and 0.0 < hb_[0] * ac.CELL - (lbz_ + ac.LINER_B * 0.5) < 3.0
+      and "p boards" in ac.harbour_hint(gw_[0], gw_[1], 0.0)
+      and ac.find_place(x0, z0, "harbour") is not None
+      and ("the harbour", "harbour") in ac.TAXI_DESTS)
+rt_ = ac.liner_route(hb_)
+pts_ = rt_[0]
+pad_ = ac.launch_pad_xz(rt_[3])
+check("her way: smooth, out at sea all the way, wide of the pier and the launch pad",
+      max(math.dist(a_, b_) for a_, b_ in zip(pts_, pts_[1:])) < 60.0
+      and all(x_ - ac.shore_x(z_) > 250.0 for x_, z_ in pts_[20:-20])
+      and min(math.dist(p_, pad_) for p_ in pts_) > 400.0
+      and min(z_ for _, z_ in pts_) < pad_[1] < max(z_ for _, z_ in pts_),
+      "%.0f units, %.0f s" % (rt_[1][-1], ac.liner_trip_time(rt_)))
+cn_ = 9000.0
+ac.liner_sail(hb_, cn_)
+ramp_ = ac.LINER_SPEED * ac.LINER_EASE * 0.5
+tab_ = ac.LINER_EASE + (rt_[2] - ramp_) / ac.LINER_SPEED
+poses_ = [ac.liner_pose(hb_, cn_ + t_) for t_ in range(0, int(ac.liner_trip_time(rt_)))]
+check("she sails: steadily, and a rocket is off the pad as she comes abeam of it",
+      abs(ac.launch_t(rt_[3], cn_ + tab_) - 10.0) < 0.01
+      and max(math.dist(a_[:2], b_[:2]) for a_, b_ in zip(poses_, poses_[1:]))
+      < ac.LINER_SPEED * 1.1
+      and ac._liner_s(ac.liner_trip_time(rt_) + 1.0, rt_[1][-1]) is None
+      and ac.gangway_near(gw_[0], gw_[1]) is None
+      and "out" in ac.harbour_hint(gw_[0], gw_[1], 0.0))
+bad_ = []
+for w_, h_ in ((60, 20), (100, 30), (211, 67), (300, 90)):
+    for t_ in (0.0, 5.0, 60.0, 120.0, 180.0):
+        try:
+            g_, c_, v_ = ac.render_cruise(hb_, 0.3, w_, h_, cn_ + t_)
+            if "=" * 10 not in "".join(g_[h_ - 4]):
+                bad_.append((w_, h_, t_, "no rail"))
+        except Exception as e_:
+            bad_.append((w_, h_, t_, repr(e_)))
+check("from her rail, all the way round, at any size", not bad_, str(bad_[:3]))
+ac.liner_home(hb_)
+ac._launch_shift[0] = 0.0
+old_red_ = ac.ROU_RED
+ac.ROU_RED = 1907
+bv_ = ac.View(ac.shore_x(lbz_ - 140.0) - 14.0, lbz_ - 140.0, math.pi * 0.5 - 0.6,
+              160, 48)
+fun_ = sum(1 for r_ in ac.render_street(bv_, cn_)[1] for c_ in r_ if c_ == 1907)
+ac.liner_sail(hb_, cn_)
+gone_ = sum(1 for r_ in ac.render_street(bv_, cn_ + 90.0)[1] for c_ in r_ if c_ == 1907)
+ac.liner_home(hb_)
+ac._launch_shift[0] = 0.0
+ac.ROU_RED = old_red_
+check("from the beach she is there at the quay, red funnel and all - and then not",
+      fun_ > 10 and gone_ < fun_ // 3, "%d funnel cells, then %d" % (fun_, gone_))
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

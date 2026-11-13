@@ -42,6 +42,7 @@ or change something. Notes cross-reference each other by title ("see The univers
 - `promenade.md` - The promenade, and what is on the water
 - `coast.md` - The coast
 - `space-centre.md` - The space centre, its launch pad out on the sea, and the launches
+- `harbour.md` - The harbour, the cruise ship, and a cruise down the coast
 - `fireworks-over-the-bay.md` - Fireworks over the bay
 - `carnival-on-the-bank.md` - The carnival on the bank
 - `big-bridge.md` - The big bridge
