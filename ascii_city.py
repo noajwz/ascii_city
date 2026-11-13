@@ -834,6 +834,7 @@ GRASS = BARK = ROOF = 0
 STAR_DIM = STAR_WARM = STAR_COLD = MOON = MOON_DIM = BAND = 0
 BEAM = BEAM_DIM = CROWN_BLUE = CROWN_RED = 0
 FOG = FOG_DIM = 0
+WOOD = WOOD_LIT = 0
 
 
 def init_colors():
@@ -843,6 +844,7 @@ def init_colors():
     global FIREFLY, EYES, SNOW
     global ROOF, STAR_DIM, STAR_WARM, STAR_COLD, MOON, MOON_DIM, BAND
     global BEAM, BEAM_DIM, CROWN_BLUE, CROWN_RED, FOG, FOG_DIM
+    global WOOD, WOOD_LIT
 
     curses.start_color()
     try:
@@ -877,7 +879,8 @@ def init_colors():
                   "roof": 252, "star_dim": 244, "star_warm": 223,
                   "star_cold": 153, "moon": 231, "moon_dim": 250,
                   "band": 60, "firefly": 118, "eyes": 190, "snow": 255,
-                  "crown_blue": 33, "fog": 248, "fog_dim": 243}
+                  "crown_blue": 33, "fog": 248, "fog_dim": 243,
+                  "wood": 94, "wood_lit": 130}
         attrs = {}
     else:
         # 8-colour fallback: bold = the "bright" version of a colour.
@@ -915,7 +918,9 @@ def init_colors():
                   "moon_dim": curses.COLOR_WHITE, "band": curses.COLOR_BLUE,
                   "firefly": curses.COLOR_GREEN, "eyes": curses.COLOR_YELLOW,
                   "snow": curses.COLOR_WHITE, "crown_blue": curses.COLOR_BLUE,
-                  "fog": curses.COLOR_WHITE, "fog_dim": curses.COLOR_WHITE}
+                  "fog": curses.COLOR_WHITE, "fog_dim": curses.COLOR_WHITE,
+                  # Not bold, yellow is the brown it was on the old terminals.
+                  "wood": curses.COLOR_YELLOW, "wood_lit": curses.COLOR_YELLOW}
         attrs = {"near": curses.A_BOLD}
 
     pair = 1
@@ -982,6 +987,8 @@ def init_colors():
     EYES = made["eyes"]
     SNOW = made["snow"] | curses.A_BOLD
     BAND = made["band"]
+    WOOD = made["wood"]                 # the sea pier's boards
+    WOOD_LIT = made["wood_lit"]         # and the joints between them, the rails
 
 
 def wide_chars_work(stdscr):
@@ -12338,12 +12345,16 @@ def coast_ground(v, kind, x, z, y, sx, glow, now):
             return ".", CURB
         return None
     if kind == "pier":
-        # Boards across the way you walk it, out to sea: the joints between
-        # them, in lengths, not ruled from rail to rail - looking down the
-        # pier a joint is a whole row of the screen.
-        if (x * 0.5) % 1.0 < 0.1 and _mix(int(x * 0.5), int(z * 0.4), 5705) % 3:
-            return "-", CURB
-        return (".", STREET) if _mix(int(x * 3.0), int(z * 3.0), 37) % 13 == 0 else None
+        # Wooden boards across the way you walk it, out to sea: brown, and
+        # laid edge to edge, so from the beach the pier is a band of timber
+        # over the water and not more water. The joints between the boards
+        # lighter, every so often; a knot or a nail head here and there.
+        if (x * 1.1) % 1.0 < 0.14:
+            return "-", WOOD_LIT
+        h = _mix(int(x * 1.1), int(z * 2.0), 5705)
+        if h % 19 == 0:
+            return ".", WOOD_LIT
+        return ("=" if h % 3 else "-"), WOOD
     if kind == "mouth":
         # The river, still going the way it was going.
         h = _mix(int(x * 2.0) - int(now * 1.6), int(z * 2.0), 29)
@@ -15310,7 +15321,11 @@ def draw_sea_pier(ch, co, v, walls, pier, now, wet):
                 put_point(ch, co, v, walls, x, y, z, "o" if lit else ".",
                           tube[0] if lit else tube[1])
                 if k % 2 == 0:
-                    put_point(ch, co, v, walls, x, 0.95, z, "-", CURB)
+                    put_point(ch, co, v, walls, x, 0.95, z, "-", WOOD_LIT)
+            if not far and k % 2 == 0:
+                # The piles it stands on, down into the water under its edge.
+                for h in (-0.25, -0.75, -1.25):
+                    put_point(ch, co, v, walls, x, h, z, "|", WOOD)
             k += 1
     wx, wz = sea_wheel(pier)
     draw_sea_wheel(ch, co, v, walls, wx, wz, now, wet, far)
@@ -19947,7 +19962,8 @@ PIGEON_NOTES = (
     "You have the wrong pigeon. This one is mine. - a very angry gull",
     "The bartender at The Top Shelf says you owe for the last one.",
 )
-LOFT_HUD = " pigeon loft, %s  -  f feed, r let out, n note  -  ad look  -  s down "
+LOFT_HUD = (" pigeon loft, %s, facing %s  -  f feed, r let out, n note  -  ad look"
+            "  -  s down ")
 LOFT_SACK = [" ____ ", "/FEED\\", "|    |", "|____|"]
 LOFT_BUCKET = ["\\___/", " |  |", " |__|"]
 WASH_SHIRT = ["_/-\\_", "|   |", "|   |", "|___|"]
@@ -22049,6 +22065,16 @@ def probe(x, z, yaw, reach):
 AUTO_LOOK = 60.0       # how far ahead the autopilot looks down a street
 AUTO_TURN_ODDS = 4     # at a clear junction, one chance in this of taking it
 AUTO_TURN_GAP = 14.0   # and not within this many seconds of the last turn
+
+
+HEADINGS = ("north", "north-east", "east", "south-east", "south", "south-west",
+            "west", "north-west")
+
+
+def compass_word(yaw):
+    """Which way a heading faces, in eighths of a turn: the way the cockpit's
+    compass reads it - north is +z, east is +x, which is where the sea is."""
+    return HEADINGS[int(round((yaw % math.tau) / (math.tau / 8.0))) % 8]
 
 
 def _wrap(a):
@@ -28719,7 +28745,7 @@ COP_SAYS = ["License and registration.", "Do you know why I pulled you over?",
 _cars_off = set()       # the traffic's police car that pulled out after you
 _cars_extra = []        # and where it is now, for the street to draw like any car
 _cars_lift = {}         # and how high, by its seed: up a ramp after you
-CAB_HUD = " driving the cab  -  %s "
+CAB_HUD = " driving the cab, facing %s  -  %s "
 CAB_KEYS = ("w s speed  a d steer  A D drift  space brakes  e handbrake  l lights  "
             "m map  h horn  x pull over")
 CAB_KEYS_SHORT = "ws speed  ad steer  AD drift  spc brake  e handbrake  l m h x"
@@ -30758,8 +30784,8 @@ def render_rave(club, width, height, now):
 ARROWS = (curses.KEY_LEFT, curses.KEY_RIGHT, curses.KEY_UP, curses.KEY_DOWN)
 
 SKYLINE_HUD = " x=%-6d %s  tab view  arrows/hl walk  HL run  space wander  ` cheats "
-STREET_HUD = (" %d,%d %s, %s%s  ws walk  ad turn  ,. step  +- pace  t taxi  tab view"
-              "  ` cheats ")
+STREET_HUD = (" %d,%d facing %s  %s, %s%s  ws walk  ad turn  ,. step  +- pace"
+              "  t taxi  tab view  ` cheats ")
 TAXI_HUD = " in a taxi  -  %s "
 METRO_HUD = " the metro  -  %s "
 FLIGHT_HUD = " " + FLIGHT_NO + "  -  %s  -  %s "
@@ -30807,10 +30833,12 @@ TUNNEL_HUD = " in the tunnels  -  w s walk, a d turn%s  -  q quit "
 PARTY_HUD = (" on the roof of %s, %s  -  ws walk  ad turn  -  into the lift hut to go"
              " down  -  q quit ")
 GALLERY_HUD = " up the lighthouse, %s  -  ad round  -  s down  -  q quit "
-ESCAPE_ROOF_HUD = (" on a roof in the alleys, %d floors up, %s  -  ad look round  -"
+ESCAPE_ROOF_HUD = (" on a roof in the alleys, %d floors up, %s, facing %s  -  ad look"
+                   " round  -"
                    "  s climbs down  -  q quit ")
-BAR_HUD = " %s, %s  -  ad look round  -  1-4 order  -  s lift down  -  q quit "
-ROOF_HUD = (" on the roof, %d floors up, %s  -  ad look round  -  s takes the"
+BAR_HUD = (" %s, %s, facing %s  -  ad look round  -  1-4 order  -  s lift down  -"
+           "  q quit ")
+ROOF_HUD = (" on the roof, %d floors up, %s, facing %s  -  ad look round  -  s takes the"
             " lift down  -  q quit ")
 
 
@@ -31957,7 +31985,8 @@ def main(stdscr):
             v.roof = on_roof
             ch, co, wet = render_street(v, now)
             draw_rooftop_bar(ch, co, v, on_roof, now, at_bar)
-            hud = BAR_HUD % (on_roof["name"].lower(), sky_word(now, wet))
+            hud = BAR_HUD % (on_roof["name"].lower(), sky_word(now, wet),
+                             compass_word(yaw))
         elif on_roof is not None:
             v = roof_view(on_roof, yaw, width, height)
             v.roof = on_roof
@@ -31966,10 +31995,11 @@ def main(stdscr):
                 if at_loft is None and low_roof(on_roof) == "loft":
                     at_loft = new_loft()
                 draw_low_roof(ch, co, v, on_roof, now, wet, at_loft)
-            hud = (LOFT_HUD % sky_word(now, wet) if at_loft is not None
+            hud = (LOFT_HUD % (sky_word(now, wet), compass_word(yaw))
+                   if at_loft is not None
                    else (ESCAPE_ROOF_HUD if on_roof.get("kind") == "escape"
                          else ROOF_HUD) % (int(on_roof["height"] / FLOOR_H),
-                                           sky_word(now, wet)))
+                                           sky_word(now, wet), compass_word(yaw)))
         elif wheel is not None:
             slot.settle(now)
             table.update(now)
@@ -32135,7 +32165,7 @@ def main(stdscr):
             draw_headlights(ch, co, v, v.walls, cab)
             draw_cab_world(ch, co, v, cab, now)
             draw_driver(ch, co, cab, now, wet, big_scale(width, height))
-            hud = CAB_HUD % cab.status()
+            hud = CAB_HUD % (compass_word(cab.heading), cab.status())
         elif street and taxi is not None and taxi["phase"] != "hail":
             if taxi["phase"] == "ride":
                 u_ = min(1.0, (now - taxi["t0"]) / taxi["dur"])
@@ -32160,7 +32190,7 @@ def main(stdscr):
             if taxi is not None:
                 draw_taxi_coming(ch, co, v, taxi["axis"], now - taxi["t0"])
             hud = STREET_HUD % (
-                cam_x, cam_z,
+                cam_x, cam_z, compass_word(yaw),
                 district(int(cam_x / CELL + BIG) - BIG,
                          int(cam_z / CELL + BIG) - BIG)["name"],
                 sky_word(now, wet),

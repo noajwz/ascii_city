@@ -9593,6 +9593,15 @@ check("from the sand along the coast: the wheel, a ring of lights standing over 
       "%d bulbs, %d rows tall" % (len(ring_), max(y_ for y_, _ in ring_)
                                   - min(y_ for y_, _ in ring_) + 1))
 check("and the pier's lights lying on the water", len(low_) > 10, "%d" % len(low_))
+ac.WOOD, ac.WOOD_LIT = 991, 992
+pch_, pco_, _ = ac.render_street(pv_, clear_t)
+wood_ = sum(1 for r_ in pco_ for c_ in r_ if c_ in (991, 992))
+fv_ = ac.View(pspot_[0], pspot_[1], pspot_[2], 110, 34)
+fch_, fco_, _ = ac.render_street(fv_, clear_t)
+deck_ = sum(1 for y_ in range(fv_.horizon + 1, 34) for c_ in fco_[y_] if c_ in (991, 992))
+ac.WOOD = ac.WOOD_LIT = 1
+check("and it is timber, brown, against the water: piles from the sand, boards from its foot",
+      wood_ > 40 and deck_ > 400, "%d from the sand, %d from its foot" % (wood_, deck_))
 wspot_ = ac.find_place(x0, z0, "seawheel")
 check("at the wheel's foot it says so", ac.sea_wheel_near(wspot_[0], wspot_[1]) == pier_
       and ac.can_stand(wspot_[0], wspot_[1]) and ac.sea_wheel_near(x0, z0) is None)
@@ -9622,6 +9631,12 @@ check("with the sea there, every place on the menus is still somewhere you can s
 check("the taxi goes everywhere it went, and to the beach and the pier",
       len(ac.taxi_dests(x0, z0)) == len(ac.TAXI_DESTS)
       and len(ac.taxi_dests(beach_[0], beach_[1])) == len(ac.TAXI_DESTS))
+check("the top bar says which way you face, the way the cockpit's compass does",
+      [ac.compass_word(a_) for a_ in (0.0, math.pi / 4, math.pi / 2, math.pi,
+                                      -math.pi / 2, 6.2)]
+      == ["north", "north-east", "east", "south", "west", "north"]
+      and "facing %s" in ac.STREET_HUD and "facing %s" in ac.ROOF_HUD
+      and "facing %s" in ac.CAB_HUD)
 check("~ on the panel is the switch", ac.toggle_coast() is False
       and ac.coast_kind(sc_ + 5, jc_) is None and ac.find_place(x0, z0, "beach") is None
       and cells_(360, 420, -60, 60) == far_off
