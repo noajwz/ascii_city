@@ -4963,7 +4963,7 @@ for w_, h_ in ((20, 8), (40, 14), (240, 70)):
     ac.draw_taxi_menu(g_, c_, tdests, 3, 100.0)
 check("and any size of window is fine", True)
 
-# --- the panel's key, where ` is a dead key -----------------------------------------
+# --- the panel's key: F1 -----------------------------------------------------------
 class FakeScr:
     """getch() over a list of keys that arrived together, then -1."""
     def __init__(self, keys):
@@ -4983,19 +4983,13 @@ def read_all(keys):
         got_.append(k_)
 
 
-bt_ = ac.CHEAT_KEY
-check("` alone is the panel's key, and so is F1",
-      read_all([bt_]) == [bt_] and read_all([ac.curses.KEY_F1]) == [bt_])
-check("a dead key's `` is one press, not open-and-shut",
-      read_all([bt_, bt_]) == [bt_])
-check("and ` with the letter it let go on is the panel, not a cheat",
-      read_all([bt_, ord("c")]) == [bt_])
-check("and ` with a vowel, come out as one accented letter, is the panel too",
-      read_all([0xC3, 0xA0]) == [bt_] and read_all([0xC3, 0x88]) == [bt_])
-check("other two-byte letters still come through as they were",
-      read_all([0xC3, 0xA9]) == [0xC3, 0xA9])
-check("and keys pressed one at a time are untouched",
-      read_all([ord("w")]) == [ord("w")])
+check("F1 is the panel's key, and ` is not any more",
+      ac.CHEAT_KEY == ac.curses.KEY_F1
+      and read_all([ac.curses.KEY_F1]) == [ac.CHEAT_KEY]
+      and read_all([ord("`")]) == [ord("`")] != [ac.CHEAT_KEY])
+check("and keys come through as they were pressed, two-byte letters too",
+      read_all([ord("w")]) == [ord("w")] and read_all([0xC3, 0xA9]) == [0xC3, 0xA9]
+      and read_all([ord("`"), ord("c")]) == [ord("`"), ord("c")])
 
 # --- driving the cab yourself ------------------------------------------------------
 check("the cab's where to? offers the wheel", "drive it yourself" in mtext)

@@ -14,18 +14,15 @@ alley, a dead end, a crossroads, a long street, the tunnels. Their kinds are sti
 `find_place()`, which the tests use; they are just not keys. Ask before putting one back.
 Adding the feature and leaving the menu alone is an unfinished job.
 
-**On a keyboard where `` ` `` is a dead key it used to misbehave**, reported as "it doesn't
-open when I press the button, and then when I close it again it does the cheat". On
-US-International - the usual layout on Windows in the Netherlands - `` ` `` sends nothing
-until the next key and then both together: a second `` ` `` gave two, so the panel opened and
-shut in one frame; a letter after it gave `` ` `` and the letter, so the panel opened and jumped
-at once; a vowel came out as one accented letter (UTF-8, `0xC3` and one of `CHEAT_GRAVES`),
-which was no key at all. `read_key()` reads every key in `main()` and takes whatever came in
-the same read as a `` ` `` to be the dead key letting go - by hand two keys are never in one
-frame - so each of those is one press of the panel's key and nothing else. F1 opens it as well,
-a key that is never dead. There are checks of each with a stand-in `getch()`, and a pty case.
+**The panel is F1, and only F1** (`CHEAT_KEY`), since 2026-11-13, when the owner asked for
+`` ` `` to go. It had been `` ` `` from the start, and on US-International - the usual layout on
+Windows in the Netherlands - `` ` `` is a dead key: it sends nothing until the next key and then
+both, so the panel opened and shut in one frame, or opened and jumped at once, until
+`read_key()` grew a page of handling for it. F1 was added then as the key that is never dead;
+now it is the only one and `read_key()` is a plain `getch()`. On a Mac laptop F1 may want fn.
+The pty cases open the panel with F1's keypad form, `\x1bOP`.
 
-`` ` `` opens a panel over the live view — over, not instead of, so that weather you change happens
+F1 opens a panel over the live view — over, not instead of, so that weather you change happens
 in front of you. **A jump closes it** — you went somewhere to look at it, and with the panel still
 up the next key is a district or another jump; the `-> where` note shows on the HUD for four
 seconds instead.
