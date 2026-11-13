@@ -416,6 +416,16 @@ def cases(run, report):
         print("    no webcast, no launch from the desk, or no booster camera")
         mc_ok = False
     ok &= mc_ok
+    # The harbour: money, the gangway, a cruise, a look round, back ashore.
+    hb_st, hb_out = run([(F1, .5), (b"+", .4), (b"\x017", 1.5), (b"p", 3.0),
+                         (b"a", .5), (b"d", .5), (b"", 3.0), (b"x", 1.2), (b"w", .5)],
+                        cols=300, rows=60)      # wide: the note goes after the HUD
+    hb_plain = ANSI.sub(b"", hb_out).decode("utf-8", "replace")
+    hb_ok = report("the harbour: a cruise, and ashore again", hb_st, hb_out)
+    if hb_ok and hb_out and not ("all aboard" in hb_plain and "tender" in hb_plain):
+        print("    did not get aboard, or not back ashore")
+        hb_ok = False
+    ok &= hb_ok
     return ok
 
 

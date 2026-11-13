@@ -767,7 +767,8 @@ def district(i, j):
                 return PIER_HALL
             if kind == "control":
                 return MISSION_CTRL
-            return (SEAFRONT if kind in ("road", "walk", "bridge", "pier", "jetty")
+            return (SEAFRONT if kind in ("road", "walk", "bridge", "pier", "jetty",
+                                         "quay")
                     else BEACH)
         back = int(math.floor(coastline(j))) - i - COAST_STRIP
         if (0 < back <= HOTEL_DEEP and not DISTRICTS[district_at(i, j)]["park"]
@@ -1597,7 +1598,7 @@ def coast_kind(i, j):
         if lo < j < hi:
             hit = "bridge" if hit in ("walk", "road") else "mouth"
     if hit in ("sea", "surf", "sand"):
-        hit = _pier_kind(i, j) or _launch_kind(i, j) or hit
+        hit = _pier_kind(i, j) or _launch_kind(i, j) or _quay_kind(i, j) or hit
     if hit == "sand" and d >= 2 and control_row(j):
         hit = "control"                 # mission control, on the sand
     _coast_cache[key] = hit
@@ -1874,7 +1875,7 @@ def deck_at(i, j):
     if COAST and i >= COAST_LAND:
         kind = coast_kind(i, j)
         if kind is not None:
-            return kind in ("bridge", "pier", "jetty")
+            return kind in ("bridge", "pier", "jetty", "quay")
     return bridge_at(i, j) or pier_at(i, j) or fair_pier_at(i, j)
 
 
@@ -3152,7 +3153,7 @@ def water_at(i, j):
     if COAST and i >= COAST_LAND:
         kind = coast_kind(i, j)
         if kind is not None:
-            return kind in ("sea", "mouth", "bridge", "pier", "jetty", "pad")
+            return kind in ("sea", "mouth", "bridge", "pier", "jetty", "pad", "quay")
     return river_at(i, j) or moat_at(i, j) or lake_at(i, j) or strip_lake(i, j)
 
 
@@ -12364,6 +12365,19 @@ def coast_ground(v, kind, x, z, y, sx, glow, now):
         if h % 19 == 0:
             return ".", WOOD_LIT
         return ("=" if h % 3 else "-"), WOOD
+    if kind == "quay":
+        # The harbour's quay: concrete, a kerb along both edges, a yellow
+        # line a little in from the one the ship lies against.
+        j = int(z / CELL + BIG) - BIG
+        h = harbour_site(j)
+        if h is not None:
+            e = min(z - h[0] * CELL, (h[0] + QUAY_BROAD) * CELL - z)
+            if e < 0.6:
+                return "=", CURB
+            if abs(z - h[0] * CELL - 1.6) < 0.25 and (x * 0.5) % 1.0 < 0.6:
+                return "-", GOLD_DIM
+        h_ = _mix(int(x * 2.0), int(z * 2.0), 6111)
+        return (".", CONCRETE) if h_ % 7 == 0 else None
     if kind in ("jetty", "pad"):
         # Concrete, out over the water. The causeway is a road for the
         # transporter, a yellow line down the middle of it; the pad is the
@@ -16512,6 +16526,507 @@ def render_mission(site, cam, width, height, now):
         _text(ch, co, ry + len(CONSOLE) * k, x0 + 2 + len(desk),
               "GO" if go else "STBY", ROU_GREEN if go else STREET)
     return ch, co
+
+
+# --- the harbour -----------------------------------------------------------------
+# Asked for on 2026-11-13: "a harbor where the cruiseship docks and where you can
+# get on." One every HARBOUR_GAP rows of coast, between a pier and the next
+# space centre: a concrete quay out into the sea, HARBOUR in lights over the way
+# on, and a cruise ship moored along its north side, lit like a hotel on its
+# side. p at the gangway and she sails: out, down the coast past the pier's wheel
+# to the space centre - a rocket goes up as she passes - round, and home.
+HARBOUR_GAP = 720      # cells of coast from one harbour to the next
+HARBOUR_ROW0 = 610     # the quay's first row, of the one nearest the origin
+QUAY_BROAD = 4         # the quay, cells across
+QUAY_OUT = 34          # and cells out past the waterline
+HARBOUR_NAME = "HARBOUR"
+LINER_NAME = "MIDNIGHT STAR"
+LINER_L = 150.0        # the ship: long
+LINER_B = 24.0         # across
+LINER_HULL = 11.0      # the hull's top, over the water
+LINER_TOP = 25.0       # the top deck
+LINER_FUNNEL = 33.0    # and the funnel's
+LINER_FEE = 15         # a cruise
+LINER_SPEED = 26.0     # units a second, under way
+LINER_EASE = 12.0      # seconds to get up to it, and to come to a stop
+LINER_SEEN = 2600.0    # how far off her lights are drawn
+LINER_HUD = (" the %s  -  a d look round  -  x goes ashore  -  q quit "
+             % LINER_NAME.lower())
+_liner_trips = {}      # harbour -> (when she sailed, her way): while she is out
+_aboard = [None]       # the harbour whose ship you are on: not drawn round you
+
+
+def _harbour_at(r0):
+    """(first row, last column) of the harbour whose quay starts at row r0, or
+    None where the river comes out."""
+    if abs(r0 - river_centre(COAST_I)) < 60:
+        return None
+    return r0, int(math.floor(coastline(r0 + QUAY_BROAD // 2))) + QUAY_OUT
+
+
+def harbour_site(j):
+    """The harbour whose quay this row is part of, or None."""
+    if not COAST:
+        return None
+    r0 = (j - HARBOUR_ROW0) // HARBOUR_GAP * HARBOUR_GAP + HARBOUR_ROW0
+    if not r0 <= j < r0 + QUAY_BROAD:
+        return None
+    return _harbour_at(r0)
+
+
+def _quay_kind(i, j):
+    """"quay" for the quay's cells, or None."""
+    h = harbour_site(j)
+    return "quay" if h is not None and i <= h[1] else None
+
+
+def near_harbours(x, z, reach):
+    """The harbours within reach along the coast - and any whose ship is out
+    and might be passing."""
+    if not COAST or x + reach < COAST_LAND * CELL:
+        return
+    k0 = int(((z - reach) / CELL - HARBOUR_ROW0) // HARBOUR_GAP) - 1
+    k1 = int(((z + reach) / CELL - HARBOUR_ROW0) // HARBOUR_GAP) + 1
+    seen = set()
+    for k in range(k0, k1 + 1):
+        h = _harbour_at(k * HARBOUR_GAP + HARBOUR_ROW0)
+        if h is not None:
+            seen.add(h)
+            yield h
+    for h in list(_liner_trips):
+        if h not in seen:
+            yield h
+
+
+def liner_berth(h):
+    """Where the ship lies at the quay: (x, z) of her middle, bow out to sea."""
+    r0, end = h
+    foot = int(math.floor(coastline(r0 + QUAY_BROAD // 2)))
+    return (foot + QUAY_OUT * 0.55) * CELL, r0 * CELL - LINER_B * 0.5 - 1.5
+
+
+def gangway(h):
+    """The foot of the gangway on the quay, (x, z)."""
+    bx, bz = liner_berth(h)
+    return bx - 22.0, h[0] * CELL + 1.2
+
+
+def gangway_near(x, z):
+    """The harbour whose gangway you are at the foot of, ready to board."""
+    if not COAST or x < COAST_LAND * CELL:
+        return None
+    h = harbour_site(int(z / CELL + BIG) - BIG)
+    if h is None or h in _liner_trips:
+        return None
+    gx, gz = gangway(h)
+    return h if (gx - x) ** 2 + (gz - z) ** 2 < 4.0 ** 2 else None
+
+
+def _catmull(pts, step=20.0):
+    """A smooth line through the points, a point every `step` units or so."""
+    out = []
+    p = [pts[0]] + list(pts) + [pts[-1]]
+    for k in range(1, len(p) - 2):
+        p0, p1, p2, p3 = p[k - 1], p[k], p[k + 1], p[k + 2]
+        n = max(4, int(math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / step))
+        for s in range(n):
+            t = s / float(n)
+            out.append(tuple(
+                0.5 * (2 * p1[c] + (-p0[c] + p2[c]) * t
+                       + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * t * t
+                       + (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * t ** 3)
+                for c in (0, 1)))
+    out.append(pts[-1])
+    return out
+
+
+def liner_route(h):
+    """Her way, out and back: (points, the length along them at each, where
+    along them she is abeam of the space centre down the coast or None).
+    Out past the end of the quay, round to the south, down the coast well out
+    past the pier's head and the wheel, past the launch pad - nearly five
+    hundred units off it: at a hundred and fifty the rocket was over the top
+    of the picture before it was well off the pad - round, and back up a
+    little further out."""
+    bx, bz = liner_berth(h)
+    down = (h[0] - 360) * CELL      # the space centre half a gap south, if any
+    site = _launch_at(h[0] - 360)
+
+    def out_(z, far):
+        return shore_x(z) + far, z
+
+    pts = [(bx, bz), (bx + 160.0, bz), out_(bz - 160.0, 400.0), out_(bz - 600.0, 600.0),
+           out_(down + 250.0, 700.0), out_(down, 700.0), out_(down - 260.0, 800.0),
+           out_(down - 120.0, 980.0), out_(down + 200.0, 950.0),
+           out_(bz - 400.0, 800.0), out_(bz - 120.0, 420.0), (bx + 220.0, bz + 6.0)]
+    line = _catmull(pts)
+    along = [0.0]
+    for a, b in zip(line, line[1:]):
+        along.append(along[-1] + math.hypot(b[0] - a[0], b[1] - a[1]))
+    abeam = None
+    if site is not None:
+        k = min(range(len(line)), key=lambda n: abs(line[n][1] - down)
+                + (0.0 if n < len(line) // 2 else 1e9))
+        abeam = along[k]
+    return line, along, abeam, site
+
+
+def _liner_s(t, total):
+    """How far along her way she is, t seconds out: easing off the quay,
+    steady, and easing in at the end. None once she is in."""
+    ramp = LINER_SPEED * LINER_EASE * 0.5
+    steady = total - 2.0 * ramp
+    if t < LINER_EASE:
+        return LINER_SPEED * t * t / (2.0 * LINER_EASE)
+    t -= LINER_EASE
+    if t < steady / LINER_SPEED:
+        return ramp + LINER_SPEED * t
+    t -= steady / LINER_SPEED
+    if t < LINER_EASE:
+        return (ramp + steady + LINER_SPEED * t
+                - LINER_SPEED * t * t / (2.0 * LINER_EASE))
+    return None
+
+
+def liner_trip_time(route):
+    """How long a cruise takes, in seconds."""
+    return route[1][-1] / LINER_SPEED + LINER_EASE
+
+
+def liner_pose(h, now):
+    """(x, z, heading) of the ship's middle: at the quay, or out on her way."""
+    trip = _liner_trips.get(h)
+    if trip is not None:
+        t0, route = trip
+        s = _liner_s(now - t0, route[1][-1])
+        if s is not None:
+            line, along = route[0], route[1]
+            k = max(0, min(len(along) - 2, _bisect(along, s) - 1))
+            f = (s - along[k]) / max(1e-6, along[k + 1] - along[k])
+            (ax, az), (bx, bz) = line[k], line[k + 1]
+            return ax + (bx - ax) * f, az + (bz - az) * f, math.atan2(bx - ax, bz - az)
+    bx, bz = liner_berth(h)
+    return bx, bz, math.pi * 0.5
+
+
+def _bisect(xs, x):
+    """The first index whose value is more than x."""
+    lo, hi = 0, len(xs)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if xs[mid] <= x:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+
+def liner_sail(h, now):
+    """She sails, with you aboard: her way is laid out, and the space centre
+    down the coast is told to have a rocket off the pad as she comes past."""
+    route = liner_route(h)
+    _liner_trips[h] = (now, route)
+    line, along, abeam, site = route
+    if abeam is not None:
+        ramp = LINER_SPEED * LINER_EASE * 0.5
+        t_abeam = (LINER_EASE + (abeam - ramp) / LINER_SPEED if abeam > ramp
+                   else LINER_EASE)
+        # Off the pad ten seconds before she is abeam: ahead and to the side
+        # from her rail, the ignition, the cloud and the climb in sight till
+        # she turns for home. At abeam less three it was mostly over the top.
+        lift = now + t_abeam - 10.0
+        _launch_shift[0] += -launch_t(site, lift) % LAUNCH_EVERY
+    return route
+
+
+def liner_home(h):
+    """Back alongside: the trip is over."""
+    _liner_trips.pop(h, None)
+
+
+def _harbour_spot(x, z):
+    """On the road at the foot of the nearest quay, looking out along it."""
+    if not COAST:
+        return None
+    cj = int(z / CELL + BIG) - BIG
+    k0 = (cj - HARBOUR_ROW0) // HARBOUR_GAP
+    best = None
+    for k in (k0 - 1, k0, k0 + 1, k0 + 2):
+        h = _harbour_at(k * HARBOUR_GAP + HARBOUR_ROW0)
+        if h is None:
+            continue
+        j = h[0] + QUAY_BROAD // 2
+        px = (int(math.floor(coastline(j))) - BEACH_DEEP - 2) * CELL - 3.0
+        pz = (j + 0.5) * CELL
+        d = (px - x) ** 2 + (pz - z) ** 2
+        if d >= CHEAT_SKIP ** 2 and can_stand(px, pz) and (best is None or d < best[0]):
+            best = (d, px, pz)
+    return None if best is None else (best[1], best[2], math.pi * 0.5)
+
+
+def _gangway_spot(x, z):
+    """At the foot of the nearest gangway, facing the ship."""
+    sp = _harbour_spot(x, z)
+    if sp is None:
+        return None
+    h = harbour_site(int(sp[1] / CELL + BIG) - BIG)
+    gx, gz = gangway(h)
+    return gx, gz + 1.0, math.pi
+
+
+def _face(ch, co, v, walls, pts, glyph, attr):
+    """One flat face of the ship, filled in on the screen, so that what is
+    behind it is behind it: she is drawn in points and lines, and without this
+    the sea and the far coast showed through her between the windows."""
+    pr = [v.project(*p) for p in pts]
+    if any(p is None for p in pr):
+        return
+    d = sum(p[2] for p in pr) / len(pr)
+    ys = [p[1] for p in pr]
+    n = len(pr)
+    for y in range(max(0, int(round(min(ys)))),
+                   min(v.height - 1, int(round(max(ys)))) + 1):
+        xs = []
+        for k in range(n):
+            (ax, ay, _), (bx, by, _) = pr[k], pr[(k + 1) % n]
+            if ay != by and (ay <= y < by or by <= y < ay):
+                xs.append(ax + (y - ay) * (bx - ax) / (by - ay))
+        if len(xs) < 2:
+            continue
+        for x in range(max(0, int(round(min(xs)))),
+                       min(v.width - 1, int(round(max(xs)))) + 1):
+            put_cell(ch, co, v, walls, x, y, d, glyph, attr)
+
+
+def draw_liner(ch, co, v, walls, x, z, heading, now, wet, far):
+    """The cruise ship: a dark hull with rows of portholes and her name at the
+    bow in neon, white decks above stacked with lit cabins and balconies, the
+    funnel in her colours, a string of lights from the bow up over the funnel
+    and down to the stern. Each face is filled, nearest last, and broken into
+    pieces along her length so that the part of her alongside you still draws
+    when the rest runs out of sight past you. From far off, only her lights."""
+    hx, hz = math.sin(heading), math.cos(heading)
+    rx, rz = -hz, hx                    # across her, to one side
+
+    def at(s, w, y):
+        return x + hx * s + rx * w, y, z + hz * s + rz * w
+
+    half, beam = LINER_L * 0.5, LINER_B * 0.5
+    bow = half - 24.0
+    side = 1.0 if (v.x - x) * rx + (v.z - z) * rz > 0.0 else -1.0
+    ahead = (v.x - x) * hx + (v.z - z) * hz
+    tick = int(now * 5.0)
+    n = len(NEON)
+    sup0, sup1 = -half + 12.0, bow - 14.0
+    if not far:
+        # The hull: the stern or the bow end if you can see it, then her side.
+        if ahead < -half:
+            _face(ch, co, v, walls, [at(-half, -beam, 0.0), at(-half, beam, 0.0),
+                                     at(-half, beam, LINER_HULL),
+                                     at(-half, -beam, LINER_HULL)], "=", CONCRETE)
+        s = -half
+        while s < bow:
+            e = min(bow, s + 12.0)
+            _face(ch, co, v, walls, [at(s, side * beam, 0.0), at(e, side * beam, 0.0),
+                                     at(e, side * beam, LINER_HULL),
+                                     at(s, side * beam, LINER_HULL)], "=", CONCRETE)
+            s = e
+        _face(ch, co, v, walls, [at(bow, side * beam, 0.0), at(half, 0.0, 0.0),
+                                 at(half + 3.0, 0.0, LINER_HULL + 1.0),
+                                 at(bow, side * beam, LINER_HULL)], "=", CONCRETE)
+        # The decks over it, set in from her side.
+        s = sup0
+        while s < sup1:
+            e = min(sup1, s + 12.0)
+            _face(ch, co, v, walls, [at(s, side * (beam - 2.0), LINER_HULL),
+                                     at(e, side * (beam - 2.0), LINER_HULL),
+                                     at(e, side * (beam - 2.0), LINER_TOP),
+                                     at(s, side * (beam - 2.0), LINER_TOP)],
+                  ":", STREET)
+            s = e
+        for s0 in ((sup0,) if ahead < 0.0 else (sup1,)):
+            _face(ch, co, v, walls, [at(s0, -(beam - 2.0), LINER_HULL),
+                                     at(s0, beam - 2.0, LINER_HULL),
+                                     at(s0, beam - 2.0, LINER_TOP),
+                                     at(s0, -(beam - 2.0), LINER_TOP)], ":", STREET)
+        # The funnel, aft.
+        fs = -half + 34.0
+        _face(ch, co, v, walls, [at(fs - 5.0, side * 4.0, LINER_TOP),
+                                 at(fs + 5.0, side * 4.0, LINER_TOP),
+                                 at(fs + 4.0, side * 4.0, LINER_FUNNEL),
+                                 at(fs - 4.0, side * 4.0, LINER_FUNNEL)], "#", ROU_RED)
+        for y_ in (LINER_FUNNEL - 2.0, LINER_FUNNEL - 1.2):
+            for s in range(-4, 5):
+                put_point(ch, co, v, walls, *at(fs + s, side * 4.05, y_), "=", GOLD)
+        # The lines of her: the deck edge, the waterline, the decks above.
+        s = -half
+        while s <= half:
+            w_ = side * (beam if s < bow else beam * (half - s) / (half - bow))
+            put_point(ch, co, v, walls, *at(s, w_, LINER_HULL), "_", ROU_BLACK)
+            put_point(ch, co, v, walls, *at(s, w_, 0.3), "~", RAIN)
+            s += 1.0
+        # Portholes down the hull.
+        for y_ in (4.0, 7.0):
+            s = -half + 4.0
+            while s < bow:
+                if _mix(int(s), int(y_), 6101) % 4:
+                    put_point(ch, co, v, walls, *at(s, side * (beam + 0.05), y_), "o",
+                              BULB_DIM)
+                s += 2.5
+        # The cabins and their balconies, deck over deck, most of them lit.
+        y_ = LINER_HULL + 1.6
+        deck = 0
+        while y_ < LINER_TOP - 0.5:
+            s = sup0 + 1.0
+            while s < sup1 - 0.5:
+                m = _mix(int(s * 2.0), deck, 6103)
+                # The balcony rail under it first, so the window wins.
+                put_point(ch, co, v, walls, *at(s, side * (beam - 1.9), y_ - 0.9), "=",
+                          CURB)
+                p = at(s, side * (beam - 1.95), y_)
+                if m % 5:
+                    put_point(ch, co, v, walls, *p, "#" if m % 3 else "o",
+                              tone_colour("warm", (m >> 4 & 15) / 15.0))
+                else:
+                    put_point(ch, co, v, walls, *p, ".", BULB_DIM)
+                s += 1.6
+            y_ += 2.4
+            deck += 1
+        # Her name, at the bow, in lights - read left to right from whichever
+        # side you see her: the way along her that goes right on the screen.
+        gap = 2.6
+        pa = v.project(*at(bow - 10.0, side * beam, LINER_HULL - 2.5))
+        pb = v.project(*at(bow - 9.0, side * beam, LINER_HULL - 2.5))
+        way = 1.0 if pa is None or pb is None or pb[0] >= pa[0] else -1.0
+        s0 = bow - 4.0 - (len(LINER_NAME) - 1) * gap if way > 0 else bow - 4.0
+        for k, c in enumerate(LINER_NAME):
+            if c != " ":
+                put_lit(ch, co, v, walls,
+                        *at(s0 + way * k * gap, side * (beam + 0.1), LINER_HULL - 2.5),
+                        c, NEON[1][0], max(wet, 0.3), now)
+    else:
+        # From far off: her decks are rows of lights.
+        y_ = LINER_HULL + 1.6
+        while y_ < LINER_TOP:
+            s = sup0
+            while s < sup1:
+                put_point(ch, co, v, walls, *at(s, side * beam, y_), ".", BULB)
+                s += 4.0
+            y_ += 4.8
+    # The dressing lights: bow, up over the funnel's mast, down to the stern.
+    mast = (-half + 34.0, LINER_FUNNEL + 4.0)
+    for (s0, y0), (s1, y1) in (((half, LINER_HULL + 1.0), mast),
+                               (mast, (-half, LINER_HULL + 1.0))):
+        steps = 30 if not far else 12
+        for k in range(steps + 1):
+            f = k / steps
+            put_lit(ch, co, v, walls, *at(s0 + (s1 - s0) * f, 0.0, y0 + (y1 - y0) * f),
+                    "o", NEON[(k + tick) % n][0], max(wet, 0.3), now)
+    put_lit(ch, co, v, walls, *at(half, 0.0, LINER_HULL + 2.0), "*",
+            FLASH if int(now) % 2 else BULB, max(wet, 0.3), now)
+
+
+def draw_harbour(ch, co, v, walls, h, now, wet):
+    """The quay and the ship: lamps down both sides of it, bollards along the
+    edge she lies against, HARBOUR in lights over the way on, the gangway up
+    to her side, a green light on the end of the quay - and her, at the quay or
+    out on her way."""
+    r0, end = h
+    z0, z1 = r0 * CELL, (r0 + QUAY_BROAD) * CELL
+    root = (int(math.floor(coastline(r0 + QUAY_BROAD // 2))) - BEACH_DEEP) * CELL
+    xe = (end + 1) * CELL
+    dq = math.hypot(min(max(v.x, root), xe) - v.x, min(max(v.z, z0), z1) - v.z)
+    if dq < 900.0:
+        far = dq > 260.0
+        for z in (z0 + 0.4, z1 - 0.4):
+            x = root
+            k = 0
+            while x < xe:
+                if k % 8 == 0:
+                    if not far:
+                        for y_ in (1.0, 2.0, 3.0):
+                            put_point(ch, co, v, walls, x, y_, z, "|", CONCRETE)
+                    put_lit(ch, co, v, walls, x, 3.6, z, "o", BULB, max(wet, 0.4), now)
+                elif not far and k % 4 == 2 and z < z0 + 1.0:
+                    put_point(ch, co, v, walls, x, 0.5, z - 0.1, "n", CURB)   # bollard
+                elif not far and k % 2 == 0:
+                    for y_ in (-0.4, -1.0, -1.6):
+                        put_point(ch, co, v, walls, x, y_, z, "|", CONCRETE)
+                k += 1
+                x += 1.25 if not far else 10.0
+        put_lit(ch, co, v, walls, xe - 1.0, 5.0, z1 - 1.0,
+                "*" if int(now * 0.7) % 2 else ".", ROU_GREEN, max(wet, 0.5), now)
+        if not far:
+            for z in (z0 + 0.4, z1 - 0.4):
+                for y_ in (0.8, 1.7, 2.6, 3.5, 4.4):
+                    put_point(ch, co, v, walls, root, y_, z, "|", CONCRETE)
+            gap = (z1 - z0 - 2.0) / max(1, len(HARBOUR_NAME) - 1)
+            zs = (z0 + z1) * 0.5 + gap * (len(HARBOUR_NAME) - 1) * 0.5
+            for k, c in enumerate(HARBOUR_NAME):
+                put_lit(ch, co, v, walls, root, 5.0, zs - k * gap, c, NEON[4][0],
+                        max(wet, 0.3), now)
+            if h not in _liner_trips:
+                # The gangway, up from the quay to the door in her side.
+                gx, gz = gangway(h)
+                bx, bz = liner_berth(h)
+                hull = bz + LINER_B * 0.5
+                for k in range(13):
+                    f = k / 12.0
+                    zz = gz + (hull - gz) * f
+                    put_point(ch, co, v, walls, gx - 0.8, 0.9 + 6.0 * f, zz, "\\", CURB)
+                    put_point(ch, co, v, walls, gx + 0.8, 0.9 + 6.0 * f, zz, "\\", CURB)
+                put_lit(ch, co, v, walls, gx, 8.4, hull + 0.1, "o", BULB, 0.3, now)
+    if _aboard[0] == h:
+        return
+    lx, lz, head = liner_pose(h, now)
+    d = math.hypot(lx - v.x, lz - v.z)
+    if d < LINER_SEEN:
+        draw_liner(ch, co, v, walls, lx, lz, head, now, wet, d > 700.0)
+
+
+def render_cruise(h, look, width, height, now):
+    """At the rail of her top deck, going: the real coast going by - the
+    hotels, the pier's wheel, the space centre and its rocket - from twenty-odd
+    units up, on the side that faces the land, and a d to look round. The rail
+    along the bottom of the picture, a string of her lights along the top."""
+    x, z, head = liner_pose(h, now)
+    hx, hz = math.sin(head), math.cos(head)
+    px, pz = -hz, hx
+    if px > 0.0:
+        px, pz = -px, -pz               # the side towards the land, which is west
+    eye = LINER_TOP + 1.6
+    v = View(x + px * (LINER_B * 0.5 - 1.5), z + pz * (LINER_B * 0.5 - 1.5),
+             math.atan2(px, pz) + look, width, height, eye=eye, reach=ROOF_REACH)
+    _aboard[0] = h
+    try:
+        ch, co, wet = render_street(v, now)
+    finally:
+        _aboard[0] = None
+    rail = height - 4
+    if rail > 4:
+        for xx in range(width):
+            ch[rail][xx], co[rail][xx] = "=", ROU_BLACK
+            ch[rail + 1][xx], co[rail + 1][xx] = ("|" if xx % 5 == 0 else " "), CURB
+            ch[rail + 2][xx], co[rail + 2][xx] = ("=" if xx % 5 == 0 else "-"), CURB
+            for yy in range(rail + 3, height):
+                ch[yy][xx], co[yy][xx] = ("-" if (xx + yy) % 7 else "."), CONCRETE
+        tick = int(now * 5.0)
+        for xx in range(0, width, 3):
+            ch[0][xx], co[0][xx] = "o", NEON[(xx // 3 + tick) % len(NEON)][0]
+    return ch, co, v
+
+
+def harbour_hint(x, z, now):
+    """What the top bar says on the quay."""
+    h = harbour_site(int(z / CELL + BIG) - BIG) if COAST else None
+    if h is None:
+        return ""
+    if h in _liner_trips:
+        return "  ~ the %s is out - she will be back ~" % LINER_NAME.title()
+    if gangway_near(x, z) is not None:
+        return "  ~ the %s: p boards, $%d - a cruise down the coast ~" % (
+            LINER_NAME.title(), LINER_FEE)
+    return "  ~ the harbour ~"
 
 
 def draw_seafront(ch, co, v, walls, now, wet):
@@ -23082,6 +23597,8 @@ def render_street(v, now):
     if COAST and v.x + LAUNCH_SEEN > COAST_LAND * CELL:
         for site_ in near_launch_sites(v.x, v.z, LAUNCH_SEEN):
             draw_launch_site(ch, co, v, walls, site_, now, wet)
+        for h_ in near_harbours(v.x, v.z, LINER_SEEN):
+            draw_harbour(ch, co, v, walls, h_, now, wet)
     for bx, bz in near_rowboats(v, now, 120.0):
         draw_rowboat(ch, co, v, walls, bx, bz, now, wet)
     ci_ = int(v.x / CELL + BIG) - BIG
@@ -26970,6 +27487,7 @@ CHEAT_HIDDEN = [
     ("l", "mini golf", "minigolf"), ("1", "the beach", "beach"),
     ("2", "the pier", "seapier"), ("3", "the pier's wheel", "seawheel"),
     ("4", "the launch pad", "launchpad"), ("5", "mission control", "mission"),
+    ("6", "the harbour", "harbour"), ("7", "the gangway", "gangway"),
 ]
 CHEAT_TEST = 1                          # ctrl-a
 TEST_JUMPS = bool(os.environ.get("ASCII_CITY_TEST"))
@@ -27938,6 +28456,10 @@ def find_place(x, z, kind):
         return _launch_spot(x, z)
     if kind == "mission":
         return _mission_spot(x, z)
+    if kind == "harbour":
+        return _harbour_spot(x, z)
+    if kind == "gangway":
+        return _gangway_spot(x, z)
     if kind == "seawheel":
         # At the foot of the wheel on the nearest pier's head, looking up at it.
         sp = _sea_pier_spot(x, z)
@@ -29564,7 +30086,7 @@ TAXI_DESTS = [("the casino", "casino"), ("the club", "club"),
               ("the riverbank", "bank"), ("the woods", "woods"), ("the lake", "lake"),
               ("the karaoke bar", "karaoke"), ("the mini golf", "minigolf"),
               ("the beach", "beach"), ("the pier", "seapier"),
-              ("the launch pad", "launchpad")]
+              ("the launch pad", "launchpad"), ("the harbour", "harbour")]
 DRIVER_SAYS = ["Busy night.", "Where you headed, friend?", "Meter's running.",
                "You see the fireworks over the bay? I saw them once.",
                "I don't go into the woods after dark. Nobody does.",
@@ -29851,6 +30373,7 @@ def cab_ground(i, j):
         if coast_kind(i, j) is not None:
             # The road along the front, or the sand - and not the sea.
             hit = {"road": "road", "bridge": "road", "sea": None, "jetty": "road",
+                   "quay": "road",
                    "mouth": None, "hall": None, "control": None,
                    "pad": None}.get(coast_kind(i, j), "rough")
         elif not is_open(i, j) or (water_at(i, j) and not deck_at(i, j)):
@@ -31967,6 +32490,7 @@ def main(stdscr):
     vendor = None               # the vending machine whose glass you are at
     tiki = None                 # sat at a beach bar: your tab, for this visit
     ride = None                 # up on the pier's wheel: {"pier", "t0"}
+    cruise = None               # aboard the cruise ship: {"h", "look"}
     vendors = {}                # and the ones you have been at, by seed: their stock
     scope_at = None             # when you put your eye to the telescope
     # The temple's terminal: the verses so far, when the last word was asked
@@ -31989,7 +32513,7 @@ def main(stdscr):
         return (sewer is not None or taxi is not None or cab is not None
                 or metro is not None
                 or flight is not None or reading or poke is not None
-                or vendor is not None or ride is not None)
+                or vendor is not None or ride is not None or cruise is not None)
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -32093,7 +32617,8 @@ def main(stdscr):
                     note = ("the sea: on - a taxi goes to the beach"
                             if toggle_coast() else
                             "the sea: off - the city is endless that way again")
-                    tiki = ride = None
+                    tiki = ride = cruise = None
+                    _liner_trips.clear()
                     if not can_stand(cam_x, cam_z):
                         cam_x, cam_z = start_position()
                 elif key == ord("+"):
@@ -32186,6 +32711,19 @@ def main(stdscr):
                                 note = "-> the woods rave (starting)"
                                 note_at = now
                         break
+            elif cruise is not None and key not in (ord("q"), CHEAT_KEY):
+                if key in (curses.KEY_LEFT, ord("a"), ord("A")):
+                    cruise["look"] -= 0.14
+                elif key in (curses.KEY_RIGHT, ord("d"), ord("D")):
+                    cruise["look"] += 0.14
+                elif key in (27, ord("x"), ord("X")):
+                    # A tender takes you back to the quay, and she turns for
+                    # home: back alongside when you get there.
+                    liner_home(cruise["h"])
+                    cam_x, cam_z, yaw = _gangway_spot(*gangway(cruise["h"])) or (
+                        cam_x, cam_z, yaw)
+                    cruise = None
+                    note, note_at = "a tender takes you back to the quay", now
             elif ride is not None and key not in (ord("q"), CHEAT_KEY):
                 # Nothing to do up there but look round.
                 if key in (curses.KEY_LEFT, ord("a"), ord("A")):
@@ -32647,6 +33185,19 @@ def main(stdscr):
                     note, note_at = "no cabs down here - stand in a street", now
             elif (street and on_roof is None and sewer is None and venue is None
                   and key in (ord("p"), ord("P"))
+                  and gangway_near(cam_x, cam_z) is not None):
+                if wallet.take(LINER_FEE):
+                    h_ = gangway_near(cam_x, cam_z)
+                    liner_sail(h_, now)
+                    cruise = {"h": h_, "look": 0.0}
+                    fwd = side = spin = 0.0
+                    autopilot = False
+                    note, note_at = ("all aboard - she casts off. a and d look "
+                                     "round"), now
+                else:
+                    note, note_at = "a cruise is $%d" % LINER_FEE, now
+            elif (street and on_roof is None and sewer is None and venue is None
+                  and key in (ord("p"), ord("P"))
                   and sea_wheel_near(cam_x, cam_z) is not None):
                 if wallet.take(SEA_WHEEL_FEE):
                     ride = {"pier": sea_wheel_near(cam_x, cam_z), "t0": now}
@@ -32857,6 +33408,14 @@ def main(stdscr):
             cam_x, cam_z, yaw = spot_
             taxi = None
             note, note_at = "-> %s, $%d. the cab pulls away" % (name_, fare_), now
+        if cruise is not None:
+            trip_ = _liner_trips.get(cruise["h"])
+            if trip_ is None or _liner_s(now - trip_[0], trip_[1][1][-1]) is None:
+                liner_home(cruise["h"])
+                cam_x, cam_z, yaw = _gangway_spot(*gangway(cruise["h"])) or (
+                    cam_x, cam_z, yaw)
+                cruise = None
+                note, note_at = "back alongside - down the gangway", now
         if cab is not None:
             cab.step(now - cab.clock, now)
             if cab.pay:
@@ -33214,6 +33773,9 @@ def main(stdscr):
                 seated = (venue[1]["seed"], now)    # sat down just now
             ch, co = render_ramen(venue[1], width, height, now, seated[1])
             hud = RAMEN_HUD % (cam_x, cam_z)
+        elif street and cruise is not None:
+            ch, co, v = render_cruise(cruise["h"], cruise["look"], width, height, now)
+            hud = LINER_HUD + launch_hint(v.x, v.z, now).strip()
         elif street and ride is not None:
             if now - ride["t0"] >= SEA_WHEEL_RIDE:
                 ride = None
@@ -33305,6 +33867,7 @@ def main(stdscr):
                 or ("  ~ the big wheel: p rides, $%d ~" % SEA_WHEEL_FEE
                     if sea_wheel_near(cam_x, cam_z) is not None else "")
                 or launch_hint(cam_x, cam_z, now)
+                or harbour_hint(cam_x, cam_z, now)
                 or coast_hint(cam_x, cam_z)
                 or ("  ~ the fog is in ~" if night(now)["fog"] else "")
                 or blackout_word(cam_x, cam_z, now)
