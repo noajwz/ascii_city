@@ -26,7 +26,7 @@ from harness import ac
 ac.COAST = False
 # And the ways to the coast come off the lists till then: with no sea there
 # is no beach for the taxi or the checks' jumps to find.
-COAST_KINDS = ("beach", "seapier", "seawheel")
+COAST_KINDS = ("beach", "seapier", "seawheel", "launchpad")
 coast_jumps_ = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] in COAST_KINDS]
 coast_fares_ = [p_ for p_ in ac.TAXI_DESTS if p_[1] in COAST_KINDS]
 ac.CHEAT_HIDDEN[:] = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] not in COAST_KINDS]
@@ -9649,6 +9649,93 @@ std_ = ([[" "] * 80 for _ in range(24)], [[0] * 80 for _ in range(24)])
 ac.draw_cheats(std_[0], std_[1], "-> somewhere")
 check("which still opens on an 80x24 terminal", any("close" in "".join(r_)
                                                      for r_ in std_[0]))
+
+# --- the space centre ---------------------------------------------------------
+# Asked for on 2026-11-13: a space agency at the beach, its launch pad out on the
+# sea. Its offices along the front, a causeway out over the water to a square
+# pad, a rocket that goes every few minutes, and the booster back on the pad.
+site_ = ac._launch_at(ac.LAUNCH_ROW0)
+r0_, pad_, end_ = site_
+mid_ = r0_ + ac.LAUNCH_BROAD // 2
+shore_i_ = int(math.floor(ac.coastline(mid_)))
+foot_ = shore_i_ - ac.BEACH_DEEP
+kinds_ = [ac.coast_kind(i_, mid_) for i_ in range(foot_, end_ + 2)]
+check("a causeway from the sand out over the sea, and the pad at its end",
+      kinds_ == ["jetty"] * (pad_ - foot_) + ["pad"] * (end_ - pad_ + 1) + ["sea"]
+      and end_ - shore_i_ == ac.LAUNCH_OUT
+      and ac.coast_kind(pad_, r0_ - ac.LAUNCH_PAD[1]) == "pad"
+      and ac.coast_kind(pad_ - 1, r0_ - 1) != "jetty", str(kinds_[:3] + kinds_[-3:]))
+px_, pz_ = ac.launch_pad_xz(site_)
+check("you can walk it out to the fence, and drive it, but not set foot on the pad",
+      all(ac.can_stand((i_ + 0.5) * ac.CELL, (mid_ + 0.5) * ac.CELL)
+          for i_ in range(foot_, pad_ - 1))
+      and not ac.can_stand(px_, pz_) and not ac.can_stand((pad_ + 0.5) * ac.CELL, pz_)
+      and ac.cab_ground(pad_ - 3, mid_) == "road"
+      and ac.cab_ground(pad_ + 2, mid_) is None)
+rows_ = [j_ for j_ in range(-6000, 6000) if ac.launch_site(j_) is not None]
+piers_ = [j_ for j_ in range(-6000, 6000) if ac.sea_pier(j_) is not None]
+firsts_ = {ac.launch_site(j_)[0] for j_ in rows_}
+check("one every LAUNCH_GAP rows of coast, well clear of the piers and the river",
+      len(firsts_) >= 14 and min(abs(a_ - b_) for a_ in rows_ for b_ in piers_) > 100
+      and all(abs(j_ - ac.river_centre(ac.COAST_I)) > 50 for j_ in rows_),
+      "%d of them" % len(firsts_))
+front_ = range(shore_i_ - ac.COAST_STRIP - ac.HOTEL_DEEP, shore_i_ - ac.COAST_STRIP)
+check("the front behind it is the agency's offices, and the hotels go on either side",
+      any(ac.district(i_, r0_)["name"] == "the space centre" for i_ in front_)
+      and not any(ac.district(i_, r0_ + 200)["name"] == "the space centre"
+                  for i_ in front_)
+      and "MISSION" in ac.SPACE_HQ["words"])
+p_ = [ac.rocket_path(t_ * 0.5) for t_ in range(0, 400)]
+b_ = ac.booster_at(ac.LAUNCH_SEP)
+check("the climb: held two seconds, straight up off the pad, then out over the sea",
+      p_[3][1] == 0.0 and p_[10][0] < 1.0 and p_[10][1] > 5.0
+      and all(b2_[1] > a2_[1] and b2_[0] >= a2_[0] for a2_, b2_ in zip(p_[5:], p_[6:]))
+      and p_[-1][0] > p_[-1][1] > 1000.0)
+check("the booster lets go where the rocket is, and comes back down onto the pad",
+      abs(b_[0] - ac.rocket_path(ac.LAUNCH_SEP)[0]) < 1.0
+      and abs(b_[1] - ac.rocket_path(ac.LAUNCH_SEP)[1]) < 1.0
+      and ac.booster_at(ac.LAUNCH_DOWN) == (0.0, 0.0)
+      and math.dist(ac.booster_at(ac.LAUNCH_HOME - 0.01), ac.booster_at(ac.LAUNCH_HOME))
+      < 1.0 and ac.booster_burn(ac.LAUNCH_HOME + 1.0) == "landing burn")
+lift_ = 5000.0 - ac.launch_t(site_, 5000.0)
+spot_ = ac._launch_spot(x0, z0)
+saved_ = (ac.ROU_BLACK, ac.FLASH, ac.GOLD, ac.EMBER_HOT, ac.rain_intensity)
+ac.ROU_BLACK, ac.FLASH, ac.GOLD, ac.EMBER_HOT = 1901, 1902, 1903, 1904
+ac.rain_intensity = lambda now_: 0.0
+v_ = ac.View(spot_[0], spot_[1], spot_[2], 160, 48)
+g_, c_, _ = ac.render_street(v_, lift_ - 100.0)
+body_ = {y_ for y_ in range(48) for x_ in range(160) if c_[y_][x_] == 1901}
+check("the taxi leaves you on the road at its foot, and the rocket stands out there",
+      ac.can_stand(spot_[0], spot_[1]) and abs(spot_[1] - pz_) < ac.CELL
+      and len(body_) >= 8 and min(body_) < v_.horizon, "%d rows of it" % len(body_))
+beach_v_ = (ac.shore_x(pz_ - 160.0) - 14.0, pz_ - 160.0, math.pi * 0.5 - 0.35)
+seen_ = []
+for t_ in list(range(0, 45, 4)) + [101, 106]:
+    v_ = ac.View(beach_v_[0], beach_v_[1], beach_v_[2], 160, 48)
+    g_, c_, _ = ac.render_street(v_, lift_ + t_)
+    seen_.append(sum(1 for y_ in range(v_.horizon) for x_ in range(160)
+                     if c_[y_][x_] in (1902, 1903, 1904)))
+check("from the sand down the beach the fire is in sight all the way up, and the "
+      "landing burn coming down", all(seen_), str(seen_))
+ac.ROU_BLACK, ac.FLASH, ac.GOLD, ac.EMBER_HOT, ac.rain_intensity = saved_
+says_ = [ac.launch_hint(spot_[0], spot_[1], lift_ + t_) for t_ in
+         (-100.0, -4.5, 1.0, ac.LAUNCH_SEP + 1.0, ac.LAUNCH_DOWN + 1.0)]
+check("the top bar: how long till the next, the countdown, and what it is doing",
+      "next launch in 1:40" in says_[0] and "T-5" in says_[1] and "LIFTOFF" in says_[2]
+      and "separation" in says_[3] and "TOUCHDOWN" in says_[4]
+      and ac.launch_hint(x0, z0, lift_ + 1.0) == "", str(says_))
+ac.launch_now(spot_[0], spot_[1], 7777.0)
+check("^ on the panel: the nearest one goes in fifteen seconds",
+      abs(ac.launch_t(site_, 7777.0) + 15.0) < 0.01
+      and "^" in "".join("".join(r_) for r_ in panel_[0]))
+ac._launch_shift[0] = 0.0
+check("the taxi goes there", ("the launch pad", "launchpad") in ac.TAXI_DESTS
+      and ac.find_place(x0, z0, "launchpad") is not None)
+ac.toggle_coast()
+check("and with the sea off there is none", ac.launch_site(r0_) is None
+      and ac.launch_hint(spot_[0], spot_[1], lift_) == ""
+      and ac.find_place(x0, z0, "launchpad") is None)
+ac.toggle_coast()
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
