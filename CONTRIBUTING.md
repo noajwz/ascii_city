@@ -15,7 +15,7 @@ Open an [issue](https://github.com/noajwz/ascii_city/issues) and include:
 - **A screenshot or a short recording**, if it is about how something looks. Many bugs here are
   only visible on screen, at a particular size or moment.
 
-The cheat menu (`` ` `` or F1) gets you to most places quickly, which helps with "it happens at the
+The cheat menu (F1) gets you to most places quickly, which helps with "it happens at the
 lighthouse" kinds of report.
 
 ## Suggesting an idea

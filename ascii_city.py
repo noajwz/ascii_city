@@ -26905,34 +26905,15 @@ def render_game(game, hi, width, height, now):
 # equivalent to having walked there.
 # ===========================================================================
 
-CHEAT_KEY = ord("`")
-CHEAT_GRAVES = {128, 136, 140, 146, 153, 160, 168, 172, 178, 185}  # AEIOU aeiou, graved
+CHEAT_KEY = curses.KEY_F1
 
 
 def read_key(scr):
-    """The next key, with ` made to work on a keyboard where it is a dead key.
-
-    On US-International - the usual layout on Windows in the Netherlands - `
-    sends nothing until the next key, and then the two together: `` for a
-    second press, ` and the letter after it, or the two combined, a with a
-    grave on it (two UTF-8 bytes, 0xC3 and one of CHEAT_GRAVES). Pressed
-    by hand the two keys are never in the same frame, so whatever came in
-    with a ` was the dead key letting go: it is one press of the panel's key
-    and nothing more - not the panel opening and shutting again at once,
-    and not a cheat you never asked for. F1 opens the panel too, a key that
-    is never dead."""
-    k = scr.getch()
-    if k == curses.KEY_F1:
-        return CHEAT_KEY
-    if k == CHEAT_KEY:
-        scr.getch()                 # its partner, if it had one: dropped
-    elif k == 0xC3:
-        nxt = scr.getch()
-        if nxt in CHEAT_GRAVES:
-            return CHEAT_KEY
-        if nxt != -1:
-            curses.ungetch(nxt)
-    return k
+    """The next key. The panel is F1 and only F1: it was ` as well, which on
+    US-International - the usual layout on Windows in the Netherlands - is a
+    dead key, and it took a page of handling to make it one press; the owner
+    asked for ` to go (2026-11-13)."""
+    return scr.getch()
 CHEAT_SKIP = 40.0      # ignore what is already underfoot, so a repeat moves on
 CHEAT_RINGS = 200      # cells of search before giving up and saying so
 
@@ -28136,7 +28117,7 @@ def draw_cheats(ch, co, note):
            ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
            ("&", "a blackout"), ("#", "a fog night"),
            names["lemonade"], names["telescope"], names["fountain"],
-           ("`", "close")]
+           ("F1", " close")]
     more = [("", "AND THE REST")] + [names[k] for k in CHEAT_MORE if k in names]
     more.append(("\\", "storm far ahead"))
     more.append(("^", "launch a rocket"))
@@ -31880,9 +31861,9 @@ def render_rave(club, width, height, now):
 
 ARROWS = (curses.KEY_LEFT, curses.KEY_RIGHT, curses.KEY_UP, curses.KEY_DOWN)
 
-SKYLINE_HUD = " x=%-6d %s  tab view  arrows/hl walk  HL run  space wander  ` cheats "
+SKYLINE_HUD = " x=%-6d %s  tab view  arrows/hl walk  HL run  space wander  F1 cheats "
 STREET_HUD = (" %d,%d facing %s  %s, %s%s  ws walk  ad turn  ,. step  +- pace"
-              "  t taxi  tab view  ` cheats ")
+              "  t taxi  tab view  F1 cheats ")
 TAXI_HUD = " in a taxi  -  %s "
 METRO_HUD = " the metro  -  %s "
 FLIGHT_HUD = " " + FLIGHT_NO + "  -  %s  -  %s "
