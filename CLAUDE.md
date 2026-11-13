@@ -663,13 +663,22 @@ lit windows and ARCADE, DANCE, BINGO in neon with nothing new (`face_kind()` cal
 boards a street, or its walls were a dark alley's). On the south half **the wheel**
 (`draw_sea_wheel()`, `SEA_WHEEL_R` 18, nearly twice the carnival's), facing the shore, so
 from the sand it is the whole circle over the water with the pier's lights lying under it.
-The boards' joints are short lengths, not ruled rail to rail: looking down the pier one joint
-is a whole row of the screen.
+**It is timber, brown** (`WOOD`, `WOOD_LIT`: xterm 94 and 130, plain yellow on eight colours,
+which is the brown it was on the old terminals) - asked for on 2026-11-13, to stand out from the
+sea: grey boards over grey water read as more water. The deck is boards edge to edge (`=` and
+`-` in `WOOD`, the joints in `WOOD_LIT`), the rails are wood, and under both edges **piles** go
+down into the water (`|` below the deck, at `y` under zero): from the sand along the coast,
+where the deck itself is edge on, the row of piles is what marks the pier out.
 
 **A ride on the wheel** (`p` at its foot, `SEA_WHEEL_FEE`; `ride` in `main()`, counted by
 `elsewhere()`): `render_wheel_ride()` is `render_street()` from your cabin (`wheel_seat()`) -
 once round in `SEA_WHEEL_RIDE` seconds, up to 38 units - with a cabin's frame over it; `a`/`d`
 look round. It hands its `View` back, for the double-width glyphs' bookkeeping.
+
+**Which way you face is on the top bar** (`compass_word()`, `HEADINGS`): "facing east" in the
+street, on the roofs, at the rooftop bar and the loft, and in the cab - eighths of a turn, north
+being +z and east +x, as the cockpit's compass has it. Asked for with the brown pier. The rave's
+hint has its own short table, `COMPASS` - the name was taken, and reusing it broke the hint.
 
 **Getting there.** The taxi: "the beach" (the boardwalk by a bar, `_beach_spot()`) and "the
 pier" (its foot, back on the road so the name reads). ctrl-a `1`, `2`, `3` for the checks: the
