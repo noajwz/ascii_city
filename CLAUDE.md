@@ -663,8 +663,11 @@ lit windows and ARCADE, DANCE, BINGO in neon with nothing new (`face_kind()` cal
 boards a street, or its walls were a dark alley's). On the south half **the wheel**
 (`draw_sea_wheel()`, `SEA_WHEEL_R` 18, nearly twice the carnival's), facing the shore, so
 from the sand it is the whole circle over the water with the pier's lights lying under it.
-**It is timber, brown** (`WOOD`, `WOOD_LIT`: xterm 94 and 130, plain yellow on eight colours,
-which is the brown it was on the old terminals) - asked for on 2026-11-13, to stand out from the
+**It is timber, brown** (`WOOD`, `WOOD_LIT`: xterm 94, the boards dimmed (`A_DIM`) and the
+joints and rails at full strength; plain yellow on eight colours, which is the brown it was on
+the old terminals). It was 94 and 130 at first and asked to be "slightly darker": the darker
+cube colours are maroon (52) or olive (58), not brown, so it is the same brown, dimmed. A
+terminal that cannot dim shows the boards as plain 94 - asked for on 2026-11-13, to stand out from the
 sea: grey boards over grey water read as more water. The deck is boards edge to edge (`=` and
 `-` in `WOOD`, the joints in `WOOD_LIT`), the rails are wood, and under both edges **piles** go
 down into the water (`|` below the deck, at `y` under zero): from the sand along the coast,

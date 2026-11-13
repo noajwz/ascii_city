@@ -880,7 +880,7 @@ def init_colors():
                   "star_cold": 153, "moon": 231, "moon_dim": 250,
                   "band": 60, "firefly": 118, "eyes": 190, "snow": 255,
                   "crown_blue": 33, "fog": 248, "fog_dim": 243,
-                  "wood": 94, "wood_lit": 130}
+                  "wood": 94, "wood_lit": 94}
         attrs = {}
     else:
         # 8-colour fallback: bold = the "bright" version of a colour.
@@ -987,8 +987,12 @@ def init_colors():
     EYES = made["eyes"]
     SNOW = made["snow"] | curses.A_BOLD
     BAND = made["band"]
-    WOOD = made["wood"]                 # the sea pier's boards
-    WOOD_LIT = made["wood_lit"]         # and the joints between them, the rails
+    # The sea pier's boards: the darkest brown there is in 256 colours, and
+    # dimmed - "a slightly more darker brown" - with the joints between them
+    # and the rails in the same brown at full strength. Where a terminal
+    # cannot dim, the boards are simply that brown.
+    WOOD = made["wood"] | curses.A_DIM
+    WOOD_LIT = made["wood_lit"]
 
 
 def wide_chars_work(stdscr):
