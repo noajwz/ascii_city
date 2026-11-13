@@ -67,3 +67,48 @@ another one's rocket going up far down the coast is in the sky now and then. Tha
 
 **What it costs**, at 300x90: 1 to 2 ms on the beach and at the causeway's foot (20 to 24 ms a
 frame there), up to 5 ms at the fence, where the tower's lattice is the whole screen (26).
+
+## Mission control
+
+Asked for once the launch was in ("very cool"): a building near the pad to launch it from,
+and a viewer "like how SpaceX livestreams always show statistics of the launch - speed, what
+booster is being used", with cameras to switch between, on the pad and on the rocket.
+
+**The building**: a coast kind of its own, `"control"`, on the sand just north of the causeway
+(`LAUNCH_CTRL`: rows 7 to 3 north of it, from the second cell of sand back to the boardwalk), so
+the beach between it and the water stays open. Built like the pier's hall - not open,
+`lot()` builds it from `MISSION_CTRL` (glass, mullions, three or four storeys, MISSION /
+CONTROL / FLIGHT / LAUNCH on its walls); `face_kind()` calls the sand and boardwalk in front of
+it a street, or its walls were a dark alley's. `_draw_control()`: MISSION CONTROL on a frame on
+the roof, and the door lit, in the middle of the side that faces the boardwalk
+(`control_door()`). Walk in at the door (`mission_near()`, in `venue_at()` after the beach bar);
+the top bar says "mission control: walk in" near it.
+
+**Inside** (`render_mission()`): the big screen on the wall and the room under it.
+- The picture is `render_street()` from one of `MISSION_CAMS` (`mission_cam_view()`), `c` or
+  `1`-`4`: **PAD CAM** on a mast out past the pad's far corner, the coast and the town behind
+  the rocket; **TRACKING** down the beach, turning to follow the rocket and, after 70 s, the
+  booster home; **ONBOARD** on the second stage looking back at the land, the hull down the
+  right of the picture and the engines' fire coming up from under it; **BOOSTER CAM** the same
+  on the booster, looking at the coast as it comes in and down. The camera cannot look up or
+  down, which is why the on-rocket ones look back at the land rather than down the side.
+  Their height is capped at 900 units; above that the world is not drawn for it.
+- Over it, the webcast: LIVE and the camera top left; the rocket (`MISSION_ROCKET`), the
+  payload, and the booster and which flight of it top right (`mission_info()`: four boosters a
+  site, flown in turn); each stage's speed and height in a box bottom left and right; the clock
+  in the middle and under it a line of `MISSION_EVENTS` going by, the names stepping down a row
+  where two would run into each other; what just happened across the top. All of it on dark
+  boxes (`_panel()`): over the smoke at liftoff the clock could not be read.
+- **The numbers are not the world's** (`telemetry()`, `TELEM_ONE`, `TELEM_TWO`): a launch here
+  is a couple of kilometres of sky, so they are what a launch's numbers look like - 8,100 km/h
+  at MECO, 27,400 to orbit - keyed to the same events, eased between them.
+- The room: a desk for each of `MISSION_DESKS`, someone at it, STBY until the flight
+  director's poll from T-38, then GO.
+- `l`: the poll and a 40-second count when there is no launch on; in a countdown, on to T-10;
+  only in the air, nothing (`launch_from_control()`). It was refused through the whole of a
+  launch at first - more than half of every five minutes - so it mostly said no.
+- On the big-window system: speeds and the clock in block letters (`_clock_blocks()`, with a
+  "+" and a ":" the font has not got), the desks `_blow_up()`'d, `z` gives the small one.
+
+**What it costs**, at 300x90, warm: 13 to 27 ms a frame, the pad camera dearest.
+ctrl-a `5` for the checks: the boardwalk a few steps from the door.
