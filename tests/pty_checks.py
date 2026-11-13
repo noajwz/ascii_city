@@ -390,6 +390,18 @@ def cases(run, report):
         [(b"`", .5), (b"\x011", 1.5), (b"w", .5), (b"`", .5), (b"~", 1.2), (b"\x1b", .4),
          (b"w", .6), (b"`", .5), (b"~", 1.2), (b"\x1b", .4), (b"w", .6)],
         cols=110, rows=34))
+    # The launch pad: a launch from the panel, fifteen seconds of countdown,
+    # liftoff on the top bar, then out along the causeway at a run to the fence.
+    lp_st, lp_out = run([(b"`", .5), (b"\x014", 1.5), (b"`", .5), (b"^", .6),
+                         (b"\x1b", .4)] + [(b"", 4.0)] * 5 + [(b"W", .5)] * 8,
+                        cols=160, rows=48)
+    lp_plain = ANSI.sub(b"", lp_out).decode("utf-8", "replace")
+    lp_ok = report("the launch pad: a launch, and out along the causeway",
+                   lp_st, lp_out)
+    if lp_ok and lp_out and not ("fifteen" in lp_plain and "LIFTOFF" in lp_plain):
+        print("    no launch from the panel, or no LIFTOFF on the top bar")
+        lp_ok = False
+    ok &= lp_ok
     return ok
 
 

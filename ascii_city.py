@@ -765,12 +765,12 @@ def district(i, j):
         if kind is not None:
             if kind == "hall":
                 return PIER_HALL
-            return (SEAFRONT if kind in ("road", "walk", "bridge", "pier")
+            return (SEAFRONT if kind in ("road", "walk", "bridge", "pier", "jetty")
                     else BEACH)
         back = int(math.floor(coastline(j))) - i - COAST_STRIP
         if (0 < back <= HOTEL_DEEP and not DISTRICTS[district_at(i, j)]["park"]
                 and not river_at(i, j)):
-            return SEAFRONT_ROW
+            return SPACE_HQ if launch_hq(j) else SEAFRONT_ROW
     if woods_at(i, j):
         return WOODS
     if industrial_at(i, j):
@@ -1595,7 +1595,7 @@ def coast_kind(i, j):
         if lo < j < hi:
             hit = "bridge" if hit in ("walk", "road") else "mouth"
     if hit in ("sea", "surf", "sand"):
-        hit = _pier_kind(i, j) or hit
+        hit = _pier_kind(i, j) or _launch_kind(i, j) or hit
     _coast_cache[key] = hit
     return hit
 
@@ -1870,7 +1870,7 @@ def deck_at(i, j):
     if COAST and i >= COAST_LAND:
         kind = coast_kind(i, j)
         if kind is not None:
-            return kind in ("bridge", "pier")
+            return kind in ("bridge", "pier", "jetty")
     return bridge_at(i, j) or pier_at(i, j) or fair_pier_at(i, j)
 
 
@@ -3148,7 +3148,7 @@ def water_at(i, j):
     if COAST and i >= COAST_LAND:
         kind = coast_kind(i, j)
         if kind is not None:
-            return kind in ("sea", "mouth", "bridge", "pier")
+            return kind in ("sea", "mouth", "bridge", "pier", "jetty", "pad")
     return river_at(i, j) or moat_at(i, j) or lake_at(i, j) or strip_lake(i, j)
 
 
@@ -12359,6 +12359,30 @@ def coast_ground(v, kind, x, z, y, sx, glow, now):
         if h % 19 == 0:
             return ".", WOOD_LIT
         return ("=" if h % 3 else "-"), WOOD
+    if kind in ("jetty", "pad"):
+        # Concrete, out over the water. The causeway is a road for the
+        # transporter, a yellow line down the middle of it; the pad is the
+        # mark the booster comes back down onto, a ring and a cross painted
+        # round where the rocket stands, and a kerb all round the edge.
+        site = launch_site(int(z / CELL + BIG) - BIG)
+        if site is not None:
+            px, pz = launch_pad_xz(site)
+            if kind == "jetty":
+                if abs(z - pz) < 0.3 and (x * 0.4) % 1.0 < 0.5:
+                    return "-", GOLD_DIM
+            else:
+                ex, ez = x - px, z - pz
+                r = math.hypot(ex, ez)
+                if abs(r - 16.0) < 0.5:
+                    return "o", GOLD_DIM
+                if 6.0 < r < 16.0 and min(abs(ex - ez), abs(ex + ez)) < 0.6:
+                    return "x", GOLD_DIM
+                if (x - site[1] * CELL < 0.7 or (site[2] + 1) * CELL - x < 0.7
+                        or abs(abs(ez) - (LAUNCH_BROAD * 0.5 + LAUNCH_PAD[1]) * CELL)
+                        < 0.7):
+                    return "=", CURB
+        h = _mix(int(x * 2.0), int(z * 2.0), 5831)
+        return (".", CONCRETE) if h % 7 == 0 else None
     if kind == "mouth":
         # The river, still going the way it was going.
         h = _mix(int(x * 2.0) - int(now * 1.6), int(z * 2.0), 29)
@@ -15433,6 +15457,648 @@ def _sea_pier_spot(x, z):
         if d >= CHEAT_SKIP ** 2 and can_stand(px, pz) and (best is None or d < best[0]):
             best = (d, px, pz)
     return None if best is None else (best[1], best[2], math.pi * 0.5)
+
+
+# --- the space centre ---------------------------------------------------------
+# Asked for on 2026-11-13: a space agency at the beach, its launch pad out on
+# the sea. One every LAUNCH_GAP rows of coast, halfway between two piers: the
+# agency's glass offices along the front, a causeway from the sand a long way
+# out over the water, and at its end a square pad with a rocket standing on
+# it, its service tower and four floodlights. Every LAUNCH_EVERY seconds it
+# goes - a countdown, the engines, a cloud rolling out across the water, the
+# climb out to sea - and the booster comes back and lands on the pad it left.
+LAUNCH_GAP = 720       # cells of coast from one space centre to the next
+LAUNCH_ROW0 = 250      # the causeway's first row, of the one nearest the origin
+LAUNCH_BROAD = 3       # the causeway, cells across
+LAUNCH_OUT = 46        # cells out past the waterline to the far edge of the pad
+LAUNCH_PAD = (12, 5)   # the pad: cells long, and cells wider than the causeway
+LAUNCH_HQ = 10         # rows of the front either side that are the agency's
+LAUNCH_NAME = "SPACE AGENCY"
+ROCKET_H = 60.0        # the rocket standing, in units, nose to engines
+ROCKET_R = 2.2         # and its radius
+ROCKET_STAGE = 0.3     # how much of it, from the nose, is the second stage
+GANTRY_H = 74.0        # the service tower beside it
+GANTRY_OFF = 8.5       # how far north of the rocket the tower's middle is
+LAUNCH_EVERY = 300.0   # seconds from one launch to the next
+LAUNCH_SEEN = 6000.0   # how far off a launch in the sky is drawn
+LAUNCH_NEAR = 1500.0   # and how far the pad's own lights and lattice are
+LAUNCH_MECO = 45.0     # seconds after liftoff the booster's engines stop
+LAUNCH_SEP = 48.0      # and it lets go of the second stage
+LAUNCH_HOME = 100.0    # over the pad again, low, coming down
+LAUNCH_DOWN = 110.0    # and standing on it
+LAUNCH_BURNS = ((LAUNCH_SEP + 3.0, LAUNCH_SEP + 11.0, "boostback burn"),
+                (80.0, 86.0, "entry burn"), (LAUNCH_HOME, LAUNCH_DOWN, "landing burn"))
+_launch_shift = [0.0]  # the menu's way of launching one now
+# The agency's offices along the front: glass, cold light, its words in neon.
+SPACE_HQ = dict(SEAFRONT_ROW, name="the space centre", lo=16.0, hi=30.0,
+                glyphs="#=", band=None, mullion=True, pal="cold", dens=(0.6, 0.9),
+                flat=0.9, hung=0.0, smoke=0.1, neon=(2, 6),
+                words=["SPACE", "MISSION", "CONTROL", "LAUNCH", "ORBIT", "ROCKET",
+                       "COSMOS", "AGENCY", "APOGEE", "COUNTDOWN"])
+
+
+def _launch_at(r0):
+    """(first row, first column of the pad, last column) of the space centre
+    whose causeway starts at row r0, or None where the river comes out."""
+    if abs(r0 - river_centre(COAST_I)) < 60:
+        return None
+    end = int(math.floor(coastline(r0 + LAUNCH_BROAD // 2))) + LAUNCH_OUT
+    return r0, end - LAUNCH_PAD[0] + 1, end
+
+
+def launch_site(j):
+    """The space centre this row is part of - causeway or pad - or None."""
+    if not COAST:
+        return None
+    r0 = (j - LAUNCH_ROW0 + LAUNCH_PAD[1]) // LAUNCH_GAP * LAUNCH_GAP + LAUNCH_ROW0
+    if not r0 - LAUNCH_PAD[1] <= j < r0 + LAUNCH_BROAD + LAUNCH_PAD[1]:
+        return None
+    return _launch_at(r0)
+
+
+def launch_hq(j):
+    """Is row j along the front one of the agency's offices."""
+    r0 = (j - LAUNCH_ROW0 + LAUNCH_HQ) // LAUNCH_GAP * LAUNCH_GAP + LAUNCH_ROW0
+    return (r0 - LAUNCH_HQ <= j < r0 + LAUNCH_BROAD + LAUNCH_HQ
+            and _launch_at(r0) is not None)
+
+
+def _launch_kind(i, j):
+    """"jetty" for the causeway, "pad" for the pad, or None."""
+    site = launch_site(j)
+    if site is None or i > site[2]:
+        return None
+    r0, pad, end = site
+    if i >= pad:
+        return "pad"
+    return "jetty" if r0 <= j < r0 + LAUNCH_BROAD else None
+
+
+def launch_pad_xz(site):
+    """Where the rocket stands: the middle of the pad, in units."""
+    r0, pad, end = site
+    return (pad + end + 1) * 0.5 * CELL, (r0 + LAUNCH_BROAD * 0.5) * CELL
+
+
+def launch_t(site, now):
+    """Seconds since this pad's launch, -130 to 170: the countdown from -60,
+    the booster back on the pad at LAUNCH_DOWN, and the next rocket on it
+    from -130. Each pad has its own time, so two are never in step."""
+    m = _mix(site[0], 0, 5801)
+    return (now + _launch_shift[0] + m % 997) % LAUNCH_EVERY - 130.0
+
+
+def near_launch_sites(x, z, reach):
+    """The space centres within reach along the coast."""
+    if not COAST or x + reach < COAST_LAND * CELL:
+        return
+    k0 = int(((z - reach) / CELL - LAUNCH_ROW0) // LAUNCH_GAP)
+    k1 = int(((z + reach) / CELL - LAUNCH_ROW0) // LAUNCH_GAP) + 1
+    for k in range(k0, k1 + 1):
+        site = _launch_at(k * LAUNCH_GAP + LAUNCH_ROW0)
+        if site is not None:
+            yield site
+
+
+def _rocket_path():
+    """The climb, worked out once: (out to sea, up) every tenth of a second
+    from liftoff. Held down two seconds, straight up off the pad, then a turn
+    out over the water that keeps on going - which is what keeps it on the
+    screen from the beach: the camera cannot look up, and from the boardwalk a
+    straight climb was off the top in ten seconds. This way it peaks about 21
+    degrees up and then sinks towards the horizon as it goes, as a launch does
+    seen from down the coast."""
+    out, x, h = [(0.0, 0.0)], 0.0, 0.0
+    for n in range(1, 2002):
+        t = max(0.0, n * 0.1 - 2.0)
+        speed = 2.0 * t * (1.0 + t / 40.0)
+        lean = 1.396 * (1.0 - math.exp(-max(0.0, h - 20.0) / 90.0))
+        x += speed * math.sin(lean) * 0.1
+        h += speed * math.cos(lean) * 0.1
+        out.append((x, h))
+    return out
+
+
+ROCKET_PATH = _rocket_path()
+
+
+def rocket_path(t):
+    """(out, up, lean) of the rocket's engines t seconds after liftoff, lean
+    being how far from straight up it points."""
+    t = max(0.0, min(199.9, t)) * 10.0
+    n = int(t)
+    f = t - n
+    (x0, h0), (x1, h1) = ROCKET_PATH[n], ROCKET_PATH[n + 1]
+    lean = math.atan2(x1 - x0, h1 - h0) if h1 > h0 or x1 > x0 else 0.0
+    return x0 + (x1 - x0) * f, h0 + (h1 - h0) * f, lean
+
+
+def booster_at(t):
+    """(out, up) of the booster's engines t seconds after liftoff, once it has
+    let go: on out and round, back in low over the sea - low, so the burns
+    are in sight from the beach - to over the pad, and straight down onto it,
+    slowing to nothing."""
+    if t < LAUNCH_HOME:
+        x0, h0, _ = rocket_path(LAUNCH_SEP)
+        p = ((x0, h0), (x0 + 1200.0, h0 + 300.0), (500.0, 250.0), (0.0, 110.0))
+        u = max(0.0, (t - LAUNCH_SEP) / (LAUNCH_HOME - LAUNCH_SEP))
+        a, b = 1.0 - u, u
+        return tuple(a * a * a * p[0][k] + 3.0 * a * a * b * p[1][k]
+                     + 3.0 * a * b * b * p[2][k] + b * b * b * p[3][k] for k in (0, 1))
+    s = min(1.0, (t - LAUNCH_HOME) / (LAUNCH_DOWN - LAUNCH_HOME))
+    return 0.0, 110.0 * (1.0 - s) ** 2
+
+
+def booster_burn(t):
+    """Which of the booster's burns is on, by name, or None."""
+    for t0, t1, name in LAUNCH_BURNS:
+        if t0 <= t < t1:
+            return name
+    return None
+
+
+LAUNCH_CALLS = [
+    (-60.0, "go for launch"), (-45.0, "the access arm swings away"),
+    (-30.0, "the tanks are full - venting"), (-10.0, None), (0.0, "LIFTOFF!"),
+    (6.0, "it has cleared the tower"), (14.0, "out over the sea"),
+    (24.0, "max q - the hardest part"),
+    (LAUNCH_MECO, "MECO - the booster's engines off"), (LAUNCH_SEP, "stage separation"),
+    (LAUNCH_SEP + 3.0, "boostback burn - coming home"),
+    (LAUNCH_SEP + 11.0, "the second stage is on its way to orbit"),
+    (80.0, "entry burn"), (86.0, "the booster is coming in"),
+    (LAUNCH_HOME, "landing burn"), (LAUNCH_DOWN, "TOUCHDOWN - the booster is back"),
+    (LAUNCH_DOWN + 2.0, "a sonic boom rolls over the beach"),
+    (LAUNCH_DOWN + 8.0, None)]
+LAUNCH_HEARD = 900.0   # how far off the countdown is on the top bar: the front and a
+                       # few streets back - further, and it took the bar from every
+                       # other hint in town for more than half of every five minutes
+
+
+def launch_hint(x, z, now):
+    """What the top bar says near a space centre: the countdown, then what the
+    rocket is doing, the way the commentary at a launch goes; and between
+    launches how long until the next."""
+    if not COAST or x + LAUNCH_HEARD < COAST_LAND * CELL:
+        return ""
+    best = None
+    for site in near_launch_sites(x, z, LAUNCH_HEARD):
+        px, pz = launch_pad_xz(site)
+        d2 = (px - x) ** 2 + (pz - z) ** 2
+        if d2 < LAUNCH_HEARD ** 2 and (best is None or d2 < best[0]):
+            best = (d2, site)
+    if best is None:
+        return ""
+    t = launch_t(best[1], now)
+    if t < -60.0 or t >= LAUNCH_DOWN + 8.0:
+        if best[0] > 400.0 ** 2:
+            return ""
+        wait = -t % LAUNCH_EVERY
+        return "  ~ the launch pad: next launch in %d:%02d ~" % divmod(int(wait), 60)
+    if -10.0 <= t < 0.0:
+        return "  ~ T-%d ... ~" % (int(-t) + 1)
+    say = ""
+    for t0, words in LAUNCH_CALLS:
+        if t >= t0:
+            say = words
+    sign = "-" if t < 0.0 else "+"
+    return "  ~ T%s%d:%02d  %s ~" % ((sign,) + divmod(int(abs(t)), 60) + (say,))
+
+
+def launch_now(x, z, now):
+    """The menu's: the nearest space centre's countdown, fifteen seconds
+    from liftoff. True if there was one near enough to see."""
+    best = None
+    for site in near_launch_sites(x, z, LAUNCH_SEEN):
+        px, pz = launch_pad_xz(site)
+        d2 = (px - x) ** 2 + (pz - z) ** 2
+        if best is None or d2 < best[0]:
+            best = (d2, site)
+    if best is None:
+        return False
+    into = launch_t(best[1], now)
+    _launch_shift[0] += (-15.0 - into) % LAUNCH_EVERY
+    return True
+
+
+def _launch_spot(x, z):
+    """At the landward end of the nearest causeway, back on the road so the
+    sign over the way on reads, looking out along it at the rocket."""
+    if not COAST:
+        return None
+    cj = int(z / CELL + BIG) - BIG
+    k0 = (cj - LAUNCH_ROW0) // LAUNCH_GAP
+    best = None
+    for k in (k0 - 1, k0, k0 + 1, k0 + 2):
+        site = _launch_at(k * LAUNCH_GAP + LAUNCH_ROW0)
+        if site is None:
+            continue
+        j = site[0] + LAUNCH_BROAD // 2
+        px = (int(math.floor(coastline(j))) - BEACH_DEEP - 2) * CELL - 3.0
+        pz = (j + 0.5) * CELL
+        d = (px - x) ** 2 + (pz - z) ** 2
+        if d >= CHEAT_SKIP ** 2 and can_stand(px, pz) and (best is None or d < best[0]):
+            best = (d, px, pz)
+    return None if best is None else (best[1], best[2], math.pi * 0.5)
+
+
+def _seg(ch, co, v, walls, a, b, attr, glyph=None):
+    """A straight line between two points in the world, drawn a cell at a time
+    on the screen, each cell's glyph from which way it runs there unless one
+    is given: the tower's lattice, its arm, the masts, a rocket in flight."""
+    pa = v.project(*a)
+    pb = v.project(*b)
+    if pa is None or pb is None:
+        return
+    dx, dy = pb[0] - pa[0], pb[1] - pa[1]
+    n = min(int(max(abs(dx), abs(dy))) + 1, 2 * (v.width + v.height))
+    if glyph is None:
+        ax, ay = abs(dx), abs(dy) * 2.0
+        glyph = ("|" if ax < 0.4 * ay else "-" if ay < 0.4 * ax else
+                 "/" if dx * dy < 0 else "\\")
+    for k in range(n + 1):
+        f = k / n
+        put_cell(ch, co, v, walls, int(round(pa[0] + dx * f)),
+                 int(round(pa[1] + dy * f)), pa[2] + (pb[2] - pa[2]) * f, glyph, attr)
+
+
+def _plume(ch, co, v, walls, tail, back, long_, wide, now):
+    """Fire out of the engines, from the tail point `long_` units along `back`,
+    opening out to `wide`: white at the nozzles, then yellow, then orange,
+    ragged and flickering at the end. Drawn in screen cells, so from far off
+    it comes down to one bright point and never to nothing."""
+    pa = v.project(*tail)
+    pb = v.project(tail[0] + back[0] * long_, tail[1] + back[1] * long_,
+                   tail[2] + back[2] * long_)
+    if pa is None or pb is None:
+        return
+    put_cell(ch, co, v, walls, int(round(pa[0])), int(round(pa[1])), pa[2], "*", FLASH)
+    dx, dy = pb[0] - pa[0], pb[1] - pa[1]
+    n = min(int(max(abs(dx), abs(dy))) + 1, 2 * (v.width + v.height))
+    w0 = ROCKET_R * 0.8 * v.fx / pa[2]
+    w1 = wide * v.fx / max(pb[2], NEAR_Z)
+    tick = int(now * 14.0)
+    for k in range(n + 1):
+        f = k / n
+        cx, cy = pa[0] + dx * f, pa[1] + dy * f
+        hw = (w0 + (w1 - w0) * f) * (0.85 + 0.15 * math.sin(now * 23.0 + k))
+        y = int(round(cy))
+        d = pa[2] + (pb[2] - pa[2]) * f
+        for c in range(int(round(cx - hw)), int(round(cx + hw)) + 1):
+            m = _mix(c, y, tick)
+            if f > 0.55 and m % 3 == 0:
+                continue                # ragged at the end
+            edge = abs(c - cx) > hw * 0.55
+            if f < 0.25 and not edge:
+                glyph, attr = "#", FLASH
+            elif f < 0.5:
+                glyph, attr = ("*" if m & 1 else "#"), GOLD
+            elif f < 0.8:
+                glyph, attr = ("*" if m & 1 else "'"), EMBER_HOT
+            else:
+                glyph, attr = ("'" if m & 1 else "."), EMBER
+            put_cell(ch, co, v, walls, c, y, d, glyph, attr)
+
+
+def draw_rocket_up(ch, co, v, walls, x, base, z, long_, nose, attr, now, hot=0.0):
+    """A rocket standing up: on the pad, or still climbing straight. From the
+    engines at `base` to `long_` units up; a pointed nose, or the flat top of
+    the booster come back alone. White in the floodlights, a dark band where
+    the stages meet, the agency's name down the side, and while the engines
+    are lit (`hot`) the bottom of it orange. From far off, one line."""
+    pt = v.project(x, base + long_, z)
+    pb = v.project(x, base, z)
+    if pt is None or pb is None:
+        return
+    dist = pb[2]
+    hw = ROCKET_R * v.fx / dist
+    top, bot = pt[1], pb[1]
+    sx = pb[0]
+    r0 = max(0, int(math.floor(top)))
+    r1 = min(v.height - 1, int(math.ceil(bot)) - 1)
+    span = max(1e-6, bot - top)
+    cone = ROCKET_R * 3.0
+    if hw < 0.75:
+        for y in range(r0, r1 + 1):
+            put_cell(ch, co, v, walls, int(round(sx)), y, dist,
+                     "^" if nose and y == r0 else "|", attr)
+        return
+    band = ROCKET_H * ROCKET_STAGE if nose else -1.0
+    letters = "ASCII"
+    for y in range(r0, r1 + 1):
+        u = (y + 0.5 - top) / span * long_          # units down from the top
+        w = hw
+        tip = nose and u < cone
+        if tip:
+            w = hw * max(0.2, u / cone)
+        c0, c1 = int(round(sx - w)), int(round(sx + w))
+        low = long_ - u < 6.0 and hot > 0.0
+        for c in range(c0, c1 + 1):
+            if c == c0 or c == c1:
+                glyph = ("^" if c0 == c1 else "/" if c == c0 else "\\") if tip else "|"
+                a = EMBER_HOT if low else attr
+            elif abs(u - band) < 1.0:
+                glyph, a = "=", STREET
+            elif tip:
+                glyph, a = ".", attr
+            else:
+                glyph, a = (":" if (c - c0) % 3 == 1 else " "), (EMBER if low else CURB)
+                if glyph == " ":
+                    continue
+            put_cell(ch, co, v, walls, c, y, dist, glyph, a)
+        # The name, a letter at a time down the middle of the booster.
+        k = int((u - long_ * 0.42) / (long_ * 0.06))
+        if nose and 0 <= k < len(letters) and u >= long_ * 0.42 and c1 - c0 >= 2:
+            put_cell(ch, co, v, walls, int(round(sx)), y, dist, letters[k], GOLD)
+
+
+def _launch_cloud(ch, co, v, walls, px, pz, t, size, far):
+    """The cloud at liftoff, out of the flame trench and across the pad and
+    the sea round it: rolling out fast, rising slower, orange from inside
+    while the engines are still low, then the grey of the floodlights,
+    drifting off on the wind and thinning out over a couple of minutes. The
+    booster's landing makes a small one of the same."""
+    if t < 0.0 or t > 150.0 * size:
+        return
+    grow = 1.0 - math.exp(-t / (5.0 * size))
+    reach = (8.0 + 55.0 * grow) * size
+    high = (3.0 + 22.0 * (1.0 - math.exp(-t / 12.0))) * size
+    left = (1.0 if t < 40.0 * size
+            else max(0.0, 1.0 - (t - 40.0 * size) / (110.0 * size)))
+    drift = t * 0.5
+    n = 80 if far else 260
+    for k in range(n):
+        m = _mix(k, int(size * 10.0), 5811)
+        if (m & 1023) / 1023.0 > left:
+            continue
+        a = ((m >> 10) & 255) / 255.0 * math.tau
+        r = reach * math.sqrt(((m >> 18) & 255) / 255.0)
+        y = 0.4 + high * (((m >> 26) & 31) / 31.0) * (1.0 - 0.6 * r / reach)
+        hot = size > 0.5 and t < 9.0 and y < 10.0
+        glyph = "o" if far else "@O0oo"[(m >> 7) % 5]
+        attr = (EMBER_HOT if hot and r < reach * 0.4 else EMBER if hot
+                else ROU_BLACK if t < 30.0 else SMOKE)
+        put_point(ch, co, v, walls, px + math.cos(a) * r, y,
+                  pz + math.sin(a) * r + drift, glyph, attr)
+
+
+def _launch_trail(ch, co, v, walls, px, pz, t, first, last):
+    """What the climb leaves behind it: smoke along the way it went, from
+    liftoff or wherever the engines were last lit, lit by them close behind,
+    spreading and going grey as it ages, gone after a minute."""
+    n = int(min(t, last) / 0.5)
+    while n > 0:
+        tk = n * 0.5
+        age = t - tk
+        if age > 60.0 or tk < first:
+            break
+        n -= 1
+        m = _mix(int(tk * 2.0), 0, 5813)
+        if age > 30.0 and m % 3:
+            continue
+        x, h, _ = rocket_path(tk)
+        spread = 0.4 + age * 0.7
+        ox = ((m & 255) / 255.0 - 0.5) * spread
+        oy = (((m >> 8) & 255) / 255.0 - 0.5) * spread
+        oz = (((m >> 16) & 255) / 255.0 - 0.5) * spread + age * 1.2
+        glyph, attr = ("*", GOLD) if age < 1.0 else ("o", ROU_BLACK) if age < 4.0 else (
+            ".", ROU_BLACK if age < 15.0 else SMOKE if age < 35.0 else HAZE)
+        put_point(ch, co, v, walls, px + x + ox, h + oy, pz + oz, glyph, attr)
+
+
+def _flame_on_water(ch, co, v, pr, now):
+    """The fire lying on the sea under it: a broken column of orange down the
+    water in the flame's own column, the way the moon's light lies."""
+    sx = int(round(pr[0]))
+    if not 0 <= sx < v.width:
+        return
+    tick = int(now * 8.0)
+    for y in range(v.horizon + 1, v.height):
+        for c in (sx - 1, sx, sx + 1):
+            if (y, c) in v.water and _mix(c, y, tick) % (2 if c == sx else 5) == 0:
+                ch[y][c], co[y][c] = (":" if (y + tick) % 3 else "."), (
+                    GOLD if c == sx else EMBER_HOT)
+
+
+def _draw_gantry(ch, co, v, walls, px, pz, t, now, far):
+    """The service tower: a steel lattice a little taller than the rocket, a
+    red light on its mast, and the arm out to the rocket's second stage that
+    swings back to the tower in the last minute of the countdown."""
+    gz = pz - GANTRY_OFF
+    s = 3.0
+    legs = [(px - s, gz - s), (px + s, gz - s), (px + s, gz + s), (px - s, gz + s)]
+    for lx, lz in legs:
+        _seg(ch, co, v, walls, (lx, 0.0, lz), (lx, GANTRY_H, lz), CURB, "|")
+    if not far:
+        h = 0.0
+        while h < GANTRY_H - 1.0:
+            for k in range(4):
+                (ax, az), (bx, bz) = legs[k], legs[(k + 1) % 4]
+                _seg(ch, co, v, walls, (ax, h, az), (bx, h + 6.0, bz), STREET)
+                _seg(ch, co, v, walls, (bx, h, bz), (ax, h + 6.0, az), STREET)
+                _seg(ch, co, v, walls, (ax, h + 6.0, az), (bx, h + 6.0, bz), CURB, "-")
+            h += 6.0
+        # The arm, at the second stage, and how far it has swung back.
+        swing = min(1.0, max(0.0, (t + 45.0) / 7.0)) if t < 2.0 else 1.0
+        a = swing * math.pi * 0.5
+        y = ROCKET_H * 0.85
+        root = (px, y, gz + s)
+        reach_ = GANTRY_OFF - s - ROCKET_R
+        tip = (px - math.sin(a) * reach_, y, gz + s + math.cos(a) * reach_)
+        _seg(ch, co, v, walls, root, tip, CURB)
+        _seg(ch, co, v, walls, (root[0], y + 1.6, root[2]), (tip[0], y + 1.6, tip[2]),
+             CURB)
+        for f in (0.0, 0.33, 0.66, 1.0):
+            put_point(ch, co, v, walls, root[0] + (tip[0] - root[0]) * f, y + 0.8,
+                      root[2] + (tip[2] - root[2]) * f, "o", BULB_DIM)
+    _seg(ch, co, v, walls, (px, GANTRY_H, gz), (px, GANTRY_H + 10.0, gz), CURB, "|")
+    put_point(ch, co, v, walls, px, GANTRY_H + 10.6, gz,
+              "*" if int(now * 1.2) % 2 else ".", ROU_RED)
+    put_point(ch, co, v, walls, px - s, GANTRY_H + 0.6, gz - s,
+              "*" if int(now * 1.2 + 0.5) % 2 else ".", ROU_RED)
+
+
+def _draw_launch_pad(ch, co, v, walls, site, px, pz, t, now, wet, far):
+    """What stands out there: the causeway's lamps and rails, the sign over
+    the way on, the fence at the end of it, the floodlights at the corners of
+    the pad and their beams on the rocket, and the tower."""
+    r0, pad, end = site
+    z0, z1 = r0 * CELL, (r0 + LAUNCH_BROAD) * CELL
+    root = (int(math.floor(coastline(r0 + LAUNCH_BROAD // 2))) - BEACH_DEEP) * CELL
+    xp, x1 = pad * CELL, (end + 1) * CELL
+    pz0, pz1 = (r0 - LAUNCH_PAD[1]) * CELL, (r0 + LAUNCH_BROAD + LAUNCH_PAD[1]) * CELL
+    for z in (z0 + 0.3, z1 - 0.3):
+        k = 0
+        x = root
+        while x < xp:
+            if k % 8 == 0:
+                if not far:
+                    for h in (1.0, 2.0, 3.0):
+                        put_point(ch, co, v, walls, x, h, z, "|", CONCRETE)
+                put_lit(ch, co, v, walls, x, 3.6, z, "o", MOON, max(wet, 0.4), now)
+            elif not far and k % 2 == 0:
+                put_point(ch, co, v, walls, x, 0.95, z, "-", CURB)
+                for h in (-0.3, -0.9, -1.5):
+                    put_point(ch, co, v, walls, x, h, z, "|", CONCRETE)
+            k += 1
+            x += 1.25 if not far else 10.0
+    # The floodlights, a mast at each corner of the pad and three lamps on
+    # it, with their beams on the rocket while there is one standing.
+    standing = t < 2.0 or t >= LAUNCH_DOWN
+    for mx, mz in ((xp + 6.0, pz0 + 6.0), (xp + 6.0, pz1 - 6.0),
+                   (x1 - 6.0, pz0 + 6.0), (x1 - 6.0, pz1 - 6.0)):
+        if not far:
+            _seg(ch, co, v, walls, (mx, 0.0, mz), (mx, 28.0, mz), CONCRETE, "|")
+        for k in (-1, 0, 1):
+            put_lit(ch, co, v, walls, mx, 28.6, mz + k * 0.9, "o", FLASH,
+                    max(wet, 0.3), now)
+        if standing and not far:
+            ty = ROCKET_H * (0.35 if t < 2.0 else 0.25)
+            pa = v.project(mx, 28.6, mz)
+            pb = v.project(px, ty, pz)
+            if pa is not None and pb is not None:
+                n = int(max(abs(pb[0] - pa[0]), abs(pb[1] - pa[1]))) // 2
+                for k in range(1, n):
+                    f = k / n
+                    if _mix(k, int(mx), 5821) % 3 == 0:
+                        put_cell(ch, co, v, walls,
+                                 int(round(pa[0] + (pb[0] - pa[0]) * f)),
+                                 int(round(pa[1] + (pb[1] - pa[1]) * f)),
+                                 pa[2] + (pb[2] - pa[2]) * f, ".", BEAM_DIM)
+    _draw_gantry(ch, co, v, walls, px, pz, t, now, far)
+    if far:
+        return
+    # The launch mount the rocket stands on.
+    for k in (-1, 0, 1):
+        y = 0.4 + k * 0.4
+        _seg(ch, co, v, walls, (px - 4.0, y, pz), (px + 4.0, y, pz), CONCRETE, "#")
+    # Its name over the way on, a letter a light, in the agency's blue.
+    for h in (0.8, 1.7, 2.6, 3.5, 4.4):
+        put_point(ch, co, v, walls, root, h, z0 + 0.3, "|", CONCRETE)
+        put_point(ch, co, v, walls, root, h, z1 - 0.3, "|", CONCRETE)
+    gap = (z1 - z0 - 1.0) / max(1, len(LAUNCH_NAME) - 1)
+    zs = (z0 + z1) * 0.5 + gap * (len(LAUNCH_NAME) - 1) * 0.5
+    for k, c in enumerate(LAUNCH_NAME):
+        if c != " ":
+            put_lit(ch, co, v, walls, root, 5.0, zs - k * gap, c,
+                    NEON[2][0] if int(now * 0.5 + k * 0.3) % 9 else NEON[2][1],
+                    max(wet, 0.3), now)
+    # The fence across the end of the causeway: as near as anybody goes.
+    fx = xp - 1.0
+    for k in range(int((z1 - z0) / 0.8) + 1):
+        z = z0 + k * 0.8
+        for h in (0.6, 1.4, 2.2):
+            put_point(ch, co, v, walls, fx, h, z, "+", CURB)
+    if (fx - v.x) ** 2 + (pz - v.z) ** 2 < 80.0 ** 2:
+        # Only near enough to read: from the beach it ran together.
+        for k, c in enumerate("DANGER"):
+            put_point(ch, co, v, walls, fx - 0.1, 2.9, (z0 + z1) * 0.5 + 1.0 - k * 0.4,
+                      c, ROU_RED)
+    for z in (z0 + 0.3, z1 - 0.3):
+        put_point(ch, co, v, walls, fx, 3.4, z, "*" if int(now * 1.5) % 2 else ".",
+                  ROU_RED)
+
+
+def draw_launch_site(ch, co, v, walls, site, now, wet):
+    """A space centre out on the water, and whatever its rocket is doing: on
+    the pad, going, or the booster coming back down."""
+    px, pz = launch_pad_xz(site)
+    d = math.hypot(px - v.x, pz - v.z)
+    t = launch_t(site, now)
+    flying = 0.0 <= t < LAUNCH_DOWN + 30.0
+    if d > LAUNCH_NEAR and not flying:
+        return
+    if d < LAUNCH_NEAR:
+        _draw_launch_pad(ch, co, v, walls, site, px, pz, t, now, wet, d > 700.0)
+    far = d > 700.0
+    lit = ROU_BLACK
+    stage = ROCKET_H * ROCKET_STAGE
+    if t < 2.0:
+        # Standing: venting in the last half minute, and lit at the bottom.
+        if -40.0 < t < -2.0 and not far:
+            for k in range(14):
+                m = _mix(k, 0, 5823)
+                age = (now * 0.6 + k / 14.0) % 1.0 * 4.0
+                vy = ROCKET_H * (0.2 + 0.5 * ((m & 7) / 7.0))
+                side = 1.0 if m & 8 else -1.0
+                put_point(ch, co, v, walls, px + side * (ROCKET_R + age * 1.6),
+                          vy + age * 0.7, pz + age * 1.4,
+                          "o" if age < 1.5 else ".", MOON_DIM)
+        draw_rocket_up(ch, co, v, walls, px, 1.2, pz, ROCKET_H, True, lit, now,
+                       hot=1.0 if t >= 0.0 else 0.0)
+        if t >= 0.0:
+            _plume(ch, co, v, walls, (px, 1.2, pz), (0.0, -1.0, 0.0), 1.0, 3.0, now)
+            for side in (-1.0, 1.0):
+                for k in range(26):
+                    put_point(ch, co, v, walls, px, 0.6 + (k % 3) * 0.5,
+                              pz + side * (3.0 + k * 0.9),
+                              "#" if k < 8 else "*", GOLD if k < 14 else EMBER_HOT)
+            _launch_cloud(ch, co, v, walls, px, pz, t, 1.0, far)
+        return
+    _launch_cloud(ch, co, v, walls, px, pz, t, 1.0, far)
+    if t < LAUNCH_SEP:
+        x, h, lean = rocket_path(t)
+        _launch_trail(ch, co, v, walls, px, pz, t, 2.0, min(t, LAUNCH_MECO))
+        base = (px + x, h + 1.2, pz)
+        if lean < 0.05:
+            draw_rocket_up(ch, co, v, walls, base[0], base[1], pz, ROCKET_H, True, lit,
+                           now, hot=1.0)
+        else:
+            _seg(ch, co, v, walls, base, (base[0] + math.sin(lean) * ROCKET_H,
+                                          base[1] + math.cos(lean) * ROCKET_H, pz), lit)
+        if t < LAUNCH_MECO:
+            longer = 8.0 + min(40.0, h * 0.08)
+            _plume(ch, co, v, walls, base, (-math.sin(lean), -math.cos(lean), 0.0),
+                   min(longer, h + 1.0) if h < 30.0 else longer,
+                   3.0 + min(14.0, h * 0.03), now)
+            pr = v.project(*base)
+            if pr is not None and h < 200.0:
+                _flame_on_water(ch, co, v, pr, now)
+        return
+    # The second stage, on out to orbit.
+    _launch_trail(ch, co, v, walls, px, pz, t, 2.0, LAUNCH_MECO)
+    if t < 170.0:
+        x, h, lean = rocket_path(t)
+        _launch_trail(ch, co, v, walls, px, pz, t, LAUNCH_SEP + 1.0, t)
+        up = (px + x, h + 1.2, pz)
+        _seg(ch, co, v, walls, up, (up[0] + math.sin(lean) * stage,
+                                    up[1] + math.cos(lean) * stage, pz), lit)
+        if t >= LAUNCH_SEP + 1.0:
+            _plume(ch, co, v, walls, up, (-math.sin(lean), -math.cos(lean), 0.0),
+                   14.0, 6.0, now)
+    # The booster, coming home.
+    bx, bh = booster_at(t)
+    low = ROCKET_H - stage
+    if t >= LAUNCH_DOWN:
+        draw_rocket_up(ch, co, v, walls, px, 1.2, pz, low, False, lit, now)
+        if not far:
+            for side in (-1.0, 1.0):
+                _seg(ch, co, v, walls, (px + side * ROCKET_R, 5.0, pz),
+                     (px + side * ROCKET_R * 2.6, 1.0, pz), CURB)
+        _launch_cloud(ch, co, v, walls, px, pz, t - LAUNCH_DOWN + 0.5, 0.35, far)
+        return
+    nx, nh = booster_at(t + 0.2)
+    burn = booster_burn(t)
+    if t >= LAUNCH_HOME:
+        base = (px + bx, bh + 1.2, pz)
+        draw_rocket_up(ch, co, v, walls, base[0], base[1], pz, low, False, lit, now)
+        if t > LAUNCH_DOWN - 4.0 and not far:
+            for side in (-1.0, 1.0):
+                _seg(ch, co, v, walls, (base[0] + side * ROCKET_R, base[1] + 5.0, pz),
+                     (base[0] + side * ROCKET_R * 2.6, base[1], pz), CURB)
+        _plume(ch, co, v, walls, base, (0.0, -1.0, 0.0), min(12.0, bh + 1.0), 4.0, now)
+        pr = v.project(*base)
+        if pr is not None:
+            _flame_on_water(ch, co, v, pr, now)
+        return
+    # Engines first along the way it is going: the burns slow it.
+    dx, dh = nx - bx, nh - bh
+    n = math.hypot(dx, dh) or 1.0
+    fwd = (dx / n, dh / n)
+    base = (px + bx, bh, pz)
+    _seg(ch, co, v, walls, base, (base[0] - fwd[0] * low, base[1] - fwd[1] * low, pz),
+         CURB if burn else STREET)
+    if burn:
+        _plume(ch, co, v, walls, base, (fwd[0], fwd[1], 0.0), 10.0, 5.0, now)
 
 
 def draw_seafront(ch, co, v, walls, now, wet):
@@ -22000,6 +22666,9 @@ def render_street(v, now):
                       shore_x(gz_) + 6.0 + math.sin(a_) * 12.0,
                       6.0 + (m_ >> 12 & 7) * 0.8 + math.sin(now * 0.8 + k_) * 0.6, gz_,
                       "v" if math.sin(now * 3.0 + k_ * 2.0) > 0 else "^", MOON_DIM)
+    if COAST and v.x + LAUNCH_SEEN > COAST_LAND * CELL:
+        for site_ in near_launch_sites(v.x, v.z, LAUNCH_SEEN):
+            draw_launch_site(ch, co, v, walls, site_, now, wet)
     for bx, bz in near_rowboats(v, now, 120.0):
         draw_rowboat(ch, co, v, walls, bx, bz, now, wet)
     ci_ = int(v.x / CELL + BIG) - BIG
@@ -25903,6 +26572,7 @@ CHEAT_HIDDEN = [
     ("t", "riverbank", "bank"), ("a", "karaoke bar", "karaoke"),
     ("l", "mini golf", "minigolf"), ("1", "the beach", "beach"),
     ("2", "the pier", "seapier"), ("3", "the pier's wheel", "seawheel"),
+    ("4", "the launch pad", "launchpad"),
 ]
 CHEAT_TEST = 1                          # ctrl-a
 TEST_JUMPS = bool(os.environ.get("ASCII_CITY_TEST"))
@@ -26867,6 +27537,8 @@ def find_place(x, z, kind):
         return _beach_spot(x, z)
     if kind == "seapier":
         return _sea_pier_spot(x, z)
+    if kind == "launchpad":
+        return _launch_spot(x, z)
     if kind == "seawheel":
         # At the foot of the wheel on the nearest pier's head, looking up at it.
         sp = _sea_pier_spot(x, z)
@@ -27049,6 +27721,7 @@ def draw_cheats(ch, co, note):
            ("`", "close")]
     more = [("", "AND THE REST")] + [names[k] for k in CHEAT_MORE if k in names]
     more.append(("\\", "storm far ahead"))
+    more.append(("^", "launch a rocket"))
     more.append(("~", "the sea: " + ("on" if COAST else "off")))
     col = 18
     columns = (left, middle, more, sky)
@@ -28491,7 +29164,8 @@ TAXI_DESTS = [("the casino", "casino"), ("the club", "club"),
               ("the lighthouse", "lighthousedoor"), ("the big bridge", "grand"),
               ("the riverbank", "bank"), ("the woods", "woods"), ("the lake", "lake"),
               ("the karaoke bar", "karaoke"), ("the mini golf", "minigolf"),
-              ("the beach", "beach"), ("the pier", "seapier")]
+              ("the beach", "beach"), ("the pier", "seapier"),
+              ("the launch pad", "launchpad")]
 DRIVER_SAYS = ["Busy night.", "Where you headed, friend?", "Meter's running.",
                "You see the fireworks over the bay? I saw them once.",
                "I don't go into the woods after dark. Nobody does.",
@@ -28767,8 +29441,9 @@ def cab_ground(i, j):
         _evict(_cab_seen, 60000)
         if coast_kind(i, j) is not None:
             # The road along the front, or the sand - and not the sea.
-            hit = {"road": "road", "bridge": "road", "sea": None,
-                   "mouth": None, "hall": None}.get(coast_kind(i, j), "rough")
+            hit = {"road": "road", "bridge": "road", "sea": None, "jetty": "road",
+                   "mouth": None, "hall": None,
+                   "pad": None}.get(coast_kind(i, j), "rough")
         elif not is_open(i, j) or (water_at(i, j) and not deck_at(i, j)):
             hit = None
         elif (road_at(i, j) or car_park_at(i, j) or bridge_at(i, j)
@@ -30982,6 +31657,10 @@ def main(stdscr):
                             + math.pi / 2 + flight["look"])
                     _far_storm_force[0] = (now, ahead_)
                     note = "a storm far off - look from up high"
+                elif key == ord("^") and not hidden_next:
+                    note = ("a launch in fifteen seconds - look out to sea"
+                            if launch_now(cam_x, cam_z, now) else
+                            "no space centre near - a taxi goes to the launch pad")
                 elif key == ord("u"):
                     note = ("the sky is busy tonight"
                             if skip_to_alien(now) else "no such night near")
@@ -32204,6 +32883,7 @@ def main(stdscr):
                     if vending_near(cam_x, cam_z) is not None else "")
                 or ("  ~ the big wheel: p rides, $%d ~" % SEA_WHEEL_FEE
                     if sea_wheel_near(cam_x, cam_z) is not None else "")
+                or launch_hint(cam_x, cam_z, now)
                 or coast_hint(cam_x, cam_z)
                 or ("  ~ the fog is in ~" if night(now)["fog"] else "")
                 or blackout_word(cam_x, cam_z, now)
