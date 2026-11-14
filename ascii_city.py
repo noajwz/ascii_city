@@ -16798,13 +16798,18 @@ def _face(ch, co, v, walls, pts, glyph, attr):
             put_cell(ch, co, v, walls, x, y, d, glyph, attr)
 
 
-def draw_liner(ch, co, v, walls, x, z, heading, now, wet, far):
-    """The cruise ship: a dark hull with rows of portholes and her name at the
-    bow in neon, white decks above stacked with lit cabins and balconies, the
-    funnel in her colours, a string of lights from the bow up over the funnel
-    and down to the stern. Each face is filled, nearest last, and broken into
-    pieces along her length so that the part of her alongside you still draws
-    when the rest runs out of sight past you. From far off, only her lights."""
+def draw_liner(ch, co, v, walls, x, z, heading, now, wet, far, going=False):
+    """The cruise ship. A dark hull whose deck line rises to a raked stem and
+    rounds off at the stern, portholes along it and her name at the bow in
+    neon; above it three tiers of decks stepping back as they go up, their
+    fronts raked, drawn as outlines and rows of lit cabins with balcony rails
+    rather than filled - a liner at night is her lights - with the lifeboats
+    hung along the side, a raked funnel in her colours, a mast, lamps along
+    the top deck, and a string of lights from the bow up over the mast and
+    down to the stern. Under way, a bow wave and a wake. Each face is filled
+    dark, nearest last, in pieces along her length so the part alongside you
+    still draws when the rest runs out of sight past you. From far off, only
+    her lights. She was boxes of = and : at first, and read as blocky."""
     hx, hz = math.sin(heading), math.cos(heading)
     rx, rz = -hz, hx                    # across her, to one side
 
@@ -16812,117 +16817,200 @@ def draw_liner(ch, co, v, walls, x, z, heading, now, wet, far):
         return x + hx * s + rx * w, y, z + hz * s + rz * w
 
     half, beam = LINER_L * 0.5, LINER_B * 0.5
-    bow = half - 24.0
+    bow = half - 20.0                   # where the side ends and the stem begins
+    stem = half + 6.0                   # and how far forward the stem reaches, up top
     side = 1.0 if (v.x - x) * rx + (v.z - z) * rz > 0.0 else -1.0
     ahead = (v.x - x) * hx + (v.z - z) * hz
     tick = int(now * 5.0)
     n = len(NEON)
-    sup0, sup1 = -half + 12.0, bow - 14.0
+
+    def sheer(s):
+        """The deck line: a little up at the stern, well up at the bow."""
+        f = (s + half) / LINER_L
+        return LINER_HULL + 3.2 * max(0.0, f) ** 2.4 + 0.5 * (1.0 - f)
+
+    # The decks: (from, to, bottom, top), each shorter than the one under it.
+    tiers = ((-half + 10.0, bow - 10.0, LINER_HULL, LINER_HULL + 5.0),
+             (-half + 15.0, bow - 17.0, LINER_HULL + 5.0, LINER_HULL + 10.0),
+             (-half + 22.0, bow - 25.0, LINER_HULL + 10.0, LINER_TOP))
+    pa = v.project(*at(0.0, side * beam, LINER_HULL))
+    pb = v.project(*at(4.0, side * beam, LINER_HULL))
+    fwd_right = pa is None or pb is None or pb[0] >= pa[0]   # the bow is to the right
+    up_fwd, up_aft = ("/", "\\") if fwd_right else ("\\", "/")
     if not far:
-        # The hull: the stern or the bow end if you can see it, then her side.
+        # The hull's end, if you can see it: the rounded stern, or the stem.
         if ahead < -half:
-            _face(ch, co, v, walls, [at(-half, -beam, 0.0), at(-half, beam, 0.0),
-                                     at(-half, beam, LINER_HULL),
-                                     at(-half, -beam, LINER_HULL)], "=", CONCRETE)
+            _face(ch, co, v, walls, [at(-half + 2.0, -beam, 0.0),
+                                     at(-half + 2.0, beam, 0.0),
+                                     at(-half, beam * 0.75, sheer(-half)),
+                                     at(-half, -beam * 0.75, sheer(-half))], " ", 0)
+        # Her side, dark, under the deck line.
         s = -half
         while s < bow:
-            e = min(bow, s + 12.0)
+            e = min(bow, s + 10.0)
             _face(ch, co, v, walls, [at(s, side * beam, 0.0), at(e, side * beam, 0.0),
-                                     at(e, side * beam, LINER_HULL),
-                                     at(s, side * beam, LINER_HULL)], "=", CONCRETE)
+                                     at(e, side * beam, sheer(e)),
+                                     at(s, side * beam, sheer(s))], " ", 0)
             s = e
+        # The bow: the side narrows to the stem, which rakes forward going up.
         _face(ch, co, v, walls, [at(bow, side * beam, 0.0), at(half, 0.0, 0.0),
-                                 at(half + 3.0, 0.0, LINER_HULL + 1.0),
-                                 at(bow, side * beam, LINER_HULL)], "=", CONCRETE)
-        # The decks over it, set in from her side.
-        s = sup0
-        while s < sup1:
-            e = min(sup1, s + 12.0)
-            _face(ch, co, v, walls, [at(s, side * (beam - 2.0), LINER_HULL),
-                                     at(e, side * (beam - 2.0), LINER_HULL),
-                                     at(e, side * (beam - 2.0), LINER_TOP),
-                                     at(s, side * (beam - 2.0), LINER_TOP)],
-                  ":", STREET)
-            s = e
-        for s0 in ((sup0,) if ahead < 0.0 else (sup1,)):
-            _face(ch, co, v, walls, [at(s0, -(beam - 2.0), LINER_HULL),
-                                     at(s0, beam - 2.0, LINER_HULL),
-                                     at(s0, beam - 2.0, LINER_TOP),
-                                     at(s0, -(beam - 2.0), LINER_TOP)], ":", STREET)
-        # The funnel, aft.
-        fs = -half + 34.0
+                                 at(stem, 0.0, sheer(half)),
+                                 at(bow, side * beam, sheer(bow))], " ", 0)
+        # The decks, each a dark block set in from the side with its front
+        # raked back, so they terrace up towards the funnel.
+        for s0, s1, y0, y1 in tiers:
+            w_ = side * (beam - 2.0)
+            _face(ch, co, v, walls, [at(s0, w_, y0), at(s1, w_, y0),
+                                     at(s1 - 2.5, w_, y1), at(s0, w_, y1)], " ", 0)
+        for s0, s1, y0, y1 in tiers:
+            end = s0 if ahead < 0.0 else s1
+            _face(ch, co, v, walls, [at(end, -(beam - 2.0), y0),
+                                     at(end, beam - 2.0, y0),
+                                     at(end, beam - 2.0, y1),
+                                     at(end, -(beam - 2.0), y1)], " ", 0)
+        # The funnel, raked aft, red with a gold band, and the mast forward of it.
+        fs = -half + 36.0
         _face(ch, co, v, walls, [at(fs - 5.0, side * 4.0, LINER_TOP),
-                                 at(fs + 5.0, side * 4.0, LINER_TOP),
-                                 at(fs + 4.0, side * 4.0, LINER_FUNNEL),
-                                 at(fs - 4.0, side * 4.0, LINER_FUNNEL)], "#", ROU_RED)
-        for y_ in (LINER_FUNNEL - 2.0, LINER_FUNNEL - 1.2):
-            for s in range(-4, 5):
-                put_point(ch, co, v, walls, *at(fs + s, side * 4.05, y_), "=", GOLD)
-        # The lines of her: the deck edge, the waterline, the decks above.
+                                 at(fs + 6.5, side * 4.0, LINER_TOP),
+                                 at(fs + 3.0, side * 4.0, LINER_FUNNEL),
+                                 at(fs - 8.0, side * 4.0, LINER_FUNNEL)], "#", ROU_RED)
+        for y_ in (LINER_FUNNEL - 2.0,):
+            lean = (LINER_FUNNEL - y_) / (LINER_FUNNEL - LINER_TOP) * 3.5 - 3.5
+            for k in range(-7, 4):
+                put_point(ch, co, v, walls, *at(fs + k - lean, side * 4.05, y_), "=",
+                          GOLD)
+        for k in range(-8, 4):
+            put_point(ch, co, v, walls, *at(fs + k, side * 4.05, LINER_FUNNEL), "_",
+                      ROU_BLACK)
+        ms = bow - 32.0
+        y_ = LINER_TOP
+        while y_ < LINER_FUNNEL + 4.0:
+            put_point(ch, co, v, walls, *at(ms, 0.0, y_), "|", CURB)
+            y_ += 0.7
+        put_point(ch, co, v, walls, *at(ms, 0.0, LINER_FUNNEL + 1.5), "+", CURB)
+        put_lit(ch, co, v, walls, *at(ms, 0.0, LINER_FUNNEL + 4.4), "*",
+                ROU_RED if int(now * 1.3) % 2 else BULB_DIM, max(wet, 0.3), now)
+        # The lines of her: the deck line along the sheer, the waterline, the
+        # stem, and the edge of each deck with its lamps.
         s = -half
         while s <= half:
             w_ = side * (beam if s < bow else beam * (half - s) / (half - bow))
-            put_point(ch, co, v, walls, *at(s, w_, LINER_HULL), "_", ROU_BLACK)
-            put_point(ch, co, v, walls, *at(s, w_, 0.3), "~", RAIN)
+            put_point(ch, co, v, walls, *at(s, w_, sheer(s)), "_", ROU_BLACK)
+            if s < half - 1.0:
+                put_point(ch, co, v, walls, *at(s, w_, 0.3), "~", RAIN)
             s += 1.0
-        # Portholes down the hull.
-        for y_ in (4.0, 7.0):
-            s = -half + 4.0
-            while s < bow:
-                if _mix(int(s), int(y_), 6101) % 4:
+        for k in range(10):
+            f = k / 9.0
+            put_point(ch, co, v, walls,
+                      *at(half + (stem - half) * f, 0.0, sheer(half) * f),
+                      up_fwd, ROU_BLACK)
+        for s0, s1, y0, y1 in tiers:
+            w_ = side * (beam - 2.0)
+            s = s0
+            while s <= s1 - 2.5:
+                put_point(ch, co, v, walls, *at(s, w_, y1), "_", ROU_BLACK)
+                if int(s - s0) % 3 == 0:
+                    put_lit(ch, co, v, walls, *at(s, w_, y1 + 0.6), ".", BULB,
+                            max(wet, 0.2), now)
+                s += 1.0
+            for k in range(5):
+                f = k / 4.0
+                put_point(ch, co, v, walls, *at(s1 - 2.5 * f, w_, y0 + (y1 - y0) * f),
+                          up_aft, ROU_BLACK)
+            y_ = y0
+            while y_ < y1:
+                put_point(ch, co, v, walls, *at(s0, w_, y_), "|", ROU_BLACK)
+                y_ += 0.7
+        # Portholes down the hull, and plating seams between them.
+        for y_ in (3.2, 6.2):
+            s = -half + 3.0
+            while s < bow + 6.0:
+                if s < bow and _mix(int(s), int(y_), 6101) % 4:
                     put_point(ch, co, v, walls, *at(s, side * (beam + 0.05), y_), "o",
                               BULB_DIM)
+                elif int(s) % 2 == 0:
+                    w_ = side * (beam if s < bow else beam * (half - s) / (half - bow))
+                    put_point(ch, co, v, walls, *at(s, w_, y_ - 1.4), "-", CONCRETE)
                 s += 2.5
+        # The lifeboats, hung along the side under the second deck.
+        s = tiers[1][0] + 6.0
+        while s < tiers[1][1] - 6.0:
+            yb = tiers[1][2] + 1.2
+            wb = side * (beam - 0.6)
+            put_point(ch, co, v, walls, *at(s - 2.5, wb, yb), "(", SMOKE)
+            put_point(ch, co, v, walls, *at(s + 2.5, wb, yb), ")", SMOKE)
+            for k in (-1.5, -0.5, 0.5, 1.5):
+                put_point(ch, co, v, walls, *at(s + k, wb, yb - 0.3), "_", SMOKE)
+            put_point(ch, co, v, walls, *at(s, wb, yb + 1.2), "T", CONCRETE)
+            s += 9.0
         # The cabins and their balconies, deck over deck, most of them lit.
-        y_ = LINER_HULL + 1.6
-        deck = 0
-        while y_ < LINER_TOP - 0.5:
-            s = sup0 + 1.0
-            while s < sup1 - 0.5:
-                m = _mix(int(s * 2.0), deck, 6103)
-                # The balcony rail under it first, so the window wins.
-                put_point(ch, co, v, walls, *at(s, side * (beam - 1.9), y_ - 0.9), "=",
-                          CURB)
-                p = at(s, side * (beam - 1.95), y_)
-                if m % 5:
-                    put_point(ch, co, v, walls, *p, "#" if m % 3 else "o",
-                              tone_colour("warm", (m >> 4 & 15) / 15.0))
-                else:
-                    put_point(ch, co, v, walls, *p, ".", BULB_DIM)
-                s += 1.6
-            y_ += 2.4
-            deck += 1
+        for t_, (s0, s1, y0, y1) in enumerate(tiers):
+            y_ = y0 + 1.5
+            deck = t_ * 3
+            while y_ < y1 - 0.4:
+                s = s0 + 1.5
+                while s < s1 - 3.0:
+                    m = _mix(int(s * 2.0), deck, 6103)
+                    put_point(ch, co, v, walls, *at(s, side * (beam - 1.9), y_ - 0.9),
+                              "=", CURB)
+                    p = at(s, side * (beam - 1.95), y_)
+                    if m % 5:
+                        put_point(ch, co, v, walls, *p, "#" if m % 3 else "o",
+                                  tone_colour("warm", (m >> 4 & 15) / 15.0))
+                    else:
+                        put_point(ch, co, v, walls, *p, ".", BULB_DIM)
+                    s += 1.6
+                y_ += 2.4
+                deck += 1
+        # The bridge, across the front of the top deck, lit cold.
+        bs = tiers[2][1] - 2.5
+        for k in range(-3, 4):
+            put_point(ch, co, v, walls, *at(bs - 1.0, k * 1.6, LINER_TOP - 1.4), "#",
+                      tone_colour("cold", 0.8))
         # Her name, at the bow, in lights - read left to right from whichever
         # side you see her: the way along her that goes right on the screen.
         gap = 2.6
-        pa = v.project(*at(bow - 10.0, side * beam, LINER_HULL - 2.5))
-        pb = v.project(*at(bow - 9.0, side * beam, LINER_HULL - 2.5))
-        way = 1.0 if pa is None or pb is None or pb[0] >= pa[0] else -1.0
-        s0 = bow - 4.0 - (len(LINER_NAME) - 1) * gap if way > 0 else bow - 4.0
+        way = 1.0 if fwd_right else -1.0
+        s0 = bow - 2.0 - (len(LINER_NAME) - 1) * gap if way > 0 else bow - 2.0
         for k, c in enumerate(LINER_NAME):
             if c != " ":
                 put_lit(ch, co, v, walls,
-                        *at(s0 + way * k * gap, side * (beam + 0.1), LINER_HULL - 2.5),
+                        *at(s0 + way * k * gap, side * (beam + 0.1), LINER_HULL - 2.2),
                         c, NEON[1][0], max(wet, 0.3), now)
+        if going:
+            # The bow wave, white off the stem, and the wake fanning out astern.
+            for k in range(12):
+                m = _mix(k, tick, 6107)
+                f = k / 12.0
+                put_point(ch, co, v, walls,
+                          *at(half - f * 14.0, side * (beam + 0.8 + f * 2.5),
+                              0.3 + (1.0 - f) * 0.9),
+                          "~" if m & 1 else "'", SNOW if f < 0.6 else RAIN)
+            for k in range(18):
+                m = _mix(k, tick // 2, 6109)
+                f = k / 18.0
+                for sgn in (-1.0, 1.0):
+                    put_point(ch, co, v, walls,
+                              *at(-half - 2.0 - f * 60.0,
+                                  sgn * (2.0 + f * 9.0 + (m & 3)), 0.2),
+                              "~" if m & 2 else ".", SNOW if f < 0.3 else RAIN_FAR)
     else:
-        # From far off: her decks are rows of lights.
-        y_ = LINER_HULL + 1.6
-        while y_ < LINER_TOP:
-            s = sup0
-            while s < sup1:
-                put_point(ch, co, v, walls, *at(s, side * beam, y_), ".", BULB)
+        # From far off: her decks are rows of lights, shorter as they go up.
+        for s0, s1, y0, y1 in tiers:
+            s = s0
+            while s < s1:
+                put_point(ch, co, v, walls, *at(s, side * beam, y0 + 1.6), ".", BULB)
                 s += 4.0
-            y_ += 4.8
-    # The dressing lights: bow, up over the funnel's mast, down to the stern.
-    mast = (-half + 34.0, LINER_FUNNEL + 4.0)
-    for (s0, y0), (s1, y1) in (((half, LINER_HULL + 1.0), mast),
-                               (mast, (-half, LINER_HULL + 1.0))):
+    # The dressing lights: bow, up over the mast, down to the stern.
+    mast = (bow - 32.0, LINER_FUNNEL + 4.0)
+    for (s0, y0), (s1, y1) in (((stem, sheer(half)), mast),
+                               (mast, (-half, sheer(-half)))):
         steps = 30 if not far else 12
         for k in range(steps + 1):
             f = k / steps
             put_lit(ch, co, v, walls, *at(s0 + (s1 - s0) * f, 0.0, y0 + (y1 - y0) * f),
                     "o", NEON[(k + tick) % n][0], max(wet, 0.3), now)
-    put_lit(ch, co, v, walls, *at(half, 0.0, LINER_HULL + 2.0), "*",
+    put_lit(ch, co, v, walls, *at(stem, 0.0, sheer(half) + 1.0), "*",
             FLASH if int(now) % 2 else BULB, max(wet, 0.3), now)
 
 
@@ -16985,7 +17073,8 @@ def draw_harbour(ch, co, v, walls, h, now, wet):
     lx, lz, head = liner_pose(h, now)
     d = math.hypot(lx - v.x, lz - v.z)
     if d < LINER_SEEN:
-        draw_liner(ch, co, v, walls, lx, lz, head, now, wet, d > 700.0)
+        draw_liner(ch, co, v, walls, lx, lz, head, now, wet, d > 700.0,
+                   h in _liner_trips)
 
 
 def render_cruise(h, look, width, height, now):

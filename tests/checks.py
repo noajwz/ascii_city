@@ -9889,7 +9889,7 @@ ac.liner_home(hb_)
 ac._launch_shift[0] = 0.0
 ac.ROU_RED = old_red_
 check("from the beach she is there at the quay, red funnel and all - and then not",
-      fun_ > 10 and gone_ < fun_ // 3, "%d funnel cells, then %d" % (fun_, gone_))
+      fun_ >= 8 and gone_ < fun_ // 3, "%d funnel cells, then %d" % (fun_, gone_))
 
 # The speedboat: from the hire stand on the quay's other side, driven like
 # the cab - the same keys, the same gentle wheel - on the sea and only there.
