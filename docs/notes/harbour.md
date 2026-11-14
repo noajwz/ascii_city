@@ -20,14 +20,25 @@ the way on, a green light on the end, the gangway up to her side.
 side bow out (`liner_berth()`). She is drawn, not built - points, lines and filled faces, not
 cells - so that she can sail. **Each face is filled on the screen** (`_face()`: a convex polygon,
 scanline-filled with `put_cell()` at its mean distance) or the sea and the far coast showed
-through her between the windows; and each face is cut into 12-unit pieces along her, so the
+through her between the windows; and each face is cut into 10-unit pieces along her, so the
 part alongside you still draws when the rest of her runs out past the edge of sight - a face
 with a corner behind the camera is skipped. Only the side, the end and the decks that face you
-are drawn. Hull plating `=` in the darkest grey, portholes; the decks `:` above, cabins lit
-warm deck over deck, a balcony rail under each (drawn first, or the rails hid the windows); the
-red funnel with gold bands; dressing lights bow to mast to stern, chasing; her name at the bow
-in neon, laid out along her whichever way reads left to right from where you are (it came out
-INGTSAR at first). From further than 700 only her lights; to `LINER_SEEN`.
+are drawn.
+
+**Her shape, redone on 2026-11-14 - "the cruise ship looks very blocky"**: she had been a box
+of `=` plating with a box of `:` decks on it. Now the faces are filled *dark* (blanks, which
+erase the sea behind her) and she is her lines and her lights: the deck line along a sheer
+(`sheer()`: a little up at the stern, well up at the bow) to a stem that rakes forward going up
+(`stem`), the stern rounded; three tiers of decks (`tiers`) each shorter than the one under it,
+their fronts raked back, outlined with the deck edge `_`, a `|` aft and `/` forward, deck lamps
+along each edge; cabins lit warm deck over deck with a balcony rail under each (drawn first, or
+the rails hid the windows); portholes and plating seams `-` down the hull; the lifeboats `(___)`
+hung under the second deck on their davits; a raked funnel in red with a gold band and a swept
+top, a mast forward of it with a radar `+` and a red light; the bridge lit cold across the front
+of the top deck; dressing lights bow to mast to stern, chasing; her name at the bow in neon, laid
+out along her whichever way reads left to right from where you are (it came out INGTSAR at
+first). **Under way** (`going`, from `_liner_trips`): a white bow wave off the stem and a wake
+fanning out astern. From further than 700 only her lights, in the tiers' rows; to `LINER_SEEN`.
 
 **Aboard** (`p` at the gangway, `LINER_FEE`; `cruise` in `main()`, counted by `elsewhere()`):
 `liner_sail()` lays out her way (`liner_route()`: a Catmull-Rom line through waypoints set
