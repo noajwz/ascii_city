@@ -10378,7 +10378,9 @@ check("and the speedboat cannot drive through her",
 bad_ = []
 for exp_ in ac.EXPEDITIONS:
     rt_ = ac.expedition_route(hh_, exp_)
-    if not all(ac.boat_water(*p_) or ac.herring_in(*p_) for p_ in rt_[0]):
+    # She noses through the floes; anything else in her way is ground.
+    if not all(ac.boat_water(*p_) or ac.herring_in(*p_) or ac.ice_in(*p_)
+               for p_ in rt_[0]):
         bad_.append((exp_["name"], "aground"))
     end_ = rt_[0][-1]
     if (exp_["water"] or ac.fish_water(*end_)) is None:
@@ -10544,6 +10546,60 @@ near_lit_ = pf_ is not None and any(
     for x_ in range(max(0, int(pf_[0]) - 3), min(160, int(pf_[0]) + 4)))
 check("in a fight there the fish shows under the water, lit, with a trail behind",
       len(bf2_.trail) >= 8 and near_lit_)
+# The deep trench and the ice floes.
+tx_, tz_ = ac.exp_anchor(hh_, "trench")
+ix_, iz_ = ac.exp_anchor(hh_, "ice")
+ac._clock[0] = 0.0                      # the floes drift: where they are, now
+floes_ = ac.ice_floes(ix_, iz_, 0.0)
+check("the trench far out past the ships; the floes far up the coast, solid ice",
+      tx_ - ac.shore_x(tz_) > 1500.0 and ac.fish_water(tx_ + 20.0, tz_) == "trench"
+      and iz_ - hh_[0] * ac.CELL > 2000.0 and ac.fish_water(ix_ + 5.0, iz_ + 5.0) == "ice"
+      and not ac.boat_water(floes_[0][0], floes_[0][1]))
+ivv_ = ac.View(ix_, iz_, 0.0, 160, 45, eye=3.4)
+ac.render_street(ivv_, 300.0)
+tvv_ = ac.View(tx_, tz_, 0.0, 160, 45, eye=3.4)
+ac.render_street(tvv_, 300.0)
+check("it snows among the floes, whatever the weather; the trench is black and still",
+      ivv_.snow >= 0.5 and tvv_.still is not None)
+tf_ = ac.Fishing(tx_, tz_, 0.0, rig_(3, 3), 400.0, 2, deck=ac.HerringDeck())
+tf_.key("act", 400.8)
+t_ = 400.8
+for _ in range(40):
+    t_ += 1.0 / 30.0
+    tf_.step(t_)
+sunk_ = (tf_.water == "trench" and tf_.sink_until - t_ > 12.0
+         and tf_.bite_at is not None and tf_.bite_at > tf_.sink_until)
+tf_.step(tf_.bite_at + 0.05)
+tf_.key("strike", tf_.bite_at + 0.1)
+deep_ = tf_.line >= ac.TRENCH_DEPTH
+tf_.who = [n_ for n_, sp_ in enumerate(ac.FISH) if sp_["name"] == "anglerfish"][0]
+took_ = fight_(tf_, tf_.bite_at + 0.1, "skilled", 400.0) - tf_.bite_at
+check("in the trench the lead sinks a long count first; it comes up a long way, slowly",
+      sunk_ and deep_ and tf_.phase == "landed" and took_ > 40.0,
+      "%s, %.0f s" % (tf_.phase, took_))
+ac.FIREFLY, ff_was_ = 9931, ac.FIREFLY
+tf_.catch = (tf_.who, 10.0, "")
+cg_ = ac.render_fishing(tf_, 160, 45, 900.0)[1]
+ac.FIREFLY = ff_was_
+check("the anglerfish's lure lights up on its card",
+      any(c_ == 9931 for r_ in cg_ for c_ in r_))
+cf3_ = ac.Fishing(ix_, iz_, 0.0, rig_(1, 1), 0.0, 4, deck=ac.HerringDeck())
+cf3_.chill = True
+w0_ = cf3_.window()
+t_ = 0.0
+while t_ < ac.ICE_COLD + 5.0:
+    t_ += 0.1
+    cf3_.step(t_)
+check("among the floes your hands go cold, and cold hands strike late",
+      cf3_.cold == 1.0 and cf3_.window() < w0_ * 0.5)
+bad_ = []
+for w_, h_ in ((40, 14), (110, 34), (300, 90)):
+    try:
+        ac.render_fishing(cf3_, w_, h_, t_)
+        ac.render_fishing(tf_, w_, h_, t_)
+    except Exception as e_:
+        bad_.append((w_, h_, repr(e_)))
+check("both draw at any size, the cold hands and all", not bad_, str(bad_))
 # The captain's cabin: c from the deck, the whole turn round, drinks and bait.
 cw_ = ac.Wallet(100)
 ct_ = rig_(3, 5)

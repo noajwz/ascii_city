@@ -285,3 +285,39 @@ lot by the kilo, and weigh nothing), moonfish (5-40 kg, a proper fight), the oar
 a silver sea-serpent with a red crest, 20-80 kg), and the glowing jellyfish, rubbish that stings.
 $50, 22 s out, the spinning rod at least.
 
+## The deep trench, and the ice floes
+
+The fourth and fifth expeditions, asked for together on 2026-11-15. Both anchor where
+`exp_anchor(h, site)` says (the end of the route, cached in `_anchor_cache`), and
+`near_anchors(x, z, reach, site)` finds them; their water is black and still
+(`still_water()`, from `coast_ground()` through `v.still`).
+
+**The deep trench**: 1900 off the beach and 150 up the coast, past the shipping lanes - the
+ships' lights are all there is (`draw_ships()` already puts them 650-1500 out). $90, 32 s out,
+the big game rod (nothing less has the line: a fish comes up from `TRENCH_DEPTH`). Its water,
+`"trench"`, is within `TRENCH_REACH` of the anchorage and more than 1200 out. **The twist**: the
+lead takes `TRENCH_SINK` (15-25 s) to get to the bottom - SINKING ... and the depth along the
+bottom of the view, then "on the bottom, wait for it" - and nothing bites on the way down (the
+bite and the nibbles are put back by the sink). Hooked, the line is `TRENCH_DEPTH` and more,
+it comes up `TRENCH_REEL` slower, and the line goes straight down by her side: the fish shows
+(`fish_at()`) only in the last 14 units, with bubbles where the line goes in till then, and "it
+is coming up from a long way down". An anglerfish took 97 s with the simulated player. Its fish:
+grenadier, black scabbardfish, anglerfish (**its lure lit on the card**: a `*` in a drawing is
+drawn in FIREFLY), barreleye ($120 a kilo), frilled shark, the giant squid (legendary), and a
+brass diving helmet ($80).
+
+**The ice floes**: 2500 up the coast and 1100 off the beach - out that far because the piers come
+every 1800 units all along the coast and the first try, 300 off, had an ocean pier's lights and
+wheel right beside the ice; a cold fog to hide them buried the floes in grain and was dropped.
+`ice_floes()`: sixteen floes going slowly round on the current, one in five a berg
+(`ICE_FLOE`, `ICE_BERG`, `draw_ice()`); the speedboat stops at them (`ice_in()`), the Herring
+noses through. It always snows there (`v.snow` at least 0.55 within 500). $70, 38 s out, the
+spinning rod. **The twist**: `Fishing.chill` (the expedition's `"cold": True`), and `cold`
+climbs from 0 to 1 over `ICE_COLD` (150 s) - the strike window shrinks with it (to a third at
+numb) and the reel slows. `draw_cold()`: HANDS, a bar along the top going gold, blue, numb, the
+words, and your breath going up from the bottom of the picture. In his cabin his stove warms you
+faster than it is getting cold; **the hot cocoa (4) warms you right through**. The captain
+shouts when your hands go blue (`CAP_COLD`). Its fish: arctic char, halibut (20-150 kg, `heavy`:
+it never tires below 0.7 - it is just heavy), cod (off the pier too), snow crab, the unicorn
+fish (legendary; he insists it is real), and a chunk of ice.
+
