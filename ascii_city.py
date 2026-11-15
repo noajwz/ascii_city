@@ -1677,7 +1677,7 @@ def coast_reset():
                  "_ramen_firsts", "_vend_picks", "_vend_faces", "_sewer_cache",
                  "_lair_cache", "_cab_seen", "_station_cache", "_center_cache",
                  "_shore_cache", "_coast_cache", "_beach_blocks", "_kiosk_cache",
-                 "_wreck_cache", "_bio_cache"):
+                 "_wreck_cache", "_bio_cache", "_anchor_cache"):
         globals()[name].clear()
 
 
@@ -4026,6 +4026,7 @@ class View:
         self.moon_attr = None   # and its colour: the moon's, or the sunrise's
         self.tackle_signs = []  # tackle shops' names, to go up last
         self.bio = None         # the coves glowing tonight, as (x, z), if any
+        self.still = None       # the trench and the floes: (x, z, reach) of black water
 
     def ray(self, sx):
         cam = 2.0 * sx / (self.width - 1) - 1.0
@@ -12453,6 +12454,10 @@ def coast_ground(v, kind, x, z, y, sx, glow, now):
         for cx, cz in v.bio:
             if (x - cx) ** 2 + (z - cz) ** 2 < BIO_REACH * BIO_REACH:
                 return bio_glow(v, x, z, e, sx, y, now)
+    if v.still is not None:
+        for cx, cz, r in v.still:
+            if (x - cx) ** 2 + (z - cz) ** 2 < r * r:
+                return still_water(v, x, z, sx, y)
     # The waves. Each crest keeps its number as it comes in, so the gaps in
     # it come in with it.
     n, f = divmod(e * 0.15 + now * 0.5 + 0.3 * math.sin(z * 0.08), 1.0)
@@ -23732,6 +23737,13 @@ def render_street(v, now):
     v.tunnels = near_tunnels(v, 90.0)
     if COAST and v.x + 1500.0 > COAST_LAND * CELL and dark_night(now):
         v.bio = list(near_bio(v.x, v.z, 1500.0)) or None
+    if COAST and v.x + 3000.0 > COAST_LAND * CELL:
+        v.still = ([(x_, z_, TRENCH_REACH) for x_, z_ in
+                    near_anchors(v.x, v.z, 2500.0, "trench")]
+                   + [(x_, z_, ICE_REACH) for x_, z_ in
+                      near_anchors(v.x, v.z, 1500.0, "ice")]) or None
+        if v.eye < 10.0 and any(True for _ in near_anchors(v.x, v.z, 500.0, "ice")):
+            v.snow = max(v.snow, 0.55)          # it snows up there, always
     walls = v.walls = draw_walls(ch, co, v, now)
     draw_sky(ch, co, v, walls, wet, now)
     if v.eye >= 10.0:
@@ -23864,6 +23876,8 @@ def render_street(v, now):
             draw_sea_wreck(ch, co, v, walls, wx_, wz_, wa_, now, wet)
         for bx_, bz_ in near_bio(v.x, v.z, 900.0):
             draw_bio(ch, co, v, walls, bx_, bz_, now, wet)
+        for ix_, iz_ in near_anchors(v.x, v.z, 1000.0, "ice"):
+            draw_ice(ch, co, v, walls, ix_, iz_, now, wet)
     for bx, bz in near_rowboats(v, now, 120.0):
         draw_rowboat(ch, co, v, walls, bx, bz, now, wet)
     ci_ = int(v.x / CELL + BIG) - BIG
@@ -31835,7 +31849,7 @@ def boat_water(x, z):
     """Can she be here: open sea or the river's mouth, and not in the ship."""
     i, j = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
     if (coast_kind(i, j) not in ("sea", "mouth") or herring_in(x, z) or wreck_in(x, z)
-            or bio_in(x, z)):
+            or bio_in(x, z) or ice_in(x, z)):
         return False
     for h_ in near_harbours(x, z, 120.0):
         lx, lz, head = liner_pose(h_, _clock[0])
@@ -32958,6 +32972,22 @@ EXPEDITIONS = [
                "caster at least. Ye've a twig. Still - yer money."),
      "there": ("There she lies - the Mary Ellen. Keep 'em off her iron, matey, "
                "or ye'll leave yer line in her!")},
+    {"name": "the deep trench", "fee": 90, "out": 1900.0, "along": 150.0, "sail": 32.0,
+     "water": None, "rod": 3, "site": "trench",
+     "says": "Past the shippin' lanes, where the bottom drops off the world.",
+     "fish": "anglerfish, frilled shark, barreleye - an' the giant squid",
+     "short": ("Down there ye'll want the big game rod - nothin' else holds that "
+               "much line. Still - yer money."),
+     "there": ("Here she drops away - four hundred fathom, near enough. Let it "
+               "sink, matey. Let it sink.")},
+    {"name": "the ice floes", "fee": 70, "out": 1100.0, "along": 2500.0, "sail": 38.0,
+     "water": None, "rod": 1, "site": "ice", "cold": True,
+     "says": "North, where the sea freezes. Bring yer gloves. Ye didn't. Nobody does.",
+     "fish": "arctic char, halibut, cod, snow crab - an' the unicorn fish",
+     "short": ("Ye'll want the spinnin' rod at least up there. Still - yer "
+               "money."),
+     "there": ("Brrr! Mind the floes. Keep yer hands warm, matey - there's cocoa "
+               "in me cabin.")},
     {"name": "the glowing sea", "fee": 50, "out": 260.0, "along": -620.0, "sail": 22.0,
      "water": None, "rod": 1, "site": "bio", "when": "dark",
      "says": "A cove where the sea lights up. Only on a dark night, mind.",
@@ -33582,6 +33612,109 @@ def draw_bio(ch, co, v, walls, cx, cz, now, wet):
                           NEON[2][0] if m & 128 else NEON[5][0])
 
 
+# --- the deep trench, and the ice floes ------------------------------------------
+# The fourth and fifth expeditions, asked for on 2026-11-15. The deep trench, far
+# out past the shipping lanes: nothing on the horizon but the ships' lights, the
+# water black and still; the lead takes a long count to get to the bottom, and
+# what comes up comes a long way, slowly - the longest fights and the best
+# prices. The ice floes, far north up the coast: white floes drifting on black
+# water, snow falling, your breath showing; your hands go cold the longer you
+# fish, and cold hands strike late and reel slow - the captain's cocoa puts
+# them right, and his cabin warms them, slowly.
+TRENCH_REACH = 350.0   # the trench's water, round where the Herring stops over it
+TRENCH_DEPTH = 280.0   # units of line out when one takes: from the bottom
+TRENCH_SINK = (15.0, 25.0)  # seconds the lead takes to get down there
+TRENCH_REEL = 0.7      # and it comes up this much slower than it would
+ICE_REACH = 170.0      # the floes, round where she anchors among them
+ICE_COLD = 150.0       # seconds fishing out there from warm hands to numb ones
+ICE_FLOE = [
+    "  .---------.  ",
+    " /:::::::::::\\ ",
+    "(_____________)",
+]
+ICE_BERG = [
+    "    /\\     ",
+    "   /  \\_   ",
+    "  /     \\  ",
+    " /       \\ ",
+    "/_________\\",
+]
+CAP_COLD = ["Yer fingers be blue, matey! In here fer a cocoa - c!",
+            "Ye'll strike like a statue with hands like that. Cocoa! Cabin!"]
+_anchor_cache = {}
+
+
+def exp_anchor(h, site):
+    """Where the Herring anchors off this harbour for the expedition with this
+    `site`: (x, z), cached - the route is a curve worked out from scratch."""
+    key = (h, site)
+    hit = _anchor_cache.get(key)
+    if hit is None:
+        exp = next(e for e in EXPEDITIONS if e.get("site") == site)
+        x, z, _ = route_pose(expedition_route(h, exp), 1.0)
+        hit = _anchor_cache[key] = (x, z)
+    return hit
+
+
+def near_anchors(x, z, reach, site):
+    """The places this expedition goes, within reach, as (x, z)."""
+    if not COAST or x + reach + 3000.0 < COAST_LAND * CELL:
+        return
+    exp = next(e for e in EXPEDITIONS if e.get("site") == site)
+    for h in near_harbours(x, z - exp["along"], reach + 400.0):
+        ax, az = exp_anchor(h, site)
+        if (ax - x) ** 2 + (az - z) ** 2 < reach * reach:
+            yield ax, az
+
+
+def ice_floes(cx, cz, now):
+    """The floes round the anchorage this instant: (x, z, how big, a berg),
+    each going slowly round on the current."""
+    out = []
+    for k in range(16):
+        m = _mix(int(cx), k, 6801)
+        a = (m & 1023) / 1023.0 * math.tau + now * (0.004 + ((m >> 10) & 7) * 0.001)
+        r = 25.0 + ((m >> 13) & 127) / 127.0 * (ICE_REACH - 30.0)
+        out.append((cx + math.sin(a) * r, cz + math.cos(a) * r,
+                    3.0 + ((m >> 20) & 7) * 1.2, (m >> 23) % 5 == 0))
+    return out
+
+
+def ice_in(x, z):
+    """Is this point in a floe: for the speedboat."""
+    for cx, cz in near_anchors(x, z, ICE_REACH + 20.0, "ice"):
+        for fx, fz, s, _ in ice_floes(cx, cz, _clock[0]):
+            if (fx - x) ** 2 + (fz - z) ** 2 < (s + 0.8) ** 2:
+                return True
+    return False
+
+
+def draw_ice(ch, co, v, walls, cx, cz, now, wet):
+    """The floes, white on the black water, and now and then a berg."""
+    for fx, fz, s, berg in sorted(ice_floes(cx, cz, now),
+                                  key=lambda f_: -((f_[0] - v.x) ** 2
+                                                   + (f_[1] - v.z) ** 2)):
+        if (fx - v.x) ** 2 + (fz - v.z) ** 2 > 800.0 ** 2:
+            continue
+        if berg:
+            blit_sprite(ch, co, v, walls, ICE_BERG, fx, fz, -0.2, s * 1.1, s * 2.0,
+                        SNOW)
+        else:
+            blit_sprite(ch, co, v, walls, ICE_FLOE, fx, fz, -0.2, 0.5 + s * 0.12,
+                        s * 2.4, SNOW)
+
+
+def still_water(v, x, z, sx, y):
+    """A point of the sea in the trench or among the floes: black and still,
+    a slow glint now and then. None for nothing."""
+    h = _mix(int(x * 1.5), int(z * 1.5), 6803)
+    if h % 41 == 0:
+        return "-", STREET
+    if h % 97 == 1 and y - v.horizon > 3:
+        return ".", RAIN_FAR
+    return None
+
+
 # --- the captain's cabin ---------------------------------------------------------
 # Asked for on 2026-11-15: while fishing at anchor, c goes in to the captain's
 # cabin, the wheelhouse, with the rooftop bar's whole turn round: the sea and the
@@ -34003,6 +34136,7 @@ WATER_NAMES = {"river": "the river", "lake": "the lake", "mouth": "the river's m
                "surf": "the surf", "inshore": "off the pier", "deep": "deep water",
                "offshore": "the open sea", "harbour": "the harbour",
                "wreck": "the wreck", "bio": "the glowing sea",
+               "trench": "the deep trench", "ice": "the ice floes",
                "fountain": "the fountain"}
 _fish_rare = [False]   # the menu's: the next bite is the rarest thing there
 
@@ -34156,6 +34290,31 @@ FISH = [
     _sp("oarfish", ("bio",), ("squid", "lugworm"), 20.0, 80.0, 1.7, 0.8, 15, "SNOW",
         "oarfish", legend=True,
         say="a silver sea-serpent with a red crest. every sailor's story was true"),
+    # In the deep trench.
+    _sp("grenadier", ("trench",), ("squid",), 1.0, 4.0, 0.6, 20, 15, "GOLD_DIM", "long",
+        say="all head, and a tail like a rat's. it lives where light never gets"),
+    _sp("black scabbardfish", ("trench",), ("squid",), 2.0, 5.0, 0.8, 14, 18, "CURB",
+        "gar", say="long and black as the water, with teeth like broken glass"),
+    _sp("anglerfish", ("trench",), ("squid",), 2.0, 30.0, 1.0, 9, 25, "MOON_DIM",
+        "angler", say="a lamp on a rod on its head. it was fishing for you"),
+    _sp("barreleye", ("trench",), ("squid", "spinner"), 0.1, 0.5, 0.3, 6, 120, "RAIN",
+        "barreleye",
+        say="a see-through head, and two green eyes looking up through it"),
+    _sp("frilled shark", ("trench",), ("squid",), 5.0, 25.0, 1.3, 5, 30, "GOLD_DIM",
+        "eel", say="a shark from before there were sharks, frilled at the neck"),
+    _sp("giant squid", ("trench",), ("squid", "biglure"), 50.0, 250.0, 2.2, 0.8, 20,
+        "ROU_RED", "bigsquid", legend=True,
+        say="eyes as big as plates. it came all the way up to look at you"),
+    # Among the ice floes.
+    _sp("arctic char", ("ice",), ("spinner", "worms", "lugworm"), 1.0, 6.0, 0.7, 20, 18,
+        "ROU_RED", "long", say="red-bellied, from water colder than you are"),
+    _sp("halibut", ("ice",), ("squid", "lugworm"), 20.0, 150.0, 1.9, 5, 14, "GOLD_DIM",
+        "flat", say="a door that swims. it never tires - it is just heavy"),
+    _sp("snow crab", ("ice",), ("squid", "lugworm"), 0.5, 1.5, 0.3, 14, 25, "neon4",
+        "crab", say="long legs, and sweet. the restaurants fight over them"),
+    _sp("unicorn fish", ("ice",), ("biglure", "squid"), 30.0, 120.0, 2.0, 0.8, 20,
+        "SNOW", "unicorn", legend=True,
+        say="a fish with a horn. the captain insists it's real. it is"),
     _sp("old boot", ("river", "mouth", "harbour", "lake"), (), 0.6, 1.4, 0.3, 4, 0,
         "BARK", "boot", junk=True, say="the other one is still down there"),
     _sp("shopping trolley", ("river",), (), 9.0, 16.0, 0.45, 2.5, 0, "CURB",
@@ -34176,6 +34335,10 @@ FISH = [
         junk=True, say="it has a crab living in it. had"),
     _sp("deckchair", ("harbour",), (), 3.0, 5.0, 0.4, 1, 0, "neon3", "junk",
         junk=True, say="off the Midnight Star, by the stripes"),
+    _sp("diving helmet", ("trench",), (), 6.0, 10.0, 0.5, 1.5, 80, "GOLD", "helmet",
+        junk=True, say="brass, and empty. you hope"),
+    _sp("chunk of ice", ("ice",), (), 2.0, 6.0, 0.3, 4, 0, "SNOW", "icecube",
+        junk=True, say="it melts in the cool box. the cool box is very cool now"),
     _sp("glowing jellyfish", ("bio",), (), 0.2, 1.5, 0.2, 7, 0, "neon2", "jelly",
         junk=True, say="it stings. of course it stings"),
     _sp("ship's bell", ("wreck",), (), 6.0, 9.0, 0.5, 2, 40, "GOLD", "bell",
@@ -34306,6 +34469,39 @@ FISH_ART = {
     "coins": ["  (o) (o)  ",
               " (o)(o)(o) ",
               "(o)(o)(o)(o)"],
+    "angler": ["        *          ",
+               "         \\         ",
+               "     .--~~'--.     ",
+               " |\\ /  o      \\    ",
+               " | >   VVVVVV  >   ",
+               " |/ \\_^^^^^^__/    "],
+    "barreleye": ["    .-(oo)-.     ",
+                  " |\\(  (  )  )o.  ",
+                  " | >  `--'     > ",
+                  " |/'--.____.--'  "],
+    "bigsquid": ["      /\\        ",
+                 "     /  \\       ",
+                 "    | () |      ",
+                 "    | () |      ",
+                 "     )  (       ",
+                 "   /(/||\\)\\     ",
+                 "  / / || \\ \\    ",
+                 " (  ( || )  )   ",
+                 "  \\  \\||/  /    "],
+    "helmet": ["  .----.  ",
+               " / .--. \\ ",
+               "| ( () ) |",
+               " \\ '--' / ",
+               " _|____|_ "],
+    "unicorn": ["            __.--~~--.__         ",
+                " |\\_   _.-''  ::::     o `.----=====",
+                " |  >-(____ ::::::   ____ _>      ",
+                " |/'   '----.._____.--'           "],
+    "icecube": ["  ______  ",
+                " /     /| ",
+                "/_____/ | ",
+                "|     | / ",
+                "|_____|/  "],
     "lantern": ["   .--.     ",
                 " >( o o o )>",
                 "   `--'     "],
@@ -34390,6 +34586,11 @@ def fish_water(x, z):
                 return "wreck"
             if out > 100.0 and any(True for _ in near_bio(x, z, BIO_REACH)):
                 return "bio"
+            if out > 1200.0 and any(True for _ in near_anchors(x, z, TRENCH_REACH,
+                                                               "trench")):
+                return "trench"
+            if out > 100.0 and any(True for _ in near_anchors(x, z, ICE_REACH, "ice")):
+                return "ice"
             return ("surf" if out < FISH_SURF else "inshore" if out < FISH_INSHORE
                     else "deep" if out < FISH_DEEP else "offshore")
     if river_at(i, j):
@@ -34805,6 +35006,9 @@ class Fishing:
         self.charge_at = self.charge_until = 0.0
         self.snag, self.snagged, self.free, self.snags = 0.0, None, 0.0, 0
         self.trail = []         # in the glowing sea: where the fish has been
+        self.sink_until = 0.0   # in the deep trench: when the lead gets to the bottom
+        self.chill = False      # among the floes: your hands go cold
+        self.cold = 0.0         # and how cold they are, 0 warm to 1 numb
         self.big = False
         self.kg = self.cast_power = 0.0
 
@@ -34832,7 +35036,8 @@ class Fishing:
         """How long you have to strike: the float's, and a lure's take is a
         jolt you cannot miss for a moment longer."""
         w = self.tackle.float_kind()[2]
-        return w + (0.2 if self.tackle.bait_kind() in LURES else 0.0)
+        w += 0.2 if self.tackle.bait_kind() in LURES else 0.0
+        return w * (1.0 - 0.65 * self.cold)       # numb fingers strike late
 
     def to(self, phase, now):
         self.phase, self.t0 = phase, now
@@ -34967,6 +35172,8 @@ class Fishing:
         self.endure = 3.0 + 9.0 * sp["power"]
         lx, lz = self.land
         self.line = max(3.0, math.hypot(lx - self.x, lz - self.z))
+        if self.water == "trench":
+            self.line = TRENCH_DEPTH + self.rng.random() * 40.0     # from the bottom
         self.ten, self.stam = 0.3, 1.0
         self.side = self.fang = 0.0
         self.over = self.slack = 0.0
@@ -34991,6 +35198,8 @@ class Fishing:
         dt = max(0.0, min(0.1, now - self.clock))
         self.clock = now
         tk = self.tackle
+        if self.chill:
+            self.cold = min(1.0, self.cold + dt / ICE_COLD)
         if self.phase == "flight" and now - self.t0 >= FISH_FLIGHT:
             self.water = fish_water(*self.land)
             if self.water is not None and self.force:
@@ -35001,6 +35210,13 @@ class Fishing:
             else:
                 self.to("wait", now)
                 self.schedule(now)
+                if self.water == "trench" and self.bite_at is not None:
+                    # A long count while the lead takes it down; nothing bites
+                    # on the way.
+                    sink = self.rng.uniform(*TRENCH_SINK)
+                    self.sink_until = now + sink
+                    self.bite_at += sink
+                    self.nibbles = [t + sink for t in self.nibbles]
                 if self.bite_at is None:
                     self.note = "nothing in %s takes %s" % (
                         WATER_NAMES[self.water], BAIT_KINDS[tk.bait_on][0])
@@ -35048,7 +35264,11 @@ class Fishing:
         if junk:
             pull = p
         else:
-            pull = p * (0.35 + 0.65 * self.stam) * (1.6 if run else 0.55)
+            tired = max(0.7, self.stam) if sp.get("heavy") else self.stam
+            pull = p * (0.35 + 0.65 * tired) * (1.6 if run else 0.55)
+        reel = rod[4] * (TRENCH_REEL if self.water == "trench" else 1.0) * (
+            1.0 - 0.45 * self.cold)
+        rod = rod[:4] + (reel,) + rod[5:]
         if self.water == "wreck" and not junk and self.wreck(dt, now, cranking,
                                                               giving, run, p):
             return
@@ -35156,9 +35376,11 @@ class Fishing:
         return False
 
     def fish_at(self):
-        """Where the fish is, on the line: (x, z)."""
+        """Where the fish is, on the line: (x, z). In the trench the line goes
+        down by her side, and it is out there only once it is near the top."""
         a = self.yaw + self.fang
-        return self.x + math.sin(a) * self.line, self.z + math.cos(a) * self.line
+        d = min(self.line, 14.0) if self.water == "trench" else self.line
+        return self.x + math.sin(a) * d, self.z + math.cos(a) * d
 
     def float_at(self, now):
         """Where the float is in the world, (x, y, z), or None."""
@@ -35294,6 +35516,14 @@ def draw_float(ch, co, v, walls, f, now, wet):
         return
     if f.phase == "fight" and lit_sea:
         draw_lit_fish(ch, co, v, walls, f, now)
+    if f.water == "trench" and (f.phase == "wait" or (f.phase == "fight"
+                                                      and f.line > 14.0)):
+        # The lead has it down out of sight: only where the line goes in, and
+        # now and then a bubble.
+        put_cell(ch, co, v, walls, sx, sy, d, ".", CURB)
+        if _mix(int(now * 3.0), 0, 6805) % 4 == 0:
+            put_point(ch, co, v, walls, x + 0.3, 0.15, z, "o", RAIN_FAR)
+        return
     if f.phase == "fight":
         thrash = f.running(now)
         n = 6 if thrash else 3
@@ -35465,6 +35695,9 @@ def render_fishing(f, width, height, now):
                   ROU_RED if f.snags else HUD)
         if f.snagged is not None:
             word, c = "SNAGGED ON THE WRECK - s gives it slack!", ROU_RED
+        elif f.water == "trench" and f.line > 40.0 and not (
+                f.running(now) or f.charging(now) or f.turning(now)):
+            word, c = "it is coming up from a long way down - keep at it", RAIN
         elif f.water == "wreck" and f.snag > 0.6 and not sp["junk"]:
             word, c = "it is diving for the wreck - reel it up!", GOLD
         elif f.running(now):
@@ -35490,6 +35723,13 @@ def render_fishing(f, width, height, now):
             _label(ch, co, y, mid - len(word) // 2, word, c)
         if f.running(now) and int(now * 10) % 2:
             _text(ch, co, base - 2 * k, int(width * 0.84) - 10, "zzzZZZ", FLASH)
+    elif f.phase == "wait" and f.water == "trench" and now < f.sink_until:
+        down = (now - f.t0) / max(0.1, f.sink_until - f.t0)
+        word = "SINKING ... %dm" % int(TRENCH_DEPTH * min(1.0, down))
+        _label(ch, co, base, mid - len(word) // 2, word, RAIN)
+    elif f.phase == "wait" and f.water == "trench" and not f.biting(now):
+        word = "on the bottom, %dm down - wait for it" % int(TRENCH_DEPTH)
+        _label(ch, co, base, mid - len(word) // 2, word, HUD)
     elif f.phase == "wait" and f.biting(now):
         if k > 1:
             _blocks(ch, co, height // 2 + 2, mid - blocks_width("STRIKE", k - 1) // 2,
@@ -35506,11 +35746,39 @@ def render_fishing(f, width, height, now):
     for x in range(min(width, len(strip) + 2)):
         ch[y][x], co[y][x] = " ", 0
     _text(ch, co, y, 1, strip[:width - 2], HUD)
+    if f.chill:
+        draw_cold(ch, co, f, now, k)
     if f.said and now - f.said_at < 3.5 and f.phase != "landed":
         _text(ch, co, y - 1, max(1, mid - len(f.said) // 2), f.said[:width - 2], BULB)
     if f.phase == "landed":
         draw_catch(ch, co, f, now, k)
     return ch, co, v
+
+
+def draw_cold(ch, co, f, now, k):
+    """Out among the floes: how cold your hands are, along the top, and your
+    breath going up from the bottom of the picture now and then."""
+    h, w = len(ch), len(ch[0])
+    bw = 20 * k
+    x0 = 2
+    warm = 1.0 - f.cold
+    _label(ch, co, 2, x0, "HANDS ", HUD)
+    for q in range(bw):
+        on = q < int(warm * bw)
+        c = GOLD if warm > 0.6 else RAIN if warm > 0.3 else CROWN_BLUE
+        _text(ch, co, 2, x0 + 6 + q, "#" if on else "-", c if on else CURB)
+    word = ("warm" if f.cold < 0.3 else "cold - your strike is slower" if f.cold < 0.6
+            else "numb - c for the captain's cocoa")
+    _label(ch, co, 3, x0, word, ROU_RED if f.cold >= 0.6 else HUD)
+    t = (now % 4.0) / 1.6
+    if t < 1.0:
+        # Breath: a puff going up and away.
+        for q in range(6):
+            yy = h - 4 - int(t * 6) - q // 2
+            xx = w // 2 - 6 + q * 2 + int(t * 4)
+            if 0 <= yy < h and 0 <= xx < w:
+                ch[yy][xx] = "~" if q % 2 else "."
+                co[yy][xx] = SNOW if t < 0.5 else CURB
 
 
 def draw_catch(ch, co, f, now, k):
@@ -35565,7 +35833,7 @@ def draw_catch(ch, co, f, now, k):
     attr = fish_colour(sp)
     wig = int(math.sin(now * 5.0) * 1.2) if not sp["junk"] else 0
     _blow_up(ch, co, w // 2 - aw * kk // 2 + wig, y, art,
-             [[attr] * len(r) for r in art], kk)
+             [[FIREFLY if c == "*" else attr for c in r] for r in art], kk)
     y += len(art) * kk + 1
     for s in lines:
         _text(ch, co, y, w // 2 - len(s) // 2, s[:bw - 2],
@@ -36284,6 +36552,11 @@ def main(stdscr):
                         said_ = cabin_key(cab_, key - ord("1"), tackle, wallet, now)
                         if said_:
                             note, note_at = said_, now
+                        elif (key - ord("1") == 3 and cab_["drink"] == 3
+                              and cab_["t"] == now and fishing.chill):
+                            fishing.cold = 0.0          # cocoa: right through
+                            note, note_at = ("the cocoa warms your hands right "
+                                             "through"), now
             elif fishing is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (ord("z"), ord("Z")):
                     _big_screens[0] = not _big_screens[0]     # big screens, off and on
@@ -37129,6 +37402,7 @@ def main(stdscr):
                             quip_at=now, seen="aim", snags=0)
                 fishing = Fishing(tx_, tz_, th_, tackle, now, int(now * 1000.0),
                                   deck=HerringDeck(), water=trip["exp"]["water"])
+                fishing.chill = trip["exp"].get("cold", False)
             else:
                 px_, pz_ = herring_plank(trip["h"])
                 cam_x, cam_z = px_ - HERRING_BACK, pz_
@@ -37146,6 +37420,16 @@ def main(stdscr):
                 trip.update(quip=CAP_LANDED[pick_ % len(CAP_LANDED)], quip_at=now)
             elif fishing.phase == "gone" and was_ == "fight":
                 trip.update(quip=CAP_LOST[pick_ % len(CAP_LOST)], quip_at=now)
+        if trip is not None and fishing is not None and fishing.chill:
+            if trip.get("cabin") is not None:
+                # His stove: warmer in here, slowly, than it gets cold outside.
+                fishing.cold = max(0.0, fishing.cold - frame_time * (1.0 / 25.0
+                                                                     + 1.0 / ICE_COLD))
+            elif fishing.cold >= 0.6 and not trip.get("blue"):
+                trip.update(quip=CAP_COLD[int(now) % len(CAP_COLD)], quip_at=now,
+                            blue=True)
+            if fishing.cold < 0.3:
+                trip["blue"] = False
         if (trip is not None and fishing is not None
                 and fishing.snags != trip.get("snags", 0)):
             trip["snags"] = fishing.snags

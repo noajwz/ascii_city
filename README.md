@@ -339,7 +339,11 @@ the city is infinite, identical every time you walk back to it, and held in no m
   when hooked: keep them up off her, or give them slack when they snag - or, on a night with
   little moon, to **the glowing sea**, a cove where every wave lights up blue-green, your float
   leaves rings of light and you can see the fish you are fighting under the water: lanternfish,
-  moonfish, and the oarfish, a silver sea-serpent. Out there `c` takes you
+  moonfish, and the oarfish, a silver sea-serpent - or **the deep trench**, far out past the
+  shipping lanes, where the lead takes a long count to sink and the giant squid comes up a long
+  way, slowly - or **the ice floes**, far up the coast in the snow, where halibut the size of a
+  door and the unicorn fish live, and your hands go numb unless he makes you a cocoa. Out there
+  `c` takes you
   into **his cabin**: look all the way
   round, the sea through the windows, the wheel, a chart with an X where you are, the parrot,
   your biggest fish over the door - and him behind his counter, with grog, bait at sea prices

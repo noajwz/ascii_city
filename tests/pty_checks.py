@@ -510,7 +510,7 @@ def cases(run, report):
     gl_st, gl_out = run([(F1, .5), (b"+", .3), (b"e", .4), (b"\x019", 1.5)]
                         + TACKLE_IN + [(b"", .5), (DOWN, .15), (b"p", .4), (b"x", .5),
                                        (F1, .5), (b"\x01v", 1.5)] + HERRING_IN
-                        + [(b"", .5), (DOWN, .3), (DOWN, .3), (b"p", 1.0)]
+                        + [(b"", .5)] + [(DOWN, .3)] * 4 + [(b"p", 1.0)]
                         + [(b" ", .3)] * 8 + [(b"", 2.0), (b"x", 1.0)],
                         cols=300, rows=60)
     gl_plain = ANSI.sub(b"", gl_out).decode("utf-8", "replace")
@@ -520,6 +520,27 @@ def cases(run, report):
         print("    no dark night, or he did not take you")
         gl_ok = False
     ok &= gl_ok
+    # The deep trench and the ice floes: a big game rod and squid from the pier,
+    # then each: out, a cast (the trench: it sinks), and at the floes, a cocoa.
+    BUY = [(b"\x019", 1.5)] + TACKLE_IN + [(b"", .5), (DOWN, .15), (DOWN, .15),
+                                          (DOWN, .15), (b"p", .4), (RIGHT, .3),
+                                          (DOWN, .15), (DOWN, .15), (DOWN, .15),
+                                          (b"p", .4), (b"x", .5)]
+    for name_, downs_, look_ in (("the deep trench", 2, "SINKING"),
+                                 ("the ice floes", 3, "warms your hands")):
+        tr_st, tr_out = run([(F1, .5), (b"+", .3), (b"+", .3)] + BUY
+                            + [(F1, .5), (b"\x01v", 1.5)] + HERRING_IN + [(b"", .5)]
+                            + [(DOWN, .3)] * downs_ + [(b"p", 1.0)]
+                            + [(b" ", .3)] * 13 + [(b"", 2.0), (b"f", 2.5),
+                                                   (b"c", .8), (b"4", .8), (b"x", .6)],
+                            cols=300, rows=60)
+        tr_plain = ANSI.sub(b"", tr_out).decode("utf-8", "replace")
+        tr_ok = report("out to " + name_, tr_st, tr_out)
+        if tr_ok and tr_out and not ("going out to " + name_ in tr_plain
+                                     and look_ in tr_plain):
+            print("    did not get there, or no %r" % look_)
+            tr_ok = False
+        ok &= tr_ok
     return ok
 
 
