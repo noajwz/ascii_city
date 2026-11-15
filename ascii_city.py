@@ -15583,6 +15583,21 @@ def near_launch_sites(x, z, reach):
             yield site
 
 
+def nearest_launch_site(x, z):
+    """The space centre nearest here along the coast, or None: the only one
+    whose launches are drawn. Every one drew its own within LAUNCH_SEEN, and
+    with one every 3600 units of coast, each on its own clock, from the beach
+    two or three were in the sky at once most of the time (85% of it) -
+    "too many rockets flying on the horizon" (2026-11-15)."""
+    best = None
+    for site in near_launch_sites(x, z, LAUNCH_SEEN):
+        px, pz = launch_pad_xz(site)
+        d2 = (px - x) ** 2 + (pz - z) ** 2
+        if best is None or d2 < best[0]:
+            best = (d2, site)
+    return None if best is None else best[1]
+
+
 def _rocket_path():
     """The climb, worked out once: (out to sea, up) every tenth of a second
     from liftoff. Held down two seconds, straight up off the pad, then a turn
@@ -16086,7 +16101,9 @@ def draw_launch_site(ch, co, v, walls, site, now, wet):
         return
     # The second stage, on out to orbit.
     _launch_trail(ch, co, v, walls, px, pz, t, 2.0, LAUNCH_MECO)
-    if t < 170.0:
+    if t < LAUNCH_DOWN:
+        # Till the booster is down: after that the second stage was a dot on
+        # the horizon for another minute, one more rocket in the sky.
         x, h, lean = rocket_path(t)
         _launch_trail(ch, co, v, walls, px, pz, t, LAUNCH_SEP + 1.0, t)
         up = (px + x, h + 1.2, pz)
@@ -23811,7 +23828,8 @@ def render_street(v, now):
                       6.0 + (m_ >> 12 & 7) * 0.8 + math.sin(now * 0.8 + k_) * 0.6, gz_,
                       "v" if math.sin(now * 3.0 + k_ * 2.0) > 0 else "^", MOON_DIM)
     if COAST and v.x + LAUNCH_SEEN > COAST_LAND * CELL:
-        for site_ in near_launch_sites(v.x, v.z, LAUNCH_SEEN):
+        site_ = nearest_launch_site(v.x, v.z)
+        if site_ is not None:
             draw_launch_site(ch, co, v, walls, site_, now, wet)
         for h_ in near_harbours(v.x, v.z, LINER_SEEN):
             draw_harbour(ch, co, v, walls, h_, now, wet)

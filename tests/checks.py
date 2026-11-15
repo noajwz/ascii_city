@@ -9733,6 +9733,20 @@ check("the top bar: how long till the next, the countdown, and what it is doing"
       "next launch in 1:40" in says_[0] and "T-5" in says_[1] and "LIFTOFF" in says_[2]
       and "separation" in says_[3] and "TOUCHDOWN" in says_[4]
       and ac.launch_hint(x0, z0, lift_ + 1.0) == "", str(says_))
+calls_ = []
+real_draw_site_ = ac.draw_launch_site
+ac.draw_launch_site = lambda *a_: calls_.append(a_[4])
+for zz_ in (-300.0, 900.0, 2200.0, 3100.0):
+    for yaw_ in (0.0, math.pi * 0.5, math.pi):
+        n0_ = len(calls_)
+        ac.render_street(ac.View(ac.shore_x(zz_) - 30.0, zz_, yaw_, 80, 24), 4000.0)
+        calls_.append(len(calls_) - n0_)
+ac.draw_launch_site = real_draw_site_
+per_ = [c_ for c_ in calls_ if isinstance(c_, int)]
+check("one space centre's rockets in the sky at a time: the nearest's, and its "
+      "second stage gone when the booster is down",
+      per_ and max(per_) == 1
+      and ac.nearest_launch_site(ac.shore_x(1257.5) - 30.0, 1257.5)[0] == site_[0])
 ac.launch_now(spot_[0], spot_[1], 7777.0)
 check("^ on the panel: the nearest one goes in fifteen seconds",
       abs(ac.launch_t(site_, 7777.0) + 15.0) < 0.01

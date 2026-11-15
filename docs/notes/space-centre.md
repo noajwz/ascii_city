@@ -62,8 +62,12 @@ looking out along it, the sign over you). `^` on the panel - it looks like a roc
 the nearest in fifteen seconds (`launch_now()`, which moves every pad's clock: `_launch_shift`).
 ctrl-a `4` for the checks. `^` is also a ctrl-a key (the sky deck), so it stands aside for it.
 
-**Other launches show.** Two sites are 3600 units apart and on different clocks; from the beach
-another one's rocket going up far down the coast is in the sky now and then. That is right.
+**Only the nearest space centre's launches are drawn** (`nearest_launch_site()`, in
+`render_street()`). Every one in `LAUNCH_SEEN` used to be, and with one every 3600 units of coast
+on clocks of their own, two or more rockets were in the sky over the beach 85% of the time -
+"too many rockets flying on the horizon" (2026-11-15). And the second stage is drawn only till
+the booster is down (`LAUNCH_DOWN`), not to T+170: after touchdown it was a dot on the horizon
+for another minute. Now there is a rocket up 37% of the time, never two.
 
 **What it costs**, at 300x90: 1 to 2 ms on the beach and at the causeway's foot (20 to 24 ms a
 frame there), up to 5 ms at the fence, where the tower's lattice is the whole screen (26).
