@@ -9418,11 +9418,13 @@ moved_ = sum(1 for y_, x_ in below_ if sch_[y_][x_] != sch2_[y_][x_])
 check("and it moves: the waves come in", moved_ > 60, "%d cells changed" % moved_)
 ac.SNOW, ac.GOLD_DIM = 1, 1
 real_ground, real_ships, real_mirror = ac.coast_ground, ac.draw_ships, ac.reflect_river
-real_harbour, real_launch = ac.draw_harbour, ac.draw_launch_site
+real_harbour, real_launch, real_liners = (ac.draw_harbour, ac.draw_launch_site,
+                                          ac.draw_liners)
 ac.coast_ground = lambda *a_: None
 ac.draw_ships = lambda *a_: None            # and the cruise ship and the rocket,
 ac.draw_harbour = lambda *a_: None          # which are out there on purpose
 ac.draw_launch_site = lambda *a_: None
+ac.draw_liners = lambda *a_: None
 ac.reflect_river = lambda *a_: None
 stray_ = 0
 for yaw_ in (math.pi / 2 - 0.4, math.pi / 2, math.pi / 2 + 0.4):
@@ -9438,7 +9440,8 @@ for eye_ in (40.0, 85.0):
     stray_ += sum(1 for y_ in range(v_.horizon + 1, 36) for x_ in range(120)
                   if g_[y_][x_] != " ")
 ac.coast_ground, ac.draw_ships, ac.reflect_river = real_ground, real_ships, real_mirror
-ac.draw_harbour, ac.draw_launch_site = real_harbour, real_launch
+ac.draw_harbour, ac.draw_launch_site, ac.draw_liners = (real_harbour, real_launch,
+                                                        real_liners)
 check("out there is only water: with the sea not drawn, nothing is - from the "
       "surf, from a roof's height, from the plane's", stray_ == 0, "%d cells" % stray_)
 ships_, rows_ = [], set()
@@ -9888,6 +9891,24 @@ gone_ = sum(1 for r_ in ac.render_street(bv_, cn_ + 90.0)[1] for c_ in r_ if c_ 
 ac.liner_home(hb_)
 ac._launch_shift[0] = 0.0
 ac.ROU_RED = old_red_
+hid_, seen_ = 0, 0
+for vx_, vz_, vy_ in ((ac.shore_x(lbz_ - 140.0) - 14.0, lbz_ - 140.0,
+                       math.pi * 0.5 - 0.6),
+                      ac._harbour_spot(x0, z0)[:2] + (math.pi * 0.5 - 0.35,)):
+    vv_ = ac.View(vx_, vz_, vy_, 160, 48)
+    ac.render_street(vv_, cn_)
+    for s_ in (-55.0, -30.0, 0.0, 25.0):
+        for y_ in (4.0, 8.0, 13.0, 17.0):
+            for w_ in (0.0, 6.0, -6.0):
+                pr_ = vv_.project(lbx_ + s_, y_, lbz_ + w_)
+                if pr_ is None:
+                    continue
+                px_, py_ = int(round(pr_[0])), int(round(pr_[1]))
+                if 0 <= px_ < 160 and 0 <= py_ < 48:
+                    seen_ += 1
+                    hid_ += ac.hidden(vv_.walls, px_, py_, pr_[2])
+check("she is solid: from the beach and from the town, what is inside her is hidden",
+      seen_ > 60 and hid_ >= seen_ - 4, "%d of %d" % (hid_, seen_))
 check("from the beach she is there at the quay, red funnel and all - and then not",
       fun_ >= 8 and gone_ < fun_ // 3, "%d funnel cells, then %d" % (fun_, gone_))
 

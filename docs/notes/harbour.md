@@ -40,6 +40,23 @@ out along her whichever way reads left to right from where you are (it came out 
 first). **Under way** (`going`, from `_liner_trips`): a white bow wave off the stem and a wake
 fanning out astern. From further than 700 only her lights, in the tiers' rows; to `LINER_SEEN`.
 
+**Solid, and her stern lit - "the part that's facing the city is dark and see through"
+(2026-11-15).** She lies bow out, so the town and the beach see her stern, and it had nothing on
+it, and three things were wrong. (1) She was drawn last, with the harbour: her dark fill painted
+over the quay's lamps and the beach bars in front of her, and everything behind her drawn later
+- her own lights on the far side, the launch pad - came through. She is drawn on her own now,
+first thing after the ground (`draw_liners()`, from `render_street()`), and **`_face()` enters
+every column it fills in `walls[4]`**, inserted nearest first like a facade, which is what
+`hidden()` reads: nearer things drawn after her go over her, further ones are hidden by her.
+(2) Each column is entered at its own distance: her faces are upright, so 1/distance is straight
+across the screen between the face's leftmost and rightmost corners. Entered at each piece's
+furthest corner, as it was first, a side seen at a slant let what was just behind it through
+(6 of 24 test points inside her hidden from the beach; 48 of 48 now). Her filled cells come out
+of `v.water`, or the moon's line and the rocket's flame lay across her hull. (3) The dark faces
+read as holes in the night sky: a faint texture now (`tex`: plating `-` on the hull, `.` on the
+decks), and **the stern is lit** - the aft end of each deck rows of suites with balconies, deck
+edges, portholes across the stern, her name across it.
+
 **Aboard** (`p` at the gangway, `LINER_FEE`; `cruise` in `main()`, counted by `elsewhere()`):
 `liner_sail()` lays out her way (`liner_route()`: a Catmull-Rom line through waypoints set
 off the coast's own line, `shore_x()`, a point every 20 units) - out past the quay, south,
