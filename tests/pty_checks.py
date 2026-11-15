@@ -506,6 +506,20 @@ def cases(run, report):
         print("    he did not take you to the wreck")
         wr_ok = False
     ok &= wr_ok
+    # The glowing sea: e on the panel for a dark night, then out to the cove.
+    gl_st, gl_out = run([(F1, .5), (b"+", .3), (b"e", .4), (b"\x019", 1.5)]
+                        + TACKLE_IN + [(b"", .5), (DOWN, .15), (b"p", .4), (b"x", .5),
+                                       (F1, .5), (b"\x01v", 1.5)] + HERRING_IN
+                        + [(b"", .5), (DOWN, .3), (DOWN, .3), (b"p", 1.0)]
+                        + [(b" ", .3)] * 8 + [(b"", 2.0), (b"x", 1.0)],
+                        cols=300, rows=60)
+    gl_plain = ANSI.sub(b"", gl_out).decode("utf-8", "replace")
+    gl_ok = report("the glowing sea, on a dark night", gl_st, gl_out)
+    if gl_ok and gl_out and not ("a dark night" in gl_plain
+                                 and "going out to the glowing sea" in gl_plain):
+        print("    no dark night, or he did not take you")
+        gl_ok = False
+    ok &= gl_ok
     return ok
 
 

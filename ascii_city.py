@@ -1677,7 +1677,7 @@ def coast_reset():
                  "_ramen_firsts", "_vend_picks", "_vend_faces", "_sewer_cache",
                  "_lair_cache", "_cab_seen", "_station_cache", "_center_cache",
                  "_shore_cache", "_coast_cache", "_beach_blocks", "_kiosk_cache",
-                 "_wreck_cache"):
+                 "_wreck_cache", "_bio_cache"):
         globals()[name].clear()
 
 
@@ -4025,6 +4025,7 @@ class View:
         self.moon_sx = None     # the column the moon's light lies down the sea in
         self.moon_attr = None   # and its colour: the moon's, or the sunrise's
         self.tackle_signs = []  # tackle shops' names, to go up last
+        self.bio = None         # the coves glowing tonight, as (x, z), if any
 
     def ray(self, sx):
         cam = 2.0 * sx / (self.width - 1) - 1.0
@@ -12448,6 +12449,10 @@ def coast_ground(v, kind, x, z, y, sx, glow, now):
             return ".", (g if g is not None else GOLD_DIM)
         return (",", BARK) if h % 43 == 1 else None
     v.water.add((y, sx))
+    if v.bio is not None:
+        for cx, cz in v.bio:
+            if (x - cx) ** 2 + (z - cz) ** 2 < BIO_REACH * BIO_REACH:
+                return bio_glow(v, x, z, e, sx, y, now)
     # The waves. Each crest keeps its number as it comes in, so the gaps in
     # it come in with it.
     n, f = divmod(e * 0.15 + now * 0.5 + 0.3 * math.sin(z * 0.08), 1.0)
@@ -23725,6 +23730,8 @@ def render_street(v, now):
             v.hollow = (hx, hz + HOLLOW_RJ * CELL * 0.72, beat, lamp)
 
     v.tunnels = near_tunnels(v, 90.0)
+    if COAST and v.x + 1500.0 > COAST_LAND * CELL and dark_night(now):
+        v.bio = list(near_bio(v.x, v.z, 1500.0)) or None
     walls = v.walls = draw_walls(ch, co, v, now)
     draw_sky(ch, co, v, walls, wet, now)
     if v.eye >= 10.0:
@@ -23855,6 +23862,8 @@ def render_street(v, now):
             draw_harbour(ch, co, v, walls, h_, now, wet)
         for wx_, wz_, wa_ in near_wrecks(v.x, v.z, 1400.0):
             draw_sea_wreck(ch, co, v, walls, wx_, wz_, wa_, now, wet)
+        for bx_, bz_ in near_bio(v.x, v.z, 900.0):
+            draw_bio(ch, co, v, walls, bx_, bz_, now, wet)
     for bx, bz in near_rowboats(v, now, 120.0):
         draw_rowboat(ch, co, v, walls, bx, bz, now, wet)
     ci_ = int(v.x / CELL + BIG) - BIG
@@ -28926,6 +28935,7 @@ def draw_cheats(ch, co, note):
     more = [("", "AND THE REST")] + [names[k] for k in CHEAT_MORE if k in names]
     more.append(("\\", "storm far ahead"))
     more.append(("^", "launch a rocket"))
+    more.append(("e", "a dark night"))      # the glowing sea; NIGHTS is full
     more.append(("~", "the sea: " + ("on" if COAST else "off")))
     col = 18
     columns = (left, middle, more, sky)
@@ -31824,7 +31834,8 @@ def _marina_spot(x, z):
 def boat_water(x, z):
     """Can she be here: open sea or the river's mouth, and not in the ship."""
     i, j = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
-    if coast_kind(i, j) not in ("sea", "mouth") or herring_in(x, z) or wreck_in(x, z):
+    if (coast_kind(i, j) not in ("sea", "mouth") or herring_in(x, z) or wreck_in(x, z)
+            or bio_in(x, z)):
         return False
     for h_ in near_harbours(x, z, 120.0):
         lx, lz, head = liner_pose(h_, _clock[0])
@@ -32921,7 +32932,7 @@ def render_rave(club, width, height, now):
 HERRING_NAME = "SALTY HERRING"
 CAPTAIN = "Cap'n Redgill"
 HERRING_GAP = 1.5      # between the end of the quay and her stern
-HERRING_BACK = 4.5     # where you are left on the quay, back from the plank
+HERRING_BACK = 3.8     # where you are left on the quay, back from the plank
 HERRING_L = 16.0       # long
 HERRING_B = 5.0        # and across
 HERRING_HUD = (" %s  -  w s choose  -  p or enter: pay and cast off  -  x walks away "
@@ -32947,7 +32958,17 @@ EXPEDITIONS = [
                "caster at least. Ye've a twig. Still - yer money."),
      "there": ("There she lies - the Mary Ellen. Keep 'em off her iron, matey, "
                "or ye'll leave yer line in her!")},
+    {"name": "the glowing sea", "fee": 50, "out": 260.0, "along": -620.0, "sail": 22.0,
+     "water": None, "rod": 1, "site": "bio", "when": "dark",
+     "says": "A cove where the sea lights up. Only on a dark night, mind.",
+     "fish": "lanternfish, moonfish, firefly squid - an' the oarfish, if she shows",
+     "short": ("Ye'll want a proper rod fer the cove - the spinnin' rod at least. "
+               "Still - yer money."),
+     "there": ("Look over the side, matey. Look at that. Fifty year an' it still "
+               "gets me.")},
 ]
+CAP_TOO_BRIGHT = ("Not with a moon like that up, matey - the sea won't glow. Come back "
+                  "on a dark night.")
 CAP_HELLO = [
     "Arr! " + CAPTAIN + ", master o' the " + HERRING_NAME.title()
     + ". Where to, matey?",
@@ -33245,7 +33266,10 @@ def render_captain(trip, tackle, money, width, height, now):
               GOLD if on else HUD)
         fee = "$%d " % exp["fee"]
         _text(ch, co, y + 1, bx + 4, fee, GOLD if on else GOLD_DIM)
-        _text(ch, co, y + 1, bx + 4 + len(fee), exp["fish"][:bw - 6 - len(fee)], HUD)
+        what = exp["fish"]
+        if exp.get("when") == "dark" and not dark_night(now):
+            what = "not tonight - too much moon"
+        _text(ch, co, y + 1, bx + 4 + len(fee), what[:bw - 6 - len(fee)], HUD)
         y += 3
     have = (tackle.rod_kind()[0] if tackle.rod is not None else "no rod")
     _text(ch, co, by + bh - 2, bx + 2, ("you: $%d, %s" % (int(money), have))[:bw - 4],
@@ -33280,6 +33304,20 @@ def render_voyage(trip, width, height, now):
                     "=" if (y - tip) % 2 == 0 else "-")
                 co[y][x] = ROU_RED if edge else (WOOD_LIT if (y - tip) % 2 == 0
                                                  else WOOD)
+    if v.bio is not None and any((cx - x) ** 2 + (cz - z) ** 2 < BIO_REACH ** 2
+                                 for cx, cz in v.bio):
+        # Into the glowing cove: her bow wave lights up as she goes.
+        for y in range(tip, deck):
+            f = (y - tip) / float(max(1, deck - tip))
+            hw = int(f * width * 0.26) + 1
+            for side_ in (-1, 1):
+                for q in range(3):
+                    m = _mix(y, q * side_, int(now * 10.0))
+                    if m % 3:
+                        xx = mx + side_ * (hw + 1 + (m >> 2) % (2 + int(f * 6)))
+                        if 0 <= xx < width:
+                            ch[y][xx] = "'" if m & 32 else "~"
+                            co[y][xx] = NEON[2][0] if m & 64 else NEON[5][0]
     if 0 <= mx < width:
         for y in range(max(1, tip - height // 3), tip):
             for t in range(max(1, k - 1)):
@@ -33422,6 +33460,126 @@ def draw_sea_wreck(ch, co, v, walls, wx, wz, wa, now, wet):
         put_point(ch, co, v, walls, bx, 0.4, bz, "A", ROU_RED)
     put_lit(ch, co, v, walls, bx, 1.5, bz, "*" if on else ".",
             ROU_RED if on else CONCRETE, max(wet, 0.5), now)
+
+
+# --- the glowing sea ----------------------------------------------------------------
+# The third expedition, asked for on 2026-11-15: a cove down the coast from every
+# harbour where, on a night with little moon, the water lights up blue-green
+# with plankton - every wave and the wake of anything moving through it. Rocks
+# stand out of the water round it on the land's side. The Herring only goes on
+# such a night; there, the float leaves rings of light, the line glows, and the
+# fish you are fighting shows under the water, lit, with a trail behind it.
+BIO_REACH = 150.0      # the cove: how far round where the Herring anchors it glows
+BIO_MOON = 0.35        # a night with less of a moon than this is dark enough
+_bio_cache = {}
+ROCK = [
+    "   _   ",
+    "  / \\_ ",
+    " /    \\",
+    "/______\\",
+]
+
+
+def bio_exp():
+    return next(e for e in EXPEDITIONS if e.get("site") == "bio")
+
+
+def bio_site(h):
+    """(x, z) of the middle of the cove off this harbour: where she anchors."""
+    hit = _bio_cache.get(h)
+    if hit is None:
+        x, z, _ = route_pose(expedition_route(h, bio_exp()), 1.0)
+        hit = _bio_cache[h] = (x, z)
+    return hit
+
+
+def moon_light(now):
+    """How much of a moon tonight: 1 full, 0 new."""
+    return 1.0 - abs(night(now)["phase"] - 0.5) * 2.0
+
+
+def dark_night(now):
+    """Is tonight dark enough for the sea to glow: little moon, and not a
+    morning coming up."""
+    return moon_light(now) < BIO_MOON and dawn(now) == 0.0
+
+
+def skip_to_dark(now):
+    """The menu's: on to the next night with little enough moon."""
+    global _night_skip
+    for _ in range(60):
+        if dark_night(now):
+            return True
+        _night_skip += NIGHT_LENGTH
+    return False
+
+
+def near_bio(x, z, reach):
+    """The coves within reach, as (x, z)."""
+    if not COAST or x + reach < COAST_LAND * CELL:
+        return
+    for h in near_harbours(x, z, reach + 800.0):
+        cx, cz = bio_site(h)
+        if (cx - x) ** 2 + (cz - z) ** 2 < reach * reach:
+            yield cx, cz
+
+
+def bio_rocks(cx, cz):
+    """The rocks round a cove, on the land's side of it: (x, z, how big)."""
+    out = []
+    for k in range(9):
+        m = _mix(int(cx), k, 6701)
+        a = math.pi * (0.15 + 0.7 * k / 8.0) + ((m & 15) - 7) * 0.02
+        r = BIO_REACH * (0.78 + ((m >> 4) & 15) / 100.0)
+        s = 2.5 + ((m >> 8) & 7) * 0.6
+        out.append((cx - math.sin(a) * r, cz + math.cos(a) * r, s))
+    return out
+
+
+def bio_in(x, z):
+    """Is this point one of the cove's rocks: for the speedboat."""
+    for cx, cz in near_bio(x, z, BIO_REACH + 20.0):
+        for rx, rz, s in bio_rocks(cx, cz):
+            if (rx - x) ** 2 + (rz - z) ** 2 < (s + 1.0) ** 2:
+                return True
+    return False
+
+
+def bio_glow(v, x, z, e, sx, y, now):
+    """A point of the sea in a glowing cove, (glyph, colour), or None: the
+    crests lit as they come in, a trail of light behind each, and sparks."""
+    lit, dim = NEON[2][0], NEON[2][1]
+    green = NEON[5][0]
+    near = y - v.horizon > 6                # far off, only a glimmer
+    n, f = divmod(e * 0.15 + now * 0.5 + 0.3 * math.sin(z * 0.08), 1.0)
+    h = _mix(int(x * 2.0), int(z * 2.0) + int(now * 2.0), 6703)
+    m = _mix(int(n), int(z * 0.3), 5207)
+    if f < 0.12 and m % 4:
+        if not near:
+            return ("~", dim) if m % 3 else None
+        return "~", (lit if m % 3 else green)
+    if near and f < 0.26 and h % 4 == 0:
+        return ".", dim                     # what the crest leaves behind it
+    if h % 17 == 0:
+        return ("'" if h & 16 else "."), (green if h & 32 else dim)
+    return None
+
+
+def draw_bio(ch, co, v, walls, cx, cz, now, wet):
+    """The cove's rocks, black against the lit water, the water breaking
+    round them in light on a dark night."""
+    lit = v.bio is not None
+    for rx, rz, s in bio_rocks(cx, cz):
+        if (rx - v.x) ** 2 + (rz - v.z) ** 2 > 700.0 ** 2:
+            continue
+        blit_sprite(ch, co, v, walls, ROCK, rx, rz, -0.3, s * 1.4, s * 2.6, CONCRETE)
+        if lit:
+            for k in range(6):
+                m = _mix(k, int(now * 3.0) + int(rx), 6705)
+                a = (m & 63) / 10.0
+                put_point(ch, co, v, walls, rx + math.cos(a) * s * 1.2, 0.05,
+                          rz + math.sin(a) * s * 1.2, "~" if m & 64 else "'",
+                          NEON[2][0] if m & 128 else NEON[5][0])
 
 
 # --- the captain's cabin ---------------------------------------------------------
@@ -33844,7 +34002,7 @@ FISH_BOX = 20          # what the cool box holds
 WATER_NAMES = {"river": "the river", "lake": "the lake", "mouth": "the river's mouth",
                "surf": "the surf", "inshore": "off the pier", "deep": "deep water",
                "offshore": "the open sea", "harbour": "the harbour",
-               "wreck": "the wreck",
+               "wreck": "the wreck", "bio": "the glowing sea",
                "fountain": "the fountain"}
 _fish_rare = [False]   # the menu's: the next bite is the rarest thing there
 
@@ -33985,6 +34143,19 @@ FISH = [
     _sp("giant grouper", ("wreck",), ("squid", "biglure"), 40.0, 180.0, 2.1, 0.8, 12,
         "GOLD_DIM", "round", legend=True,
         say="it lives in her hold. it is most of her hold"),
+    # In the glowing sea.
+    _sp("lanternfish", ("bio",), ("squid", "lugworm", "spinner"), 0.05, 0.2, 0.15, 30,
+        20, "neon2", "lantern",
+        say="lights down its sides, like a little train at night"),
+    _sp("flashlight fish", ("bio",), ("lugworm", "squid"), 0.1, 0.4, 0.2, 18, 15,
+        "neon5", "round", say="a lamp under each eye. it blinks them at you"),
+    _sp("firefly squid", ("bio",), ("spinner",), 0.05, 0.15, 0.2, 14, 40, "neon2",
+        "squid", say="it lights up blue when you touch it. so do you"),
+    _sp("moonfish", ("bio",), ("squid", "spinner"), 5.0, 40.0, 1.05, 6, 10, "ROU_RED",
+        "round", say="round as the moon you came out here to get away from"),
+    _sp("oarfish", ("bio",), ("squid", "lugworm"), 20.0, 80.0, 1.7, 0.8, 15, "SNOW",
+        "oarfish", legend=True,
+        say="a silver sea-serpent with a red crest. every sailor's story was true"),
     _sp("old boot", ("river", "mouth", "harbour", "lake"), (), 0.6, 1.4, 0.3, 4, 0,
         "BARK", "boot", junk=True, say="the other one is still down there"),
     _sp("shopping trolley", ("river",), (), 9.0, 16.0, 0.45, 2.5, 0, "CURB",
@@ -34005,6 +34176,8 @@ FISH = [
         junk=True, say="it has a crab living in it. had"),
     _sp("deckchair", ("harbour",), (), 3.0, 5.0, 0.4, 1, 0, "neon3", "junk",
         junk=True, say="off the Midnight Star, by the stripes"),
+    _sp("glowing jellyfish", ("bio",), (), 0.2, 1.5, 0.2, 7, 0, "neon2", "jelly",
+        junk=True, say="it stings. of course it stings"),
     _sp("ship's bell", ("wreck",), (), 6.0, 9.0, 0.5, 2, 40, "GOLD", "bell",
         junk=True, say="MARY ELLEN, it says round it. it still rings"),
     _sp("porthole", ("wreck",), (), 2.0, 4.0, 0.35, 3, 15, "GOLD_DIM", "porthole",
@@ -34133,6 +34306,17 @@ FISH_ART = {
     "coins": ["  (o) (o)  ",
               " (o)(o)(o) ",
               "(o)(o)(o)(o)"],
+    "lantern": ["   .--.     ",
+                " >( o o o )>",
+                "   `--'     "],
+    "jelly": ["  .---.  ",
+              " (  o  ) ",
+              "  ~^~^~  ",
+              "  ( ) )  ",
+              "   ) (   "],
+    "oarfish": ["  ^^^^^^^^^^^^^^^^^^^^^^^^^^        ",
+                "<(o====================================~~>",
+                "  vvvvvvvvvvvvvvvvvvvvvvvvvv        "],
     "bell": ["   _   ",
              "  ( )  ",
              " /   \\ ",
@@ -34204,6 +34388,8 @@ def fish_water(x, z):
                 return "harbour"
             if out > 250.0 and any(True for _ in near_wrecks(x, z, WRECK_REACH)):
                 return "wreck"
+            if out > 100.0 and any(True for _ in near_bio(x, z, BIO_REACH)):
+                return "bio"
             return ("surf" if out < FISH_SURF else "inshore" if out < FISH_INSHORE
                     else "deep" if out < FISH_DEEP else "offshore")
     if river_at(i, j):
@@ -34618,6 +34804,7 @@ class Fishing:
         self.rod_side = 0
         self.charge_at = self.charge_until = 0.0
         self.snag, self.snagged, self.free, self.snags = 0.0, None, 0.0, 0
+        self.trail = []         # in the glowing sea: where the fish has been
         self.big = False
         self.kg = self.cast_power = 0.0
 
@@ -34786,6 +34973,7 @@ class Fishing:
         self.run_until = self.charge_at = self.charge_until = 0.0
         self.run_at = now + 1.0 + self.rng.random() * 2.0
         self.snag, self.snagged, self.free, self.snags = 0.0, None, 0.0, 0
+        self.trail = []
         self.crank_until = self.give_until = 0.0
         self.to("fight", now)
         self.say("something heavy..." if sp["junk"] else "FISH ON!", now)
@@ -34887,6 +35075,8 @@ class Fishing:
             want = pull * 0.8
             self.line += (speed * 0.4 if run else 0.4 * p * self.stam) * dt
         self.ten += (want - self.ten) * min(1.0, dt * 6.0)
+        if self.water == "bio" and (not self.trail or now - self.trail[-1][2] > 0.08):
+            self.trail = (self.trail + [self.fish_at() + (now,)])[-16:]
         if not junk:
             if not run:
                 self.side *= math.exp(-dt * 0.7)
@@ -35066,9 +35256,10 @@ def draw_rod(ch, co, f, v, now, k):
         tense = f.phase == "fight"
         sag = 0.0 if f.phase == "flight" else (
             max(0.0, 2.5 - f.ten * 3.0) if tense else 2.0)
+        glowing = f.water == "bio" and f.phase in ("wait", "fight")
         _line(ch, co, tx, ty, end[0], end[1], sag, ":" if tense and f.ten > 0.8
               else ".", ROU_RED if tense and f.ten > f.tackle.rod_kind()[3] * 0.85
-              else STAR)
+              else NEON[2][0] if glowing else STAR)
     return tx, ty
 
 
@@ -35088,10 +35279,21 @@ def draw_float(ch, co, v, walls, f, now, wet):
     if pr is None:
         return
     sx, sy, d = int(round(pr[0])), int(round(pr[1])), pr[2]
+    lit_sea = v.bio is not None and (f.water == "bio" or (
+        f.phase == "flight" and fish_water(*f.land) == "bio"))
     if f.phase == "flight":
+        if lit_sea:
+            # Where it went, a trail of light hanging in the air behind it.
+            u = min(1.0, (now - f.t0) / FISH_FLIGHT)
+            for q in range(1, 7):
+                pt_ = f.float_at(f.t0 + max(0.0, u - q * 0.05) * FISH_FLIGHT)
+                put_point(ch, co, v, walls, pt_[0], pt_[1], pt_[2], ".",
+                          NEON[2][0] if q < 3 else NEON[2][1])
         put_cell(ch, co, v, walls, sx, sy, d, "o" if kind else "*",
                  FIREFLY if glow else ROU_RED if kind else CURB)
         return
+    if f.phase == "fight" and lit_sea:
+        draw_lit_fish(ch, co, v, walls, f, now)
     if f.phase == "fight":
         thrash = f.running(now)
         n = 6 if thrash else 3
@@ -35112,6 +35314,15 @@ def draw_float(ch, co, v, walls, f, now, wet):
             r = 0.3 + since * 2.0
             put_point(ch, co, v, walls, x + math.cos(a) * r, 0.05, z + math.sin(a) * r,
                       "'" if since < 0.3 else ".", SNOW)
+    if lit_sea:
+        # The float on the glowing water: rings of light going out from it.
+        for ring in range(2):
+            r = ((now * 0.7 + ring * 0.5) % 1.0) * 2.4
+            for q in range(10):
+                a = q * 0.628
+                put_point(ch, co, v, walls, x + math.cos(a) * r, 0.02,
+                          z + math.sin(a) * r, ".",
+                          NEON[2][0] if r < 1.2 else NEON[2][1])
     if f.nibbling(now) or f.biting(now):
         r = 0.6 if f.biting(now) else 0.35
         for q in range(6):
@@ -35132,6 +35343,32 @@ def draw_float(ch, co, v, walls, f, now, wet):
                  ROU_RED if kind == 1 else GOLD)
         put_cell(ch, co, v, walls, sx, sy, d, "|" if lit else ".",
                  SNOW if lit else CURB)
+
+
+def draw_lit_fish(ch, co, v, walls, f, now):
+    """In the glowing sea, the fish you are fighting, under the water: lit
+    up by the plankton it swims through, its body pointing the way it is
+    going, and a trail of light behind it."""
+    lit, dim, green = NEON[2][0], NEON[2][1], NEON[5][0]
+    for n, (tx, tz, _) in enumerate(f.trail[:-1]):
+        put_point(ch, co, v, walls, tx, -0.4, tz, "." if n < len(f.trail) - 6 else ":",
+                  dim if n < len(f.trail) - 6 else green)
+    fx, fz = f.fish_at()
+    if len(f.trail) >= 2:
+        ax_, az_ = f.trail[-2][0], f.trail[-2][1]
+    else:
+        ax_, az_ = f.x, f.z
+    hx, hz = fx - ax_, fz - az_
+    m = math.hypot(hx, hz) or 1.0
+    hx, hz = hx / m, hz / m
+    size = 0.6 + 0.4 * min(3.0, FISH[f.who]["power"] * 2.0)
+    for k, g in ((-2, "<"), (-1, "="), (0, "="), (1, "o"), (2, ">")):
+        put_point(ch, co, v, walls, fx + hx * k * size * 0.5, -0.5,
+                  fz + hz * k * size * 0.5, g, lit)
+    for q in range(5):
+        a = now * 6.0 + q * 1.26
+        put_point(ch, co, v, walls, fx + math.cos(a) * size, -0.2,
+                  fz + math.sin(a) * size, "'", green if q % 2 else lit)
 
 
 def draw_aim(ch, co, v, walls, f, now):
@@ -35930,6 +36167,9 @@ def main(stdscr):
                 elif key == ord("+"):
                     wallet.give(1000)
                     note = "+$1000"
+                elif key == ord("e") and not hidden_next:
+                    note = ("a dark night - the coves glow" if skip_to_dark(now)
+                            else "no such night near")
                 elif key == ord("g") and not hidden_next:
                     _fish_rare[0] = True
                     note = "the next bite is a big one - the rarest there is"
@@ -36098,6 +36338,8 @@ def main(stdscr):
                         exp_ = EXPEDITIONS[trip["sel"]]
                         if tackle.rod is None:
                             trip["say"] = CAP_NO_ROD
+                        elif exp_.get("when") == "dark" and not dark_night(now):
+                            trip["say"] = CAP_TOO_BRIGHT
                         elif not wallet.take(exp_["fee"]):
                             trip["say"] = CAP_NO_CASH % exp_["fee"]
                         else:

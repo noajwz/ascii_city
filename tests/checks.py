@@ -10480,6 +10480,70 @@ check("snagged: slack frees it; holding on, the line parts on her",
 check("he says when you have not the rod she wants",
       wexp_["rod"] == 2 and "surf caster" in wexp_["short"]
       and "Mary Ellen" in wexp_["there"])
+# The glowing sea: the third, a cove that lights up on a night with little
+# moon - and he only goes on such a night.
+bexp_ = ac.bio_exp()
+brt_ = ac.expedition_route(hh_, bexp_)
+bax_, baz_, bah_ = ac.route_pose(brt_, 1.0)
+bright_ = next(t_ for t_ in range(0, 200000, 690) if not ac.dark_night(float(t_)))
+dark_ = next(t_ for t_ in range(0, 200000, 690) if ac.dark_night(float(t_)))
+rocks_ = ac.bio_rocks(bax_, baz_)
+check("the glowing sea: on his list, a cove off the beach, its own water, rocks round it",
+      bexp_ in ac.EXPEDITIONS and bexp_.get("when") == "dark"
+      and ac.fish_water(bax_ + 10.0, baz_) == "bio"
+      and ac.fish_water(ac.shore_x(baz_) + 40.0, baz_) != "bio"
+      and all(rx_ < bax_ for rx_, _, _ in rocks_)
+      and not ac.boat_water(rocks_[0][0], rocks_[0][1]))
+dark_n_ = sum(ac.dark_night(float(t_)) for t_ in range(0, 690 * 200, 690))
+check("a dark enough night comes round now and then, and e on the panel finds one",
+      40 < dark_n_ < 140 and ac.skip_to_dark(float(bright_))
+      and ac.dark_night(float(bright_)), "%d of 200 nights" % dark_n_)
+ac._night_skip = 0.0
+ac.NEON[2], lit_was_ = (9921, 9922), ac.NEON[2]
+
+
+def lit_cells_(t_):
+    vv_ = ac.View(bax_, baz_, bah_, 160, 45, eye=3.4)
+    return sum(1 for r_ in ac.render_street(vv_, t_)[1] for c_ in r_ if c_ == 9921)
+
+
+lit_dark_, lit_bright_ = lit_cells_(float(dark_)), lit_cells_(float(bright_))
+ac.NEON[2] = lit_was_
+check("on a dark night the cove's water lights up blue-green; with a moon, not",
+      lit_dark_ > 100 and lit_bright_ * 8 < lit_dark_,       # a few are other neon
+      "%d / %d" % (lit_dark_, lit_bright_))
+bpool_ = {ac.FISH[n_]["name"] for n_, _ in ac.bite_pool("bio", "squid", 0.0)}
+check("its fish: lanternfish, moonfish, the oarfish, and a jellyfish that stings",
+      {"lanternfish", "moonfish", "oarfish", "glowing jellyfish"} <= bpool_
+      and ac.FISH[wn_["oarfish"] if "oarfish" in wn_ else
+                  [n_ for n_, sp_ in enumerate(ac.FISH) if sp_["name"] == "oarfish"][0]]
+      ["legend"])
+trb_ = {"phase": "talk", "h": hh_, "sel": 2, "t0": 0.0, "say": ac.CAP_HELLO[0]}
+gb_ = "".join("".join(r_) for r_ in ac.render_captain(trb_, ac.Tackle(), 50, 160, 45,
+                                                       float(bright_))[0])
+gd_ = "".join("".join(r_) for r_ in ac.render_captain(trb_, ac.Tackle(), 50, 160, 45,
+                                                       float(dark_))[0])
+check("his list says so when there is too much moon for it",
+      "too much moon" in gb_ and "too much moon" not in gd_)
+ac.NEON[2], lit_was_ = (9921, 9922), ac.NEON[2]
+bf2_ = ac.Fishing(bax_, baz_, bah_, rig_(2, 3), float(dark_), 3, deck=ac.HerringDeck())
+bf2_.land, bf2_.water = (bax_ + 20.0, baz_), "bio"
+bf2_.who = [n_ for n_, sp_ in enumerate(ac.FISH) if sp_["name"] == "moonfish"][0]
+bf2_.hook(float(dark_))
+t_ = float(dark_)
+for q_ in range(40):
+    t_ += 1.0 / 30.0
+    bf2_.key("back", t_)
+    bf2_.step(t_)
+gf_, cf_, vf_ = ac.render_fishing(bf2_, 160, 45, t_)
+ac.NEON[2] = lit_was_
+fx_, fz_ = bf2_.fish_at()
+pf_ = vf_.project(fx_, -0.5, fz_)
+near_lit_ = pf_ is not None and any(
+    cf_[y_][x_] == 9921 for y_ in range(max(0, int(pf_[1]) - 2), min(45, int(pf_[1]) + 3))
+    for x_ in range(max(0, int(pf_[0]) - 3), min(160, int(pf_[0]) + 4)))
+check("in a fight there the fish shows under the water, lit, with a trail behind",
+      len(bf2_.trail) >= 8 and near_lit_)
 # The captain's cabin: c from the deck, the whole turn round, drinks and bait.
 cw_ = ac.Wallet(100)
 ct_ = rig_(3, 5)
