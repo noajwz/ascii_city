@@ -16774,16 +16774,42 @@ def _gangway_spot(x, z):
     return gx, gz + 1.0, math.pi
 
 
-def _face(ch, co, v, walls, pts, glyph, attr):
+def _face(ch, co, v, walls, pts, glyph, attr, tex=None):
     """One flat face of the ship, filled in on the screen, so that what is
     behind it is behind it: she is drawn in points and lines, and without this
-    the sea and the far coast showed through her between the windows."""
+    the sea and the far coast showed through her between the windows.
+
+    And entered in the column's runs, the way a building's front is
+    (walls[4], nearest first, which hidden() reads): filling the face only
+    blanks what was drawn before her, and everything drawn after - her own
+    lights on the far side, the launch pad behind her - came through her,
+    so from the town she looked dark and see-through. Entered at its own
+    distance in each column - her faces stand upright, so one column of a
+    face is one distance, and one over the distance goes straight across
+    the screen - a little further, so what is drawn on it is not hidden by
+    it. At the furthest corner of each piece, as it was first, a side seen
+    at a slant let what was just behind it through.
+
+    tex is (glyph, colour, in a hundred): a faint texture on the dark fill,
+    or a face as dark as the night sky reads as a hole in it."""
     pr = [v.project(*p) for p in pts]
     if any(p is None for p in pr):
         return
-    d = sum(p[2] for p in pr) / len(pr)
+    lo_p = min(pr, key=lambda p: p[0])
+    hi_p = max(pr, key=lambda p: p[0])
+    near_d, far_d = min(p[2] for p in pr), max(p[2] for p in pr)
+    span = hi_p[0] - lo_p[0]
+
+    def depth(x):
+        if span < 0.5:
+            return sum(p[2] for p in pr) / len(pr)
+        f = max(0.0, min(1.0, (x - lo_p[0]) / span))
+        inv = 1.0 / lo_p[2] + (1.0 / hi_p[2] - 1.0 / lo_p[2]) * f
+        return max(near_d, min(far_d, 1.0 / inv))
+
     ys = [p[1] for p in pr]
     n = len(pr)
+    cols = {}
     for y in range(max(0, int(round(min(ys)))),
                    min(v.height - 1, int(round(max(ys)))) + 1):
         xs = []
@@ -16795,7 +16821,22 @@ def _face(ch, co, v, walls, pts, glyph, attr):
             continue
         for x in range(max(0, int(round(min(xs)))),
                        min(v.width - 1, int(round(max(xs)))) + 1):
-            put_cell(ch, co, v, walls, x, y, d, glyph, attr)
+            d = depth(x)
+            if tex is not None and _mix(x, y, 6113) % 100 < tex[2]:
+                put_cell(ch, co, v, walls, x, y, d, tex[0], tex[1])
+            else:
+                put_cell(ch, co, v, walls, x, y, d, glyph, attr)
+            v.water.discard((y, x))     # no moonlight laid across her hull
+            lo, hi = cols.get(x, (y, y))
+            cols[x] = (min(lo, y), max(hi, y))
+    runs = walls[4]
+    for x, (lo, hi) in cols.items():
+        far = depth(x) + 0.3
+        col = runs[x]
+        k = 0
+        while k < len(col) and col[k][0] <= far:
+            k += 1
+        col.insert(k, (far, lo, hi))
 
 
 def draw_liner(ch, co, v, walls, x, z, heading, now, wet, far, going=False):
@@ -16837,37 +16878,41 @@ def draw_liner(ch, co, v, walls, x, z, heading, now, wet, far, going=False):
     pb = v.project(*at(4.0, side * beam, LINER_HULL))
     fwd_right = pa is None or pb is None or pb[0] >= pa[0]   # the bow is to the right
     up_fwd, up_aft = ("/", "\\") if fwd_right else ("\\", "/")
+    hull_tex = ("-", STREET, 10)         # plating, faint, on the dark hull
+    deck_tex = (".", CURB, 7)            # and the white of the decks at night
     if not far:
         # The hull's end, if you can see it: the rounded stern, or the stem.
         if ahead < -half:
             _face(ch, co, v, walls, [at(-half + 2.0, -beam, 0.0),
                                      at(-half + 2.0, beam, 0.0),
                                      at(-half, beam * 0.75, sheer(-half)),
-                                     at(-half, -beam * 0.75, sheer(-half))], " ", 0)
+                                     at(-half, -beam * 0.75, sheer(-half))], " ", 0,
+                  hull_tex)
         # Her side, dark, under the deck line.
         s = -half
         while s < bow:
             e = min(bow, s + 10.0)
             _face(ch, co, v, walls, [at(s, side * beam, 0.0), at(e, side * beam, 0.0),
                                      at(e, side * beam, sheer(e)),
-                                     at(s, side * beam, sheer(s))], " ", 0)
+                                     at(s, side * beam, sheer(s))], " ", 0, hull_tex)
             s = e
         # The bow: the side narrows to the stem, which rakes forward going up.
         _face(ch, co, v, walls, [at(bow, side * beam, 0.0), at(half, 0.0, 0.0),
                                  at(stem, 0.0, sheer(half)),
-                                 at(bow, side * beam, sheer(bow))], " ", 0)
+                                 at(bow, side * beam, sheer(bow))], " ", 0, hull_tex)
         # The decks, each a dark block set in from the side with its front
         # raked back, so they terrace up towards the funnel.
         for s0, s1, y0, y1 in tiers:
             w_ = side * (beam - 2.0)
             _face(ch, co, v, walls, [at(s0, w_, y0), at(s1, w_, y0),
-                                     at(s1 - 2.5, w_, y1), at(s0, w_, y1)], " ", 0)
+                                     at(s1 - 2.5, w_, y1), at(s0, w_, y1)], " ", 0,
+                  deck_tex)
         for s0, s1, y0, y1 in tiers:
             end = s0 if ahead < 0.0 else s1
             _face(ch, co, v, walls, [at(end, -(beam - 2.0), y0),
                                      at(end, beam - 2.0, y0),
                                      at(end, beam - 2.0, y1),
-                                     at(end, -(beam - 2.0), y1)], " ", 0)
+                                     at(end, -(beam - 2.0), y1)], " ", 0, deck_tex)
         # The funnel, raked aft, red with a gold band, and the mast forward of it.
         fs = -half + 36.0
         _face(ch, co, v, walls, [at(fs - 5.0, side * 4.0, LINER_TOP),
@@ -16967,6 +17012,56 @@ def draw_liner(ch, co, v, walls, x, z, heading, now, wet, far, going=False):
         for k in range(-3, 4):
             put_point(ch, co, v, walls, *at(bs - 1.0, k * 1.6, LINER_TOP - 1.4), "#",
                       tone_colour("cold", 0.8))
+        if ahead < 0.0:
+            # The end that faces the town: the decks' aft ends lit, suites
+            # with their balconies looking out over the wake, deck over deck.
+            for t_, (s0, s1, y0, y1) in enumerate(tiers):
+                w0 = beam - 3.0
+                w_ = -w0
+                while w_ <= w0:
+                    put_point(ch, co, v, walls, *at(s0 - 0.05, w_, y1), "_", ROU_BLACK)
+                    w_ += 1.0
+                y_ = y0 + 1.5
+                deck = 20 + t_ * 3
+                while y_ < y1 - 0.4:
+                    w_ = -w0
+                    while w_ <= w0:
+                        m = _mix(int(w_ * 2.0) + 100, deck, 6103)
+                        put_point(ch, co, v, walls, *at(s0 - 0.08, w_, y_ - 0.9), "=",
+                                  CURB)
+                        p = at(s0 - 0.1, w_, y_)
+                        if m % 4:
+                            put_point(ch, co, v, walls, *p, "#" if m % 3 else "o",
+                                      tone_colour("warm", (m >> 4 & 15) / 15.0))
+                        else:
+                            put_point(ch, co, v, walls, *p, ".", BULB_DIM)
+                        w_ += 1.6
+                    y_ += 2.4
+                    deck += 1
+        if ahead < -half:
+            # And the stern itself: its rail, portholes, her name across it.
+            w_ = -beam * 0.75
+            while w_ <= beam * 0.75:
+                put_point(ch, co, v, walls, *at(-half - 0.05, w_, sheer(-half)), "_",
+                          ROU_BLACK)
+                w_ += 1.0
+            for y_ in (3.2, 6.0):
+                w_ = -beam * 0.6
+                while w_ <= beam * 0.6:
+                    if _mix(int(w_ * 3.0), int(y_), 6115) % 4:
+                        put_point(ch, co, v, walls, *at(-half + 0.9, w_, y_), "o",
+                                  BULB_DIM)
+                    w_ += 2.5
+            pl = v.project(*at(-half, -1.0, 8.0))
+            pr_ = v.project(*at(-half, 1.0, 8.0))
+            across = 1.0 if pl is None or pr_ is None or pr_[0] >= pl[0] else -1.0
+            gap_ = 1.5
+            w0_ = -across * gap_ * (len(LINER_NAME) - 1) * 0.5
+            for k, c in enumerate(LINER_NAME):
+                if c != " ":
+                    put_lit(ch, co, v, walls,
+                            *at(-half + 0.4, w0_ + across * k * gap_, 8.3), c,
+                            NEON[1][0], max(wet, 0.3), now)
         # Her name, at the bow, in lights - read left to right from whichever
         # side you see her: the way along her that goes right on the screen.
         gap = 2.6
@@ -17015,10 +17110,10 @@ def draw_liner(ch, co, v, walls, x, z, heading, now, wet, far, going=False):
 
 
 def draw_harbour(ch, co, v, walls, h, now, wet):
-    """The quay and the ship: lamps down both sides of it, bollards along the
-    edge she lies against, HARBOUR in lights over the way on, the gangway up
-    to her side, a green light on the end of the quay - and her, at the quay or
-    out on her way."""
+    """The quay: lamps down both sides of it, bollards along the edge the
+    ship lies against, HARBOUR in lights over the way on, the gangway up to
+    her side, a green light on the end of the quay. She is drawn on her own,
+    much earlier (draw_liners())."""
     r0, end = h
     z0, z1 = r0 * CELL, (r0 + QUAY_BROAD) * CELL
     root = (int(math.floor(coastline(r0 + QUAY_BROAD // 2))) - BEACH_DEEP) * CELL
@@ -17068,13 +17163,26 @@ def draw_harbour(ch, co, v, walls, h, now, wet):
                     put_point(ch, co, v, walls, gx + 0.8, 0.9 + 6.0 * f, zz, "\\", CURB)
                 put_lit(ch, co, v, walls, gx, 8.4, hull + 0.1, "o", BULB, 0.3, now)
             draw_marina(ch, co, v, walls, h, now, wet, _boat_out[0] == h)
-    if _aboard[0] == h:
+
+
+def draw_liners(ch, co, v, walls, now, wet):
+    """The cruise ships in view, at their quays or out on their way - drawn
+    straight after the ground, before anything else: she fills her faces and
+    enters them in the columns' runs, so what is nearer, drawn after her,
+    goes over her, and what is further, drawn after her, is hidden by her.
+    Drawn last, with the harbour, her fill painted over the quay's lamps and
+    the beach bars in front of her, and everything behind her drawn later -
+    her own lights on the far side, the launch pad - came through her."""
+    if not COAST or v.x + LINER_SEEN < COAST_LAND * CELL:
         return
-    lx, lz, head = liner_pose(h, now)
-    d = math.hypot(lx - v.x, lz - v.z)
-    if d < LINER_SEEN:
-        draw_liner(ch, co, v, walls, lx, lz, head, now, wet, d > 700.0,
-                   h in _liner_trips)
+    for h in near_harbours(v.x, v.z, LINER_SEEN):
+        if _aboard[0] == h:
+            continue
+        lx, lz, head = liner_pose(h, now)
+        d = math.hypot(lx - v.x, lz - v.z)
+        if d < LINER_SEEN:
+            draw_liner(ch, co, v, walls, lx, lz, head, now, wet, d > 700.0,
+                       h in _liner_trips)
 
 
 def render_cruise(h, look, width, height, now):
@@ -23576,6 +23684,7 @@ def render_street(v, now):
     if v.eye >= 10.0:
         draw_moon_river(ch, co, v, walls, now)
         draw_far_traffic(ch, co, v, walls, now)
+    draw_liners(ch, co, v, walls, now, wet)
     tunnels = v.tunnels
     draw_tunnel_ceiling(ch, co, v, walls, now, tunnels)
     draw_flash(ch, co, v, walls, v.flash)
