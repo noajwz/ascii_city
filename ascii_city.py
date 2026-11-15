@@ -34338,7 +34338,7 @@ def render_cabin(trip, f, tackle, width, height, now):
             by = ceil + 1
             if bx > 0 and by + len(board) + 2 < sill + 3:
                 for y in range(by, by + len(board) + 2):
-                    for x in range(bx, bx + bw):
+                    for x in range(bx, min(width, bx + bw)):    # he may be off the edge
                         ch[y][x], co[y][x] = " ", 0
                 _box(ch, co, bx, by, bw, len(board) + 2, WOOD_LIT)
                 for r_, line in enumerate(board):

@@ -10691,8 +10691,8 @@ check("he is to starboard: facing him, you are served; turned away, not",
 tr2_ = {"h": hh_, "phase": "fish", "cabin": ac.new_cabin(ah_, 0.0)}
 bad_ = []
 for w_, h_ in ((30, 10), (60, 20), (110, 34), (160, 45), (300, 90), (451, 133)):
-    for q_ in range(8):
-        tr2_["cabin"]["yaw"] = ah_ + q_ * math.pi / 4.0
+    for q_ in range(64):            # eighths missed him half off the right edge
+        tr2_["cabin"]["yaw"] = ah_ + q_ * math.tau / 64.0
         try:
             gc_ = ac.render_cabin(tr2_, bf_, ct_, w_, h_, 5.0 + q_)[0]
             txt_ = "".join("".join(r_) for r_ in gc_)
