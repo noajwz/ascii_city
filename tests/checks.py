@@ -27,7 +27,7 @@ ac.COAST = False
 # And the ways to the coast come off the lists till then: with no sea there
 # is no beach for the taxi or the checks' jumps to find.
 COAST_KINDS = ("beach", "seapier", "seawheel", "launchpad", "mission",
-               "harbour", "gangway", "marina", "piertackle")
+               "harbour", "gangway", "marina", "piertackle", "herring")
 coast_jumps_ = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] in COAST_KINDS]
 coast_fares_ = [p_ for p_ in ac.TAXI_DESTS if p_[1] in COAST_KINDS]
 ac.CHEAT_HIDDEN[:] = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] not in COAST_KINDS]
@@ -10321,13 +10321,53 @@ ac._big_screens[0] = True
 check("on a big window the shop's name is in block letters; small, and z, not",
       pat_["name"] not in big_ and pat_["name"] in small_ and pat_["name"] in shz_
       and "###" in big_)
-bf_ = ac.Fishing(ac.shore_x(400.0) + 650.0, 400.0, -math.pi / 2, rig_(3, 5), 300.0, 9,
-                 boat=ac.Boat(ac.shore_x(400.0) + 650.0, 400.0, -math.pi / 2, 300.0, 1))
+# The fishing boat: no fishing off the speedboat; the Salty Herring and her
+# captain take you, to one place at a time.
+check("the speedboat is for driving: nothing about fishing at her wheel",
+      "fish" not in ac.BOAT_HUD)
+hs_ = ac.find_place(x0, z0, "herring")
+hh_ = ac.herring_near(hs_[0], hs_[1])
+hbx_, hbz_ = ac.herring_berth(hh_)
+check("the fishing boat at the quay, past the boat hire; her captain by the plank",
+      hh_ is not None and ac.can_stand(hs_[0], hs_[1])
+      and "Redgill" in ac.harbour_hint(hs_[0], hs_[1], 0.0)
+      and ac.coast_kind(int(hbx_ / ac.CELL), int(hbz_ / ac.CELL)) == "sea"
+      and hbx_ - ac.marina(hh_)[0] > 40.0
+      and ("the fishing boat", "herring") in ac.TAXI_DESTS)
+check("and the speedboat cannot drive through her",
+      not ac.boat_water(hbx_, hbz_) and ac.boat_water(hbx_, hbz_ + 9.0))
+bad_ = []
+for exp_ in ac.EXPEDITIONS:
+    rt_ = ac.expedition_route(hh_, exp_)
+    if not all(ac.boat_water(*p_) or ac.herring_in(*p_) for p_ in rt_[0]):
+        bad_.append((exp_["name"], "aground"))
+    end_ = rt_[0][-1]
+    if (exp_["water"] or ac.fish_water(*end_)) is None:
+        bad_.append((exp_["name"], "no water"))
+check("every expedition's way is all sea, and ends where there are fish",
+      not bad_ and ac.fish_water(*ac.expedition_route(hh_, ac.EXPEDITIONS[0])[0][-1])
+      == "offshore", str(bad_))
+tr_ = {"phase": "talk", "h": hh_, "sel": 0, "t0": 0.0, "say": ac.CAP_HELLO[0]}
+bad_ = []
+for w_, h_ in ((30, 10), (60, 20), (110, 34), (160, 45), (300, 90), (451, 133)):
+    try:
+        gc_ = ac.render_captain(tr_, ac.Tackle(), 50, w_, h_, 1.0)[0]
+        if w_ >= 60 and "OPEN OCEAN" not in "".join("".join(r_) for r_ in gc_):
+            bad_.append((w_, h_, "no list"))
+        vt_ = dict(tr_, phase="out", t0=0.0, exp=ac.EXPEDITIONS[0], look=0.3,
+                   dur=24.0, route=ac.expedition_route(hh_, ac.EXPEDITIONS[0]))
+        for t_ in (0.5, 12.0, 23.9):
+            ac.render_voyage(vt_, w_, h_, t_)
+    except Exception as e_:
+        bad_.append((w_, h_, repr(e_)))
+check("his screen and the voyage draw at any size", not bad_, str(bad_))
+ax_, az_, ah_ = ac.route_pose(ac.expedition_route(hh_, ac.EXPEDITIONS[0]), 1.0)
+bf_ = ac.Fishing(ax_, az_, ah_, rig_(3, 5), 300.0, 9, deck=ac.HerringDeck())
 bf_.key("act", 300.8)
 for q_ in range(40):
     bf_.step(300.8 + q_ / 30.0)
-check("off the boat, out at sea: the open sea's fish", bf_.water == "offshore"
-      and "offshore" in ac.FISH[bf_.who]["where"]
+check("at anchor out there: the open sea's fish, off her side",
+      bf_.water == "offshore" and "offshore" in ac.FISH[bf_.who]["where"]
       and ac.render_fishing(bf_, 160, 45, 302.0) is not None, str(bf_.water))
 
 print("ALL OK" if ok else "FAILURES")

@@ -17204,6 +17204,7 @@ def draw_harbour(ch, co, v, walls, h, now, wet):
                     put_point(ch, co, v, walls, gx + 0.8, 0.9 + 6.0 * f, zz, "\\", CURB)
                 put_lit(ch, co, v, walls, gx, 8.4, hull + 0.1, "o", BULB, 0.3, now)
             draw_marina(ch, co, v, walls, h, now, wet, _boat_out[0] == h)
+            draw_herring(ch, co, v, walls, h, now, wet)
 
 
 def draw_liners(ch, co, v, walls, now, wet):
@@ -17269,6 +17270,8 @@ def harbour_hint(x, z, now):
     if gangway_near(x, z) is not None:
         return "  ~ the %s: p boards, $%d - a cruise down the coast ~" % (
             LINER_NAME.title(), LINER_FEE)
+    if herring_near(x, z) is not None:
+        return herring_hint(x, z)
     if marina_near(x, z) is not None:
         return "  ~ boat hire: p takes a speedboat out, $%d ~" % BOAT_FEE
     return "  ~ the harbour ~"
@@ -27738,7 +27741,7 @@ CHEAT_HIDDEN = [
     ("4", "the launch pad", "launchpad"), ("5", "mission control", "mission"),
     ("6", "the harbour", "harbour"), ("7", "the gangway", "gangway"),
     ("8", "boat hire", "marina"), ("9", "the pier's tackle shop", "piertackle"),
-    ("0", "a bait kiosk", "kiosk"),
+    ("0", "a bait kiosk", "kiosk"), ("v", "the fishing boat", "herring"),
 ]
 CHEAT_TEST = 1                          # ctrl-a
 TEST_JUMPS = bool(os.environ.get("ASCII_CITY_TEST"))
@@ -28715,6 +28718,8 @@ def find_place(x, z, kind):
         return _marina_spot(x, z)
     if kind == "tackle":
         return _tackle_spot(x, z)
+    if kind == "herring":
+        return _herring_spot(x, z)
     if kind == "piertackle":
         return _pier_tackle_spot(x, z)
     if kind == "kiosk":
@@ -30347,7 +30352,7 @@ TAXI_DESTS = [("the casino", "casino"), ("the club", "club"),
               ("the karaoke bar", "karaoke"), ("the mini golf", "minigolf"),
               ("the beach", "beach"), ("the pier", "seapier"),
               ("the launch pad", "launchpad"), ("the harbour", "harbour"),
-              ("the tackle shop", "tackle")]
+              ("the tackle shop", "tackle"), ("the fishing boat", "herring")]
 DRIVER_SAYS = ["Busy night.", "Where you headed, friend?", "Meter's running.",
                "You see the fireworks over the bay? I saw them once.",
                "I don't go into the woods after dark. Nobody does.",
@@ -31761,8 +31766,7 @@ BOAT_SLIDE = 0.6       # and with e held, which lets the stern go
 BOAT_BODY = 1.6        # how close to anything she can come
 BOAT_KNOTS = 1.9       # knots to a unit a second
 BOAT_HUD = (" speedboat  -  w s throttle  -  a d steer  -  e or shift slide"
-            "  -  space slows  -  h horn  -  f fishes, stopped  -  x back to the quay"
-            "  -  %s  %d knots ")
+            "  -  space slows  -  h horn  -  x back to the quay  -  %s  %d knots ")
 _boat_out = [None]     # the harbour whose boat you have out
 BOAT_MOORED = [
     "  ___    ",
@@ -31802,7 +31806,7 @@ def _marina_spot(x, z):
 def boat_water(x, z):
     """Can she be here: open sea or the river's mouth, and not in the ship."""
     i, j = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
-    if coast_kind(i, j) not in ("sea", "mouth"):
+    if coast_kind(i, j) not in ("sea", "mouth") or herring_in(x, z):
         return False
     for h_ in near_harbours(x, z, 120.0):
         lx, lz, head = liner_pose(h_, _clock[0])
@@ -32888,6 +32892,384 @@ def render_rave(club, width, height, now):
     return ch, co
 
 
+# --- the fishing boat ----------------------------------------------------------
+# Asked for on 2026-11-15, in place of fishing off the speedboat: a fishing
+# boat at the harbour, moored along the quay past the boat hire, and her
+# captain on the quay by the gangplank. p talks to him; he asks where to, you
+# pay, and he takes you - you do not drive her. One expedition at a time, to
+# one place: EXPEDITIONS is the list, and there is one on it for now, the
+# open ocean. There, she drops anchor and you fish off her side; x and he
+# takes you home.
+HERRING_NAME = "SALTY HERRING"
+CAPTAIN = "Cap'n Redgill"
+HERRING_GAP = 1.5      # between the end of the quay and her stern
+HERRING_L = 16.0       # long
+HERRING_B = 5.0        # and across
+HERRING_HUD = (" %s  -  w s choose  -  p or enter: pay and cast off  -  x walks away "
+               % CAPTAIN.lower())
+VOYAGE_HUD = (" aboard the %s, %s  -  a d look round  -  space: \"faster, cap'n!\" "
+              % (HERRING_NAME.lower(), "%s"))
+# Where he goes. Each: its name, what it costs, how far off the beach and how
+# far along the coast from the harbour she anchors, how long the sail out is,
+# the fish (a WATER_NAMES key - None is whatever the sea is there), the rod
+# you will want, and what he says of it. Add the next one here.
+EXPEDITIONS = [
+    {"name": "the open ocean", "fee": 45, "out": 700.0, "along": -160.0,
+     "sail": 24.0, "water": None, "rod": 3,
+     "says": "Tuna, swordfish - an' the marlin, if ye've the arm fer it.",
+     "fish": "tuna, mahi-mahi, swordfish, blue shark, marlin"},
+]
+CAP_HELLO = [
+    "Arr! " + CAPTAIN + ", master o' the " + HERRING_NAME.title()
+    + ". Where to, matey?",
+    "Ahoy! Ye've the look of a fisherman. Or a tourist. Same money. Where to?",
+    "Arr, a customer! Mind the bucket, it bites. Where'll it be?",
+]
+CAP_NO_ROD = ("A fishin' trip with no rod? Ye'd be fishin' with yer teeth! The tackle "
+              "shop be on the pier, arr.")
+CAP_NO_CASH = "That be $%d, matey. The Herring don't run on smiles."
+CAP_WRONG_ROD = ("Out there ye'll want the big game rod an' the big lure. Ye've not "
+                 "got 'em. Still - yer money. Arr.")
+CAP_AWAY = [
+    "Cast off! Hold on to yer hat - an' yer lunch.",
+    "Arr, smell that? That be the open sea. Or it be the bait bucket.",
+    "Me parrot says the tuna be bitin'. Me parrot lies.",
+    "Lost this eye to a marlin. Well. To a marlin-shaped door.",
+    "Fifty year I've sailed these waters. Forty-nine of 'em lost.",
+    "See them lights back there? Landlubbers. Asleep in proper beds. Pah.",
+    "If ye see a mermaid, she owes me twenty dollars.",
+]
+CAP_THERE = "Here we be! Drop anchor! Fish as long as ye like - I've me crossword."
+CAP_HOOKED = ["Fish on! Fish on! Arr, don't horse it!", "Steady, matey, steady!",
+              "Give it line when it runs, ye barnacle!"]
+CAP_LANDED = ["Arr, a fine beast!", "That'll feed the crew. The crew be me.",
+              "Ha! Ye're a natural. A natural what, I couldn't say.",
+              "Into the box with it! Mind the parrot."]
+CAP_LOST = ["HAR! It took yer line clean off!", "The sea giveth, an' it snappeth.",
+            "Arr. That one'll be tellin' its friends about ye."]
+CAP_HOME = ["Back to port! Ye did grand. Mostly.",
+            "Home we go. Same time tomorrow, arr.",
+            "Hold on - the harbour master hates it when I take the corner like this."]
+PARROT = ["SQUAWK! PIECES OF EIGHT!", "SQUAWK! BIG GAME LURE!",
+          "SQUAWK! WHERE'S ME TEA?", "SQUAWK! REDGILL'S A SOFTIE!"]
+HERRING_CABIN = [
+    "             |               ",
+    "             |\\              ",
+    "             | \\             ",
+    "        _____|__\\____        ",
+    "       |  _   _  |   |       ",
+    "       |_[_]_[_]_|___|       ",
+    "                             ",
+    "                             ",
+]
+HERRING_HULL = [
+    "                             ",
+    "                             ",
+    "                             ",
+    "                             ",
+    "                             ",
+    " ______|_________|___|______ ",
+    " \\                         / ",
+    "  \\_______________________/  ",
+]
+HERRING_WINDOWS = [
+    "                             ",
+    "                             ",
+    "                             ",
+    "                             ",
+    "                             ",
+    "          #   #              ",
+    "                             ",
+    "                             ",
+]
+PIRATE = [
+    " .===. ",
+    " (=o ) ",
+    "<|]=|\\v",
+    "  / \\  ",
+]
+CAPTAIN_ART = [
+    r"         ____________           ",
+    r"     ___/    _X_     \___       ",
+    r"    (____________________)      ",
+    r"         |  ___   ___  |   ,_,  ",
+    r"         | (_o_) (###) |  (o>   ",
+    r"         |      L      |  /))   ",
+    r"         |   \_____/   | /))    ",
+    r"        /~~~~~~~~~~~~~~~\ ^^    ",
+    r"       /~~~~~~~~~~~~~~~~~\      ",
+    r"       \~~~~~~~~~~~~~~~~~/      ",
+    r"     ___\~~~~~~~~~~~~~~~/___    ",
+    r"    /    |=====[$]=====|    \   ",
+]
+_herring_out = [None]  # the harbour whose fishing boat is out, with you aboard
+
+
+def herring_berth(h):
+    """Where she lies: (x, z) of her middle, off the end of the quay, bow out
+    to sea - clear of the boat hire's side, where a speedboat just out ran
+    straight into her, and of the cruise ship's way out on the other."""
+    r0, end = h
+    return ((end + 1) * CELL + HERRING_GAP + HERRING_L * 0.5,
+            (r0 + QUAY_BROAD * 0.5) * CELL)
+
+
+def herring_plank(h):
+    """Where you stand to talk to the captain: the end of the quay, at the
+    foot of the gangplank."""
+    r0, end = h
+    return (end + 1) * CELL - 1.6, (r0 + QUAY_BROAD * 0.5) * CELL
+
+
+def herring_near(x, z):
+    """The harbour whose fishing boat's gangplank you are at, or None."""
+    if not COAST or x < COAST_LAND * CELL:
+        return None
+    h = harbour_site(int(z / CELL + BIG) - BIG)
+    if h is None or _herring_out[0] == h:
+        return None
+    px, pz = herring_plank(h)
+    return h if (px - x) ** 2 + (pz - z) ** 2 < 3.0 ** 2 else None
+
+
+def _herring_spot(x, z):
+    """By the nearest fishing boat's gangplank, facing her."""
+    sp = _harbour_spot(x, z)
+    if sp is None:
+        return None
+    px, pz = herring_plank(harbour_site(int(sp[1] / CELL + BIG) - BIG))
+    return px, pz, math.pi * 0.5
+
+
+def herring_in(x, z):
+    """Is this point in her, moored: for the speedboat, which went through her."""
+    for h in near_harbours(x, z, 120.0):
+        if _herring_out[0] == h:
+            continue
+        bx, bz = herring_berth(h)
+        if abs(x - bx) < HERRING_L * 0.5 + 1.0 and abs(z - bz) < HERRING_B * 0.5 + 1.0:
+            return True
+    return False
+
+
+def expedition_route(h, exp):
+    """Her way out to where she anchors: (points, the length along them).
+    Along the quay and past its end, then out and along the coast."""
+    bx, bz = herring_berth(h)
+    _, end = h
+    tz = bz + exp["along"]
+    tx = shore_x(tz) + exp["out"]
+    qx = (end + 1) * CELL + 25.0
+    pts = [(bx, bz), (bx + 40.0, bz), (qx + 60.0, bz + (tz - bz) * 0.15),
+           (qx + 60.0 + (tx - qx - 60.0) * 0.5, bz + (tz - bz) * 0.5), (tx, tz)]
+    line = _catmull(pts, 10.0)
+    along = [0.0]
+    for (ax, az), (cx, cz) in zip(line, line[1:]):
+        along.append(along[-1] + math.hypot(cx - ax, cz - az))
+    return line, along
+
+
+def route_pose(route, u):
+    """(x, z, heading) u of the way along a route (0..1), eased at both ends."""
+    line, along = route
+    e = u * u * (3.0 - 2.0 * u)
+    s = along[-1] * max(0.0, min(1.0, e))
+    k = max(0, min(len(along) - 2, _bisect(along, s) - 1))
+    f = (s - along[k]) / max(1e-6, along[k + 1] - along[k])
+    (ax, az), (bx, bz) = line[k], line[k + 1]
+    return ax + (bx - ax) * f, az + (bz - az) * f, math.atan2(bx - ax, bz - az)
+
+
+class HerringDeck:
+    """Her deck at anchor, for fishing off: it rides the swell."""
+
+    def eye(self, now):
+        return 3.4 + 0.22 * math.sin(now * 1.1) + 0.08 * math.sin(now * 2.7)
+
+
+def draw_herring(ch, co, v, walls, h, now, wet):
+    """The fishing boat at the quay - a red hull, a white wheelhouse, a mast
+    with its light - her name in lights, and the captain on the quay by the
+    gangplank with FISHING TRIPS over him."""
+    if _herring_out[0] == h:
+        return
+    bx, bz = herring_berth(h)
+    if (bx - v.x) ** 2 + (bz - v.z) ** 2 > 300.0 ** 2:
+        return
+    bob = 0.12 * math.sin(now * 1.2 + bx)
+    for art, attr in ((HERRING_HULL, ROU_RED), (HERRING_CABIN, SNOW),
+                      (HERRING_WINDOWS, BULB)):
+        blit_sprite(ch, co, v, walls, art, bx, bz, bob - 0.6, 7.0 + bob, HERRING_L,
+                    attr)
+    put_lit(ch, co, v, walls, bx - 1.0, 7.4 + bob, bz, "o", SNOW, max(wet, 0.4), now)
+    put_lit(ch, co, v, walls, bx + 6.0, 1.6 + bob, bz, "o",
+            ROU_GREEN if int(now) % 2 else ROU_RED, max(wet, 0.4), now)
+    v.tackle_signs.append((bx, 0.9 + bob, bz, 2 << 6, HERRING_NAME))
+    px, pz = herring_plank(h)
+    for k in range(5):                  # the gangplank, quay to her stern
+        put_point(ch, co, v, walls, px + 1.6 + k * 0.7, 0.5 + k * 0.15, pz, "=",
+                  WOOD_LIT)
+    blit_sprite(ch, co, v, walls, PIRATE, px - 0.6, pz - 2.4, 0.0, 1.9, 1.3, GOLD_DIM)
+    for y in (0.8, 1.7, 2.6):
+        put_point(ch, co, v, walls, px - 1.0, y, pz + 3.0, "|", CONCRETE)
+    v.tackle_signs.append((px - 1.0, 3.3, pz + 3.0, 4 << 6, "FISHING TRIPS"))
+
+
+def herring_hint(x, z):
+    if herring_near(x, z) is not None:
+        return "  ~ the %s: p talks to %s - fishing trips ~" % (HERRING_NAME.title(),
+                                                                 CAPTAIN)
+    return ""
+
+
+def _wrap_words(text, w):
+    lines, line = [], ""
+    for word in text.split():
+        if line and len(line) + 1 + len(word) > w:
+            lines.append(line)
+            line = word
+        else:
+            line = (line + " " + word).strip()
+    return lines + ([line] if line else [])
+
+
+def captain_colours(art):
+    """Each cell of the captain's drawing its colour: the hat, the skull on
+    it, his face and the eye patch, the red beard he is named for, the
+    parrot, his coat and its gold."""
+    out = []
+    for r, row in enumerate(art):
+        line = []
+        for c, chx in enumerate(row):
+            if c >= 25 and 3 <= r <= 7:
+                a = GOLD if chx in "o>" else ROU_GREEN
+            elif r <= 2:
+                a = SNOW if chx == "X" else ROU_BLACK
+            elif r <= 6:
+                a = (ROU_BLACK if chx == "#" else SNOW if chx == "o"
+                     else ROU_RED if chx in "\\_/" and r == 6 else GOLD_DIM)
+            elif r <= 10:
+                a = ROU_RED
+            else:
+                a = GOLD if chx in "[$]" else CROWN_BLUE
+            line.append(a)
+        out.append(line)
+    return out
+
+
+def render_captain(trip, tackle, money, width, height, now):
+    """At the gangplank, the captain in front of his boat: him, big, his
+    parrot on his shoulder, and what he says; and where he will take you."""
+    h = trip["h"]
+    px, pz = herring_plank(h)
+    v = View(px - 3.0, pz, math.pi * 0.5 - 0.15, width, height)
+    ch, co, _ = render_street(v, now)
+    k = big_scale(width, height)
+    art = CAPTAIN_ART
+    aw = max(len(r) for r in art)
+    art = [r.ljust(aw) for r in art]
+    if width < 60 or height < 20:
+        for y in range(height):
+            for x in range(width):
+                ch[y][x], co[y][x] = " ", 0
+        _text(ch, co, 1, 1, CAPTAIN.upper()[:width - 2], GOLD)
+        for r, line in enumerate(_wrap_words(trip["say"], width - 2)[:height - 6]):
+            _text(ch, co, 2 + r, 1, line, BULB)
+        for n, exp in enumerate(EXPEDITIONS[:height - 4]):
+            _text(ch, co, height - 2 - len(EXPEDITIONS) + n, 1,
+                  ("%s %s $%d" % (">" if n == trip["sel"] else " ", exp["name"],
+                                  exp["fee"]))[:width - 2], GOLD)
+        return ch, co
+    kk = k
+    while kk > 1 and (aw * kk > width // 2 or len(art) * kk > height - 4):
+        kk -= 1
+    ax, ay = max(1, width // 4 - aw * kk // 2), height - len(art) * kk
+    for y in range(ay, height):
+        for x in range(ax, min(width, ax + aw * kk)):
+            ch[y][x], co[y][x] = " ", 0
+    _blow_up(ch, co, ax, ay, art, captain_colours(art), kk)
+    if int(now * 0.4) % 5 == 0:
+        sq = PARROT[int(now * 0.4 / 5) % len(PARROT)]
+        _text(ch, co, max(1, ay - 2), ax + aw * kk - len(sq), sq, ROU_GREEN)
+    # What he says, and the list.
+    bw = min(width - ax - aw * kk - 4, 64 + 20 * (k - 1))
+    bx = width - bw - 2
+    lines = _wrap_words(trip["say"], bw - 4)
+    bh = 4 + len(lines) + 2 + 3 * len(EXPEDITIONS) + 3
+    by = max(2, height // 2 - bh // 2)
+    for y in range(by, min(height, by + bh)):
+        for x in range(bx, bx + bw):
+            ch[y][x], co[y][x] = " ", 0
+    _box(ch, co, bx, by, bw, bh, GOLD_DIM)
+    _text(ch, co, by + 1, bx + 2, CAPTAIN.upper() + " SAYS:", GOLD)
+    for r, line in enumerate(lines):
+        _text(ch, co, by + 2 + r, bx + 2, line, BULB)
+    y = by + 3 + len(lines)
+    _text(ch, co, y, bx + 2, "WHERE TO, MATEY?", GOLD)
+    y += 1
+    for n, exp in enumerate(EXPEDITIONS):
+        on = n == trip["sel"]
+        _text(ch, co, y, bx + 2, ("> " if on else "  ") + exp["name"].upper(),
+              GOLD if on else HUD)
+        fee = "$%d " % exp["fee"]
+        _text(ch, co, y + 1, bx + 4, fee, GOLD if on else GOLD_DIM)
+        _text(ch, co, y + 1, bx + 4 + len(fee), exp["fish"][:bw - 6 - len(fee)], HUD)
+        y += 3
+    have = (tackle.rod_kind()[0] if tackle.rod is not None else "no rod")
+    _text(ch, co, by + bh - 2, bx + 2, ("you: $%d, %s" % (int(money), have))[:bw - 4],
+          HUD)
+    return ch, co
+
+
+def render_voyage(trip, width, height, now):
+    """Aboard, going: the sea and the coast going by from her deck, the
+    bow out in front of you, her mast and its light, and the captain at
+    the wheel saying what he says."""
+    u = min(1.0, (now - trip["t0"]) / trip["dur"])
+    x, z, head = route_pose(trip["route"], u)
+    eye = HerringDeck().eye(now) + 0.2
+    v = View(x, z, head + trip["look"], width, height, eye=eye)
+    ch, co, _ = render_street(v, now)
+    if width < 40 or height < 14:
+        return ch, co, v
+    k = big_scale(width, height)
+    # The bow, where you are looking ahead: wood, rails down both sides.
+    off = int(math.sin(trip["look"]) * width * 0.9)
+    mx = width // 2 - off
+    tip = int(height * 0.72)
+    deck = height - 2
+    for y in range(tip, deck):
+        f = (y - tip) / float(max(1, deck - tip))
+        hw = int(f * width * 0.26) + 1
+        for x in range(mx - hw, mx + hw + 1):
+            if 0 <= x < width:
+                edge = x in (mx - hw, mx + hw)
+                ch[y][x] = ("/" if x < mx else "\\") if edge else (
+                    "=" if (y - tip) % 2 == 0 else "-")
+                co[y][x] = ROU_RED if edge else (WOOD_LIT if (y - tip) % 2 == 0
+                                                 else WOOD)
+    if 0 <= mx < width:
+        for y in range(max(1, tip - height // 3), tip):
+            for t in range(max(1, k - 1)):
+                if 0 <= mx + t < width:
+                    ch[y][mx + t], co[y][mx + t] = "|", CURB     # the mast
+        y = max(1, tip - height // 3)
+        ch[y][mx], co[y][mx] = "o", SNOW
+    for x in range(width):                       # the rail across in front of you
+        ch[deck][x], co[deck][x] = "=", ROU_RED
+        ch[height - 1][x], co[height - 1][x] = (" " if x % 6 else "|"), CURB
+    lines = CAP_AWAY if trip["phase"] == "out" else CAP_HOME
+    n = int((now - trip["t0"]) / 5.0)
+    say = (PARROT[n // 2 % len(PARROT)] if n % 4 == 3 else lines[n % len(lines)])
+    who = "PARROT" if say.startswith("SQUAWK") else CAPTAIN.upper()
+    line = "%s: %s" % (who, say)
+    for x in range(width):
+        ch[deck - 1][x], co[deck - 1][x] = " ", 0
+    _text(ch, co, deck - 1, max(1, width // 2 - len(line) // 2), line[:width - 2],
+          ROU_GREEN if who == "PARROT" else GOLD)
+    return ch, co, v
+
+
 # --- fishing -----------------------------------------------------------------
 # Asked for on 2026-11-15: a fishing mechanic, different fish depending on
 # where you cast, and a tackle shop with rods, bait and floats. Carry a rod
@@ -32939,7 +33321,6 @@ FISH_INSHORE = 110.0   # then the deep water past the pier's head,
 FISH_DEEP = 400.0      # then the open sea, which only the boat gets out to
 FISH_WAIT = 11.0       # seconds, on average, from the float going in to a bite
 FISH_BOX = 20          # what the cool box holds
-FISH_SLOW = 3.0        # how slow the boat has to be to fish off her
 WATER_NAMES = {"river": "the river", "lake": "the lake", "mouth": "the river's mouth",
                "surf": "the surf", "inshore": "off the pier", "deep": "deep water",
                "offshore": "the open sea", "harbour": "the harbour",
@@ -33636,11 +34017,12 @@ class Fishing:
     """You, fishing: where you stand and which way you cast, the phase, the
     float, and - once one is on - the fish."""
 
-    def __init__(self, x, z, yaw, tackle, now, seed, boat=None):
+    def __init__(self, x, z, yaw, tackle, now, seed, deck=None, water=None):
         self.x, self.z, self.yaw0 = x, z, yaw
         self.aim = 0.0
         self.tackle = tackle
-        self.boat = boat
+        self.deck = deck        # a boat you are fishing off: its eye(now), its side
+        self.force = water      # an expedition's own water, where it has one
         self.rng = random.Random(seed)
         self.phase, self.t0, self.clock = "aim", now, now
         self.land = None        # where the float went in
@@ -33757,8 +34139,10 @@ class Fishing:
                     self.land = self.target(now)
                     self.to("flight", now)
             elif what in ("left", "right"):
-                self.aim = max(-0.6, min(0.6, self.aim
-                                         + (-0.07 if what == "left" else 0.07)))
+                # Off a deck all round is water: swing round as far as you like.
+                most = math.pi if self.deck is not None else 0.6
+                self.aim = max(-most, min(most, self.aim
+                                          + (-0.07 if what == "left" else 0.07)))
             elif what in ("rod", "bait", "float"):
                 self.say(tk.cycle(what), now)
         elif self.phase == "wait":
@@ -33844,6 +34228,8 @@ class Fishing:
         tk = self.tackle
         if self.phase == "flight" and now - self.t0 >= FISH_FLIGHT:
             self.water = fish_water(*self.land)
+            if self.water is not None and self.force:
+                self.water = self.force
             if self.water is None:
                 self.say("it lands on dry ground - reel in and try again", now)
                 self.to("gone", now)
@@ -34152,13 +34538,13 @@ def render_fishing(f, width, height, now):
     the cast's meter while you aim; the tension and how much line is out in
     a fight; what you have on along the bottom; and the card when you land
     something."""
-    eye = f.boat.eye(now) if f.boat is not None else EYE_Y
+    eye = f.deck.eye(now) if f.deck is not None else EYE_Y
     v = View(f.x, f.z, f.yaw, width, height, eye=eye)
     ch, co, wet = render_street(v, now)
     walls = v.walls
     k = big_scale(width, height)
     tk = f.tackle
-    if f.boat is not None and height > 12:
+    if f.deck is not None and height > 12:
         # Her side, under your elbows.
         for x in range(width):
             ch[height - 2][x], co[height - 2][x] = "=", SNOW
@@ -34234,7 +34620,7 @@ def render_fishing(f, width, height, now):
     strip = " %s  |  %s  |  %s  |  cool box %d  |  book %d/%d " % (
         rod[0], bait, tk.float_kind()[0], len(tk.box), len(tk.book),
         len(fish_species()))
-    y = height - 1 - (2 if f.boat is not None else 0)
+    y = height - 1 - (2 if f.deck is not None else 0)
     for x in range(min(width, len(strip) + 2)):
         ch[y][x], co[y][x] = " ", 0
     _text(ch, co, y, 1, strip[:width - 2], HUD)
@@ -34762,6 +35148,7 @@ def main(stdscr):
     tackle = Tackle()           # your rods, bait, floats, cool box and book
     fishing = None              # with a line in the water: a Fishing
     shop = None                 # at a tackle shop's counter: your visit
+    trip = None                 # with the fishing boat's captain, or aboard her
     vendors = {}                # and the ones you have been at, by seed: their stock
     scope_at = None             # when you put your eye to the telescope
     # The temple's terminal: the verses so far, when the last word was asked
@@ -34785,7 +35172,8 @@ def main(stdscr):
                 or metro is not None
                 or flight is not None or reading or poke is not None
                 or vendor is not None or ride is not None or cruise is not None
-                or boat is not None or fishing is not None or shop is not None)
+                or boat is not None or fishing is not None or shop is not None
+                or trip is not None)
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -34889,8 +35277,8 @@ def main(stdscr):
                     note = ("the sea: on - a taxi goes to the beach"
                             if toggle_coast() else
                             "the sea: off - the city is endless that way again")
-                    tiki = ride = cruise = boat = fishing = shop = None
-                    _boat_out[0] = None
+                    tiki = ride = cruise = boat = fishing = shop = trip = None
+                    _boat_out[0] = _herring_out[0] = None
                     _liner_trips.clear()
                     if not can_stand(cam_x, cam_z):
                         cam_x, cam_z = start_position()
@@ -34957,7 +35345,8 @@ def main(stdscr):
                             cab = None
                             metro = None
                             flight = None
-                            fishing = shop = None
+                            fishing = shop = trip = None
+                            _herring_out[0] = None
                             if kind == "pilot":
                                 home_ = zone_home("airport", int(cam_x // CELL),
                                                   int(cam_z // CELL))
@@ -35011,6 +35400,46 @@ def main(stdscr):
                         note = "you pack the rod up"
                     note_at = now
                     fishing = None
+                    if trip is not None:
+                        # He weighs anchor and takes you home, the way you came.
+                        line_, along_ = trip["route"]
+                        back_ = list(reversed(line_))
+                        trip.update(phase="home", t0=now, dur=trip["dur"] * 0.7,
+                                    look=0.0, route=(back_, [along_[-1] - a_ for a_
+                                                             in reversed(along_)]))
+            elif trip is not None and key not in (ord("q"), CHEAT_KEY):
+                if trip["phase"] == "talk":
+                    n_ = len(EXPEDITIONS)
+                    if key in (27, ord("x"), ord("X")):
+                        trip = None
+                        note, note_at = "\"Arr. Another time, matey.\"", now
+                    elif key in (curses.KEY_UP, ord("w"), ord("W")):
+                        trip["sel"] = (trip["sel"] - 1) % n_
+                    elif key in (curses.KEY_DOWN, ord("s"), ord("S")):
+                        trip["sel"] = (trip["sel"] + 1) % n_
+                    elif key in (ord("z"), ord("Z")):
+                        _big_screens[0] = not _big_screens[0]
+                    elif key in (ord("p"), ord("P"), 10, 13, curses.KEY_ENTER):
+                        exp_ = EXPEDITIONS[trip["sel"]]
+                        if tackle.rod is None:
+                            trip["say"] = CAP_NO_ROD
+                        elif not wallet.take(exp_["fee"]):
+                            trip["say"] = CAP_NO_CASH % exp_["fee"]
+                        else:
+                            _herring_out[0] = trip["h"]
+                            trip.update(phase="out", t0=now, exp=exp_, look=0.0,
+                                        dur=exp_["sail"],
+                                        route=expedition_route(trip["h"], exp_))
+                            note, note_at = ("%s: %s" % (CAPTAIN, CAP_WRONG_ROD)
+                                             if tackle.rod != exp_["rod"] else
+                                             "%s: %s" % (CAPTAIN, CAP_AWAY[0])), now
+                else:
+                    if key in (curses.KEY_LEFT, ord("a"), ord("A")):
+                        trip["look"] -= 0.14
+                    elif key in (curses.KEY_RIGHT, ord("d"), ord("D")):
+                        trip["look"] += 0.14
+                    elif key == ord(" "):
+                        trip["t0"] -= 3.0       # he leans on the throttle
             elif shop is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (27, ord("x"), ord("X")):
                     # Back out, and round to the water, rod or no rod.
@@ -35039,16 +35468,6 @@ def main(stdscr):
                     boat = None
                     _boat_out[0] = None
                     note, note_at = "back at the quay - they tie her up", now
-                elif key in (ord("f"), ord("F")):
-                    if tackle.rod is None:
-                        note, note_at = ("no rod - a tackle shop sells them, and the "
-                                         "taxi knows one"), now
-                    elif abs(boat.speed) > FISH_SLOW:
-                        note, note_at = "slow her right down first", now
-                    else:
-                        boat.want = boat.speed = 0.0
-                        fishing = Fishing(boat.x, boat.z, boat.heading, tackle, now,
-                                          int(now * 1000.0), boat=boat)
                 else:
                     boat.key({curses.KEY_UP: "faster", ord("w"): "faster",
                               ord("W"): "faster", curses.KEY_DOWN: "slower",
@@ -35545,6 +35964,15 @@ def main(stdscr):
                     autopilot = False
             elif (street and on_roof is None and sewer is None and venue is None
                   and key in (ord("p"), ord("P"))
+                  and herring_near(cam_x, cam_z) is not None):
+                h_ = herring_near(cam_x, cam_z)
+                trip = {"phase": "talk", "h": h_, "sel": 0, "t0": now,
+                        "say": CAP_HELLO[int(now) % len(CAP_HELLO)], "quip": "",
+                        "quip_at": -1e9, "seen": ""}
+                fwd = side = spin = 0.0
+                autopilot = False
+            elif (street and on_roof is None and sewer is None and venue is None
+                  and key in (ord("p"), ord("P"))
                   and tackle_near(cam_x, cam_z) is not None):
                 shop = new_shop(tackle_near(cam_x, cam_z), now)
                 fwd = side = spin = 0.0
@@ -35799,6 +36227,30 @@ def main(stdscr):
             boat.step(now - boat.clock, now)
         if fishing is not None:
             fishing.step(now)
+        if (trip is not None and trip["phase"] in ("out", "home")
+                and now - trip["t0"] >= trip["dur"]):
+            if trip["phase"] == "out":
+                # There: anchored, and you fish off her side.
+                tx_, tz_, th_ = route_pose(trip["route"], 1.0)
+                trip.update(phase="fish", quip=CAP_THERE, quip_at=now, seen="aim")
+                fishing = Fishing(tx_, tz_, th_, tackle, now, int(now * 1000.0),
+                                  deck=HerringDeck(), water=trip["exp"]["water"])
+            else:
+                cam_x, cam_z = herring_plank(trip["h"])
+                yaw = -math.pi * 0.5            # down the gangplank, facing the town
+                note, note_at = "%s: %s" % (CAPTAIN, CAP_HOME[1]), now
+                trip = None
+                _herring_out[0] = None
+        if trip is not None and fishing is not None and fishing.phase != trip["seen"]:
+            # He has something to say about how it is going.
+            was_, trip["seen"] = trip["seen"], fishing.phase
+            pick_ = int(now * 7.0)
+            if fishing.phase == "fight":
+                trip.update(quip=CAP_HOOKED[pick_ % len(CAP_HOOKED)], quip_at=now)
+            elif fishing.phase == "landed":
+                trip.update(quip=CAP_LANDED[pick_ % len(CAP_LANDED)], quip_at=now)
+            elif fishing.phase == "gone" and was_ == "fight":
+                trip.update(quip=CAP_LOST[pick_ % len(CAP_LOST)], quip_at=now)
         if cab is not None:
             cab.step(now - cab.clock, now)
             if cab.pay:
@@ -36161,7 +36613,21 @@ def main(stdscr):
             hud = FISH_HUD[fishing.phase] % (
                 WATER_NAMES.get(fishing.water, "") if fishing.phase in (
                     "wait", "fight", "landed") else
-                "from the boat" if fishing.boat is not None else "")
+                "off the " + HERRING_NAME.title() if fishing.deck is not None else "")
+            if trip is not None:
+                hud = hud.replace("x packs up", "x heads for home").replace(
+                    "x keeps it and packs up", "x keeps it, home")
+                if now - trip["quip_at"] < 5.0 and height > 3:
+                    q_ = "%s: %s" % (CAPTAIN.upper(), trip["quip"])
+                    _text(ch, co, 1, max(1, width // 2 - len(q_) // 2), q_[:width - 2],
+                          GOLD)
+        elif street and trip is not None and trip["phase"] == "talk":
+            ch, co = render_captain(trip, tackle, wallet.money, width, height, now)
+            hud = HERRING_HUD
+        elif street and trip is not None:
+            ch, co, v = render_voyage(trip, width, height, now)
+            hud = VOYAGE_HUD % ("going out to " + trip["exp"]["name"]
+                                if trip["phase"] == "out" else "going home")
         elif street and shop is not None:
             ch, co = render_tackle(shop, tackle, width, height, now)
             hud = TACKLE_HUD % shop["at"]["name"].lower()

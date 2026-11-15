@@ -39,7 +39,8 @@ nothing saved.
 - **A coast** — east of where you start the city ends at the sea: hotels in neon along the front,
   a boardwalk, a beach with bars and fires on it, and a pier with a big wheel at the end.
 - **Fishing** — buy a rod, bait and a float at a tackle shop and fish the river, the woods'
-  lake, the surf, off the pier or from a speedboat far out: 44 kinds of fish, each where it lives.
+  lake, the surf, off the pier, or far out on a fishing boat whose captain is more or less a
+  pirate: 44 kinds of fish, each where it lives.
 - **Secrets** — tunnels under every street, somebody living down a manhole, a mystery that starts
   with a note, and things in the woods you will not like.
 
@@ -185,7 +186,8 @@ And two things outside the terminal:
 - **A coast** — east of where you start the city ends at the sea: hotels in neon along the front,
   a boardwalk, a beach with bars and fires on it, and a pier with a big wheel at the end.
 - **Fishing** — buy a rod, bait and a float at a tackle shop and fish the river, the woods'
-  lake, the surf, off the pier or from a speedboat far out: 44 kinds of fish, each where it lives.
+  lake, the surf, off the pier, or far out on a fishing boat whose captain is more or less a
+  pirate: 44 kinds of fish, each where it lives.
 - **Secrets** — tunnels under every street, somebody living down a manhole, a mystery that starts
   with a note, and things in the woods you will not like.
 
@@ -323,12 +325,16 @@ the city is infinite, identical every time you walk back to it, and held in no m
   — `p` at its foot rides it once round, over the whole coast.
 - **Fishing.** A tackle shop on every ocean pier and a bait kiosk on the river's piers (a taxi
   goes to **the tackle shop**): `p` at the counter for rods, bait, floats, to sell your catch and
-  to see your book. With a rod, `f` by any water - or off the speedboat - casts: a meter for how
+  to see your book. With a rod, `f` by any water casts: a meter for how
   far, a bite, `f` to strike, then a fight on the line's tension (`w` reels, `s` gives line when
   it runs, `a` `d` lean the rod against it). What bites depends on the water the float goes into
   and the bait on the hook: roach and pike in the river, trout and something very old in the
   woods' lake, bass in the surf, mackerel and conger off the pier, turbot past its head, tuna and
-  marlin from the boat far out, koi in the fountain on the Strip - and a good deal of rubbish.
+  marlin far out at sea, koi in the fountain on the Strip - and a good deal of rubbish.
+- **The fishing boat**, the *Salty Herring*, at the harbour's quay (a taxi goes to **the fishing
+  boat**): `p` by the gangplank and Cap'n Redgill asks where to. Pay him and he sails you out to
+  the open ocean - tuna, swordfish, marlin - drops anchor while you fish, and brings you home
+  when you have had enough (`x`).
 
 ### Weather and the sky
 
