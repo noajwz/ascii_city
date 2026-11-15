@@ -324,7 +324,7 @@ the city is infinite, identical every time you walk back to it, and held in no m
 - **The pier**: out over the sea, lights the length of it, a hall at the end and a **big wheel**
   — `p` at its foot rides it once round, over the whole coast.
 - **Fishing.** A tackle shop on every ocean pier and a bait kiosk on the river's piers (a taxi
-  goes to **the tackle shop**): `p` at the counter for rods, bait, floats, to sell your catch and
+  goes to **the tackle shop**): walk up to the counter for rods, bait, floats, to sell your catch and
   to see your book. With a rod, `f` by any water casts: a meter for how
   far, a bite, `f` to strike, then a fight on the line's tension (`w` reels, `s` gives line when
   it runs, `a` `d` lean the rod against it). What bites depends on the water the float goes into
@@ -332,7 +332,7 @@ the city is infinite, identical every time you walk back to it, and held in no m
   woods' lake, bass in the surf, mackerel and conger off the pier, turbot past its head, tuna and
   marlin far out at sea, koi in the fountain on the Strip - and a good deal of rubbish.
 - **The fishing boat**, the *Salty Herring*, at the harbour's quay (a taxi goes to **the fishing
-  boat**): `p` by the gangplank and Cap'n Redgill asks where to. Pay him and he sails you out to
+  boat**): walk up the quay to him and Cap'n Redgill asks where to. Pay him and he sails you out to
   the open ocean - tuna, swordfish, marlin - drops anchor while you fish, and brings you home
   when you have had enough (`x`). Out there `c` takes you into **his cabin**: look all the way
   round, the sea through the windows, the wheel, a chart with an X where you are, the parrot,

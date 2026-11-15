@@ -87,7 +87,7 @@ kiosk there was out of reach; one every 700 units or so, cached in `_kiosk_cache
 `coast_reset()` clears). `draw_tackle_hut()`: a hut with a lit hatch, a neon fish on a pole,
 its tail going, and the name in neon over the roof. **The names go up at the end of the frame**
 (`v.tackle_signs`, `draw_tackle_signs()`): drawn with the pier, the river's lights and the
-bridges painted over them. `p` at the counter (`tackle_near()`, `TACKLE_REACH`) goes in -
+bridges painted over them. Walking up to the counter (`tackle_near()`, `TACKLE_REACH`) goes in -
 `shop` in `main()`, `render_tackle()`: the name in neon, floats on a string, rods in a rack, the
 live bait fridge, the man with his pipe, and the shelves: RODS, BAIT, FLOATS, SELL, BOOK, `a`/`d`
 between them, `w`/`s` along one, `p` buys, `c` sells the cool box anywhere in the shop, with a
@@ -130,7 +130,7 @@ her name in lights on the hull, a gangplank from the end of the quay, and by it 
 (`v.tackle_signs`). She is solid to the speedboat (`herring_in()` in `boat_water()`) while she
 is moored. A taxi goes to "the fishing boat"; ctrl-a `v` for the checks.
 
-**Talking to him** (`p` at the plank, `herring_near()`): `trip` in `main()`, phase `"talk"`,
+**Talking to him** (walking up to the plank, `herring_near()`): `trip` in `main()`, phase `"talk"`,
 `render_captain()` - the quay behind, him big (`CAPTAIN_ART`, coloured by `captain_colours()`:
 hat and skull, eye patch, the red beard, the parrot, the coat with its gold), what he says, and
 **where to** - `EXPEDITIONS`. `w`/`s` choose, `p` or enter pays and casts off, `x` walks away.
@@ -190,3 +190,19 @@ fish, lore, nonsense). Turned away, the top bar tells you he is to starboard.
 shelf's label and the barrel's came out GGRROOGG; they are `_label()`s now, plain text on a
 blank of its own (the planking showed between the words).
 
+## Walked into, not p
+
+Asked for on 2026-11-15: "the tackleshop, fishing boat, cruise all need me to press P in order
+to interact. Please make it so walking inside it does the interaction like most other things."
+All three are in `venue_at()` now, first thing - `"tackle"` (the counter), `"herring"` (the
+gangplank) and `"gangway"` (the cruise ship's) - and `main()` turns them into the shop, the
+captain and the cruise the way it does the airport's gate and the library. So they go by the
+door rules: walk up and you are in, hurry past and you are not (see the hurrying rule in
+CLAUDE.md). **Everywhere they leave you is a step short**, or you would be straight back in:
+`tackle_back()` (`TACKLE_BACK` back from the counter, away from the hut) where a jump puts you and
+where you come out of a shop; `HERRING_BACK` along the quay from the plank for the jump, walking
+away from the captain and coming home from a trip; and `_gangway_spot()` 5.5 back on the quay
+for the jump and where the cruise sets you down. The top bar says what is there from further
+off than the trigger (`reach` on `tackle_near()`, `herring_near()`, `gangway_near()`). The pty
+cases walk in with `w`: one press for a counter (a second would be a key in the shop), two for
+the rest. The speedboat hire, the pier's big wheel and the vending machines are still `p`.

@@ -9857,9 +9857,11 @@ gw_ = ac.find_place(x0, z0, "gangway")
 lbx_, lbz_ = ac.liner_berth(hb_)
 check("she lies alongside its north side, and the gangway's foot is on the quay",
       gw_ is not None and ac.can_stand(gw_[0], gw_[1])
-      and ac.gangway_near(gw_[0], gw_[1]) == hb_
+      and ac.gangway_near(gw_[0], gw_[1]) is None
+      and ac.gangway_near(gw_[0], gw_[1] - 3.0) == hb_
+      and ac.venue_at(gw_[0], gw_[1] - 3.0)[0] == "gangway"
       and 0.0 < hb_[0] * ac.CELL - (lbz_ + ac.LINER_B * 0.5) < 3.0
-      and "p boards" in ac.harbour_hint(gw_[0], gw_[1], 0.0)
+      and "up the gangway" in ac.harbour_hint(gw_[0], gw_[1], 0.0)
       and ac.find_place(x0, z0, "harbour") is not None
       and ("the harbour", "harbour") in ac.TAXI_DESTS)
 rt_ = ac.liner_route(hb_)
@@ -9881,7 +9883,7 @@ check("she sails: steadily, and a rocket is off the pad as she comes abeam of it
       and max(math.dist(a_[:2], b_[:2]) for a_, b_ in zip(poses_, poses_[1:]))
       < ac.LINER_SPEED * 1.1
       and ac._liner_s(ac.liner_trip_time(rt_) + 1.0, rt_[1][-1]) is None
-      and ac.gangway_near(gw_[0], gw_[1]) is None
+      and ac.gangway_near(gw_[0], gw_[1] - 3.0) is None
       and "out" in ac.harbour_hint(gw_[0], gw_[1], 0.0))
 bad_ = []
 for w_, h_ in ((60, 20), (100, 30), (211, 67), (300, 90)):
@@ -9997,12 +9999,19 @@ check("at the helm, at any size: the bow, the wheel, the knots", not bad_, str(b
 # A rod, bait and a float from a tackle shop - one on every ocean pier, a
 # kiosk on every river pier - and f by any water. What bites is the water the
 # float goes into and the bait on the hook; then the strike and the fight.
+def ahead_(sp_, d_):
+    """d_ units on from a jump's spot, the way it faces: walked up to."""
+    return sp_[0] + math.sin(sp_[2]) * d_, sp_[1] + math.cos(sp_[2]) * d_
+
+
 ks_ = ac.find_place(x0, z0, "kiosk")
-kat_ = ac.tackle_near(ks_[0], ks_[1])
+kat_ = ac.tackle_near(*ahead_(ks_, ac.TACKLE_BACK))
 kiosks_ = [r_ for r_ in range(-3000, 3000, ac.PIER_WIDE) if ac.river_kiosk(r_)]
-check("a bait kiosk on the river's piers: a counter to stand at, p goes in",
+check("a bait kiosk on the river's piers: walk up to the counter and you are in",
       kat_ is not None and kat_["kind"] == "kiosk" and ac.can_stand(ks_[0], ks_[1])
-      and "p goes in" in ac.tackle_hint(ks_[0], ks_[1], ac.Tackle())
+      and ac.tackle_near(ks_[0], ks_[1]) is None
+      and ac.venue_at(*ahead_(ks_, ac.TACKLE_BACK))[0] == "tackle"
+      and "walk up" in ac.tackle_hint(ks_[0], ks_[1], ac.Tackle())
       and len(kiosks_) >= 30, "%d kiosks in 6000 columns" % len(kiosks_))
 
 
@@ -10027,7 +10036,7 @@ walk_on_ = sum(to_street_(*ac.river_kiosk(r_)[1]) for r_ in kiosks_)
 check("and you can walk to each one from a street",
       walk_on_ >= len(kiosks_) - 1, "%d of %d" % (walk_on_, len(kiosks_)))
 ps_ = ac.find_place(x0, z0, "piertackle")
-pat_ = ac.tackle_near(ps_[0], ps_[1])
+pat_ = ac.tackle_near(*ahead_(ps_, ac.TACKLE_BACK))
 pier_ = ac.sea_pier(int(ps_[1] / ac.CELL))
 check("and a tackle shop on every ocean pier, on the boards",
       pat_ is not None and pat_["kind"] == "pier" and ac.can_stand(ps_[0], ps_[1])
@@ -10039,10 +10048,10 @@ check("and a tackle shop on every ocean pier, on the boards",
 ts_ = ac.find_place(x0, z0, "tackle")
 check("the taxi goes to the nearest of them",
       ("the tackle shop", "tackle") in ac.TAXI_DESTS and ts_ is not None
-      and ac.tackle_near(ts_[0], ts_[1]) is not None)
+      and ac.tackle_near(*ahead_(ts_, ac.TACKLE_BACK)) is not None)
 huts_ = 0
-for vx_, vz_, vy_ in ((ks_[0] - 2.0, ks_[1] - 8.0, 0.35), (ps_[0] - 12.0, ps_[1] - 4.0,
-                                                           1.1)):
+for vx_, vz_, vy_ in ((kat_["sx"] - 2.0, kat_["sz"] - 8.0, 0.35),
+                      (pat_["sx"] - 12.0, pat_["sz"] - 4.0, 1.1)):
     vv_ = ac.View(vx_, vz_, vy_, 160, 45)
     gg_ = ac.render_street(vv_, 300.0)[0]
     txt_ = "\n".join("".join(r_) for r_ in gg_)
@@ -10326,10 +10335,12 @@ check("on a big window the shop's name is in block letters; small, and z, not",
 check("the speedboat is for driving: nothing about fishing at her wheel",
       "fish" not in ac.BOAT_HUD)
 hs_ = ac.find_place(x0, z0, "herring")
-hh_ = ac.herring_near(hs_[0], hs_[1])
+hh_ = ac.herring_near(*ahead_(hs_, ac.HERRING_BACK))
 hbx_, hbz_ = ac.herring_berth(hh_)
 check("the fishing boat at the quay, past the boat hire; her captain by the plank",
       hh_ is not None and ac.can_stand(hs_[0], hs_[1])
+      and ac.herring_near(hs_[0], hs_[1]) is None
+      and ac.venue_at(*ahead_(hs_, ac.HERRING_BACK))[0] == "herring"
       and "Redgill" in ac.harbour_hint(hs_[0], hs_[1], 0.0)
       and ac.coast_kind(int(hbx_ / ac.CELL), int(hbz_ / ac.CELL)) == "sea"
       and hbx_ - ac.marina(hh_)[0] > 40.0

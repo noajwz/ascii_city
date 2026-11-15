@@ -64,6 +64,12 @@ F1 = b"\x1bOP"
 # The casino and club jumps stand you out front, to see the door; these
 # steps walk you in.
 IN = [(b"w", .25)] * 12
+# And the tackle shops, the fishing boat's captain and the cruise ship's
+# gangway, a few steps short of them: walked into, like a door.
+# One press of w is about two units; a shop's counter is one step on, and a
+# second press would be a key in the shop.
+WALK_IN = [(b"w", .3)] * 2
+TACKLE_IN = [(b"w", .5)]
 
 def cases(run, report):
     """Every case, in order. Run twice: once to learn what each run() will be
@@ -417,7 +423,7 @@ def cases(run, report):
         mc_ok = False
     ok &= mc_ok
     # The harbour: money, the gangway, a cruise, a look round, back ashore.
-    hb_st, hb_out = run([(F1, .5), (b"+", .4), (b"\x017", 1.5), (b"p", 3.0),
+    hb_st, hb_out = run([(F1, .5), (b"+", .4), (b"\x017", 1.5)] + WALK_IN + [(b"", 3.0),
                          (b"a", .5), (b"d", .5), (b"", 3.0), (b"x", 1.2), (b"w", .5)],
                         cols=300, rows=60)      # wide: the note goes after the HUD
     hb_plain = ANSI.sub(b"", hb_out).decode("utf-8", "replace")
@@ -441,7 +447,8 @@ def cases(run, report):
     # Fishing: a kiosk on a river pier, a rod, worms and a float, out facing
     # the water, the panel's big one next, a cast, the strike, the fight.
     DOWN, RIGHT = b"\x1bOB", b"\x1bOC"
-    fi_st, fi_out = run([(F1, .5), (b"+", .3), (b"\x010", 1.5), (b"p", .8),
+    fi_st, fi_out = run([(F1, .5), (b"+", .3), (b"\x010", 1.5)] + TACKLE_IN
+                        + [(b"", .5),
                          (DOWN, .2), (b"p", .4), (RIGHT, .3), (DOWN, .2), (b"p", .4),
                          (RIGHT, .3), (b"p", .4), (b"x", .6), (F1, .4), (b"g", .3),
                          (F1, .4), (b"f", .8), (b"f", 1.2)] + [(b"f", .3)] * 16
@@ -456,7 +463,7 @@ def cases(run, report):
     ok &= fi_ok
     # The fishing boat: no rod and the captain sends you to the shop; then a
     # big game rod and lure from the pier, the trip out, a cast, and home.
-    nr_st, nr_out = run([(F1, .5), (b"\x01v", 1.5), (b"p", .8), (b"p", .8),
+    nr_st, nr_out = run([(F1, .5), (b"\x01v", 1.5)] + WALK_IN + [(b"", .5), (b"p", .8),
                          (b"x", .6)], cols=160, rows=45)
     nr_plain = ANSI.sub(b"", nr_out).decode("utf-8", "replace")
     nr_ok = report("the fishing boat's captain, no rod", nr_st, nr_out)
@@ -464,10 +471,12 @@ def cases(run, report):
         print("    no captain, or he took you without a rod")
         nr_ok = False
     ok &= nr_ok
-    ex_st, ex_out = run([(F1, .5), (b"+", .3), (b"\x019", 1.5), (b"p", .8)]
+    ex_st, ex_out = run([(F1, .5), (b"+", .3), (b"\x019", 1.5)] + TACKLE_IN
+                        + [(b"", .5)]
                         + [(DOWN, .15)] * 3 + [(b"p", .4), (RIGHT, .3)]
                         + [(DOWN, .15)] * 5 + [(b"p", .4), (b"x", .5),
-                                               (F1, .5), (b"\x01v", 1.5), (b"p", .8),
+                                               (F1, .5), (b"\x01v", 1.5)] + WALK_IN + [
+                                               (b"", .5),
                                                (b"p", 1.0)]
                         + [(b" ", .3)] * 9 + [(b"", 1.5), (b"c", .8), (b"1", .6),
                                                (b"t", .5), (b"5", .4), (b"a", .3),
