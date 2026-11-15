@@ -1677,7 +1677,7 @@ def coast_reset():
                  "_ramen_firsts", "_vend_picks", "_vend_faces", "_sewer_cache",
                  "_lair_cache", "_cab_seen", "_station_cache", "_center_cache",
                  "_shore_cache", "_coast_cache", "_beach_blocks", "_kiosk_cache",
-                 "_wreck_cache", "_bio_cache", "_anchor_cache"):
+                 "_wreck_cache", "_bio_cache", "_anchor_cache", "_island_cache"):
         globals()[name].clear()
 
 
@@ -23878,6 +23878,8 @@ def render_street(v, now):
             draw_bio(ch, co, v, walls, bx_, bz_, now, wet)
         for ix_, iz_ in near_anchors(v.x, v.z, 1000.0, "ice"):
             draw_ice(ch, co, v, walls, ix_, iz_, now, wet)
+        for ix_, iz_ in near_islands(v.x, v.z, 1600.0):
+            draw_island(ch, co, v, walls, ix_, iz_, now, wet)
     for bx, bz in near_rowboats(v, now, 120.0):
         draw_rowboat(ch, co, v, walls, bx, bz, now, wet)
     ci_ = int(v.x / CELL + BIG) - BIG
@@ -31849,7 +31851,7 @@ def boat_water(x, z):
     """Can she be here: open sea or the river's mouth, and not in the ship."""
     i, j = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
     if (coast_kind(i, j) not in ("sea", "mouth") or herring_in(x, z) or wreck_in(x, z)
-            or bio_in(x, z) or ice_in(x, z)):
+            or bio_in(x, z) or ice_in(x, z) or island_in(x, z)):
         return False
     for h_ in near_harbours(x, z, 120.0):
         lx, lz, head = liner_pose(h_, _clock[0])
@@ -32996,6 +32998,20 @@ EXPEDITIONS = [
                "Still - yer money."),
      "there": ("Look over the side, matey. Look at that. Fifty year an' it still "
                "gets me.")},
+    {"name": "the launch pad", "fee": 55, "out": 330.0, "along": 1670.0, "sail": 30.0,
+     "water": None, "rod": 1, "site": "pad", "face": "pad",
+     "says": "Under the rockets. Odd fish there. Very odd.",
+     "fish": "three-eyed flounder, rocket fish, orange mackerel",
+     "short": ("Ye'll want the spinnin' rod at least. Still - yer money."),
+     "there": ("There she stands. Timed it, I did - she goes up in forty seconds. "
+               "Fish quick!")},
+    {"name": "treasure island", "fee": 80, "out": 1700.0, "along": -2200.0,
+     "sail": 34.0, "water": None, "rod": 1, "site": "island", "needs": "chart",
+     "says": "Where yer map says. Don't tell me mother.",
+     "fish": "parrotfish, lagoon barracuda - an' the golden fish",
+     "short": ("Ye'll want the spinnin' rod at least. Still - yer money."),
+     "there": ("Treasure Island! Row ashore an' dig where the map says - g. I'll "
+               "mind the boat. An' the rum.")},
 ]
 CAP_TOO_BRIGHT = ("Not with a moon like that up, matey - the sea won't glow. Come back "
                   "on a dark night.")
@@ -33258,8 +33274,9 @@ def render_captain(trip, tackle, money, width, height, now):
         _text(ch, co, 1, 1, CAPTAIN.upper()[:width - 2], GOLD)
         for r, line in enumerate(_wrap_words(trip["say"], width - 2)[:height - 6]):
             _text(ch, co, 2 + r, 1, line, BULB)
-        for n, exp in enumerate(EXPEDITIONS[:height - 4]):
-            _text(ch, co, height - 2 - len(EXPEDITIONS) + n, 1,
+        shown = expeditions_for(tackle)
+        for n, exp in enumerate(shown[:height - 4]):
+            _text(ch, co, height - 2 - len(shown) + n, 1,
                   ("%s %s $%d" % (">" if n == trip["sel"] else " ", exp["name"],
                                   exp["fee"]))[:width - 2], GOLD)
         return ch, co
@@ -33278,7 +33295,7 @@ def render_captain(trip, tackle, money, width, height, now):
     bw = min(width - ax - aw * kk - 4, 64 + 20 * (k - 1))
     bx = width - bw - 2
     lines = _wrap_words(trip["say"], bw - 4)
-    bh = 4 + len(lines) + 2 + 3 * len(EXPEDITIONS) + 3
+    bh = 4 + len(lines) + 2 + 3 * len(expeditions_for(tackle)) + 3
     by = max(2, height // 2 - bh // 2)
     for y in range(by, min(height, by + bh)):
         for x in range(bx, bx + bw):
@@ -33290,7 +33307,7 @@ def render_captain(trip, tackle, money, width, height, now):
     y = by + 3 + len(lines)
     _text(ch, co, y, bx + 2, "WHERE TO, MATEY?", GOLD)
     y += 1
-    for n, exp in enumerate(EXPEDITIONS):
+    for n, exp in enumerate(expeditions_for(tackle)):
         on = n == trip["sel"]
         _text(ch, co, y, bx + 2, ("> " if on else "  ") + exp["name"].upper(),
               GOLD if on else HUD)
@@ -33715,6 +33732,263 @@ def still_water(v, x, z, sx, y):
     return None
 
 
+# --- the launch pad, and Treasure Island -------------------------------------------
+# The sixth and seventh expeditions, asked for on 2026-11-15. The launch pad: the
+# Herring anchors off the space centre's sea platform, facing it, and the
+# captain has timed it so a rocket goes up over you while you fish - after which
+# nothing bites for a minute. The water round every pad has the city's
+# oddballs. Treasure Island: only on his list once he has given you a map, which
+# he does when you have sat through enough of his tales; out there, g rows you
+# ashore with a shovel, and the map says where.
+PAD_FISH = 220.0       # the water round a launch pad that has its own fish
+PAD_LIFT = 40.0        # seconds after she anchors that the rocket goes
+PAD_SCARE = 60.0       # and nothing bites for this long after
+ISLAND_AHEAD = 55.0    # the island, this far on from where she anchors
+ISLAND_R = 26.0        # its sand: nothing to cast into, nothing to drive over
+ISLAND_SEA = 220.0     # and round it, the island's water
+MAP_TALES = 6          # tales to sit through for a map
+TREASURE = 1200        # what the chest is worth
+CAP_SCARED = "HAR! Ye scared 'em, ye and yer rockets! Give it a minute."
+CAP_MAP = ("Ye've listened to an old man long enough. Here - take this. X marks it. "
+           "Treasure Island's on me list now.")
+DIG_HUD = (" Treasure Island  -  a d walk the beach  -  space digs  -  x back to the "
+           "boat ")
+ISLAND_ART = [
+    "            _.--------._            ",
+    "     _..--''            ''--.._     ",
+    "_.-''                          ''-._",
+]
+PALM_LEAVES = [
+    " \\\\  |  // ",
+    "--\\\\ | //--",
+    "   (_*_)   ",
+    "  //   \\\\  ",
+    "           ",
+    "           ",
+    "           ",
+    "           ",
+]
+PALM_TRUNK = [
+    "           ",
+    "           ",
+    "           ",
+    "     )     ",
+    "     |     ",
+    "     (     ",
+    "     |     ",
+    "    _|_    ",
+]
+SKULL_ROCK = [
+    "   .-----.   ",
+    "  /       \\  ",
+    " |  O   O  | ",
+    " |    ^    | ",
+    "  \\ '\"\"\"' /  ",
+    "   '-----'   ",
+]
+DIGGER = [
+    [" o  |", "/|\\_|", "/ \\ ^"],
+    [" o   ", "/|\\  ", "/ \\_\\"],
+]
+CHEST_UP = [
+    "   ________   ",
+    "  /$ $ $ $ \\  ",
+    " /__________\\ ",
+    " |   [==]   | ",
+    " |__________| ",
+]
+DIG_FINDS = ["sand. more sand.", "a crab. it nips you, and it is not sorry.",
+             "a coconut. the island's only export.", "an old bottle - empty.",
+             "a seashell. pretty, and worth nothing.", "a boot. the other one."]
+_island_cache = {}
+
+
+def island_site(h):
+    """(x, z) of the middle of the island off this harbour: on from where the
+    Herring anchors, so it is in front of you."""
+    hit = _island_cache.get(h)
+    if hit is None:
+        exp = next(e for e in EXPEDITIONS if e.get("site") == "island")
+        x, z, th = route_pose(expedition_route(h, exp), 1.0)
+        hit = _island_cache[h] = (x + math.sin(th) * ISLAND_AHEAD,
+                                  z + math.cos(th) * ISLAND_AHEAD)
+    return hit
+
+
+def near_islands(x, z, reach):
+    if not COAST or x + reach + 3000.0 < COAST_LAND * CELL:
+        return
+    exp = next(e for e in EXPEDITIONS if e.get("site") == "island")
+    for h in near_harbours(x, z - exp["along"], reach + 400.0):
+        ix, iz = island_site(h)
+        if (ix - x) ** 2 + (iz - z) ** 2 < reach * reach:
+            yield ix, iz
+
+
+def island_in(x, z):
+    """Is this point the island's sand: for the speedboat."""
+    return any(True for _ in near_islands(x, z, ISLAND_R))
+
+
+def nearest_pad(x, z, reach=PAD_FISH):
+    """The space centre whose pad is nearest here, within reach, or None."""
+    best = None
+    for site in near_launch_sites(x, z, reach + 100.0):
+        px, pz = launch_pad_xz(site)
+        d2 = (px - x) ** 2 + (pz - z) ** 2
+        if d2 < reach * reach and (best is None or d2 < best[0]):
+            best = (d2, site)
+    return best and best[1]
+
+
+def pad_water(x, z):
+    """Is this the water round a launch pad."""
+    return nearest_pad(x, z) is not None
+
+
+def draw_island(ch, co, v, walls, ix, iz, now, wet):
+    """The island: a mound of sand, one palm, and the skull-shaped rock with
+    its lantern lit on top."""
+    if (ix - v.x) ** 2 + (iz - v.z) ** 2 > 1600.0 ** 2:
+        return
+    blit_sprite(ch, co, v, walls, ISLAND_ART, ix, iz, -0.3, 2.6, ISLAND_R * 2.2,
+                GOLD_DIM)
+    px, pz = ix - 9.0, iz - 4.0
+    blit_sprite(ch, co, v, walls, PALM_TRUNK, px, pz, 1.5, 15.0, 8.0, BARK)
+    blit_sprite(ch, co, v, walls, PALM_LEAVES, px, pz, 1.5, 15.0, 8.0, GRASS)
+    sx, sz = ix + 8.0, iz + 5.0
+    blit_sprite(ch, co, v, walls, SKULL_ROCK, sx, sz, 1.0, 10.0, 11.0, CURB)
+    on = int(now * 3.0 + ix) % 9 != 0                       # it gutters, now and then
+    put_lit(ch, co, v, walls, sx, 11.3, sz, "o" if on else ".", BULB if on else EMBER,
+            max(wet, 0.4), now)
+
+
+def expeditions_for(tackle):
+    """What is on his list for you: everything, but Treasure Island only once
+    he has given you a map."""
+    return [e for e in EXPEDITIONS if e.get("needs") != "chart" or tackle.charted]
+
+
+def new_dig(tackle, now):
+    """Ashore on Treasure Island, at the skull rock, where the map starts."""
+    return {"u": DIG_SKULL, "holes": [], "t": None, "last": None, "found": False,
+            "say": ("THE MAP: from the skull, %d paces toward the palm. Dig."
+                    % tackle.map) if tackle.map else
+                   "No map, no treasure. A nice beach, though.", "t0": now}
+
+
+DIG_PALM, DIG_SKULL, DIG_PACE = 0.22, 0.78, 0.045   # the beach, across the screen
+
+
+def dig_key(dig, what, tackle, wallet, rng, now):
+    """A key on the beach: walk, or dig. The note for the top bar, or ''."""
+    if dig["t"] is not None and now - dig["t"] < 1.2:
+        return ""                                       # still digging
+    if what in ("left", "right"):
+        dig["u"] = max(0.08, min(0.92, dig["u"] + (-0.01 if what == "left" else 0.01)))
+        return ""
+    if what != "dig":
+        return ""
+    dig["t"] = now
+    dig["holes"].append(dig["u"])
+    if tackle.map is None:
+        dig["say"] = DIG_FINDS[rng.randrange(len(DIG_FINDS))]
+        return ""
+    spot = DIG_SKULL - tackle.map * DIG_PACE
+    d = abs(dig["u"] - spot)
+    if d < 0.02:
+        dig.update(found=True, say="THE CHEST! Gold, and a lot of it. $%d!" % TREASURE)
+        wallet.give(TREASURE)
+        tackle.map = None
+        tackle.treasures += 1
+        return "you dug up the treasure - $%d" % TREASURE
+    near = "WARMER!" if dig["last"] is not None and d < dig["last"] else "COLDER!"
+    if dig["last"] is None:
+        near = "SQUAWK!"
+    dig["last"] = d
+    dig["say"] = "%s  -  PARROT: %s" % (DIG_FINDS[rng.randrange(len(DIG_FINDS))], near)
+    return ""
+
+
+def render_dig(trip, tackle, width, height, now):
+    """Ashore on Treasure Island: the night sky, the sea with the Herring lying
+    off, the beach, the lagoon behind the palm, the skull rock with its
+    lantern - and you with a shovel, the holes you have dug, and what the map
+    says. Drawn, not cast: it is one small beach."""
+    dig = trip["dig"]
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    if width < 40 or height < 16:
+        _text(ch, co, height // 2, 1, dig["say"][:width - 2], GOLD)
+        return ch, co
+    k = big_scale(width, height)
+    horizon = int(height * 0.36)
+    beach = int(height * 0.5)
+    walk = height - 4 - k
+    for y in range(horizon):
+        for x in range(width):
+            m = _mix(x, y, 6901)
+            if m % 120 == 0:
+                ch[y][x] = "*" if m & 256 else "."
+                co[y][x] = STAR if m & 512 else MOON
+    for y in range(horizon, beach):
+        for x in range(width):
+            m = _mix(x // 3, y + int(now * 0.8), 6903)
+            if m % 5 == 0:
+                ch[y][x], co[y][x] = "~", (RAIN if y > horizon + 2 else RAIN_FAR)
+    # The Herring, lying off, her mast light on.
+    hx = int(width * 0.86)
+    _text(ch, co, horizon + 1, hx, "|", CURB)
+    _text(ch, co, horizon, hx, "o", SNOW)
+    _text(ch, co, horizon + 2, hx - 4, "\\_____/", ROU_RED)
+    for y in range(beach, height):
+        for x in range(width):
+            m = _mix(x, y, 6905)
+            if m % 9 == 0:
+                ch[y][x], co[y][x] = ".", GOLD_DIM
+    # The lagoon, behind the palm.
+    lx0, lx1 = int(width * 0.03), int(width * 0.34)
+    ly0, ly1 = beach + 1, beach + max(3, (walk - beach) // 2)
+    for y in range(ly0, ly1):
+        f = (y - ly0 + 0.5) / max(1, ly1 - ly0)
+        half = int((lx1 - lx0) * 0.5 * math.sqrt(max(0.0, 1.0 - (2 * f - 1) ** 2)))
+        mid = (lx0 + lx1) // 2
+        for x in range(mid - half, mid + half):
+            m = _mix(x, y + int(now), 6907)
+            ch[y][x], co[y][x] = ("~" if m % 3 else " "), RAIN
+    # The palm, and the skull rock with its lantern.
+    for art, attr in ((PALM_TRUNK, BARK), (PALM_LEAVES, GRASS)):
+        _bar_sprite(ch, co, art, lambda c, n, a_=attr: a_, int(width * DIG_PALM),
+                    walk - 1, k)
+    _bar_sprite(ch, co, SKULL_ROCK, lambda c, n: CURB, int(width * DIG_SKULL), walk - 1,
+                k)
+    ly = walk - len(SKULL_ROCK) * k - 1
+    lit = int(now * 3.0) % 9 != 0
+    _text(ch, co, ly, int(width * DIG_SKULL), "o" if lit else ".",
+          BULB if lit else EMBER)
+    # The holes, and you with the shovel - or the chest, if you have it.
+    for u in dig["holes"]:
+        _text(ch, co, walk + k, int(u * width) - 1, "(_)", BARK)
+    digging = dig["t"] is not None and now - dig["t"] < 1.2
+    me = DIGGER[int(now * 6.0) % 2] if digging else DIGGER[0]
+    _bar_sprite(ch, co, me, lambda c, n: HUD, int(dig["u"] * width), walk + k - 1, k)
+    if digging:
+        for q in range(4):
+            m = _mix(q, int(now * 10.0), 6909)
+            _text(ch, co, walk - 1 - (m & 3), int(dig["u"] * width) + 2 + (m >> 2 & 3),
+                  ".", GOLD_DIM)
+    if dig["found"] and not digging:
+        _bar_sprite(ch, co, CHEST_UP, lambda c, n: GOLD if c == "$" else GOLD_DIM,
+                    int(dig["u"] * width) + 10 * k, walk + k - 1, k)
+    paces = (DIG_SKULL - dig["u"]) / DIG_PACE
+    where = ("%.0f paces from the skull" % paces if paces > 0.4 else
+             "%.0f paces past the skull" % -paces if paces < -0.4 else
+             "at the skull rock")
+    _label(ch, co, 1, 2, dig["say"][:width - 4], GOLD)
+    _label(ch, co, 2, 2, where, HUD)
+    return ch, co
+
+
 # --- the captain's cabin ---------------------------------------------------------
 # Asked for on 2026-11-15: while fishing at anchor, c goes in to the captain's
 # cabin, the wheelhouse, with the rooftop bar's whole turn round: the sea and the
@@ -33881,7 +34155,14 @@ def cabin_key(cab, n, tackle, wallet, now):
     return ""
 
 
-def cabin_talk(cab):
+def cabin_talk(cab, tackle):
+    """A tale - and when you have sat through enough of them, a map."""
+    tackle.tales += 1
+    if tackle.map is None and tackle.tales >= MAP_TALES:
+        tackle.map = _spin_rng.randint(4, 11)
+        tackle.charted, tackle.tales = True, 0
+        cab["say"] = CAP_MAP
+        return
     cab["tale"] = (cab["tale"] + 1) % len(CAB_TALES)
     cab["say"] = CAB_TALES[cab["tale"]]
 
@@ -34137,19 +34418,20 @@ WATER_NAMES = {"river": "the river", "lake": "the lake", "mouth": "the river's m
                "offshore": "the open sea", "harbour": "the harbour",
                "wreck": "the wreck", "bio": "the glowing sea",
                "trench": "the deep trench", "ice": "the ice floes",
+               "pad": "the launch pad", "island": "treasure island",
                "fountain": "the fountain"}
 _fish_rare = [False]   # the menu's: the next bite is the rarest thing there
 
 
 def _sp(name, where, baits, lo, hi, power, odds, price, colour, art, likes=(),
-        say="", junk=False, alien=False, legend=False):
+        say="", junk=False, alien=False, legend=False, heavy=False):
     """One kind of fish (or of rubbish): the waters it is in, what it takes,
     how heavy it comes, how hard it pulls, how common it is, $ a kilo (flat,
     for rubbish), its colour and its drawing."""
     return {"name": name, "where": where, "baits": baits, "lo": lo, "hi": hi,
             "power": power, "odds": odds, "price": price, "colour": colour,
             "art": art, "likes": likes, "say": say, "junk": junk, "alien": alien,
-            "legend": legend}
+            "legend": legend, "heavy": heavy}
 
 
 _FRESH = ("bread", "worms")
@@ -34210,7 +34492,8 @@ FISH = [
     _sp("weever", ("surf",), ("lugworm",), 0.1, 0.4, 0.3, 6, 1, "GOLD", "long",
         say="careful - the spines on its back sting"),
     # Off the pier.
-    _sp("mackerel", ("inshore", "deep", "offshore", "harbour"), ("spinner", "squid"),
+    _sp("mackerel", ("inshore", "deep", "offshore", "harbour", "pad"),
+        ("spinner", "squid"),
         0.3, 1.2, 0.45, 30, 8, "neon2", "long", likes=("dawn",),
         say="blue and green tiger stripes. where there is one there are fifty"),
     _sp("garfish", ("inshore",), ("spinner",), 0.3, 1.2, 0.4, 12, 6, "neon5", "gar",
@@ -34221,7 +34504,8 @@ FISH = [
         "round", say="lips like a trumpet player"),
     _sp("dogfish", ("inshore", "deep"), _SEA, 1.0, 3.0, 0.5, 14, 3, "GOLD_DIM",
         "shark", say="sandpaper skin. the shop takes them, just"),
-    _sp("cod", ("inshore", "deep"), _SEA, 1.5, 12.0, 0.8, 9, 11, "GOLD_DIM", "long",
+    _sp("cod", ("inshore", "deep", "ice"), _SEA, 1.5, 12.0, 0.8, 9, 11, "GOLD_DIM",
+        "long",
         likes=("moon",), say="a mouth you could put your fist in"),
     _sp("squid", ("inshore", "harbour"), ("spinner",), 0.3, 1.5, 0.3, 8, 14, "neon0",
         "squid", say="it inks your shoes"),
@@ -34309,12 +34593,29 @@ FISH = [
     _sp("arctic char", ("ice",), ("spinner", "worms", "lugworm"), 1.0, 6.0, 0.7, 20, 18,
         "ROU_RED", "long", say="red-bellied, from water colder than you are"),
     _sp("halibut", ("ice",), ("squid", "lugworm"), 20.0, 150.0, 1.9, 5, 14, "GOLD_DIM",
-        "flat", say="a door that swims. it never tires - it is just heavy"),
+        "flat", heavy=True, say="a door that swims. it never tires - it is just heavy"),
     _sp("snow crab", ("ice",), ("squid", "lugworm"), 0.5, 1.5, 0.3, 14, 25, "neon4",
         "crab", say="long legs, and sweet. the restaurants fight over them"),
     _sp("unicorn fish", ("ice",), ("biglure", "squid"), 30.0, 120.0, 2.0, 0.8, 20,
         "SNOW", "unicorn", legend=True,
         say="a fish with a horn. the captain insists it's real. it is"),
+    # Round the launch pads.
+    _sp("three-eyed flounder", ("pad",), ("lugworm", "squid"), 0.5, 3.0, 0.45, 16, 20,
+        "neon5", "flat3", say="three eyes. the space centre says it's nothing to do "
+                              "with them"),
+    _sp("rocket fish", ("pad",), ("spinner", "biglure", "squid"), 2.0, 8.0, 1.05, 9, 22,
+        "SNOW", "rocket", say="it goes like a rocket, and it has the fins for it"),
+    _sp("orange mackerel", ("pad",), ("spinner", "squid"), 0.3, 1.2, 0.45, 26, 12,
+        "neon4", "long", say="they glow faintly orange. nobody at the space centre "
+                             "will say why"),
+    # Round Treasure Island.
+    _sp("parrotfish", ("island",), ("lugworm", "squid"), 1.0, 5.0, 0.55, 22, 12,
+        "neon1", "round", say="the captain's parrot is deeply insulted"),
+    _sp("lagoon barracuda", ("island",), ("spinner",), 3.0, 15.0, 1.0, 12, 15,
+        "MOON_DIM", "pike", say="all teeth and no manners"),
+    _sp("golden fish", ("island",), ("bread", "spinner", "squid"), 1.0, 3.0, 0.8, 0.8,
+        300, "GOLD", "round", legend=True,
+        say="found nowhere else in the world. it shines like the treasure"),
     _sp("old boot", ("river", "mouth", "harbour", "lake"), (), 0.6, 1.4, 0.3, 4, 0,
         "BARK", "boot", junk=True, say="the other one is still down there"),
     _sp("shopping trolley", ("river",), (), 9.0, 16.0, 0.45, 2.5, 0, "CURB",
@@ -34339,6 +34640,10 @@ FISH = [
         junk=True, say="brass, and empty. you hope"),
     _sp("chunk of ice", ("ice",), (), 2.0, 6.0, 0.3, 4, 0, "SNOW", "icecube",
         junk=True, say="it melts in the cool box. the cool box is very cool now"),
+    _sp("booster fragment", ("pad",), (), 5.0, 15.0, 0.55, 2.5, 200, "CURB", "booster",
+        junk=True, say="the space centre pays well to get these back. no questions"),
+    _sp("coconut", ("island",), (), 1.0, 2.0, 0.2, 5, 2, "BARK", "coconut", junk=True,
+        say="it fell off the palm. the island's only export"),
     _sp("glowing jellyfish", ("bio",), (), 0.2, 1.5, 0.2, 7, 0, "neon2", "jelly",
         junk=True, say="it stings. of course it stings"),
     _sp("ship's bell", ("wreck",), (), 6.0, 9.0, 0.5, 2, 40, "GOLD", "bell",
@@ -34502,6 +34807,25 @@ FISH_ART = {
                 "/_____/ | ",
                 "|     | / ",
                 "|_____|/  "],
+    "flat3": ["     .-~~~~~~~-.     ",
+              "   .'  o  o  o  `.   ",
+              " <(  .  .  .  .  )>  ",
+              "   `.  .  .  .  .'   ",
+              "     `-~~~~~~~-'     "],
+    "rocket": ["      _       ",
+               " |\\ / \\___   ",
+               " | >|  o  |>> ",
+               " |/ \\_/~~~   ",
+               "              "],
+    "booster": ["   /\\    ",
+                "  |  |   ",
+                "  |##|   ",
+                "  |  |   ",
+                " /|__|\\  ",
+                "  ^^^^   "],
+    "coconut": ["  .--.  ",
+                " ( .. ) ",
+                "  '--'  "],
     "lantern": ["   .--.     ",
                 " >( o o o )>",
                 "   `--'     "],
@@ -34580,6 +34904,8 @@ def fish_water(x, z):
             out = x - shore_x(z)
             if out < 0.5 or (kind == "sea" and not boat_water(x, z)):
                 return None
+            if out > 600.0 and any(True for _ in near_islands(x, z, ISLAND_SEA)):
+                return "island"
             if _in_harbour(x, z):
                 return "harbour"
             if out > 250.0 and any(True for _ in near_wrecks(x, z, WRECK_REACH)):
@@ -34591,6 +34917,8 @@ def fish_water(x, z):
                 return "trench"
             if out > 100.0 and any(True for _ in near_anchors(x, z, ICE_REACH, "ice")):
                 return "ice"
+            if out > 60.0 and pad_water(x, z):
+                return "pad"
             return ("surf" if out < FISH_SURF else "inshore" if out < FISH_INSHORE
                     else "deep" if out < FISH_DEEP else "offshore")
     if river_at(i, j):
@@ -34873,6 +35201,10 @@ class Tackle:
         self.float_on = 0
         self.box = []           # (kind, kg, water), kept to sell
         self.book = {}          # kind -> [how many, best kg, where]
+        self.tales = 0          # the captain's tales sat through, since the last map
+        self.map = None         # his treasure map: paces from the skull, or None
+        self.charted = False    # and has he ever given you one
+        self.treasures = 0
 
     def rod_kind(self):
         return ROD_KINDS[self.rod] if self.rod is not None else None
@@ -35007,6 +35339,7 @@ class Fishing:
         self.snag, self.snagged, self.free, self.snags = 0.0, None, 0.0, 0
         self.trail = []         # in the glowing sea: where the fish has been
         self.sink_until = 0.0   # in the deep trench: when the lead gets to the bottom
+        self.scared_until = 0.0  # off the launch pad: nothing bites till then
         self.chill = False      # among the floes: your hands go cold
         self.cold = 0.0         # and how cold they are, 0 warm to 1 numb
         self.big = False
@@ -35071,12 +35404,21 @@ class Fishing:
             pick -= o
             if pick <= 0.0:
                 break
-        self.who, self.bite_at = n, now + wait
+        self.who, self.bite_at = n, max(now + wait, self.scared_until
+                                        + self.rng.uniform(3.0, 15.0)
+                                        if now < self.scared_until else 0.0)
         if bait not in LURES and not FISH[n]["junk"]:
             for _ in range(self.rng.randint(0, 3)):
                 t = now + 1.2 + self.rng.random() * max(0.5, wait - 1.8)
                 if t < self.bite_at - 0.7:
                     self.nibbles.append(t)
+
+    def scare(self, until):
+        """A rocket going up: nothing bites till `until`."""
+        self.scared_until = until
+        if self.bite_at is not None and self.bite_at < until:
+            self.bite_at = until + self.rng.uniform(3.0, 15.0)
+            self.nibbles = []
 
     def nibbling(self, now):
         return any(0.0 <= now - t < 0.4 for t in self.nibbles)
@@ -36530,6 +36872,23 @@ def main(stdscr):
                                 note = "-> the woods rave (starting)"
                                 note_at = now
                         break
+            elif (trip is not None and trip.get("dig") is not None
+                  and key not in (ord("q"), CHEAT_KEY)):
+                if key in (27, ord("x"), ord("X")):
+                    trip["dig"] = None
+                    note, note_at = "you row back out to the Herring", now
+                elif key in (ord("z"), ord("Z")):
+                    _big_screens[0] = not _big_screens[0]
+                else:
+                    said_ = dig_key(trip["dig"], {
+                        curses.KEY_LEFT: "left", ord("a"): "left", ord("A"): "left",
+                        curses.KEY_RIGHT: "right", ord("d"): "right",
+                        ord("D"): "right", ord(" "): "dig", ord("p"): "dig",
+                        ord("P"): "dig", 10: "dig", 13: "dig",
+                        curses.KEY_ENTER: "dig"}.get(key, ""), tackle, wallet,
+                        _spin_rng, now)
+                    if said_:
+                        note, note_at = said_, now
             elif (trip is not None and trip.get("cabin") is not None
                   and key not in (ord("q"), CHEAT_KEY)):
                 cab_ = trip["cabin"]
@@ -36547,7 +36906,7 @@ def main(stdscr):
                     if not cabin_facing(cab_, fishing.yaw0):
                         note, note_at = "the captain is round to starboard - turn", now
                     elif key in (ord("t"), ord("T")):
-                        cabin_talk(cab_)
+                        cabin_talk(cab_, tackle)
                     else:
                         said_ = cabin_key(cab_, key - ord("1"), tackle, wallet, now)
                         if said_:
@@ -36560,6 +36919,13 @@ def main(stdscr):
             elif fishing is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (ord("z"), ord("Z")):
                     _big_screens[0] = not _big_screens[0]     # big screens, off and on
+                elif (trip is not None and key in (ord("g"), ord("G"))
+                      and trip["exp"].get("site") == "island"):
+                    if fishing.phase in ("aim", "wait", "gone"):
+                        fishing.to("aim", now)
+                        trip["dig"] = new_dig(tackle, now)
+                    else:
+                        note, note_at = "not now - land it first", now
                 elif trip is not None and key in (ord("c"), ord("C")):
                     if fishing.phase in ("aim", "wait", "gone"):
                         fishing.to("aim", now)      # reeled in, and inside
@@ -36595,7 +36961,7 @@ def main(stdscr):
                                                              in reversed(along_)]))
             elif trip is not None and key not in (ord("q"), CHEAT_KEY):
                 if trip["phase"] == "talk":
-                    n_ = len(EXPEDITIONS)
+                    n_ = len(expeditions_for(tackle))
                     if key in (27, ord("x"), ord("X")):
                         px_, pz_ = herring_plank(trip["h"])
                         cam_x, cam_z = px_ - HERRING_BACK, pz_     # back along the quay
@@ -36608,7 +36974,7 @@ def main(stdscr):
                     elif key in (ord("z"), ord("Z")):
                         _big_screens[0] = not _big_screens[0]
                     elif key in (ord("p"), ord("P"), 10, 13, curses.KEY_ENTER):
-                        exp_ = EXPEDITIONS[trip["sel"]]
+                        exp_ = expeditions_for(tackle)[trip["sel"] % n_]
                         if tackle.rod is None:
                             trip["say"] = CAP_NO_ROD
                         elif exp_.get("when") == "dark" and not dark_night(now):
@@ -37400,6 +37766,15 @@ def main(stdscr):
                 tx_, tz_, th_ = route_pose(trip["route"], 1.0)
                 trip.update(phase="fish", quip=trip["exp"].get("there", CAP_THERE),
                             quip_at=now, seen="aim", snags=0)
+                if trip["exp"].get("face") == "pad":
+                    # Turned to the pad, and the rocket timed to go up over you.
+                    site_ = nearest_pad(tx_, tz_)
+                    if site_ is not None:
+                        px_, pz_ = launch_pad_xz(site_)
+                        th_ = math.atan2(px_ - tx_, pz_ - tz_)
+                        _launch_shift[0] += (-PAD_LIFT - launch_t(site_, now)) % (
+                            LAUNCH_EVERY)
+                        trip["site"] = site_
                 fishing = Fishing(tx_, tz_, th_, tackle, now, int(now * 1000.0),
                                   deck=HerringDeck(), water=trip["exp"]["water"])
                 fishing.chill = trip["exp"].get("cold", False)
@@ -37420,6 +37795,11 @@ def main(stdscr):
                 trip.update(quip=CAP_LANDED[pick_ % len(CAP_LANDED)], quip_at=now)
             elif fishing.phase == "gone" and was_ == "fight":
                 trip.update(quip=CAP_LOST[pick_ % len(CAP_LOST)], quip_at=now)
+        if trip is not None and fishing is not None and trip.get("site") is not None:
+            lt_ = launch_t(trip["site"], now)
+            if 0.0 <= lt_ < 1.0 and now - trip.get("scared", -1e9) > 30.0:
+                fishing.scare(now + PAD_SCARE)
+                trip.update(scared=now, quip=CAP_SCARED, quip_at=now)
         if trip is not None and fishing is not None and fishing.chill:
             if trip.get("cabin") is not None:
                 # His stove: warmer in here, slowly, than it gets cold outside.
@@ -37815,6 +38195,9 @@ def main(stdscr):
                 seated = (venue[1]["seed"], now)    # sat down just now
             ch, co = render_ramen(venue[1], width, height, now, seated[1])
             hud = RAMEN_HUD % (cam_x, cam_z)
+        elif street and trip is not None and trip.get("dig") is not None:
+            ch, co = render_dig(trip, tackle, width, height, now)
+            hud = DIG_HUD
         elif street and trip is not None and trip.get("cabin") is not None:
             ch, co, v = render_cabin(trip, fishing, tackle, width, height, now)
             hud = CABIN_HUD
@@ -37826,6 +38209,8 @@ def main(stdscr):
                 "off the " + HERRING_NAME.title() if fishing.deck is not None else "")
             if trip is not None:
                 hud = hud.replace("x packs up", "c the cabin  -  x heads for home")
+                if trip["exp"].get("site") == "island":
+                    hud = hud.replace("c the cabin", "g dig ashore  -  c the cabin")
                 hud = hud.replace("x keeps it and packs up", "x keeps it, home")
                 if now - trip["quip_at"] < 5.0 and height > 3:
                     q_ = "%s: %s" % (CAPTAIN.upper(), trip["quip"])

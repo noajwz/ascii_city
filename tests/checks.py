@@ -10600,6 +10600,75 @@ for w_, h_ in ((40, 14), (110, 34), (300, 90)):
     except Exception as e_:
         bad_.append((w_, h_, repr(e_)))
 check("both draw at any size, the cold hands and all", not bad_, str(bad_))
+
+# The launch pad, and Treasure Island.
+pexp_ = next(e_ for e_ in ac.EXPEDITIONS if e_.get("site") == "pad")
+px_, pz_, pth_ = ac.route_pose(ac.expedition_route(hh_, pexp_), 1.0)
+psite_ = ac.nearest_pad(px_, pz_)
+pool_ = {ac.FISH[n_]["name"] for n_, _ in ac.bite_pool("pad", "squid", 0.0)}
+check("the Herring anchors off a launch pad, in its water, with the city's oddballs",
+      psite_ is not None and ac.fish_water(px_, pz_) == "pad"
+      and {"three-eyed flounder", "orange mackerel", "booster fragment"} <= pool_,
+      str(sorted(pool_)))
+sf_ = ac.Fishing(px_, pz_, pth_, rig_(1, 3), 500.0, 3, deck=ac.HerringDeck())
+sf_.key("act", 500.1)
+t_ = 500.1
+for _ in range(40):
+    t_ += 1.0 / 30.0
+    sf_.step(t_)
+sf_.scare(t_ + ac.PAD_SCARE)
+late_ = sf_.bite_at is not None and sf_.bite_at >= t_ + ac.PAD_SCARE
+bit_ = False
+while t_ < 500.0 + ac.PAD_SCARE - 5.0:
+    t_ += 0.1
+    sf_.step(t_)
+    bit_ |= sf_.phase != "wait"
+check("after the rocket goes up nothing bites for a minute", late_ and not bit_,
+      "%s %s" % (late_, sf_.phase))
+gt_ = ac.Tackle()
+had_ = [e_["name"] for e_ in ac.expeditions_for(gt_)]
+cab9_ = ac.new_cabin(0.0, 0.0)
+for _ in range(ac.MAP_TALES):
+    ac.cabin_talk(cab9_, gt_)
+check("Treasure Island is on his list only once he has given you a map, for his tales",
+      "treasure island" not in had_ and gt_.map is not None and gt_.charted
+      and cab9_["say"] == ac.CAP_MAP
+      and "treasure island" in [e_["name"] for e_ in ac.expeditions_for(gt_)])
+iexp_ = next(e_ for e_ in ac.EXPEDITIONS if e_.get("site") == "island")
+ix_, iz_, ith_ = ac.route_pose(ac.expedition_route(hh_, iexp_), 1.0)
+isx_, isz_ = ac.island_site(hh_)
+golden_ = [e_ for e_, sp_ in enumerate(ac.FISH) if sp_["name"] == "golden fish"][0]
+check("the island stands off the anchorage; the speedboat stops at it; its water",
+      ac.island_in(isx_, isz_) and not ac.boat_water(isx_, isz_)
+      and ac.fish_water(ix_, iz_) == "island" and ac.FISH[golden_]["where"] == ("island",))
+dw_ = ac.Wallet(0)
+dig_ = ac.new_dig(gt_, 0.0)
+rr_ = random.Random(5)
+spot_ = ac.DIG_SKULL - gt_.map * ac.DIG_PACE
+for _ in range(12):
+    ac.dig_key(dig_, "left", gt_, dw_, rr_, 0.0)
+ac.dig_key(dig_, "dig", gt_, dw_, rr_, 0.0)
+first_ = dig_["say"]
+ac.dig_key(dig_, "right" if dig_["u"] < spot_ else "left", gt_, dw_, rr_, 0.5)
+t_ = 2.0
+while abs(dig_["u"] - spot_) > 0.015 and t_ < 200.0:
+    ac.dig_key(dig_, "right" if dig_["u"] < spot_ else "left", gt_, dw_, rr_, t_)
+    t_ += 0.05
+ac.dig_key(dig_, "dig", gt_, dw_, rr_, t_ + 2.0)
+check("ashore, you dig where the map says: the parrot says warmer or colder, then gold",
+      "PARROT" in first_ and dig_["found"] and dw_.money == ac.TREASURE
+      and gt_.map is None and len(dig_["holes"]) == 2, "%s / %s" % (first_, dig_["say"]))
+bad_ = []
+for w_, h_ in ((40, 14), (80, 24), (160, 45), (300, 90), (451, 133)):
+    try:
+        ac.render_dig({"dig": dig_}, gt_, w_, h_, t_ + 3.0)
+    except Exception as e_:
+        bad_.append((w_, h_, repr(e_)))
+check("the beach draws at any size", not bad_, str(bad_))
+hv_ = [sp_ for sp_ in ac.FISH if sp_["name"] == "halibut"][0]
+check("the halibut is heavy, and cod are under the ice too",
+      hv_["heavy"] and any(ac.FISH[n_]["name"] == "cod"
+                           for n_, _ in ac.bite_pool("ice", "squid", 0.0)))
 # The captain's cabin: c from the deck, the whole turn round, drinks and bait.
 cw_ = ac.Wallet(100)
 ct_ = rig_(3, 5)

@@ -116,3 +116,8 @@ the top bar says "mission control: walk in" near it.
 
 **What it costs**, at 300x90, warm: 13 to 27 ms a frame, the pad camera dearest.
 ctrl-a `5` for the checks: the boardwalk a few steps from the door.
+
+**The fishing boat comes here** (see Fishing, and the tackle shops: the launch pad). The water
+round every pad has its own fish, from the causeway too, and the captain times a launch over
+you.
+
