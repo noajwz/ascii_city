@@ -33270,6 +33270,381 @@ def render_voyage(trip, width, height, now):
     return ch, co, v
 
 
+# --- the captain's cabin ---------------------------------------------------------
+# Asked for on 2026-11-15: while fishing at anchor, c goes in to the captain's
+# cabin, the wheelhouse, with the rooftop bar's whole turn round: the sea and the
+# coast are the real ones, through her windows, and the cabin is drawn round you
+# by bearing, from her bow - the wheel forward, the captain behind his counter
+# to starboard (drinks, bait at sea prices, and he talks), the door aft with your
+# biggest fish over it, the chart table and the parrot to port, a lantern
+# swinging overhead. x (or c) and you are back on deck, rod in hand.
+CABIN_EYE = 4.6         # the wheelhouse is up a step from the deck
+CABIN_MIX = 2.0         # seconds he takes pouring
+CABIN_LIMIT = 5         # and after this many, water
+CABIN_DRINKS = [("GROG", 5, "gold"), ("SPICED RUM", 8, "red"),
+                ("BILGE WATER", 2, "green"), ("HOT COCOA", 3, "brown")]
+# What he sells off his shelf: (which of BAIT_KINDS, his price) - sea prices.
+CABIN_BAIT = [(3, 12), (5, 60), (2, 9), (4, 16)]
+CABIN_HUD = (" the captain's cabin  -  a d look round  -  facing him: 1-4 a drink, 5-8 "
+             "bait, t talk  -  x back on deck ")
+CAB_IN = ["Come in, come in! Shut the door, the parrot gets ideas.",
+          "Welcome to me cabin. Wipe yer feet. Not on the parrot.",
+          "Ah, a visitor! Sit. Not there - that's where the fish go."]
+CAB_SERVED = ["There ye be. Don't drink it near the bait.",
+              "Grog! Me own recipe. Mostly rum. Partly rum.",
+              "Sip it slow, matey. The sea's already rockin' fer ye.",
+              "Arr. That'll put hair on yer chest. And yer tongue.",
+              "Down the hatch! Not that hatch. That's the bilge."]
+CAB_WATER = "That be enough grog fer a landlubber. Here - water. It's wet, at least."
+CAB_BAIT_SAID = "Sea prices, matey! Ye're a long way from the tackle shop."
+CAB_TALES = [
+    "Marlin run hard an' they run long. Give 'em line, take it back slow. Slow!",
+    "Tuna won't look at squid. Big game lure or nothin'. Fussy, like me mother.",
+    "I once hooked the moon, ye know. Reeled her halfway in before the line went.",
+    "This parrot? Won him off a duchess at cards. She cheated. So did I.",
+    "The old one in the woods' lake? Saw it once. It saw me too. Neither of us spoke.",
+    "Never whistle on a boat. Brings the wind. Never fish without a float at night. "
+    "Brings the dark.",
+    "Swordfish fight with their noses. Respect that. I lost a good hat to one.",
+    "Out here there's places I'd take ye, if the Herring were bigger. One day. Arr.",
+    "When it swims at ye, reel! Slack line's how fish get away. And wives.",
+    "Me first boat sank. Me second boat sank. This one floats. Mostly.",
+]
+CABIN_WHEEL = [
+    "      |      ",
+    "  \\   |   /  ",
+    "   .--+--.   ",
+    "--|  (@)  |--",
+    "   '--+--'   ",
+    "  /   |   \\  ",
+    "      |      ",
+    " [=========] ",
+    " |  N  o  | ",
+    " |_________| ",
+]
+CABIN_CAPTAIN = [
+    "   ________   ",
+    " _/  _X_   \\_ ",
+    "(____________)",
+    "  | (o) (#) | ",
+    "  |    L    | ",
+    "  | \\_____/ | ",
+    " /~~~~~~~~~~~\\",
+    " \\~~~~~~~~~~~/",
+    " /|==[$]====|\\",
+]
+CABIN_COUNTER = [
+    " ____________________________________ ",
+    "|====================================|",
+    "|  []   []   []   []   []   []   []  |",
+    "|____________________________________|",
+]
+CABIN_SHELF = [
+    " !  i  !! i  ! [ooo]  i ! !!  i !   ",
+    "====================================",
+]
+CABIN_DOOR = [
+    " ____________ ",
+    "|  ________  |",
+    "| |        | |",
+    "| |   ()   | |",
+    "| |        | |",
+    "| |      o | |",
+    "| |        | |",
+    "| |________| |",
+    "|____________|",
+]
+CABIN_TABLE = [
+    " ________________________ ",
+    "|                        |",
+    "|                        |",
+    "|                        |",
+    "|                        |",
+    "|                        |",
+    "|________________________|",
+    "  ||                  ||  ",
+    "  ||                  ||  ",
+]
+CABIN_PERCH = [
+    " ,_,  ",
+    "(o>   ",
+    "/))   ",
+    "/))   ",
+    "-^^---",
+    "  |   ",
+    "  |   ",
+    " _|_  ",
+]
+CABIN_HAMMOCK = [
+    "o                o",
+    " \\              / ",
+    "  \\____________/  ",
+    "   \\__________/   ",
+]
+CABIN_BOTTLE = [
+    "  _        ",
+    " ( )______ ",
+    "(  | |>|\\ )",
+    " (________)",
+]
+CABIN_BARREL = [
+    "  ______  ",
+    " /      \\ ",
+    "|        |",
+    "|========|",
+    "|        |",
+    " \\______/ ",
+]
+
+
+def new_cabin(yaw, now):
+    """Your visit to the cabin: which way you face, what you have had."""
+    return {"yaw": yaw, "n": 0, "t": None, "drink": None, "tale": -1, "t0": now,
+            "say": CAB_IN[int(now) % len(CAB_IN)]}
+
+
+def cabin_facing(cab, head):
+    """Are you looking at the captain - to starboard of her bow."""
+    return abs((head + math.pi * 0.5 - cab["yaw"] + math.pi) % math.tau - math.pi) < 0.7
+
+
+def cabin_key(cab, n, tackle, wallet, now):
+    """1-4 a drink, 5-8 bait off his shelf: the note for the top bar, or ''."""
+    if n < len(CABIN_DRINKS):
+        if cab["t"] is not None and now - cab["t"] < CABIN_MIX:
+            return "he is still pouring"
+        if cab["n"] >= CABIN_LIMIT:
+            cab.update(t=now, drink=2, say=CAB_WATER)
+            return ""
+        name, price, _ = CABIN_DRINKS[n]
+        if not wallet.take(price):
+            return "a %s is $%d" % (name.lower(), price)
+        cab["n"] += 1
+        cab.update(t=now, drink=n, say=CAB_SERVED[(cab["n"] + n) % len(CAB_SERVED)])
+        return ""
+    n -= len(CABIN_DRINKS)
+    if n < len(CABIN_BAIT):
+        b, price = CABIN_BAIT[n]
+        name, _, many, _ = BAIT_KINDS[b]
+        if not wallet.take(price):
+            return "%s is $%d out here" % (name, price)
+        tackle.bait[b] += many
+        if tackle.bait_kind() is None:
+            tackle.bait_on = b
+        cab["say"] = "%s - %s. %s" % (name.capitalize(), "%d of 'em" % many
+                                      if many > 1 else "one", CAB_BAIT_SAID)
+    return ""
+
+
+def cabin_talk(cab):
+    cab["tale"] = (cab["tale"] + 1) % len(CAB_TALES)
+    cab["say"] = CAB_TALES[cab["tale"]]
+
+
+def _label(ch, co, y, x, text, attr):
+    """Words in the cabin, on a blank of their own: the planking showed
+    between them."""
+    if 0 <= y < len(ch):
+        for n, c in enumerate(text):
+            if 0 <= x + n < len(ch[0]):
+                ch[y][x + n], co[y][x + n] = c, attr
+
+
+def _col_bearing(v, sx):
+    """The bearing a column looks along: the inverse of bar_col()."""
+    cam = 2.0 * sx / max(1, v.width - 1) - 1.0
+    return v.yaw + math.atan(cam * PLANE)
+
+
+def draw_chart(ch, co, x0, y0, w, h, f):
+    """The chart on the table: the coast down it, the harbour, and an X where
+    she lies at anchor - a little map of where you really are."""
+    span = 1400.0                           # units of coast the chart covers
+    for r in range(h):
+        z = f.z + (h * 0.5 - r) / h * span
+        sx = shore_x(z)
+        for c in range(w):
+            x = sx - 200.0 + c / float(w) * 1000.0
+            if x < sx:
+                g, a = ("#" if (r + c) % 3 else ":"), GRASS
+            else:
+                g, a = ("~" if (r * 3 + c) % 7 == 0 else " "), RAIN_FAR
+            if g != " ":
+                ch[y0 + r][x0 + c], co[y0 + r][x0 + c] = g, a
+    for hz in [((k * HARBOUR_GAP + HARBOUR_ROW0) + QUAY_BROAD * 0.5) * CELL
+               for k in range(-3, 4)]:
+        r = int(h * 0.5 - (hz - f.z) / span * h)
+        c = int(200.0 / 1000.0 * w)         # on the shore
+        if 0 <= r < h and 0 <= c < w:
+            ch[y0 + r][x0 + c], co[y0 + r][x0 + c] = "H", GOLD
+    r = h // 2
+    c = int((f.x - (shore_x(f.z) - 200.0)) / 1000.0 * w)
+    if 0 <= c < w:
+        ch[y0 + r][x0 + c], co[y0 + r][x0 + c] = "X", ROU_RED
+
+
+def render_cabin(trip, f, tackle, width, height, now):
+    """Inside the wheelhouse at anchor: the real sea and coast through her
+    windows, and round you, by bearing so it holds still as you turn, her
+    cabin - planking, beams, the posts between the windows, and what is in it.
+    After a few, it sways."""
+    cab = trip["cabin"]
+    head = f.yaw0
+    sway = max(0, cab["n"] - 2) * 0.008 * math.sin(now * 0.8)
+    v = View(f.x, f.z, cab["yaw"] + sway, width, height,
+             eye=CABIN_EYE + 0.15 * math.sin(now * 1.1))
+    ch, co, _ = render_street(v, now)
+    if width < 50 or height < 20:
+        _text(ch, co, height - 1, 0, (" " + cab["say"])[:width], BULB)
+        return ch, co, v
+    k = big_scale(width, height)
+    roll = int(round(0.6 * math.sin(now * 1.1)))      # the swell, inside
+    ceil = 2 * k + 1 + roll
+    sill = int(height * 0.6) + roll
+    floor = int(height * 0.86) + roll
+    # The walls: beams over, planking under the windows, posts between them.
+    for x in range(width):
+        b = _col_bearing(v, x) - head
+        seam = (b * 18.0) % 1.0 < 0.12
+        # Posts between the windows half way between the things in the cabin,
+        # which stand at the eighths of a turn: the windows are over them.
+        post = abs((b % (math.pi / 4.0)) - math.pi / 8.0) < 0.025
+        for y in range(height):
+            if y < ceil:
+                g, a = ("=" if y % 2 else "-"), (WOOD_LIT if y % 2 else WOOD)
+            elif y < sill and post:
+                g, a = "|", WOOD_LIT
+            elif y < sill:
+                continue                    # a window: the sea shows
+            elif y == sill:
+                g, a = "=", WOOD_LIT
+            elif y < floor:
+                g, a = ("|" if seam else "_" if (y - sill) % 3 == 0 else " "), WOOD
+            else:
+                g, a = ("=" if (y - floor) % 2 == 0 else "-"), WOOD
+            if 0 <= y < height:
+                ch[y][x], co[y][x] = g, a
+    # What stands round the cabin, the furthest round first.
+    spots = [(0.0, "wheel"), (math.pi * 0.5, "captain"), (math.pi, "door"),
+             (-math.pi * 0.5, "chart"), (math.pi * 0.25, "barrel"),
+             (-math.pi * 0.75, "hammock"), (math.pi * 0.75, "bottle"),
+             (-math.pi * 0.25, "perch")]
+    spots.sort(key=lambda s_: -abs((head + s_[0] - v.yaw + math.pi) % math.tau
+                                   - math.pi))
+
+    def plain(attr):
+        return lambda c, n: attr
+
+    for off, what in spots:
+        sx = bar_col(v, head + off)
+        if sx is None:
+            continue
+        if what == "wheel":
+            _bar_sprite(ch, co, CABIN_WHEEL, lambda c, n: GOLD if c in "@+N"
+                        else GOLD_DIM, sx, floor - 1, k)
+        elif what == "barrel":
+            _, y0 = _bar_sprite(ch, co, CABIN_BARREL, plain(WOOD_LIT), sx, floor - 1, k)
+            _label(ch, co, y0 + 2 * k, sx - 2, "BAIT", GOLD)    # words stay words
+        elif what == "hammock":
+            _bar_sprite(ch, co, CABIN_HAMMOCK, plain(GOLD_DIM), sx, sill + 2 * k, k)
+        elif what == "bottle":
+            _bar_sprite(ch, co, CABIN_BOTTLE, lambda c, n: SNOW if c in "|>\\"
+                        else RAIN, sx, sill - 1, k)
+        elif what == "perch":
+            _bar_sprite(ch, co, CABIN_PERCH, lambda c, n: GOLD if c in "o>"
+                        else ROU_GREEN if c in "(/),_" else WOOD_LIT,
+                        sx, floor - 1, k)
+            if int(now * 0.5) % 4 == 0:
+                sq = PARROT[int(now * 0.5 / 4) % len(PARROT)]
+                _text(ch, co, floor - 9 * k - 1, sx - len(sq) // 2, sq, ROU_GREEN)
+        elif what == "door":
+            x0, y0 = _bar_sprite(ch, co, CABIN_DOOR, lambda c, n: GOLD if c in "o()"
+                                 else WOOD_LIT, sx, floor - 1, k)
+            _label(ch, co, floor + 1, sx - 8, " x: out on deck ", HUD)
+            # Over it, your biggest fish yet, mounted.
+            best = max(tackle.book.items(), key=lambda kv: kv[1][1] * FISH[kv[0]]
+                       ["power"], default=None)
+            if best is not None:
+                sp = FISH[best[0]]
+                art = FISH_ART[sp["art"]]
+                aw = max(len(r_) for r_ in art)
+                label = " %s, %.1f kg " % (sp["name"], best[1][1])
+                pw = max(aw * k, len(label)) + 4
+                ph = len(art) * k + 3
+                ay = max(ceil + 1, y0 - ph - 1)
+                px0 = sx - pw // 2
+                # On a board, not over the sea.
+                for y in range(ay, ay + ph):
+                    for x in range(px0, px0 + pw):
+                        if 0 <= y < height and 0 <= x < width:
+                            ch[y][x], co[y][x] = " ", 0
+                _box(ch, co, px0, ay, pw, ph, WOOD_LIT)
+                _blow_up(ch, co, sx - aw * k // 2, ay + 1, [r_.ljust(aw) for r_ in art],
+                         [[fish_colour(sp)] * aw for _ in art], k)
+                _label(ch, co, ay + ph - 2, sx - len(label) // 2, label, GOLD)
+            else:
+                _label(ch, co, max(ceil + 2, y0 - 3), sx - 15,
+                       " ( a plaque: YOUR FISH HERE ) ", GOLD_DIM)
+        elif what == "chart":
+            x0, y0 = _bar_sprite(ch, co, CABIN_TABLE, plain(WOOD_LIT), sx, floor - 1,
+                                 k)
+            cw, chh = (len(CABIN_TABLE[0]) - 2) * k, 5 * k
+            if 0 <= x0 and x0 + cw + k < width:
+                draw_chart(ch, co, x0 + k, y0 + k, cw, chh, f)
+                _label(ch, co, y0 - 1, sx - 9, " WHERE WE BE  (X) ", GOLD)
+        elif what == "captain":
+            x0, y0 = _bar_sprite(ch, co, CABIN_SHELF, lambda c, n: (
+                (ROU_GREEN, GOLD, ROU_RED, CROWN_BLUE)[n % 4] if c in "!i"
+                else GOLD if c.isalpha() or c in "[]" else WOOD_LIT), sx, sill - 1, k)
+            pouring = cab["t"] is not None and now - cab["t"] < CABIN_MIX
+            cy = floor - len(CABIN_COUNTER) * k
+            lean = (k if pouring and int(now * 6.0) % 2 else 0)
+            _bar_sprite(ch, co, CABIN_CAPTAIN, lambda c, n: (
+                SNOW if c in "Xo" else ROU_BLACK if c == "#" else
+                ROU_RED if c == "~" else GOLD if c in "[$]"
+                else GOLD_DIM), sx + lean, cy - 1, k)
+            cx0, cy0 = _bar_sprite(ch, co, CABIN_COUNTER, lambda c, n: GOLD_DIM
+                                   if c in "[]" else WOOD_LIT, sx, floor - 1, k)
+            if cab["drink"] is not None and not pouring:
+                tint = {"gold": GOLD, "red": ROU_RED, "green": ROU_GREEN,
+                        "brown": WOOD_LIT}[CABIN_DRINKS[cab["drink"]][2]]
+                _bar_sprite(ch, co, BAR_DRINK, plain(tint), sx + 12 * k, cy - 1, k)
+            # His menu, chalked on a board by him; and what he says.
+            board = ["DRINKS"] + ["%d %-12s $%d" % (n + 1, d[0], d[1])
+                                  for n, d in enumerate(CABIN_DRINKS)]
+            board += ["", "BAIT, SEA PRICES"] + [
+                "%d %-12s $%d" % (n + 1 + len(CABIN_DRINKS),
+                                  BAIT_KINDS[b][0].upper(), p)
+                for n, (b, p) in enumerate(CABIN_BAIT)]
+            bw = max(len(r_) for r_ in board) + 4
+            bx = cx0 - bw - 2 * k
+            by = ceil + 1
+            if bx > 0 and by + len(board) + 2 < sill + 3:
+                for y in range(by, by + len(board) + 2):
+                    for x in range(bx, bx + bw):
+                        ch[y][x], co[y][x] = " ", 0
+                _box(ch, co, bx, by, bw, len(board) + 2, WOOD_LIT)
+                for r_, line in enumerate(board):
+                    _text(ch, co, by + 1 + r_, bx + 2, line,
+                          GOLD if line.isupper() and not line[0].isdigit() else HUD)
+            say = "*glug glug glug*" if pouring else cab["say"]
+            lines = _wrap_words(say, max(20, min(60, width // 2)))[:3]
+            for r_, line in enumerate(lines):
+                y = y0 - 1 - len(lines) + r_
+                for x in range(sx - len(line) // 2 - 1, sx + len(line) // 2 + 2):
+                    if 0 <= x < width and 0 <= y < height:
+                        ch[y][x], co[y][x] = " ", 0
+                _text(ch, co, y, sx - len(line) // 2, line, BULB)
+    # The lantern overhead, swinging with her.
+    lx = width // 2 + int(round(3.0 * k * math.sin(now * 1.1 + 0.6)))
+    for y in range(ceil, ceil + 2 * k):
+        if 0 <= lx < width:
+            ch[y][lx], co[y][lx] = "|", CURB
+    _blow_up(ch, co, lx - k, ceil + 2 * k, ["[o]"], [[GOLD_DIM, BULB, GOLD_DIM]],
+             max(1, k - 1) if k > 1 else 1)
+    return ch, co, v
+
+
 # --- fishing -----------------------------------------------------------------
 # Asked for on 2026-11-15: a fishing mechanic, different fish depending on
 # where you cast, and a tackle shop with rods, bait and floats. Carry a rod
@@ -35377,9 +35752,37 @@ def main(stdscr):
                                 note = "-> the woods rave (starting)"
                                 note_at = now
                         break
+            elif (trip is not None and trip.get("cabin") is not None
+                  and key not in (ord("q"), CHEAT_KEY)):
+                cab_ = trip["cabin"]
+                if key in (27, ord("x"), ord("X"), ord("c"), ord("C")):
+                    trip["cabin"] = None
+                    note, note_at = "back out on deck, rod in hand", now
+                elif key in (curses.KEY_LEFT, ord("a"), ord("A")):
+                    cab_["yaw"] -= 0.12
+                elif key in (curses.KEY_RIGHT, ord("d"), ord("D")):
+                    cab_["yaw"] += 0.12
+                elif key in (ord("z"), ord("Z")):
+                    _big_screens[0] = not _big_screens[0]
+                elif key in (ord("t"), ord("T")) or ord("1") <= key < ord("1") + len(
+                        CABIN_DRINKS) + len(CABIN_BAIT):
+                    if not cabin_facing(cab_, fishing.yaw0):
+                        note, note_at = "the captain is round to starboard - turn", now
+                    elif key in (ord("t"), ord("T")):
+                        cabin_talk(cab_)
+                    else:
+                        said_ = cabin_key(cab_, key - ord("1"), tackle, wallet, now)
+                        if said_:
+                            note, note_at = said_, now
             elif fishing is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (ord("z"), ord("Z")):
                     _big_screens[0] = not _big_screens[0]     # big screens, off and on
+                elif trip is not None and key in (ord("c"), ord("C")):
+                    if fishing.phase in ("aim", "wait", "gone"):
+                        fishing.to("aim", now)      # reeled in, and inside
+                        trip["cabin"] = new_cabin(fishing.yaw0 + math.pi * 0.5, now)
+                    else:
+                        note, note_at = "not now - land it first", now
                 elif fishing.key({
                         27: "stop", ord("x"): "stop", ord("X"): "stop",
                         ord("f"): "act", ord("F"): "act", ord(" "): "strike",
@@ -36608,6 +37011,9 @@ def main(stdscr):
                 seated = (venue[1]["seed"], now)    # sat down just now
             ch, co = render_ramen(venue[1], width, height, now, seated[1])
             hud = RAMEN_HUD % (cam_x, cam_z)
+        elif street and trip is not None and trip.get("cabin") is not None:
+            ch, co, v = render_cabin(trip, fishing, tackle, width, height, now)
+            hud = CABIN_HUD
         elif street and fishing is not None:
             ch, co, v = render_fishing(fishing, width, height, now)
             hud = FISH_HUD[fishing.phase] % (
@@ -36615,8 +37021,8 @@ def main(stdscr):
                     "wait", "fight", "landed") else
                 "off the " + HERRING_NAME.title() if fishing.deck is not None else "")
             if trip is not None:
-                hud = hud.replace("x packs up", "x heads for home").replace(
-                    "x keeps it and packs up", "x keeps it, home")
+                hud = hud.replace("x packs up", "c the cabin  -  x heads for home")
+                hud = hud.replace("x keeps it and packs up", "x keeps it, home")
                 if now - trip["quip_at"] < 5.0 and height > 3:
                     q_ = "%s: %s" % (CAPTAIN.upper(), trip["quip"])
                     _text(ch, co, 1, max(1, width // 2 - len(q_) // 2), q_[:width - 2],

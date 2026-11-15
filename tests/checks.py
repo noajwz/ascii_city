@@ -10366,6 +10366,39 @@ bf_ = ac.Fishing(ax_, az_, ah_, rig_(3, 5), 300.0, 9, deck=ac.HerringDeck())
 bf_.key("act", 300.8)
 for q_ in range(40):
     bf_.step(300.8 + q_ / 30.0)
+# The captain's cabin: c from the deck, the whole turn round, drinks and bait.
+cw_ = ac.Wallet(100)
+ct_ = rig_(3, 5)
+cb_ = ac.new_cabin(ah_ + math.pi * 0.5, 0.0)
+ac.cabin_key(cb_, 0, ct_, cw_, 0.0)                     # grog, $5
+poured_ = cb_["drink"] == 0 and cw_.money == 95
+ac.cabin_key(cb_, 1, ct_, cw_, 0.5)                     # still pouring: nothing
+busy_ = cw_.money == 95
+squid0_ = ct_.bait[3]
+ac.cabin_key(cb_, len(ac.CABIN_DRINKS), ct_, cw_, 1.0)  # squid strips, sea prices
+for n_ in range(ac.CABIN_LIMIT + 1):
+    ac.cabin_key(cb_, 3, ct_, cw_, 10.0 + n_ * 5.0)
+check("in the cabin: he pours, sells bait at sea prices, and stops you in the end",
+      poured_ and busy_ and ct_.bait[3] == squid0_ + ac.BAIT_KINDS[3][2]
+      and ac.CABIN_BAIT[0][1] > ac.BAIT_KINDS[3][1]
+      and cb_["say"] == ac.CAB_WATER, str(cb_["say"]))
+check("he is to starboard: facing him, you are served; turned away, not",
+      ac.cabin_facing(cb_, ah_)
+      and not ac.cabin_facing(dict(cb_, yaw=ah_ - math.pi * 0.5), ah_))
+tr2_ = {"h": hh_, "phase": "fish", "cabin": ac.new_cabin(ah_, 0.0)}
+bad_ = []
+for w_, h_ in ((30, 10), (60, 20), (110, 34), (160, 45), (300, 90), (451, 133)):
+    for q_ in range(8):
+        tr2_["cabin"]["yaw"] = ah_ + q_ * math.pi / 4.0
+        try:
+            gc_ = ac.render_cabin(tr2_, bf_, ct_, w_, h_, 5.0 + q_)[0]
+            txt_ = "".join("".join(r_) for r_ in gc_)
+            if w_ >= 300 and ("GGRR" in txt_ or "BBAA" in txt_):
+                bad_.append((w_, h_, "words blown up"))
+        except Exception as e_:
+            bad_.append((w_, h_, q_, repr(e_)))
+check("the cabin draws all the way round, at any size, words still words",
+      not bad_, str(bad_[:3]))
 check("at anchor out there: the open sea's fish, off her side",
       bf_.water == "offshore" and "offshore" in ac.FISH[bf_.who]["where"]
       and ac.render_fishing(bf_, 160, 45, 302.0) is not None, str(bf_.water))

@@ -156,3 +156,37 @@ way round. He has something to say when one is on, landed or lost (`CAP_HOOKED`,
 `CAP_LOST`, over the top of the view). `x` - and he weighs anchor and takes you home the same
 way back, phase `"home"`, and you are down the gangplank facing the town.
 
+## The captain's cabin
+
+Asked for on 2026-11-15: "when fishing there's a button to go inside the captains cabin. We can
+give it the same kind of full circle view as the skybar has. In here you can talk to the
+captain, the captain also sells drinks and bait."
+
+**`c` at anchor** (aiming or waiting - a line in the water is reeled in; not with a fish on)
+goes in: `trip["cabin"]` (`new_cabin()`), `render_cabin()`, and `x` or `c` is back on deck with
+the rod. **It is the rooftop bar's way of doing it** (see The rooftop bar): `render_street()`
+from her wheelhouse, `CABIN_EYE`, so the sea, the moon on it and the ships out there are the
+real ones through her windows; then the cabin over it **in screen space, by bearing** from her
+bow (`bar_col()`, `_bar_sprite()` - solid, `k` times over), so it holds still as you turn
+(`a`/`d`). Beams over, planking under the windows (seams by bearing, `_col_bearing()`), posts
+between the windows at the sixteenths - half way between the things in the cabin, which stand
+at the eighths. A post at the eighths put a bar straight through the captain.
+
+**Round the cabin**: forward the wheel (`CABIN_WHEEL`) and binnacle; to starboard the captain
+(`CABIN_CAPTAIN`) behind his counter, the bottles on a shelf, his chalkboard, what he says; aft
+the door, and over it **your biggest fish yet** on a plaque (`tackle.book`, the best by weight
+and fight); to port the chart table with **a chart of where you really are** (`draw_chart()`:
+the coast, the harbours as H, an X where she lies) and the parrot on his perch, squawking; the
+bait barrel, the hammock and a ship in a bottle between; a lantern swinging overhead; and the
+whole cabin rising and falling a row with the swell.
+
+**Facing him** (`cabin_facing()`, within 0.7 rad of starboard) `1`-`4` a drink (`CABIN_DRINKS`,
+off the wallet, `CABIN_MIX` of him pouring, `CABIN_LIMIT` and it is water; past two the view
+sways, as at the rooftop bar), `5`-`8` bait off his shelf at sea prices (`CABIN_BAIT` - dearer
+than the shop's: you are a long way from it), `t` a tale (`CAB_TALES`: tips for the open sea's
+fish, lore, nonsense). Turned away, the top bar tells you he is to starboard.
+
+**Words stay words on a big window**: `_bar_sprite()` blows a drawing up `k` times, so the
+shelf's label and the barrel's came out GGRROOGG; they are `_label()`s now, plain text on a
+blank of its own (the planking showed between the words).
+

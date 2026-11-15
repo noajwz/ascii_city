@@ -334,7 +334,10 @@ the city is infinite, identical every time you walk back to it, and held in no m
 - **The fishing boat**, the *Salty Herring*, at the harbour's quay (a taxi goes to **the fishing
   boat**): `p` by the gangplank and Cap'n Redgill asks where to. Pay him and he sails you out to
   the open ocean - tuna, swordfish, marlin - drops anchor while you fish, and brings you home
-  when you have had enough (`x`).
+  when you have had enough (`x`). Out there `c` takes you into **his cabin**: look all the way
+  round, the sea through the windows, the wheel, a chart with an X where you are, the parrot,
+  your biggest fish over the door - and him behind his counter, with grog, bait at sea prices
+  and tall tales.
 
 ### Weather and the sky
 
