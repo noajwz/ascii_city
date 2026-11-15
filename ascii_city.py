@@ -12456,10 +12456,14 @@ def coast_ground(v, kind, x, z, y, sx, glow, now):
     if v.moon_sx is not None and abs(sx - v.moon_sx) <= 1 + (y - v.horizon) * 0.1:
         if h % 2:
             return (":" if h % 3 else "."), v.moon_attr or MOON
-    g = glow.get(((int(x / GLOW_CELL + BIG) - BIG) * 65536)
-                 + (int(z / GLOW_CELL + BIG) - BIG))
-    if g is not None and h % 3 == 0:
-        return ":", g
+    if h % 3 == 0 and glow:
+        # Only looked up where it would be used: a third of the points, and
+        # out at sea the map is mostly empty - from the cruise ship's deck
+        # the sea is twelve thousand points a frame.
+        g = glow.get(((int(x / GLOW_CELL + BIG) - BIG) * 65536)
+                     + (int(z / GLOW_CELL + BIG) - BIG))
+        if g is not None:
+            return ":", g
     if h % 13 == 0:
         return "-", STREET
     return None
@@ -16550,6 +16554,8 @@ LINER_FEE = 15         # a cruise
 LINER_SPEED = 26.0     # units a second, under way
 LINER_EASE = 12.0      # seconds to get up to it, and to come to a stop
 LINER_SEEN = 2600.0    # how far off her lights are drawn
+LINER_OFF = 340.0      # how far off the beach she sails along the coast
+LINER_WALLS = 420.0    # and how far real buildings go from her deck
 LINER_HUD = (" the %s  -  a d look round  -  x goes ashore  -  q quit "
              % LINER_NAME.lower())
 _liner_trips = {}      # harbour -> (when she sailed, her way): while she is out
@@ -16643,11 +16649,13 @@ def _catmull(pts, step=20.0):
 def liner_route(h):
     """Her way, out and back: (points, the length along them at each, where
     along them she is abeam of the space centre down the coast or None).
-    Out past the end of the quay, round to the south, down the coast well out
-    past the pier's head and the wheel, past the launch pad - nearly five
-    hundred units off it: at a hundred and fifty the rocket was over the top
-    of the picture before it was well off the pad - round, and back up a
-    little further out."""
+    Out past the end of the quay, round to the south, down the coast
+    LINER_OFF off the beach - close enough that the town is buildings with
+    their signs lit and not a line on the horizon, which it was at six
+    hundred and more - past the pier's head and the wheel; wide round the
+    launch pad, nearly five hundred off it, since at a hundred and fifty the
+    rocket was over the top of the picture before it was well off the pad;
+    round, and back up the coast as close in."""
     bx, bz = liner_berth(h)
     down = (h[0] - 360) * CELL      # the space centre half a gap south, if any
     site = _launch_at(h[0] - 360)
@@ -16655,10 +16663,13 @@ def liner_route(h):
     def out_(z, far):
         return shore_x(z) + far, z
 
-    pts = [(bx, bz), (bx + 160.0, bz), out_(bz - 160.0, 400.0), out_(bz - 600.0, 600.0),
-           out_(down + 250.0, 700.0), out_(down, 700.0), out_(down - 260.0, 800.0),
-           out_(down - 120.0, 980.0), out_(down + 200.0, 950.0),
-           out_(bz - 400.0, 800.0), out_(bz - 120.0, 420.0), (bx + 220.0, bz + 6.0)]
+    off = LINER_OFF
+    pts = [(bx, bz), (bx + 160.0, bz), out_(bz - 180.0, off), out_(bz - 600.0, off),
+           out_(down + 650.0, off), out_(down + 300.0, 560.0), out_(down, 700.0),
+           out_(down - 260.0, 800.0), out_(down - 120.0, 980.0),
+           out_(down + 250.0, 760.0), out_(down + 650.0, off + 40.0),
+           out_(bz - 600.0, off + 40.0), out_(bz - 180.0, off + 40.0),
+           (bx + 220.0, bz + 6.0)]
     line = _catmull(pts)
     along = [0.0]
     for a, b in zip(line, line[1:]):
@@ -17198,6 +17209,7 @@ def render_cruise(h, look, width, height, now):
     eye = LINER_TOP + 1.6
     v = View(x + px * (LINER_B * 0.5 - 1.5), z + pz * (LINER_B * 0.5 - 1.5),
              math.atan2(px, pz) + look, width, height, eye=eye, reach=ROOF_REACH)
+    v.high_walls = LINER_WALLS          # the town as buildings, not block shapes
     _aboard[0] = h
     try:
         ch, co, wet = render_street(v, now)
