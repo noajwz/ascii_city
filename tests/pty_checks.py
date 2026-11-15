@@ -469,13 +469,17 @@ def cases(run, report):
                         + [(DOWN, .15)] * 5 + [(b"p", .4), (b"x", .5),
                                                (F1, .5), (b"\x01v", 1.5), (b"p", .8),
                                                (b"p", 1.0)]
-                        + [(b" ", .3)] * 9 + [(b"", 1.5), (b"f", 1.5), (b"x", 1.0)]
+                        + [(b" ", .3)] * 9 + [(b"", 1.5), (b"c", .8), (b"1", .6),
+                                               (b"t", .5), (b"5", .4), (b"a", .3),
+                                               (b"x", .6), (b"f", 1.5), (b"x", 1.0)]
                         + [(b" ", .3)] * 7 + [(b"", 1.5), (b"w", .4)],
                         cols=160, rows=45)
     ex_plain = ANSI.sub(b"", ex_out).decode("utf-8", "replace")
     ex_ok = report("a fishing trip: out, a cast, and home", ex_st, ex_out)
     if ex_ok and ex_out and not ("going out to the open ocean" in ex_plain
-                                 and "CAST" in ex_plain and "going home" in ex_plain):
+                                 and "CAST" in ex_plain and "going home" in ex_plain
+                                 and "captain's cabin" in ex_plain
+                                 and "DRINKS" in ex_plain):
         print("    did not sail, fish, or come home")
         ex_ok = False
     ok &= ex_ok
