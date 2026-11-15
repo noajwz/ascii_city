@@ -1676,7 +1676,7 @@ def coast_reset():
                  "_tower_blocks", "_cinema_blocks", "_wash_blocks", "_ramen_picks",
                  "_ramen_firsts", "_vend_picks", "_vend_faces", "_sewer_cache",
                  "_lair_cache", "_cab_seen", "_station_cache", "_center_cache",
-                 "_shore_cache", "_coast_cache", "_beach_blocks"):
+                 "_shore_cache", "_coast_cache", "_beach_blocks", "_kiosk_cache"):
         globals()[name].clear()
 
 
@@ -4023,6 +4023,7 @@ class View:
         self.shore = {}         # the waterline this instant, by z: the sea's
         self.moon_sx = None     # the column the moon's light lies down the sea in
         self.moon_attr = None   # and its colour: the moon's, or the sunrise's
+        self.tackle_signs = []  # tackle shops' names, to go up last
 
     def ray(self, sx):
         cam = 2.0 * sx / (self.width - 1) - 1.0
@@ -12073,6 +12074,13 @@ def draw_pier(ch, co, v, walls, run, end, now, wet):
     if int(now * 0.7) % 5:
         put_point(ch, co, v, walls, gx, 0.85, gz, "v", MOON)
 
+    # The bait kiosk at the land end.
+    kiosk = river_kiosk(run)
+    if kiosk is not None:
+        seed = _mix(run, 1, 6301)
+        draw_tackle_hut(ch, co, v, walls, kiosk[0][0], kiosk[0][1], seed,
+                        KIOSK_NAMES[seed % len(KIOSK_NAMES)], now, wet, True)
+
 
 def draw_gulls(ch, co, v, walls, now):
     """A few over the water, going round. They are the one thing out here that
@@ -15408,6 +15416,11 @@ def draw_sea_pier(ch, co, v, walls, pier, now, wet):
         m = _mix(r0, k, 5703)
         blit_sprite(ch, co, v, walls, LOOK_UP, wx - 6.0 - (m & 7),
                     wz - 6.0 + ((m >> 4) & 15) * 0.8, 0.0, SMOKER_H, SMOKER_W, CURB)
+    # The tackle shop, on the south side of the boards.
+    (tx_, tz_), _ = pier_tackle(pier)
+    seed_ = _mix(r0, 0, 6301)
+    draw_tackle_hut(ch, co, v, walls, tx_, tz_, seed_,
+                    TACKLE_NAMES[seed_ % len(TACKLE_NAMES)], now, wet, False)
 
 
 SEA_WHEEL_FEE = 6      # a ride on the wheel
@@ -23860,6 +23873,8 @@ def render_street(v, now):
         if not grand_at(i):
             draw_bridge(ch, co, v, walls, i, j, now, wet)
     draw_river_mist(ch, co, v, walls, now, wet)
+    if v.tackle_signs:
+        draw_tackle_signs(ch, co, v, walls, now)
     if woods_depth(int(v.x / CELL + BIG) - BIG, int(v.z / CELL + BIG) - BIG) > -8.0:
         draw_woods_life(ch, co, v, walls, now, wet)
     if rave is not None:
@@ -27722,7 +27737,8 @@ CHEAT_HIDDEN = [
     ("2", "the pier", "seapier"), ("3", "the pier's wheel", "seawheel"),
     ("4", "the launch pad", "launchpad"), ("5", "mission control", "mission"),
     ("6", "the harbour", "harbour"), ("7", "the gangway", "gangway"),
-    ("8", "boat hire", "marina"),
+    ("8", "boat hire", "marina"), ("9", "the pier's tackle shop", "piertackle"),
+    ("0", "a bait kiosk", "kiosk"),
 ]
 CHEAT_TEST = 1                          # ctrl-a
 TEST_JUMPS = bool(os.environ.get("ASCII_CITY_TEST"))
@@ -28697,6 +28713,12 @@ def find_place(x, z, kind):
         return _gangway_spot(x, z)
     if kind == "marina":
         return _marina_spot(x, z)
+    if kind == "tackle":
+        return _tackle_spot(x, z)
+    if kind == "piertackle":
+        return _pier_tackle_spot(x, z)
+    if kind == "kiosk":
+        return _kiosk_spot(x, z)
     if kind == "seawheel":
         # At the foot of the wheel on the nearest pier's head, looking up at it.
         sp = _sea_pier_spot(x, z)
@@ -28862,7 +28884,8 @@ def draw_cheats(ch, co, note):
               for g, kinds in CHEAT_GROUPS}
     gap = [("", "")]
     left = (groups["NIGHTLIFE"] + [("/", "closing time")] + gap
-            + [("", "MONEY"), ("+", "+$1000"), ("%", "jackpot next")] + gap
+            + [("", "MONEY"), ("+", "+$1000"), ("%", "jackpot next"),
+               ("g", "big fish next")] + gap
             + groups["VIEWS"] + gap + [("", "THE MYSTERY"), ("m", "start it"),
                                        ("c", "the next clue")])
     middle = [("", "PARTS OF TOWN")] + [(d["key"], d["name"]) for d in DISTRICTS]
@@ -30323,7 +30346,8 @@ TAXI_DESTS = [("the casino", "casino"), ("the club", "club"),
               ("the riverbank", "bank"), ("the woods", "woods"), ("the lake", "lake"),
               ("the karaoke bar", "karaoke"), ("the mini golf", "minigolf"),
               ("the beach", "beach"), ("the pier", "seapier"),
-              ("the launch pad", "launchpad"), ("the harbour", "harbour")]
+              ("the launch pad", "launchpad"), ("the harbour", "harbour"),
+              ("the tackle shop", "tackle")]
 DRIVER_SAYS = ["Busy night.", "Where you headed, friend?", "Meter's running.",
                "You see the fireworks over the bay? I saw them once.",
                "I don't go into the woods after dark. Nobody does.",
@@ -31737,7 +31761,8 @@ BOAT_SLIDE = 0.6       # and with e held, which lets the stern go
 BOAT_BODY = 1.6        # how close to anything she can come
 BOAT_KNOTS = 1.9       # knots to a unit a second
 BOAT_HUD = (" speedboat  -  w s throttle  -  a d steer  -  e or shift slide"
-            "  -  space slows  -  h horn  -  x back to the quay  -  %s  %d knots ")
+            "  -  space slows  -  h horn  -  f fishes, stopped  -  x back to the quay"
+            "  -  %s  %d knots ")
 _boat_out = [None]     # the harbour whose boat you have out
 BOAT_MOORED = [
     "  ___    ",
@@ -32863,6 +32888,1773 @@ def render_rave(club, width, height, now):
     return ch, co
 
 
+# --- fishing -----------------------------------------------------------------
+# Asked for on 2026-11-15: a fishing mechanic, different fish depending on
+# where you cast, and a tackle shop with rods, bait and floats. Carry a rod
+# and stand by water - the river, the woods' lake, the sea off the sand, the
+# ocean pier, the harbour, the fountain on the Strip, or the speedboat stopped
+# out at sea - and f fishes. What can bite is decided by where the float goes
+# in, not where you stand: the river, the lake, the river's mouth, the surf,
+# off the pier, the deep water past its head, the open sea, the harbour and
+# the fountain each have fish of their own, and the bait on the hook picks
+# among them. Then: a cast, the wait, a nibble or two, the bite, the strike,
+# and a fight with the tension on the line - and a card for what you landed.
+# Everything you carry is for the session, like the money.
+ROD_KINDS = [   # (name, $, how far it casts, what the line holds, reel speed, says,
+                #  how much line is on the reel)
+    ("willow pole", 15, 11.0, 0.9, 5.0, "short and light - the river and the lake",
+     45.0),
+    ("spinning rod", 55, 24.0, 1.15, 7.0, "casts a lure a fair way. most of town",
+     90.0),
+    ("surf caster", 130, 46.0, 1.45, 7.5, "a long cast off the sand or the pier",
+     160.0),
+    ("big game rod", 380, 30.0, 2.6, 10.0, "a winch of a reel, for out at sea", 450.0),
+]
+BAIT_KINDS = [  # (name, $, how many to a pack, kind)
+    ("bread", 2, 10, "bread"),
+    ("worms", 4, 10, "worms"),
+    ("lugworm", 6, 10, "lugworm"),
+    ("squid strips", 8, 10, "squid"),
+    ("spinner", 12, 1, "spinner"),
+    ("big game lure", 45, 1, "biglure"),
+]
+BAIT_SAYS = ["carp, roach, bream - and mullet in salt water",
+             "anything in fresh water likes a worm",
+             "the beach's bait: bass, flatfish, cod",
+             "for the hunters: conger, rays, sharks",
+             "a lure - kept unless the line goes. pike, perch, mackerel",
+             "for tuna and marlin, a long way out - on the big game rod only"]
+LURES = ("spinner", "biglure")          # they come back unless the line goes
+FLOAT_KINDS = [  # (name, $, seconds to strike in, glows in the dark)
+    ("no float", 0, 0.45, False),
+    ("cork float", 4, 0.75, False),
+    ("waggler", 9, 0.95, False),
+    ("glow float", 18, 0.95, True),
+]
+FLOAT_SAYS = ["", "red and white - you will see it go under",
+              "slim: it shows a nibble from a bite",
+              "lit green - you see it at night from the end of the pier"]
+FISH_SURF = 22.0       # units out from the waterline: the surf, then off the pier,
+FISH_INSHORE = 110.0   # then the deep water past the pier's head,
+FISH_DEEP = 400.0      # then the open sea, which only the boat gets out to
+FISH_WAIT = 11.0       # seconds, on average, from the float going in to a bite
+FISH_BOX = 20          # what the cool box holds
+FISH_SLOW = 3.0        # how slow the boat has to be to fish off her
+WATER_NAMES = {"river": "the river", "lake": "the lake", "mouth": "the river's mouth",
+               "surf": "the surf", "inshore": "off the pier", "deep": "deep water",
+               "offshore": "the open sea", "harbour": "the harbour",
+               "fountain": "the fountain"}
+_fish_rare = [False]   # the menu's: the next bite is the rarest thing there
+
+
+def _sp(name, where, baits, lo, hi, power, odds, price, colour, art, likes=(),
+        say="", junk=False, alien=False, legend=False):
+    """One kind of fish (or of rubbish): the waters it is in, what it takes,
+    how heavy it comes, how hard it pulls, how common it is, $ a kilo (flat,
+    for rubbish), its colour and its drawing."""
+    return {"name": name, "where": where, "baits": baits, "lo": lo, "hi": hi,
+            "power": power, "odds": odds, "price": price, "colour": colour,
+            "art": art, "likes": likes, "say": say, "junk": junk, "alien": alien,
+            "legend": legend}
+
+
+_FRESH = ("bread", "worms")
+_SEA = ("lugworm", "squid")
+FISH = [
+    # The river.
+    _sp("roach", ("river",), _FRESH, 0.1, 0.6, 0.15, 30, 3, "STAR", "round",
+        say="silver, with red eyes"),
+    _sp("perch", ("river", "lake"), ("worms", "spinner"), 0.2, 1.6, 0.3, 24, 6,
+        "neon5", "round", say="stripes down its sides and a spiny fin up"),
+    _sp("bream", ("river",), _FRESH, 0.5, 3.5, 0.35, 18, 3, "GOLD_DIM", "round",
+        say="slimy, bronze, and heavier than it looks"),
+    _sp("chub", ("river",), ("bread", "worms", "spinner"), 0.5, 3.2, 0.45, 14, 3,
+        "CURB", "long", say="it ate the bread and wanted more"),
+    _sp("eel", ("river", "mouth"), ("worms", "squid"), 0.3, 2.4, 0.55, 9, 12,
+        "GOLD_DIM", "eel", likes=("rain",),
+        say="it ties itself in a knot round the line"),
+    _sp("zander", ("river",), ("spinner", "worms"), 1.0, 7.0, 0.6, 6, 10, "MOON_DIM",
+        "long", say="glassy eyes - it hunts in the dark"),
+    _sp("pike", ("river", "lake"), ("spinner",), 2.0, 14.0, 0.85, 6, 6, "neon5",
+        "pike", say="all teeth. mind your fingers"),
+    _sp("carp", ("river", "lake"), _FRESH, 2.0, 16.0, 0.8, 6, 5, "GOLD", "round",
+        say="a proper fighter"),
+    _sp("wels catfish", ("river",), ("worms", "squid"), 6.0, 45.0, 1.25, 1.2, 4,
+        "CURB", "cat", likes=("rain",),
+        say="whiskers like a walrus. it has been down there for years"),
+    # The woods' lake.
+    _sp("rainbow trout", ("lake",), ("worms", "spinner"), 0.5, 3.5, 0.55, 22, 12,
+        "neon0", "long", likes=("dawn",), say="a pink stripe the length of it"),
+    _sp("brown trout", ("lake",), ("spinner", "worms"), 0.4, 4.0, 0.6, 14, 14,
+        "GOLD_DIM", "long", likes=("dawn",), say="red spots and a gold belly"),
+    _sp("tench", ("lake",), _FRESH, 0.5, 3.0, 0.45, 16, 5, "neon5", "round",
+        say="olive green, with the reddest eyes"),
+    _sp("crucian carp", ("lake",), _FRESH, 0.2, 1.5, 0.3, 18, 4, "GOLD", "round",
+        say="round as a coin"),
+    _sp("the old one", ("lake",), ("bread",), 22.0, 34.0, 1.8, 0.4, 20, "GOLD",
+        "round", legend=True,
+        say="the lake's own carp. they say it was here before the woods"),
+    # Where the river comes out.
+    _sp("sea trout", ("mouth",), ("spinner", "worms"), 1.0, 6.0, 0.7, 12, 16, "STAR",
+        "long", likes=("dawn",), say="a brown trout that went to sea and came back"),
+    _sp("salmon", ("mouth",), ("spinner",), 3.0, 14.0, 0.95, 3.5, 18, "SNOW", "long",
+        say="up from the sea, on its way to somewhere"),
+    _sp("flounder", ("mouth", "surf"), ("lugworm", "worms"), 0.3, 2.0, 0.35, 16, 8,
+        "GOLD_DIM", "flat", say="both eyes on the one side"),
+    _sp("mullet", ("mouth", "harbour"), ("bread",), 0.5, 3.0, 0.5, 14, 6, "MOON_DIM",
+        "long", say="it sucked the bread off three times first"),
+    # Off the sand.
+    _sp("sea bass", ("surf", "inshore", "mouth"), ("lugworm", "squid", "spinner"),
+        1.0, 7.0, 0.75, 18, 20, "SNOW", "long", likes=("moon", "dawn"),
+        say="the one everybody on the beach is after"),
+    _sp("plaice", ("surf",), ("lugworm",), 0.5, 3.0, 0.4, 14, 10, "neon4", "flat",
+        say="orange spots, like somebody painted it"),
+    _sp("sole", ("surf",), ("lugworm",), 0.3, 1.5, 0.35, 9, 28, "GOLD_DIM", "flat",
+        likes=("moon",), say="the restaurants on the front pay for these"),
+    _sp("shore crab", ("surf", "harbour"), ("lugworm", "squid", "worms"), 0.05, 0.3,
+        0.15, 18, 2, "neon5", "crab", say="it lets go when it feels like it"),
+    _sp("weever", ("surf",), ("lugworm",), 0.1, 0.4, 0.3, 6, 1, "GOLD", "long",
+        say="careful - the spines on its back sting"),
+    # Off the pier.
+    _sp("mackerel", ("inshore", "deep", "offshore", "harbour"), ("spinner", "squid"),
+        0.3, 1.2, 0.45, 30, 8, "neon2", "long", likes=("dawn",),
+        say="blue and green tiger stripes. where there is one there are fifty"),
+    _sp("garfish", ("inshore",), ("spinner",), 0.3, 1.2, 0.4, 12, 6, "neon5", "gar",
+        say="a beak full of needles, and green bones"),
+    _sp("pollock", ("inshore", "deep", "harbour"), ("spinner", "squid"), 1.0, 7.0,
+        0.7, 14, 9, "GOLD_DIM", "long", say="it dives for the pier's legs"),
+    _sp("wrasse", ("inshore", "harbour"), _SEA, 0.5, 3.5, 0.5, 11, 5, "neon5",
+        "round", say="lips like a trumpet player"),
+    _sp("dogfish", ("inshore", "deep"), _SEA, 1.0, 3.0, 0.5, 14, 3, "GOLD_DIM",
+        "shark", say="sandpaper skin. the shop takes them, just"),
+    _sp("cod", ("inshore", "deep"), _SEA, 1.5, 12.0, 0.8, 9, 11, "GOLD_DIM", "long",
+        likes=("moon",), say="a mouth you could put your fist in"),
+    _sp("squid", ("inshore", "harbour"), ("spinner",), 0.3, 1.5, 0.3, 8, 14, "neon0",
+        "squid", say="it inks your shoes"),
+    _sp("conger eel", ("inshore", "deep", "harbour"), ("squid",), 3.0, 30.0, 1.1, 5,
+        6, "CURB", "eel", likes=("rain",), say="it pulls like a car going backwards"),
+    # Past the pier's head.
+    _sp("ling", ("deep",), ("squid",), 4.0, 20.0, 0.95, 8, 9, "GOLD_DIM", "eel",
+        say="long, mottled, and not pleased"),
+    _sp("turbot", ("deep",), _SEA, 2.0, 12.0, 0.85, 5, 30, "GOLD_DIM", "flat",
+        say="a king's fish, they say"),
+    _sp("thornback ray", ("deep",), _SEA, 2.0, 9.0, 0.9, 8, 8, "GOLD_DIM", "ray",
+        say="it flies through the water, and it does not want to come up"),
+    _sp("tope", ("deep", "offshore"), ("squid",), 8.0, 30.0, 1.25, 4, 5, "MOON_DIM",
+        "shark", say="a small shark. small"),
+    _sp("john dory", ("deep",), ("spinner", "squid"), 0.5, 2.5, 0.45, 3, 35, "GOLD",
+        "round", say="a thumbprint on each side - the saint's, they say"),
+    # The open sea, from the boat.
+    _sp("mahi-mahi", ("offshore",), ("biglure", "spinner"), 5.0, 22.0, 1.1, 14, 14,
+        "neon7", "long", say="gold and green, and it jumps the whole way in"),
+    _sp("yellowfin tuna", ("offshore",), ("biglure",), 20.0, 120.0, 1.8, 9,
+        22, "neon7", "tuna", say="a torpedo with yellow fins"),
+    _sp("blue shark", ("offshore",), ("squid",), 30.0, 120.0, 1.6, 6, 4, "CROWN_BLUE",
+        "shark", say="it looks at you the whole time"),
+    _sp("swordfish", ("offshore",), ("biglure",), 50.0, 250.0, 2.0, 2.5, 25,
+        "MOON_DIM", "bill", likes=("moon",), say="it fences with the boat"),
+    _sp("blue marlin", ("offshore",), ("biglure",), 100.0, 400.0, 2.45, 1.0, 15,
+        "CROWN_BLUE", "bill", legend=True, say="the fish of a lifetime"),
+    # The fountain on the Strip.
+    _sp("goldfish", ("fountain",), _FRESH, 0.05, 0.3, 0.1, 30, 5, "neon4", "round",
+        say="somebody won this at a fair once"),
+    _sp("koi", ("fountain",), ("bread",), 1.0, 8.0, 0.35, 12, 60, "neon4", "round",
+        say="the hotel's koi. walk away quickly"),
+    # And on the strange night, anywhere.
+    _sp("something that glows", ("river", "lake", "surf", "inshore", "deep",
+                                 "offshore", "harbour"),
+        ("bread", "worms", "lugworm", "squid", "spinner", "biglure"), 0.5, 3.0, 0.6, 6,
+        120, "FIREFLY", "glow", alien=True,
+        say="it is warm, and it hums. it looks at you"),
+    # Rubbish: no fight but its weight, and what the shop will give you.
+    _sp("old boot", ("river", "mouth", "harbour", "lake"), (), 0.6, 1.4, 0.3, 4, 0,
+        "BARK", "boot", junk=True, say="the other one is still down there"),
+    _sp("shopping trolley", ("river",), (), 9.0, 16.0, 0.45, 2.5, 0, "CURB",
+        "trolley", junk=True, say="from the supermarket by the bridge, probably"),
+    _sp("bicycle wheel", ("river",), (), 1.5, 3.0, 0.35, 2, 0, "CURB", "wheel",
+        junk=True, say="the rest of the bike got away"),
+    _sp("traffic cone", ("river", "harbour"), (), 1.0, 2.0, 0.3, 1.5, 0, "neon4",
+        "cone", junk=True, say="how do they always end up in the water"),
+    _sp("somebody's phone", ("river", "fountain"), (), 0.2, 0.25, 0.2, 0.6, 15,
+        "CURB", "phone", junk=True, say="it is still ringing"),
+    _sp("message in a bottle", ("surf", "inshore"), (), 0.5, 0.9, 0.2, 0.8, 0,
+        "RAIN", "bottle", junk=True),
+    _sp("flip-flop", ("surf",), (), 0.1, 0.3, 0.15, 2, 0, "neon1", "junk",
+        junk=True, say="the left one"),
+    _sp("seaweed", ("surf", "inshore", "harbour", "mouth"), (), 0.3, 2.0, 0.2, 5, 0,
+        "GRASS", "weed", junk=True, say="you have caught the sea's hair"),
+    _sp("old tyre", ("harbour",), (), 6.0, 10.0, 0.5, 3, 0, "CONCRETE", "tyre",
+        junk=True, say="it has a crab living in it. had"),
+    _sp("deckchair", ("harbour",), (), 3.0, 5.0, 0.4, 1, 0, "neon3", "junk",
+        junk=True, say="off the Midnight Star, by the stripes"),
+    _sp("casino chip", ("fountain",), (), 0.01, 0.02, 0.1, 10, 25, "neon3", "chip",
+        junk=True, say="somebody made a wish with it"),
+    _sp("handful of coins", ("fountain",), (), 0.05, 0.3, 0.1, 18, 4, "GOLD", "coins",
+        junk=True, say="wishes, mostly pennies"),
+    _sp("jackpot token", ("fountain",), (), 0.03, 0.04, 0.1, 0.5, 500, "GOLD", "chip",
+        junk=True, legend=True, say="the cashier's window will want to know where"),
+]
+BOTTLE_NOTES = ["\"the old one in the woods' lake is real. I saw it. bread. - M\"",
+                "\"to whoever: I am sorry about the pier lights. it was me.\"",
+                "\"I left on the Midnight Star and never came back. lovely out here.\"",
+                "\"there is pizza under the streets. ask the turtles.\"",
+                "\"the slots pay best after midnight. a friend.\"",
+                "\"if you can read this you are standing on a beach. hello.\""]
+
+FISH_ART = {
+    "round": ["      _.-~~-._    ",
+              " |\\ .'  (((   o'. ",
+              " | >   )))      _>",
+              " |/ '._______.-'  "],
+    "long": ["          __.--~~--.__     ",
+             " |\\  _.-''  ((((     o `.  ",
+             " | >(___  ))))   ___    _> ",
+             " |/     ''--..___..--''    "],
+    "pike": ["            __.------.__      ",
+             " |\\_   _.-''  ::::     o`--.  ",
+             " |  >-(____ ::::::   _____vvv> ",
+             " |/'   '----.._____.--'        "],
+    "eel": ["   .~~-.__.-~~-.__.-~~-.__  ",
+            "  <__.-~~-.__.-~~-.__.-~~ o> "],
+    "cat": ["      __.-------.__        ",
+            " |\\.-'   . .  .    `-.  /  ",
+            " | >   .  .  .     o  >==  ",
+            " |/'-.__________.-.__/  \\  "],
+    "flat": ["     .-~~~~~~~-.     ",
+             "   .'  .  .  o  `.   ",
+             " <(  .  .  .  .  )>  ",
+             "   `.  .  .  .  .'   ",
+             "     `-~~~~~~~-'     "],
+    "ray": ["       /\\        ",
+            "    _.'  `._     ",
+            "   <  o  o  >    ",
+            "    `-.__.-'     ",
+            "       ||        ",
+            "        \\\\_      "],
+    "shark": ["           /|          ",
+              " |\\______/ |____      ",
+              " | ____        o \\_   ",
+              " |/    \\__.-.____/    ",
+              "          \\|           "],
+    "bill": ["              /\\                   ",
+             " |\\      ___ /  \\__                ",
+             " | \\.--''         `-.._______      ",
+             " | /'--..___      o _.-'           ",
+             " |/         `--.\\_/                "],
+    "tuna": ["         _/|         ",
+             " |\\  .-''   ''-.     ",
+             " | >(  ::::::  o >   ",
+             " |/  '-.,___,.-'     ",
+             "          \\|         "],
+    "gar": ["        __.------.__              ",
+            " |\\_.-''          o `-------====  ",
+            " |/  '--..______..--'             "],
+    "squid": ["   /\\    ",
+              "  /  \\   ",
+              " | oo |  ",
+              "  )  (   ",
+              " /|/\\|\\  ",
+              " | || |  "],
+    "crab": [" \\/    \\/ ",
+             " (o)__(o) ",
+             "/( ____ )\\",
+             " /_/  \\_\\ "],
+    "glow": ["   *   .   *   ",
+             " .-~~~~~~~~-. .",
+             "( o   o   o  )>",
+             " `-~~~~~~~~-'  ",
+             "  .   *    .   "],
+    "boot": ["   ___    ",
+             "  |   |   ",
+             "  |   |__ ",
+             "  |______)"],
+    "trolley": ["_________  ",
+                "\\#######/  ",
+                " \\#####/__ ",
+                "  o     o  "],
+    "wheel": ["  .-''-.  ",
+              " / \\  / \\ ",
+              "|---()---|",
+              " \\ /  \\ / ",
+              "  '-..-'  "],
+    "cone": ["   /\\   ",
+             "  /==\\  ",
+             " /    \\ ",
+             "/======\\",
+             "--------"],
+    "phone": [" .----. ",
+              " |    | ",
+              " | :) | ",
+              " |____| ",
+              " '----' "],
+    "bottle": ["      __        ",
+               " .---'  '-----. ",
+               "(| ~ ~ ~ ~    |=",
+               " '-----------'  "],
+    "weed": ["  \\ | /  ",
+             " ~ \\|/ ~ ",
+             "  ~ | ~  ",
+             "   ~|~   "],
+    "tyre": ["  .-\"\"-.  ",
+             " / .--. \\ ",
+             "| (    ) |",
+             " \\ '--' / ",
+             "  '-..-'  "],
+    "chip": [" .------. ",
+             "/ (  $ ) \\",
+             "\\ (    ) /",
+             " '------' "],
+    "coins": ["  (o) (o)  ",
+              " (o)(o)(o) ",
+              "(o)(o)(o)(o)"],
+    "junk": ["  ,--.  ",
+             " ( ?? ) ",
+             "  `--'  "],
+}
+
+
+def fish_colour(sp):
+    """A kind of fish's colour, worked out now: the colours are only made
+    when the terminal is."""
+    c = sp["colour"]
+    if c.startswith("neon"):
+        return NEON[int(c[4:]) % len(NEON)][0]
+    return globals()[c]
+
+
+def fish_value(n, kg):
+    """What the tackle shop gives you for it."""
+    sp = FISH[n]
+    if sp["junk"]:
+        return sp["price"]
+    return max(1, int(round(sp["price"] * kg)))
+
+
+def fish_species():
+    """The kinds that go in the book: the fish, not the rubbish."""
+    return [n for n, sp in enumerate(FISH) if not sp["junk"]]
+
+
+def _in_harbour(x, z):
+    """Is this point in the water round a quay: along the ship's side, off
+    the hire stand's, or off its end."""
+    for h in near_harbours(x, z, 200.0):
+        r0, end = h
+        if (r0 * CELL - LINER_B - 8.0 < z < (r0 + QUAY_BROAD) * CELL + 30.0
+                and x < (end + 1) * CELL + 25.0):
+            return True
+    return False
+
+
+def fish_water(x, z):
+    """What a float that went in here went into: a key of WATER_NAMES, or
+    None for anywhere it would only lie on top of - land, a deck, a ship."""
+    i, j = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    if COAST and i >= COAST_LAND:
+        kind = coast_kind(i, j)
+        if kind is not None:
+            if kind == "mouth":
+                return "mouth"
+            if kind not in ("sea", "surf"):
+                return None
+            out = x - shore_x(z)
+            if out < 0.5 or (kind == "sea" and not boat_water(x, z)):
+                return None
+            if _in_harbour(x, z):
+                return "harbour"
+            return ("surf" if out < FISH_SURF else "inshore" if out < FISH_INSHORE
+                    else "deep" if out < FISH_DEEP else "offshore")
+    if river_at(i, j):
+        if deck_at(i, j):
+            return None
+        return "mouth" if COAST and i > COAST_I - MOUTH_REACH else "river"
+    if near_river(i, j) and moat_at(i, j):
+        return "river"
+    if lake_at(i, j):
+        return "lake"
+    if strip_lake(i, j):
+        return "fountain"
+    return None
+
+
+def water_ahead(x, z, yaw, reach):
+    """Is there water to cast into, within reach in front of you."""
+    for a in (0.0, -0.35, 0.35):
+        dx, dz = math.sin(yaw + a), math.cos(yaw + a)
+        d = 3.0
+        while d <= reach:
+            if fish_water(x + dx * d, z + dz * d) is not None:
+                return True
+            d += 1.5
+    return False
+
+
+def water_yaw(x, z, reach, yaw):
+    """Which way, of sixteen, has the most water to cast into within reach:
+    where you turn to, stepping out of a tackle shop."""
+    best, at = -1, yaw
+    for q in range(16):
+        a = yaw + q * math.tau / 16.0
+        n = sum(1 for d in range(4, int(reach) + 1, 2)
+                if fish_water(x + math.sin(a) * d, z + math.cos(a) * d) is not None)
+        if n > best:
+            best, at = n, a
+    return at
+
+
+def bite_pool(water, bait, now):
+    """What could take this bait in this water tonight, as (kind, odds)."""
+    nt = night(now)
+    wet = rain_intensity(now) > 0.2
+    full = abs(nt["phase"] - 0.5) < 0.15
+    morning = dawn(now) > 0.0
+    out = []
+    for n, sp in enumerate(FISH):
+        if water not in sp["where"] or (sp["alien"] and not nt["alien"]):
+            continue
+        if sp["junk"]:
+            odds = sp["odds"] * (0.6 if bait in LURES else 1.0)
+        elif bait not in sp["baits"]:
+            continue
+        else:
+            odds = sp["odds"]
+        likes = sp["likes"]
+        if wet and "rain" in likes:
+            odds *= 2.0
+        if full and "moon" in likes:
+            odds *= 1.6
+        if morning and "dawn" in likes:
+            odds *= 2.0
+        out.append((n, odds))
+    return out
+
+
+# --- the tackle shops -------------------------------------------------------
+# One on every ocean pier, on the boards a little way out, BAIT & TACKLE over
+# it and a neon fish; and a bait kiosk at the land end of every river pier, so
+# there is one wherever the river is. p at the counter goes in; the taxi goes
+# to the nearest ("the tackle shop").
+TACKLE_OUT = 25.0      # how far out along the ocean pier its shop is
+TACKLE_REACH = 2.6     # how near its counter you stand to be served
+TACKLE_NAMES = ["HOOK LINE & SINKER", "THE REEL DEAL", "SALTY'S", "OCEAN TACKLE",
+                "THE BAIT BOX"]
+KIOSK_NAMES = ["BAIT", "WORMS & TACKLE", "THE KIOSK", "RIVER BAIT"]
+TACKLE_HUT = [
+    " ___________ ",
+    "/___________\\",
+    "| .-------. |",
+    "| |       | |",
+    "|_|_______|_|",
+]
+TACKLE_HATCH = [
+    "             ",
+    "             ",
+    "             ",
+    "   ~><  ><   ",
+    "   =======   ",
+]
+TACKLE_ROOF = [
+    " ___________ ",
+    "/___________\\",
+    "             ",
+    "             ",
+    "             ",
+]
+FISH_NEON = [
+    ["\\   .--.   ",
+     " >=(  o >  ",
+     "/   `--'   "],
+    ["    .--.   ",
+     "-==(  o >  ",
+     "    `--'   "],
+]
+
+
+def pier_tackle(pier):
+    """The ocean pier's tackle shop: (x, z) of the hut, on the south side
+    of the boards, and (x, z) of its counter, where you stand."""
+    r0, _, _ = pier
+    root = (int(math.floor(coastline(r0 + PIER_BROAD // 2))) - BEACH_DEEP) * CELL
+    hx, hz = root + TACKLE_OUT, (r0 + PIER_BROAD) * CELL - 2.4
+    return (hx, hz), (hx, hz - 2.8)
+
+
+_kiosk_cache = {}
+
+
+def river_kiosk(run):
+    """The bait kiosk on the river pier whose first column is `run`: (x, z)
+    of the kiosk, on the first row of boards all three columns have, on its
+    east side, and of its counter - or None if that is no pier, or there is
+    no way onto it from the bank. Cached by the pier: the drawing and the
+    top bar ask every frame."""
+    hit = _kiosk_cache.get(run, 0)
+    if hit != 0:
+        return hit
+    _evict(_kiosk_cache, 4000)
+    hit = None
+    if not off_coast(run) and not _mix(run // PIER_WIDE, 0, 457) % 19:
+        cols = range(run, run + PIER_WIDE)
+        k0 = max(int(math.floor(river_span(c)[0])) + 1 for c in cols)
+        if (all(pier_at(c, k0) for c in cols)
+                and any(can_stand((c + 0.5) * CELL, (k0 - 0.5) * CELL)
+                        for c in cols)):
+            i = run + PIER_WIDE - 1
+            hx, hz = (i + 0.6) * CELL, (k0 + 0.6) * CELL
+            hit = (hx, hz), (hx - 3.2, hz)
+    _kiosk_cache[run] = hit
+    return hit
+
+
+def tackle_near(x, z):
+    """The tackle shop or kiosk whose counter you are at, as a dict, or None."""
+    i, j = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    if COAST and i >= COAST_LAND:
+        pier = sea_pier(j) or sea_pier(j + 1)
+        if pier is not None:
+            (hx, hz), (sx, sz) = pier_tackle(pier)
+            if (sx - x) ** 2 + (sz - z) ** 2 < TACKLE_REACH ** 2:
+                seed = _mix(pier[0], 0, 6301)
+                return {"kind": "pier", "x": hx, "z": hz, "seed": seed,
+                        "name": TACKLE_NAMES[seed % len(TACKLE_NAMES)]}
+        return None
+    if not near_river(i, j):
+        return None
+    run = i - i % PIER_WIDE
+    for r in (run, run - PIER_WIDE):
+        k = river_kiosk(r)
+        if k is None:
+            continue
+        (hx, hz), (sx, sz) = k
+        if (sx - x) ** 2 + (sz - z) ** 2 < TACKLE_REACH ** 2:
+            seed = _mix(r, 1, 6301)
+            return {"kind": "kiosk", "x": hx, "z": hz, "seed": seed,
+                    "name": KIOSK_NAMES[seed % len(KIOSK_NAMES)]}
+    return None
+
+
+def _kiosk_spot(x, z):
+    """At the counter of the nearest bait kiosk along the river, facing it."""
+    ci = int(x / CELL + BIG) - BIG
+    for step in range(0, CHEAT_RINGS * 6):
+        i = ci + (step + 1) // 2 * (1 if step % 2 else -1)
+        if i % PIER_WIDE:
+            continue
+        k = river_kiosk(i)
+        if k is None:
+            continue
+        sx, sz = k[1]
+        if (sx - x) ** 2 + (sz - z) ** 2 >= CHEAT_SKIP ** 2 and can_stand(sx, sz):
+            return sx, sz, math.pi * 0.5
+    return None
+
+
+def _pier_tackle_spot(x, z):
+    """At the counter of the tackle shop on the nearest ocean pier."""
+    sp = _sea_pier_spot(x, z)
+    if sp is None:
+        return None
+    pier = sea_pier(int(sp[1] / CELL + BIG) - BIG)
+    sx, sz = pier_tackle(pier)[1]
+    return sx, sz, 0.0
+
+
+def _tackle_spot(x, z):
+    """The nearer of the two: what the taxi takes you to."""
+    best = None
+    for sp in (_kiosk_spot(x, z), _pier_tackle_spot(x, z)):
+        if sp is not None and (best is None or (sp[0] - x) ** 2 + (sp[1] - z) ** 2
+                               < (best[0] - x) ** 2 + (best[1] - z) ** 2):
+            best = sp
+    return best
+
+
+def draw_tackle_hut(ch, co, v, walls, x, z, seed, name, now, wet, small):
+    """A tackle shop: a hut with a lit hatch, its name in neon over the roof
+    a letter a column, and a neon fish on a pole beside it, its tail going.
+    A kiosk is the same, smaller."""
+    s = 0.7 if small else 1.0
+    n = len(NEON)
+    blit_sprite(ch, co, v, walls, TACKLE_HUT, x, z, 0.0, 3.4 * s, 4.6 * s, CURB)
+    blit_sprite(ch, co, v, walls, TACKLE_ROOF, x, z, 0.0, 3.4 * s, 4.6 * s, GOLD_DIM)
+    blit_sprite(ch, co, v, walls, TACKLE_HATCH, x, z, 0.0, 3.4 * s, 4.6 * s, BULB)
+    put_lit(ch, co, v, walls, x, 3.0 * s, z, "o", BULB, max(wet, 0.4), now)
+    fx = x + 3.2 * s
+    for h in (0.6, 1.5, 2.4, 3.3):
+        if h < 3.6 * s:
+            put_point(ch, co, v, walls, fx, h, z, "|", CONCRETE)
+    tube = NEON[(seed >> 3) % n]
+    flap = int(now * 2.5 + seed % 7) % 2
+    blit_sprite(ch, co, v, walls, FISH_NEON[flap], fx, z, 3.6 * s, 4.8 * s, 3.0 * s,
+                tube[0])
+    # The name goes up at the end of the frame (draw_tackle_signs()): drawn
+    # now, the river's lights and the bridges were painted over it.
+    v.tackle_signs.append((x, 4.1 * s, z, seed, name))
+
+
+def draw_tackle_signs(ch, co, v, walls, now):
+    """The tackle shops' names in neon, a letter a column over their roofs,
+    the gaps between the words blanked so they read."""
+    n = len(NEON)
+    for x, y, z, seed, name in v.tackle_signs:
+        pr = v.project(x, y, z)
+        if pr is None or pr[2] > 90.0:
+            continue
+        sx0 = int(round(pr[0])) - len(name) // 2
+        sign = NEON[(seed >> 6) % n]
+        for k, c in enumerate(name):
+            flick = (now * 1.1 + seed % 5) % 9.0 < 0.12 and k == seed % len(name)
+            put_cell(ch, co, v, walls, sx0 + k, int(round(pr[1])), pr[2], c,
+                     sign[1] if flick else sign[0])
+
+
+def tackle_hint(x, z, tackle):
+    """What the top bar says at a tackle shop, or with a rod by the water."""
+    shop = tackle_near(x, z)
+    if shop is not None:
+        return "  ~ %s - bait & tackle: p goes in ~" % shop["name"].lower()
+    return ""
+
+
+class Tackle:
+    """What you carry: the rods you have bought and the one in your hand,
+    your bait and floats and which are on the line, the cool box, and the
+    book of what you have caught and where."""
+
+    def __init__(self):
+        self.rods = []
+        self.rod = None
+        self.bait = [0] * len(BAIT_KINDS)
+        self.bait_on = None
+        self.floats = [0] * len(FLOAT_KINDS)
+        self.float_on = 0
+        self.box = []           # (kind, kg, water), kept to sell
+        self.book = {}          # kind -> [how many, best kg, where]
+
+    def rod_kind(self):
+        return ROD_KINDS[self.rod] if self.rod is not None else None
+
+    def bait_kind(self):
+        """The bait on the hook, if there is any left of it."""
+        if self.bait_on is None or not self.bait[self.bait_on]:
+            return None
+        return BAIT_KINDS[self.bait_on][3]
+
+    def float_kind(self):
+        return FLOAT_KINDS[self.float_on]
+
+    def use_bait(self):
+        """A bait gone - eaten, or taken off the hook."""
+        if self.bait_on is not None and self.bait[self.bait_on]:
+            self.bait[self.bait_on] -= 1
+
+    def lose_rig(self):
+        """The line gone: the float with it, and the lure if it was one."""
+        if self.float_on:
+            self.floats[self.float_on] -= 1
+            if not self.floats[self.float_on]:
+                self.float_on = 0
+        if self.bait_kind() in LURES:
+            self.use_bait()
+
+    def cycle(self, what):
+        """The next rod, bait or float you have: the one now on, by name."""
+        if what == "rod" and self.rods:
+            at = self.rods.index(self.rod) if self.rod in self.rods else -1
+            self.rod = self.rods[(at + 1) % len(self.rods)]
+            return ROD_KINDS[self.rod][0]
+        if what == "bait":
+            have = [n for n, c in enumerate(self.bait) if c]
+            if not have:
+                return "no bait"
+            at = have.index(self.bait_on) if self.bait_on in have else -1
+            self.bait_on = have[(at + 1) % len(have)]
+            return "%s (%d)" % (BAIT_KINDS[self.bait_on][0], self.bait[self.bait_on])
+        if what == "float":
+            have = [n for n, c in enumerate(self.floats) if c or n == 0]
+            at = have.index(self.float_on) if self.float_on in have else 0
+            self.float_on = have[(at + 1) % len(have)]
+            return FLOAT_KINDS[self.float_on][0]
+        return ""
+
+    def log(self, n, kg, water):
+        """Into the book: how many, the best, and where it was."""
+        got = self.book.get(n)
+        if got is None:
+            self.book[n] = [1, kg, water]
+            return "new"
+        got[0] += 1
+        if kg > got[1]:
+            got[1], got[2] = kg, water
+            return "best"
+        return ""
+
+    def box_worth(self):
+        return sum(fish_value(n, kg) for n, kg, _ in self.box)
+
+
+def fish_ready(tackle, x, z, yaw):
+    """Why you cannot fish here, or None if you can."""
+    if tackle.rod is None:
+        return "no rod - a tackle shop sells them, and the taxi knows one"
+    if not water_ahead(x, z, yaw, tackle.rod_kind()[2] + 3.0):
+        return "no water within a cast - face the river, a lake or the sea"
+    return None
+
+
+# --- with a line in the water -------------------------------------------------
+# aim: a power meter swings, the spot it would land on is marked in the world -
+# green over water, red over land - and f casts. flight: the float goes out on
+# its arc. wait: it rides the swell; a nibble or two dips it; then the bite,
+# and f inside the float's moment strikes. fight: the fish runs now and then -
+# "it turns" first - and reeling against a run, or not giving it line, takes
+# the tension past what the line holds and it goes; let it go slack too long
+# and it throws the hook. Holding the rod over the other way to its pull tires
+# it faster. landed: the card, and keep it or let it go.
+FISH_SWING = 1.6       # seconds the power meter takes there and back
+FISH_FLIGHT = 0.9      # seconds the cast is in the air
+FISH_GRACE = 0.45      # a press of the reel keeps it turning this long: past
+                       # the wait before a held key starts repeating
+FISH_SNAP = 0.35       # seconds over what the line holds before it goes
+FISH_SLACK = 1.3       # seconds slack before a fish throws the hook
+FISH_CHARGE = 0.35     # how often, a run done, it swims straight at you
+FISH_WARN = 0.6        # "it turns": this long before a run pulls
+FISH_HUD = {
+    "aim": (" fishing %s  -  f casts  -  a d aim  -  r rod  b bait  o float"
+            "  -  x packs up "),
+    "flight": " fishing %s  -  ... ",
+    "wait": " fishing %s  -  f strikes when it bites  -  r reels in  -  x packs up ",
+    "fight": (" a fish on, %s  -  w reels  -  s gives line  -  a d the rod over"
+              "  -  x cuts it loose "),
+    "landed": (" landed, %s  -  f keeps it  -  l lets it go  -  x keeps it and"
+               " packs up "),
+    "gone": " fishing %s  -  f again ",
+}
+
+
+class Fishing:
+    """You, fishing: where you stand and which way you cast, the phase, the
+    float, and - once one is on - the fish."""
+
+    def __init__(self, x, z, yaw, tackle, now, seed, boat=None):
+        self.x, self.z, self.yaw0 = x, z, yaw
+        self.aim = 0.0
+        self.tackle = tackle
+        self.boat = boat
+        self.rng = random.Random(seed)
+        self.phase, self.t0, self.clock = "aim", now, now
+        self.land = None        # where the float went in
+        self.water = None       # and what into
+        self.bite_at = None     # when the bite comes, and who by
+        self.who = None
+        self.nibbles = []
+        self.said, self.said_at = "", -1e9
+        self.catch = None       # landed: (kind, kg, what happened in the book)
+        self.note = ""
+        # On the line.
+        self.line = self.ten = self.stam = 0.0
+        self.power = self.endure = 1.0
+        self.run_at = self.run_until = 0.0
+        self.side = self.fang = 0.0
+        self.over = self.slack = 0.0
+        self.crank_until = self.give_until = self.rod_until = 0.0
+        self.rod_side = 0
+        self.charge_at = self.charge_until = 0.0
+        self.big = False
+        self.kg = self.cast_power = 0.0
+
+    @property
+    def yaw(self):
+        return self.yaw0 + self.aim
+
+    def say(self, text, now):
+        self.said, self.said_at = text, now
+
+    def swing(self, now):
+        """Where the power meter is, 0..1, there and back."""
+        u = ((now - self.t0) / FISH_SWING) % 1.0
+        return 1.0 - abs(2.0 * u - 1.0)
+
+    def reach(self, power):
+        return 2.5 + power * self.tackle.rod_kind()[2]
+
+    def target(self, now):
+        """Where a cast now would land: (x, z)."""
+        d = self.reach(self.swing(now))
+        return self.x + math.sin(self.yaw) * d, self.z + math.cos(self.yaw) * d
+
+    def window(self):
+        """How long you have to strike: the float's, and a lure's take is a
+        jolt you cannot miss for a moment longer."""
+        w = self.tackle.float_kind()[2]
+        return w + (0.2 if self.tackle.bait_kind() in LURES else 0.0)
+
+    def to(self, phase, now):
+        self.phase, self.t0 = phase, now
+
+    def schedule(self, now):
+        """When the next bite comes, and what from - or never, if nothing in
+        this water takes what is on the hook."""
+        bait = self.tackle.bait_kind()
+        self.bite_at, self.who, self.nibbles = None, None, []
+        pool = bite_pool(self.water, bait, now) if bait else []
+        if not pool:
+            return
+        total = sum(o for _, o in pool)
+        if _fish_rare[0]:
+            # The menu's big one: the rarest thing there, and big.
+            _fish_rare[0] = False
+            real = [p for p in pool if not FISH[p[0]]["junk"]] or pool
+            self.who = min(real, key=lambda p: p[1])[0]
+            self.bite_at = now + 3.0
+            self.big = True
+            return
+        self.big = False
+        mean = FISH_WAIT * 30.0 / min(30.0, total)
+        if rain_intensity(now) > 0.2:
+            mean /= 1.3
+        if dawn(now) > 0.0:
+            mean /= 1.6
+        wait = max(3.0, min(45.0, self.rng.expovariate(1.0 / mean)))
+        pick = self.rng.random() * total
+        for n, o in pool:
+            pick -= o
+            if pick <= 0.0:
+                break
+        self.who, self.bite_at = n, now + wait
+        if bait not in LURES and not FISH[n]["junk"]:
+            for _ in range(self.rng.randint(0, 3)):
+                t = now + 1.2 + self.rng.random() * max(0.5, wait - 1.8)
+                if t < self.bite_at - 0.7:
+                    self.nibbles.append(t)
+
+    def nibbling(self, now):
+        return any(0.0 <= now - t < 0.4 for t in self.nibbles)
+
+    def biting(self, now):
+        return (self.bite_at is not None
+                and 0.0 <= now - self.bite_at < self.window())
+
+    def key(self, what, now):
+        """One key's worth: "stop" back to whoever asked, or None."""
+        tk = self.tackle
+        if what == "stop":
+            if self.phase == "fight":
+                self.say("you cut it loose", now)
+                tk.lose_rig()
+            elif self.phase == "landed":
+                self.keep(now)
+            return "stop"
+        if self.phase == "aim":
+            if what in ("act", "strike"):
+                if tk.bait_kind() is None:
+                    self.say("nothing on the hook - b changes bait, or a tackle shop",
+                             now)
+                elif tk.bait_kind() == "biglure" and tk.rod != len(ROD_KINDS) - 1:
+                    self.say("the big game lure is too heavy for this rod - r", now)
+                else:
+                    self.cast_power = self.swing(now)
+                    self.land = self.target(now)
+                    self.to("flight", now)
+            elif what in ("left", "right"):
+                self.aim = max(-0.6, min(0.6, self.aim
+                                         + (-0.07 if what == "left" else 0.07)))
+            elif what in ("rod", "bait", "float"):
+                self.say(tk.cycle(what), now)
+        elif self.phase == "wait":
+            if what in ("act", "strike"):
+                self.strike(now)
+            elif what in ("reel", "back"):
+                self.say("you reel in", now)
+                self.to("aim", now)
+        elif self.phase == "fight":
+            if what in ("act", "strike", "reel"):
+                self.crank_until = now + FISH_GRACE
+                self.give_until = 0.0
+            elif what == "back":
+                self.give_until = now + FISH_GRACE
+                self.crank_until = 0.0
+            elif what in ("left", "right"):
+                self.rod_side = -1 if what == "left" else 1
+                self.rod_until = now + FISH_GRACE * 2.0
+        elif self.phase == "landed":
+            if what in ("act", "strike"):
+                self.keep(now)
+            elif what == "release":
+                self.say("it swims off, slowly. then not slowly at all", now)
+                self.to("aim", now)
+        elif self.phase == "gone" and what in ("act", "strike"):
+            self.to("aim", now)
+        return None
+
+    def keep(self, now):
+        n, kg, _ = self.catch
+        if len(self.tackle.box) >= FISH_BOX:
+            self.say("the cool box is full - sell at a tackle shop. back it goes",
+                     now)
+        else:
+            self.tackle.box.append((n, kg, self.water))
+            self.say("in the cool box", now)
+        self.to("aim", now)
+
+    def strike(self, now):
+        tk = self.tackle
+        if self.biting(now):
+            self.hook(now)
+        elif self.nibbling(now):
+            self.say("too soon - it lets go", now)
+            if self.rng.random() < 0.35 and tk.bait_kind() not in LURES:
+                tk.use_bait()
+                self.say("too soon - and it had the bait off", now)
+            self.schedule(now)
+        else:
+            self.say("nothing there yet", now)
+
+    def hook(self, now):
+        """It is on: the fish, how big, how hard it pulls."""
+        sp = FISH[self.who]
+        u = 0.85 + 0.15 * self.rng.random() if self.big else self.rng.random() ** 2.2
+        kg = sp["lo"] + (sp["hi"] - sp["lo"]) * u
+        self.kg = kg
+        self.power = sp["power"] * (0.7 + 0.6 * u)
+        self.endure = 3.0 + 9.0 * sp["power"]
+        lx, lz = self.land
+        self.line = max(3.0, math.hypot(lx - self.x, lz - self.z))
+        self.ten, self.stam = 0.3, 1.0
+        self.side = self.fang = 0.0
+        self.over = self.slack = 0.0
+        self.run_until = self.charge_at = self.charge_until = 0.0
+        self.run_at = now + 1.0 + self.rng.random() * 2.0
+        self.crank_until = self.give_until = 0.0
+        self.to("fight", now)
+        self.say("something heavy..." if sp["junk"] else "FISH ON!", now)
+
+    def running(self, now):
+        return now < self.run_until
+
+    def charging(self, now):
+        return self.charge_at <= now < self.charge_until
+
+    def turning(self, now):
+        return not self.running(now) and 0.0 <= self.run_at - now < FISH_WARN
+
+    def step(self, now):
+        dt = max(0.0, min(0.1, now - self.clock))
+        self.clock = now
+        tk = self.tackle
+        if self.phase == "flight" and now - self.t0 >= FISH_FLIGHT:
+            self.water = fish_water(*self.land)
+            if self.water is None:
+                self.say("it lands on dry ground - reel in and try again", now)
+                self.to("gone", now)
+            else:
+                self.to("wait", now)
+                self.schedule(now)
+                if self.bite_at is None:
+                    self.note = "nothing in %s takes %s" % (
+                        WATER_NAMES[self.water], BAIT_KINDS[tk.bait_on][0])
+                else:
+                    self.note = ""
+        elif self.phase == "wait":
+            if self.bite_at is None and now - self.t0 > 20.0 and self.note:
+                self.say(self.note + " - try another bait, or another water", now)
+                self.t0 = now
+            elif self.bite_at is not None and now - self.bite_at > self.window():
+                # Missed it: away with the bait, and another along in a while.
+                if tk.bait_kind() not in LURES:
+                    tk.use_bait()
+                    left = "rebaited" if tk.bait_kind() else "and that was the last"
+                    self.say("it took the bait - " + left, now)
+                else:
+                    self.say("it hit the lure and missed", now)
+                self.schedule(now)
+        elif self.phase == "fight":
+            self.fight(dt, now)
+
+    def fight(self, dt, now):
+        """The tension on the line, a frame at a time."""
+        tk = self.tackle
+        rod = tk.rod_kind()
+        sp = FISH[self.who]
+        junk = sp["junk"]
+        cranking = now < self.crank_until
+        giving = now < self.give_until
+        if now > self.rod_until:
+            self.rod_side = 0
+        p = self.power
+        if not junk and not self.running(now) and now >= self.run_at:
+            if self.stam > 0.1:
+                self.run_until = now + 0.8 + self.rng.random() * (0.8 + p)
+                self.side = self.rng.choice((-1.0, 1.0))
+                # And now and then, the run done, it turns and swims at you.
+                if self.stam > 0.25 and self.rng.random() < FISH_CHARGE:
+                    self.charge_at = self.run_until
+                    self.charge_until = self.run_until + 1.2 + self.rng.random()
+            self.run_at = max(self.run_until, self.charge_until) + (
+                1.5 + self.rng.random() * 3.5) / (0.5 + p)
+        run = self.running(now)
+        speed = 3.0 + 5.0 * min(1.2, sp["power"])
+        if junk:
+            pull = p
+        else:
+            pull = p * (0.35 + 0.65 * self.stam) * (1.6 if run else 0.55)
+        if self.charging(now):
+            # Coming in by itself: no pull, and the line goes slack unless
+            # you take it up.
+            self.line -= speed * 0.3 * dt
+            want = 0.35 if cranking else 0.0
+            if cranking:
+                self.line -= rod[4] * 0.7 * dt
+        elif cranking:
+            want = pull + 0.35 * (1.6 if run else 1.0)
+            if run:
+                self.line += (speed * 0.15 - rod[4] * 0.2) * dt
+            else:
+                self.line -= rod[4] * dt * (1.0 - 0.5 * self.stam * min(1.0, p))
+        elif giving:
+            want = pull * 0.5
+            self.line += (speed * 0.7 if run else 1.5) * dt
+        else:
+            want = pull * 0.8
+            self.line += (speed * 0.4 if run else 0.4 * p * self.stam) * dt
+        self.ten += (want - self.ten) * min(1.0, dt * 6.0)
+        if not junk:
+            if not run:
+                self.side *= math.exp(-dt * 0.7)
+            self.fang = max(-0.5, min(0.5, self.fang + self.side * dt * 0.25))
+            lever = 1.0 - 0.8 * self.rod_side * self.side
+            self.stam = max(0.0, self.stam - dt * (0.04 + 0.3 * self.ten) * lever
+                            / self.endure)
+        if self.ten > rod[3]:
+            self.over += dt
+        else:
+            self.over = max(0.0, self.over - dt)
+        weak = p * 0.55 + 0.35 > rod[3]
+        if self.over > FISH_SNAP or self.line > rod[6]:
+            tk.lose_rig()
+            self.say("it took all the line off the reel and kept going"
+                     if self.line > rod[6] else "SNAP - the line goes" + (
+                         ". that one wants a stronger rod" if weak else
+                         " - give it line when it runs (s)"), now)
+            self.to("gone", now)
+            return
+        if self.ten < 0.1 and not junk and self.stam > 0.2:
+            self.slack += dt
+        else:
+            self.slack = 0.0
+        if self.slack > FISH_SLACK:
+            if tk.bait_kind() not in LURES:
+                tk.use_bait()
+            self.say("the line went slack and it threw the hook - keep it tight", now)
+            self.to("gone", now)
+            return
+        if self.line <= 1.6:
+            n = self.who
+            if not junk and tk.bait_kind() not in LURES:
+                tk.use_bait()
+            what = "" if junk else tk.log(n, self.kg, self.water)
+            self.catch = (n, self.kg, what)
+            self.to("landed", now)
+
+    def fish_at(self):
+        """Where the fish is, on the line: (x, z)."""
+        a = self.yaw + self.fang
+        return self.x + math.sin(a) * self.line, self.z + math.cos(a) * self.line
+
+    def float_at(self, now):
+        """Where the float is in the world, (x, y, z), or None."""
+        if self.phase == "flight":
+            u = min(1.0, (now - self.t0) / FISH_FLIGHT)
+            lx, lz = self.land
+            sx = self.x + math.sin(self.yaw) * 1.0
+            sz = self.z + math.cos(self.yaw) * 1.0
+            h = 2.0 + self.cast_power * 6.0
+            y = (EYE_Y + 1.0) * (1.0 - u) + 4.0 * h * u * (1.0 - u) * 0.6
+            return sx + (lx - sx) * u, y, sz + (lz - sz) * u
+        if self.phase == "wait":
+            lx, lz = self.land
+            bob = 0.06 * math.sin(now * 2.1 + lx)
+            if self.biting(now):
+                bob = -0.35
+            elif self.nibbling(now):
+                bob = -0.12
+            return lx, 0.12 + bob, lz
+        if self.phase == "fight":
+            fx, fz = self.fish_at()
+            return fx, 0.05, fz
+        return None
+
+
+def _line(ch, co, x0, y0, x1, y1, sag, glyph, attr, top=1):
+    """The fishing line on the screen, from the rod's tip to where it goes
+    into the water, sagging in the middle by `sag` rows."""
+    h, w = len(ch), len(ch[0])
+    n = int(max(abs(x1 - x0), abs(y1 - y0))) + 1
+    for k in range(n):                  # not the last: the float is there
+        u = k / float(n)
+        x = int(round(x0 + (x1 - x0) * u))
+        y = int(round(y0 + (y1 - y0) * u + sag * 4.0 * u * (1.0 - u)))
+        if top <= y < h and 0 <= x < w:
+            ch[y][x], co[y][x] = glyph, attr
+
+
+def draw_rod(ch, co, f, v, now, k):
+    """The rod in your hands from the bottom right, bending towards the fish
+    as the tension comes on; the reel on it, turning while you reel; and the
+    line from its tip to the float or the fish. Where the tip is, so the
+    caller can hang things off it."""
+    h, w = len(ch), len(ch[0])
+    bx, by = int(w * 0.84), h - 1
+    tx, ty = int(w * 0.63), int(h * 0.42)
+    end = None
+    pt = f.float_at(now)
+    if pt is not None:
+        pr = v.project(*pt)
+        if pr is not None:
+            end = (pr[0], pr[1])
+    if f.phase == "fight" and end is not None:
+        b = min(0.4, f.ten * 0.18)
+        tx = int(tx + (end[0] - tx) * b * 0.6)
+        ty = int(ty + max(0.0, end[1] - ty) * b + b * h * 0.12)
+    elif f.phase == "wait" and f.tackle.float_on == 0 and (f.nibbling(now)
+                                                          or f.biting(now)):
+        ty += 1 + (k if f.biting(now) else 0)     # with no float, the tip knocks
+    # Bent: a curve from the butt, through a point off the straight line.
+    cx, cy = bx + (tx - bx) * 0.55, by + (ty - by) * 0.75
+    n = int(max(abs(tx - bx), abs(ty - by)) * 1.5) + 2
+    for s in range(n + 1):
+        u = s / float(n)
+        x = (1 - u) ** 2 * bx + 2 * (1 - u) * u * cx + u * u * tx
+        y = (1 - u) ** 2 * by + 2 * (1 - u) * u * cy + u * u * ty
+        xi, yi = int(round(x)), int(round(y))
+        # The glyph by the curve's slope there, a cell being twice as tall
+        # as it is wide - not by the step from the last cell, which is
+        # nothing but - and | at this resolution.
+        ddx = 2 * (1 - u) * (cx - bx) + 2 * u * (tx - cx)
+        ddy = 2 * (1 - u) * (cy - by) + 2 * u * (ty - cy)
+        r = abs(ddy) * 2.0 / max(1e-6, abs(ddx))
+        glyph = ("|" if r > 3.5 else "_" if r < 0.3 else
+                 "/" if ddx * ddy < 0 else "\\")
+        thick = 1 + (k - 1) * (1 if u < 0.6 else 0) + (1 if u < 0.7 else 0)
+        for t in range(thick):
+            if 1 <= yi < h and 0 <= xi + t < w:
+                ch[yi][xi + t] = glyph
+                co[yi][xi + t] = GOLD_DIM if u < 0.22 else ROU_BLACK
+    # The rings up it, and the reel near the butt.
+    for u in (0.4, 0.6, 0.8):
+        x = int(round((1 - u) ** 2 * bx + 2 * (1 - u) * u * cx + u * u * tx))
+        y = int(round((1 - u) ** 2 * by + 2 * (1 - u) * u * cy + u * u * ty))
+        if 1 <= y < h and 0 <= x - 1 < w:
+            ch[y][x - 1], co[y][x - 1] = "o", CURB
+    turning = f.phase == "fight" and now < f.crank_until
+    ry = h - 3 - k
+    rx = bx - 3 * k
+    spoke = "-\\|/"[int(now * 14) % 4] if turning else "-"
+    reel = ["(@)" + spoke + "o"] if k == 1 else [" ___ ", "(_@_)" + spoke, " '-' "]
+    for r, line in enumerate(reel):
+        _text(ch, co, ry + r, rx, line, ROU_BLACK)
+    if end is not None:
+        tense = f.phase == "fight"
+        sag = 0.0 if f.phase == "flight" else (
+            max(0.0, 2.5 - f.ten * 3.0) if tense else 2.0)
+        _line(ch, co, tx, ty, end[0], end[1], sag, ":" if tense and f.ten > 0.8
+              else ".", ROU_RED if tense and f.ten > f.tackle.rod_kind()[3] * 0.85
+              else STAR)
+    return tx, ty
+
+
+def draw_float(ch, co, v, walls, f, now, wet):
+    """The float on the water, or going out to it: its colour by its kind,
+    the glow float lit; rings round it at a nibble, a splash where it went
+    in, and at the bite it goes under. In a fight the fish itself, thrashing
+    where the line goes in."""
+    tk = f.tackle
+    pt = f.float_at(now)
+    if pt is None:
+        return
+    x, y, z = pt
+    kind = tk.float_on
+    glow = FLOAT_KINDS[kind][3]
+    pr = v.project(x, y, z)
+    if pr is None:
+        return
+    sx, sy, d = int(round(pr[0])), int(round(pr[1])), pr[2]
+    if f.phase == "flight":
+        put_cell(ch, co, v, walls, sx, sy, d, "o" if kind else "*",
+                 FIREFLY if glow else ROU_RED if kind else CURB)
+        return
+    if f.phase == "fight":
+        thrash = f.running(now)
+        n = 6 if thrash else 3
+        for q in range(n):
+            m = _mix(q, int(now * 10.0), 6401)
+            put_point(ch, co, v, walls, x + ((m & 7) - 3.5) * 0.25, 0.1 + ((m >> 3) & 3)
+                      * 0.15 * (2 if thrash else 1), z + (((m >> 5) & 7) - 3.5) * 0.25,
+                      "'" if m & 64 else "~", SNOW)
+        sp = FISH[f.who]
+        if thrash and not sp["junk"] and int(now * 4.0) % 3 == 0:
+            put_point(ch, co, v, walls, x, 0.6, z, "><>"[int(now * 8) % 3],
+                      fish_colour(sp))
+        return
+    since = now - f.t0
+    if since < 0.6:
+        for q in range(8):
+            a = q * 0.785
+            r = 0.3 + since * 2.0
+            put_point(ch, co, v, walls, x + math.cos(a) * r, 0.05, z + math.sin(a) * r,
+                      "'" if since < 0.3 else ".", SNOW)
+    if f.nibbling(now) or f.biting(now):
+        r = 0.6 if f.biting(now) else 0.35
+        for q in range(6):
+            a = q * 1.047 + now
+            put_point(ch, co, v, walls, x + math.cos(a) * r, 0.02, z + math.sin(a) * r,
+                      "~" if f.biting(now) else ".", RAIN)
+    if f.biting(now):
+        put_cell(ch, co, v, walls, sx, sy - 1, d, "!", FLASH)
+        return                          # under
+    if kind == 0:
+        put_cell(ch, co, v, walls, sx, sy, d, ".", CURB)   # only the line going in
+        return
+    if glow:
+        put_lit(ch, co, v, walls, x, y + 0.15, z, "o", FIREFLY, max(wet, 0.5), now)
+    else:
+        lit = d < 30.0
+        put_cell(ch, co, v, walls, sx, sy - 1, d, "o" if lit else ".",
+                 ROU_RED if kind == 1 else GOLD)
+        put_cell(ch, co, v, walls, sx, sy, d, "|" if lit else ".",
+                 SNOW if lit else CURB)
+
+
+def draw_aim(ch, co, v, walls, f, now):
+    """Where the cast would go: dots along its arc and a mark where it lands,
+    green over water and red over land."""
+    lx, lz = f.target(now)
+    ok = fish_water(lx, lz) is not None
+    attr = ROU_GREEN if ok else ROU_RED
+    sx, sz = f.x + math.sin(f.yaw), f.z + math.cos(f.yaw)
+    p = f.swing(now)
+    hh = 2.0 + p * 6.0
+    for q in range(1, 9):
+        u = q / 9.0
+        y = (EYE_Y + 1.0) * (1.0 - u) + 4.0 * hh * u * (1.0 - u) * 0.6
+        put_point(ch, co, v, walls, sx + (lx - sx) * u, y, sz + (lz - sz) * u, ".",
+                  attr)
+    # The mark: across the line of the cast, so its arms are either side of
+    # it on the screen, and the middle last.
+    rx, rz = math.cos(f.yaw), -math.sin(f.yaw)
+    for a, g in ((-1.4, "-"), (-0.7, "-"), (0.7, "-"), (1.4, "-"), (0.0, "X")):
+        put_point(ch, co, v, walls, lx + rx * a, 0.08, lz + rz * a, g, attr)
+
+
+def render_fishing(f, width, height, now):
+    """Fishing: the view out over the water from where you stand - or from the
+    boat's side, rising and falling - with the rod, the line and the float;
+    the cast's meter while you aim; the tension and how much line is out in
+    a fight; what you have on along the bottom; and the card when you land
+    something."""
+    eye = f.boat.eye(now) if f.boat is not None else EYE_Y
+    v = View(f.x, f.z, f.yaw, width, height, eye=eye)
+    ch, co, wet = render_street(v, now)
+    walls = v.walls
+    k = big_scale(width, height)
+    tk = f.tackle
+    if f.boat is not None and height > 12:
+        # Her side, under your elbows.
+        for x in range(width):
+            ch[height - 2][x], co[height - 2][x] = "=", SNOW
+            ch[height - 1][x], co[height - 1][x] = (
+                "|" if x % 9 == 0 else " "), CURB
+    if f.phase == "aim":
+        draw_aim(ch, co, v, walls, f, now)
+    draw_float(ch, co, v, walls, f, now, wet)
+    if width < 40 or height < 14:
+        _text(ch, co, height - 1, 0, (" " + f.phase + "  " + f.said)[:width], GOLD)
+        return ch, co, v
+    draw_rod(ch, co, f, v, now, k)
+    rod = tk.rod_kind()
+    mid = width // 2
+    if f.phase == "aim":
+        bw = min(40, width // 3) * (1 if k == 1 else 2)
+        p = f.swing(now)
+        bx = mid - bw // 2 - 4
+        y = height - 4 - 2 * (k - 1)
+        _text(ch, co, y, bx, "CAST [" + " " * bw + "]", HUD)
+        for q in range(int(p * bw)):
+            c = ROU_GREEN if q < bw * 0.6 else GOLD if q < bw * 0.85 else ROU_RED
+            for r in range(k):
+                _text(ch, co, y + r, bx + 6 + q, "=" if q < int(p * bw) - 1 else ">", c)
+        _text(ch, co, y, bx + bw + 8, "%dm" % int(f.reach(p)), GOLD)
+    elif f.phase == "fight":
+        sp = FISH[f.who]
+        gx = width - 6 - 3 * (k - 1)
+        g0, g1 = int(height * 0.18), int(height * 0.68)
+        frac = f.ten / rod[3]
+        _text(ch, co, g0 - 1, gx - 2, "TENSION", HUD)
+        for y in range(g0, g1):
+            u = (g1 - y) / float(g1 - g0)
+            lit = u <= frac
+            c = ROU_GREEN if u < 0.6 else GOLD if u < 0.85 else ROU_RED
+            if frac > 0.95 and int(now * 8) % 2:
+                c = FLASH
+            _text(ch, co, y, gx, ("[" + ("#" if lit else " ") * (1 + k) + "]"),
+                  c if lit else CURB)
+        _text(ch, co, g1 + 1, gx - 2, "LINE %2dm" % int(f.line), GOLD)
+        if f.running(now):
+            word, c = "IT RUNS - s gives line", ROU_RED
+        elif f.charging(now):
+            word, c = "IT SWIMS AT YOU - reel in the slack!", ROU_RED
+        elif f.turning(now):
+            word, c = "it turns...", GOLD
+        elif sp["junk"]:
+            word, c = "a dead weight - reel it in", HUD
+        elif f.stam < 0.3:
+            word, c = "it is tiring - reel it in", ROU_GREEN
+        else:
+            word, c = "%s - keep it tight" % ("pulling left" if f.side < -0.3 else
+                                              "pulling right" if f.side > 0.3 else
+                                              "on the line"), HUD
+        y = height - 4 - (5 * (k - 1) if k > 1 else 0)
+        if k > 1 and f.running(now):
+            _blocks(ch, co, y - 1, mid - blocks_width("RUNS", k - 1) // 2, "RUNS",
+                    ROU_RED, k - 1, k - 1)
+            _text(ch, co, y + 5 * (k - 1), mid - len(word) // 2, word, c)
+        else:
+            _text(ch, co, y, mid - len(word) // 2, word, c)
+        if f.running(now) and int(now * 10) % 2:
+            _text(ch, co, height - 4 - 2 * k, int(width * 0.84) - 10, "zzzZZZ", FLASH)
+    elif f.phase == "wait" and f.biting(now):
+        if k > 1:
+            _blocks(ch, co, height // 2 + 2, mid - blocks_width("STRIKE", k - 1) // 2,
+                    "STRIKE", FLASH, k - 1, k - 1)
+        else:
+            _text(ch, co, height - 5, mid - 8, "!! f STRIKES !!", FLASH)
+    # What is on, along the bottom.
+    bait = ("%s x%d" % (BAIT_KINDS[tk.bait_on][0], tk.bait[tk.bait_on])
+            if tk.bait_on is not None else "no bait")
+    strip = " %s  |  %s  |  %s  |  cool box %d  |  book %d/%d " % (
+        rod[0], bait, tk.float_kind()[0], len(tk.box), len(tk.book),
+        len(fish_species()))
+    y = height - 1 - (2 if f.boat is not None else 0)
+    for x in range(min(width, len(strip) + 2)):
+        ch[y][x], co[y][x] = " ", 0
+    _text(ch, co, y, 1, strip[:width - 2], HUD)
+    if f.said and now - f.said_at < 3.5 and f.phase != "landed":
+        _text(ch, co, y - 1, max(1, mid - len(f.said) // 2), f.said[:width - 2], BULB)
+    if f.phase == "landed":
+        draw_catch(ch, co, f, now, k)
+    return ch, co, v
+
+
+def draw_catch(ch, co, f, now, k):
+    """The card for what you landed: its drawing, its name, how heavy, what
+    it will fetch, and whether it is new to the book."""
+    h, w = len(ch), len(ch[0])
+    n, kg, what = f.catch
+    sp = FISH[n]
+    art = FISH_ART[sp["art"]]
+    aw = max(len(r) for r in art)
+    art = [r.ljust(aw) for r in art]
+    kk = k
+    while kk > 1 and (aw * kk + 6 > w - 4 or len(art) * kk + 16 > h - 2):
+        kk -= 1
+    title = sp["name"].upper()
+    lines = []
+    weight = ("%.1f kg" % kg) if kg >= 0.1 else "a few grams"
+    worth = fish_value(n, kg)
+    lines.append("%s  -  %s" % (weight, ("worth $%d at a tackle shop" % worth)
+                                if worth else "worth nothing to anybody"))
+    if sp["legend"]:
+        lines.append("* * *  LEGENDARY  * * *")
+    if what == "new":
+        lines.append("new in the book: %s" % WATER_NAMES.get(f.water, ""))
+    elif what == "best":
+        lines.append("your biggest one yet")
+    say = sp["say"]
+    if sp["art"] == "bottle":
+        say = BOTTLE_NOTES[int(kg * 1000) % len(BOTTLE_NOTES)]
+    if say:
+        lines.append(say)
+    lines.append("")
+    lines.append("f keeps it  -  l lets it go")
+    big_title = kk > 1 and blocks_width(title, kk - 1) + 6 < w - 4
+    tw = blocks_width(title, kk - 1) if big_title else len(title)
+    bw = min(w - 2, max(aw * kk, tw, max(len(s) for s in lines)) + 6)
+    th = 5 * (kk - 1) if big_title else 1
+    bh = min(h - 2, 3 + th + 1 + len(art) * kk + 1 + len(lines) + 1)
+    x0, y0 = w // 2 - bw // 2, max(1, h // 2 - bh // 2)
+    for y in range(y0, y0 + bh):
+        for x in range(x0, x0 + bw):
+            if 0 <= y < h and 0 <= x < w:
+                ch[y][x], co[y][x] = " ", 0
+    edge = GOLD if sp["legend"] or what == "new" else GOLD_DIM
+    _box(ch, co, x0, y0, bw, bh, edge)
+    y = y0 + 1
+    if big_title:
+        _blocks(ch, co, y, w // 2 - tw // 2, title, GOLD, kk - 1, kk - 1)
+    else:
+        _text(ch, co, y, w // 2 - tw // 2, title, GOLD)
+    y += th + 1
+    attr = fish_colour(sp)
+    wig = int(math.sin(now * 5.0) * 1.2) if not sp["junk"] else 0
+    _blow_up(ch, co, w // 2 - aw * kk // 2 + wig, y, art,
+             [[attr] * len(r) for r in art], kk)
+    y += len(art) * kk + 1
+    for s in lines:
+        _text(ch, co, y, w // 2 - len(s) // 2, s[:bw - 2],
+              GOLD if "LEGEND" in s else HUD if s.startswith("f keeps") else BULB)
+        y += 1
+
+
+# --- in the tackle shop -----------------------------------------------------
+# Behind the counter, the man who runs it, smoking a pipe and full of advice;
+# rods in a rack, floats on a string, the live bait fridge humming; and the
+# shelves: rods, bait, floats, the counter where you sell your catch, and your
+# book. ad between the shelves, ws along one, p buys.
+TACKLE_TABS = ["RODS", "BAIT", "FLOATS", "SELL", "BOOK"]
+TACKLE_HUD = (" %s  -  a d shelves  -  w s choose  -  p buys  -  c sells your catch"
+              "  -  x leaves ")
+TACKLE_HELLO = ["Evening. Biting tonight, they are. Or so I tell everybody.",
+                "Come in, come in. Mind the worms.",
+                "You want bait, I've got bait. You want advice, that's free."]
+TACKLE_TIPS = [
+    "Bread for carp and roach. A worm for nearly anything in fresh water.",
+    "Mackerel come past the pier on a spinner. You'll know when they do.",
+    "Don't reel while it runs. Let it take line - that's what s is for.",
+    "Hold the rod over the other way to where it pulls. Tires them out.",
+    "The further out the float goes, the bigger they come. The pier's head is deep.",
+    "Out past the ships there's tuna. A boat, a big game rod, and a lure that size.",
+    "Somebody saw the old one in the woods' lake. Thirty kilos of carp. Bread.",
+    "Rain brings the eels up. And they feed at dawn, if you ever see one.",
+    "A glow float, at night - you'll see it go under from the end of the pier.",
+    "They fish the fountain on the Strip. Security don't like it. Koi fetch a fortune.",
+    "Sole on lugworm, off the sand, after dark. Which round here is always.",
+    "The salmon come in at the river's mouth. Spinner. Patience.",
+    "A light rod and a big fish: the fish wins. Every time.",
+    "Give it line when it runs, take it back when it rests. That's all fishing is.",
+]
+ROD_ART = [
+    ["##=============-------------------o"],
+    ["###=(@)========--------------------------o"],
+    ["####==(@)=========----------------------------------o"],
+    ["#####=(@@)======######=========---------------------o"],
+]
+BAIT_ART = [
+    ["  .------------.  ", " (  .  .   .   ) ", "(  .   .  .  .  )",
+     " '-------------'  "],
+    ["  ___________  ", " |~ S ~ ~S ~ | ", " |   WORMS   | ", " '-----------' "],
+    ["  ___________  ", " |S~ ~ S ~ ~S| ", " |  LUGWORM  | ", " '-----------' "],
+    [" _____________ ", "|=============|", "| ~ SQUID ~ ~ |", "'-------------'"],
+    ["     __      ", "o--=(  )>    ", "     ``      "],
+    ["   ______________     ", "o=(::::::::::::::>~~~ ", "   ``````````````     "],
+]
+FLOAT_ART = [
+    [],
+    ["  |  ", " (#) ", " ( ) ", "  |  ", "  |  "],
+    ["  #  ", "  |  ", " (|) ", "  |  ", "  |  "],
+    ["  *  ", " (o) ", " (|) ", "  |  ", "  |  "],
+]
+TACKLE_MAN = [
+    "  _____  ",
+    " (_____)=",
+    "  |o o|  ",
+    "  | - |-o",
+    " /|===|\\ ",
+    "/ |===| \\",
+]
+
+
+def new_shop(at, now):
+    """Your visit to a tackle shop."""
+    return {"at": at, "tab": 0, "sel": [0] * len(TACKLE_TABS),
+            "say": TACKLE_HELLO[at["seed"] % len(TACKLE_HELLO)], "said_at": now,
+            "tip": at["seed"] % len(TACKLE_TIPS)}
+
+
+def shop_rows(shop, tackle):
+    """What is on the shelf you are at: (words, $ or None, colour hint)."""
+    tab = TACKLE_TABS[shop["tab"]]
+    if tab == "RODS":
+        out = []
+        for n, (name, price, cast, line, _, _, _) in enumerate(ROD_KINDS):
+            have = (" in hand" if tackle.rod == n else " yours" if n in tackle.rods
+                    else "")
+            out.append(("%-13s cast %2dm  line %.1f%s" % (name, cast, line, have),
+                        None if n in tackle.rods else price))
+        return out
+    if tab == "BAIT":
+        return [("%-14s %2d to a pack  have %d%s" % (
+            name, many, tackle.bait[n], " on" if tackle.bait_on == n else ""), price)
+            for n, (name, price, many, _) in enumerate(BAIT_KINDS)]
+    if tab == "FLOATS":
+        return [("%-11s strike %.2fs  have %d%s" % (
+            name, win, tackle.floats[n], " on" if tackle.float_on == n else ""), price)
+            for n, (name, price, win, _) in enumerate(FLOAT_KINDS) if n]
+    if tab == "SELL":
+        rows = [("%-20s %5.1f kg   $%d" % (FISH[n]["name"], kg, fish_value(n, kg)),
+                 None) for n, kg, _ in tackle.box]
+        return rows or [("the cool box is empty", None)]
+    rows = []
+    for n in fish_species():
+        sp = FISH[n]
+        got = tackle.book.get(n)
+        if got is None:
+            where = WATER_NAMES[sp["where"][0]]
+            rows.append(("%-20s ?          %s" % ("? " * 6, where), None))
+        else:
+            rows.append(("%-20s x%-3d best %.1f kg, %s" % (
+                sp["name"], got[0], got[1], WATER_NAMES.get(got[2], "")), None))
+    return rows
+
+
+def shop_key(shop, tackle, what, wallet, now):
+    """A key at the counter."""
+    tabs = len(TACKLE_TABS)
+    if what in ("left", "right"):
+        shop["tab"] = (shop["tab"] + (1 if what == "right" else -1)) % tabs
+        return
+    rows = shop_rows(shop, tackle)
+    t = shop["tab"]
+    if what in ("up", "down"):
+        shop["sel"][t] = (shop["sel"][t] + (1 if what == "down" else -1)) % len(rows)
+        return
+    sel = shop["sel"][t] % len(rows)
+
+    def say(text):
+        shop["say"], shop["said_at"] = text, now
+
+    if what == "sell" or (what == "buy" and TACKLE_TABS[t] == "SELL"):
+        if not tackle.box:
+            say("Nothing in the box? Go on, they're out there.")
+            return
+        got = tackle.box_worth()
+        best = max(tackle.box, key=lambda c: fish_value(c[0], c[1]))
+        wallet.give(got)
+        say(("$%d for the lot. " % got) + (
+            "Lovely %s, that." % FISH[best[0]]["name"] if got else
+            "I'll bin that lot for you, no charge."))
+        tackle.box = []
+        shop["sel"][t] = 0
+        return
+    if what != "buy":
+        return
+    tab = TACKLE_TABS[t]
+    if tab == "RODS":
+        name, price = ROD_KINDS[sel][0], ROD_KINDS[sel][1]
+        if sel in tackle.rods:
+            tackle.rod = sel
+            say("The %s it is. Off you go." % name)
+        elif wallet.take(price):
+            tackle.rods.append(sel)
+            tackle.rod = sel
+            say("A %s. You'll want bait for that - and a float, if you like." % name
+                if not any(tackle.bait) else "A %s. Good choice. Mind the hook." % name)
+        else:
+            say("The %s is $%d. Come back with it." % (name, price))
+    elif tab == "BAIT":
+        name, price, many, _ = BAIT_KINDS[sel]
+        if wallet.take(price):
+            tackle.bait[sel] += many
+            if tackle.bait_kind() is None:
+                tackle.bait_on = sel
+            say("%s. %s." % (name.capitalize(), BAIT_SAYS[sel].capitalize()))
+        else:
+            say("That's $%d." % price)
+    elif tab == "FLOATS":
+        n = sel + 1
+        name, price = FLOAT_KINDS[n][0], FLOAT_KINDS[n][1]
+        if wallet.take(price):
+            tackle.floats[n] += 1
+            tackle.float_on = n
+            say("A %s: %s." % (name, FLOAT_SAYS[n]))
+        else:
+            say("That's $%d." % price)
+    else:
+        shop["tip"] = (shop["tip"] + 1) % len(TACKLE_TIPS)
+        say(TACKLE_TIPS[shop["tip"]])
+
+
+def draw_shop_item(ch, co, shop, tackle, x0, y0, x1, y1, sel, k, now):
+    """The picture of what you are pointing at on the shelf: the rod, the
+    bait, the float - or the fish, in the cool box and in the book (a
+    shape in the dark till you have caught one)."""
+    tab = TACKLE_TABS[shop["tab"]]
+    art, attr = None, HUD
+    if tab == "RODS":
+        art, attr = ROD_ART[sel], ROU_BLACK
+    elif tab == "BAIT":
+        art = BAIT_ART[sel]
+        attr = (BULB, ROU_RED, ROU_RED, MOON_DIM, SNOW, NEON[7][0])[sel]
+    elif tab == "FLOATS":
+        art = FLOAT_ART[sel + 1]
+        attr = (ROU_RED, GOLD, FIREFLY)[sel]
+    elif tab == "SELL" and tackle.box:
+        sp = FISH[tackle.box[sel % len(tackle.box)][0]]
+        art, attr = FISH_ART[sp["art"]], fish_colour(sp)
+    elif tab == "BOOK":
+        n = fish_species()[sel % len(fish_species())]
+        sp = FISH[n]
+        art = FISH_ART[sp["art"]]
+        attr = fish_colour(sp) if n in tackle.book else BAND
+    if not art:
+        return
+    aw = max(len(r) for r in art)
+    art = [r.ljust(aw) for r in art]
+    kk = max(1, k)
+    while kk > 1 and (aw * kk > x1 - x0 or len(art) * kk > y1 - y0):
+        kk -= 1
+    if aw > x1 - x0 or len(art) > y1 - y0:
+        return
+    bob = int(math.sin(now * 2.0) * 0.8 * kk) if tab in ("SELL", "BOOK") else 0
+    _blow_up(ch, co, (x0 + x1) // 2 - aw * kk // 2,
+             (y0 + y1) // 2 - len(art) * kk // 2 + bob, art,
+             [[attr] * len(r) for r in art], kk)
+
+
+def render_tackle(shop, tackle, width, height, now):
+    """In a tackle shop, at the counter: its name in neon and the neon fish
+    over the door you came in by; the rods in their rack down one side, the
+    floats on a string, the live bait fridge humming down the other; the man
+    behind the counter with his pipe; and the shelves. On a big window the
+    same room bigger: the drawings k times over, the name in block letters,
+    the shelves still words."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    at = shop["at"]
+    name = at["name"]
+    seed = at["seed"]
+    n = len(NEON)
+    if width < 50 or height < 18:
+        _text(ch, co, 1, 1, ("~ %s ~" % name)[:width - 1], GOLD)
+        rows = shop_rows(shop, tackle)
+        t = shop["tab"]
+        _text(ch, co, 2, 1, TACKLE_TABS[t][:width - 1], HUD)
+        for r, (words, price) in enumerate(rows[:height - 5]):
+            mark = ">" if r == shop["sel"][t] % len(rows) else " "
+            _text(ch, co, 3 + r, 1, ("%s %s %s" % (mark, words, "" if price is None
+                                                    else "$%d" % price))[:width - 1],
+                  GOLD if mark == ">" else HUD)
+        _text(ch, co, height - 1, 1, shop["say"][:width - 2], BULB)
+        return ch, co
+    k = big_scale(width, height)
+    tube = NEON[(seed >> 6) % n]
+    # The name, and the neon fish beside it, its tail going.
+    top = 1
+    if k > 1:
+        nw = blocks_width(name, k - 1)
+        _blocks(ch, co, top, width // 2 - nw // 2, name, tube[0], k - 1, k - 1)
+        name_h = 5 * (k - 1)
+    else:
+        _text(ch, co, top, width // 2 - len(name) // 2, name, tube[0])
+        name_h = 1
+    fish = FISH_NEON[int(now * 2.5) % 2]
+    fx = width // 2 + (blocks_width(name, k - 1) if k > 1 else len(name)) // 2 + 3 * k
+    if fx + len(fish[0]) * k < width:
+        _blow_up(ch, co, fx, top, fish, [[NEON[(seed >> 3) % n][0]] * len(r)
+                                         for r in fish], k)
+    # The floats on a string, under it.
+    fy = top + name_h + 1
+    for x in range(2 * k, width - 2 * k):
+        sag = int(1.5 * k * math.sin(math.pi * (x - 2 * k) / max(1, width - 4 * k)))
+        if (x // (3 * k)) % 2 == 0 and x % (3 * k) == 0:
+            _text(ch, co, fy + sag, x, "o", ROU_RED if (x // (3 * k)) % 4 else SNOW)
+            _text(ch, co, fy + sag + 1, x, "|", SNOW)
+        else:
+            _text(ch, co, fy + sag, x, "-", CURB)
+    counter = height - 4 - (k - 1) * 2
+    # The rods, standing in their rack down the left, all lengths and colours.
+    rx0 = 2 * k
+    rods_w = max(10, width // 7)
+    for q in range(rods_w // (2 * k)):
+        x = rx0 + q * 2 * k
+        tall = fy + 3 + int(_mix(q, seed, 6501) % max(1, (counter - fy - 6) // 2))
+        c = NEON[(q + seed) % n][1]
+        for y in range(tall, counter):
+            for t in range(max(1, k - 1)):
+                _text(ch, co, y, x + t, "|" if y > tall else "'", c)
+        for y in range(counter - 3 * k, counter):
+            _text(ch, co, y, x, "#", GOLD_DIM)            # the cork handles
+        _text(ch, co, counter - 4 * k, x, "@", ROU_BLACK)
+    # The live bait fridge, down the right, its light humming.
+    bw_, bh_ = 12 * k, min(counter - fy - 4, 8 * k)
+    bx_ = width - bw_ - 2 * k
+    by_ = counter - bh_
+    hum = FLASH if int(now * 7.0 + seed) % 23 else RAIN
+    _box(ch, co, bx_, by_, bw_, bh_, RAIN)
+    _text(ch, co, by_ + 1, bx_ + bw_ // 2 - 4, "LIVE BAIT", hum)
+    for r in range(by_ + 2, by_ + bh_ - 1):
+        for x in range(bx_ + 1, bx_ + bw_ - 1):
+            m = _mix(x, r + int(now * 3.0), 6503)
+            if m % 7 == 0:
+                _text(ch, co, r, x, "~" if m & 8 else "S", ROU_RED if m & 16 else BARK)
+    # The man behind the counter, his pipe going.
+    art = TACKLE_MAN
+    mh, mw = len(art) * k, len(art[0]) * k
+    mx = rx0 + rods_w + 2 * k
+    my = counter - mh
+    _blow_up(ch, co, mx, my, art, [[CURB] * len(r) for r in art], k)
+    for q in range(4):
+        t = (now * 0.5 + q * 0.25) % 1.0
+        sx = mx + mw + int(t * 3 * k) - k
+        sy = my + 3 * k - int(t * 4 * k)
+        _text(ch, co, sy, sx, "~" if q % 2 else ".", SMOKE)
+    # The shelves.
+    px0 = mx + mw + 4 * k
+    px1 = bx_ - 2 * k
+    pw = px1 - px0
+    rows = shop_rows(shop, tackle)
+    t = shop["tab"]
+    py0 = fy + 3 * k
+    ph = counter - py0 - 1
+    if pw > 30 and ph > 6:
+        _box(ch, co, px0, py0, pw, ph, GOLD_DIM)
+        for y in range(py0 + 1, py0 + ph - 1):
+            for x in range(px0 + 1, px0 + pw - 1):
+                ch[y][x], co[y][x] = " ", 0
+        tx = px0 + 2
+        for q, tab in enumerate(TACKLE_TABS):
+            word = "[%s]" % tab if q == t else " %s " % tab
+            _text(ch, co, py0 + 1, tx, word, GOLD if q == t else HUD)
+            tx += len(word) + 1
+        room = ph - 6
+        sel = shop["sel"][t] % len(rows)
+        first = max(0, min(sel - room // 2, len(rows) - room))
+        for r, (words, price) in enumerate(rows[first:first + room]):
+            y = py0 + 3 + r
+            on = first + r == sel
+            cost = "" if price is None else "$%d" % price
+            line = ("> " if on else "  ") + words
+            _text(ch, co, y, px0 + 2, line[:pw - 10], GOLD if on else HUD)
+            _text(ch, co, y, px0 + pw - 2 - len(cost), cost, GOLD if on else GOLD_DIM)
+        tab = TACKLE_TABS[t]
+        foot = ("p sells the lot - $%d" % tackle.box_worth() if tab == "SELL"
+                else "%d of %d kinds caught  -  p for a tip" % (
+                    len(tackle.book), len(fish_species())) if tab == "BOOK"
+                else ROD_KINDS[sel][5] if tab == "RODS" else BAIT_SAYS[sel]
+                if tab == "BAIT" else FLOAT_SAYS[sel + 1])
+        _text(ch, co, py0 + ph - 2, px0 + 2, foot[:pw - 4], BULB)
+        draw_shop_item(ch, co, shop, tackle, px0 + 50, py0 + 3,
+                       px0 + pw - 3, py0 + ph - 3, sel, k, now)
+    # The counter, and what you have on it.
+    for y in range(counter, height):
+        for x in range(width):
+            ch[y][x], co[y][x] = ("=" if y < counter + max(1, k - 1) else
+                                  "|" if (x // k) % 6 == 0 else " "), (
+                GOLD_DIM if y < counter + max(1, k - 1) else BARK)
+    held = ("%s in hand" % tackle.rod_kind()[0]) if tackle.rod is not None else "no rod"
+    box = "cool box: %d, worth $%d" % (len(tackle.box), tackle.box_worth())
+    say = shop["say"]
+    y = counter + max(1, k - 1)
+    for x in range(width):
+        ch[y][x], co[y][x] = " ", 0
+    _text(ch, co, y, max(2, width // 2 - len(say) // 2), say[:width - 4], BULB)
+    y = height - 2
+    for x in range(width):
+        ch[y][x], co[y][x] = " ", 0
+    _text(ch, co, y, 2, held, HUD)
+    _text(ch, co, y, width - len(box) - 2, box, HUD)
+    return ch, co
+
+
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
@@ -32967,6 +34759,9 @@ def main(stdscr):
     ride = None                 # up on the pier's wheel: {"pier", "t0"}
     cruise = None               # aboard the cruise ship: {"h", "look"}
     boat = None                 # at the wheel of a speedboat: a Boat
+    tackle = Tackle()           # your rods, bait, floats, cool box and book
+    fishing = None              # with a line in the water: a Fishing
+    shop = None                 # at a tackle shop's counter: your visit
     vendors = {}                # and the ones you have been at, by seed: their stock
     scope_at = None             # when you put your eye to the telescope
     # The temple's terminal: the verses so far, when the last word was asked
@@ -32990,7 +34785,7 @@ def main(stdscr):
                 or metro is not None
                 or flight is not None or reading or poke is not None
                 or vendor is not None or ride is not None or cruise is not None
-                or boat is not None)
+                or boat is not None or fishing is not None or shop is not None)
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -33094,7 +34889,7 @@ def main(stdscr):
                     note = ("the sea: on - a taxi goes to the beach"
                             if toggle_coast() else
                             "the sea: off - the city is endless that way again")
-                    tiki = ride = cruise = boat = None
+                    tiki = ride = cruise = boat = fishing = shop = None
                     _boat_out[0] = None
                     _liner_trips.clear()
                     if not can_stand(cam_x, cam_z):
@@ -33102,6 +34897,9 @@ def main(stdscr):
                 elif key == ord("+"):
                     wallet.give(1000)
                     note = "+$1000"
+                elif key == ord("g") and not hidden_next:
+                    _fish_rare[0] = True
+                    note = "the next bite is a big one - the rarest there is"
                 elif key == ord("%"):
                     rig_jackpot()
                     note = "next pull 777, next plinko ball to the edge"
@@ -33159,6 +34957,7 @@ def main(stdscr):
                             cab = None
                             metro = None
                             flight = None
+                            fishing = shop = None
                             if kind == "pilot":
                                 home_ = zone_home("airport", int(cam_x // CELL),
                                                   int(cam_z // CELL))
@@ -33189,6 +34988,47 @@ def main(stdscr):
                                 note = "-> the woods rave (starting)"
                                 note_at = now
                         break
+            elif fishing is not None and key not in (ord("q"), CHEAT_KEY):
+                if key in (ord("z"), ord("Z")):
+                    _big_screens[0] = not _big_screens[0]     # big screens, off and on
+                elif fishing.key({
+                        27: "stop", ord("x"): "stop", ord("X"): "stop",
+                        ord("f"): "act", ord("F"): "act", ord(" "): "strike",
+                        ord("p"): "strike", ord("P"): "strike", 10: "strike",
+                        13: "strike", curses.KEY_ENTER: "strike",
+                        curses.KEY_UP: "reel", ord("w"): "reel", ord("W"): "reel",
+                        curses.KEY_DOWN: "back", ord("s"): "back", ord("S"): "back",
+                        curses.KEY_LEFT: "left", ord("a"): "left", ord("A"): "left",
+                        curses.KEY_RIGHT: "right", ord("d"): "right",
+                        ord("D"): "right", ord("l"): "release", ord("L"): "release",
+                        ord("b"): "bait", ord("B"): "bait", ord("o"): "float",
+                        ord("O"): "float", ord("r"): (
+                            "reel" if fishing.phase in ("wait", "fight") else "rod"),
+                        ord("R"): "rod"}.get(key, ""), now) == "stop":
+                    if fishing.said and now - fishing.said_at < 0.1:
+                        note = fishing.said
+                    else:
+                        note = "you pack the rod up"
+                    note_at = now
+                    fishing = None
+            elif shop is not None and key not in (ord("q"), CHEAT_KEY):
+                if key in (27, ord("x"), ord("X")):
+                    # Back out, and round to the water, rod or no rod.
+                    shop = None
+                    yaw = water_yaw(cam_x, cam_z, 30.0, yaw)
+                    note, note_at = "the bell over the door rings behind you", now
+                elif key in (ord("z"), ord("Z")):
+                    _big_screens[0] = not _big_screens[0]     # big screens, off and on
+                else:
+                    shop_key(shop, tackle, {
+                        curses.KEY_UP: "up", ord("w"): "up", ord("W"): "up",
+                        curses.KEY_DOWN: "down", ord("s"): "down", ord("S"): "down",
+                        curses.KEY_LEFT: "left", ord("a"): "left", ord("A"): "left",
+                        curses.KEY_RIGHT: "right", ord("d"): "right",
+                        ord("D"): "right", ord("p"): "buy", ord("P"): "buy",
+                        ord(" "): "buy", 10: "buy", 13: "buy",
+                        curses.KEY_ENTER: "buy", ord("c"): "sell",
+                        ord("C"): "sell"}.get(key, ""), wallet, now)
             elif boat is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (27, ord("x"), ord("X")):
                     # Back to the stand, however far out: they come and get it.
@@ -33199,6 +35039,16 @@ def main(stdscr):
                     boat = None
                     _boat_out[0] = None
                     note, note_at = "back at the quay - they tie her up", now
+                elif key in (ord("f"), ord("F")):
+                    if tackle.rod is None:
+                        note, note_at = ("no rod - a tackle shop sells them, and the "
+                                         "taxi knows one"), now
+                    elif abs(boat.speed) > FISH_SLOW:
+                        note, note_at = "slow her right down first", now
+                    else:
+                        boat.want = boat.speed = 0.0
+                        fishing = Fishing(boat.x, boat.z, boat.heading, tackle, now,
+                                          int(now * 1000.0), boat=boat)
                 else:
                     boat.key({curses.KEY_UP: "faster", ord("w"): "faster",
                               ord("W"): "faster", curses.KEY_DOWN: "slower",
@@ -33685,6 +35535,21 @@ def main(stdscr):
                 else:
                     note, note_at = "no cabs down here - stand in a street", now
             elif (street and on_roof is None and sewer is None and venue is None
+                  and key in (ord("f"), ord("F"))):
+                said_ = fish_ready(tackle, cam_x, cam_z, yaw)
+                if said_:
+                    note, note_at = said_, now
+                else:
+                    fishing = Fishing(cam_x, cam_z, yaw, tackle, now, int(now * 1000.0))
+                    fwd = side = spin = 0.0
+                    autopilot = False
+            elif (street and on_roof is None and sewer is None and venue is None
+                  and key in (ord("p"), ord("P"))
+                  and tackle_near(cam_x, cam_z) is not None):
+                shop = new_shop(tackle_near(cam_x, cam_z), now)
+                fwd = side = spin = 0.0
+                autopilot = False
+            elif (street and on_roof is None and sewer is None and venue is None
                   and key in (ord("p"), ord("P"))
                   and marina_near(cam_x, cam_z) is not None):
                 if wallet.take(BOAT_FEE):
@@ -33932,6 +35797,8 @@ def main(stdscr):
                 note, note_at = "back alongside - down the gangway", now
         if boat is not None:
             boat.step(now - boat.clock, now)
+        if fishing is not None:
+            fishing.step(now)
         if cab is not None:
             cab.step(now - cab.clock, now)
             if cab.pay:
@@ -34289,6 +36156,15 @@ def main(stdscr):
                 seated = (venue[1]["seed"], now)    # sat down just now
             ch, co = render_ramen(venue[1], width, height, now, seated[1])
             hud = RAMEN_HUD % (cam_x, cam_z)
+        elif street and fishing is not None:
+            ch, co, v = render_fishing(fishing, width, height, now)
+            hud = FISH_HUD[fishing.phase] % (
+                WATER_NAMES.get(fishing.water, "") if fishing.phase in (
+                    "wait", "fight", "landed") else
+                "from the boat" if fishing.boat is not None else "")
+        elif street and shop is not None:
+            ch, co = render_tackle(shop, tackle, width, height, now)
+            hud = TACKLE_HUD % shop["at"]["name"].lower()
         elif street and boat is not None:
             ch, co, v = render_boat(boat, width, height, now)
             hud = BOAT_HUD % (compass_word(boat.heading),
@@ -34384,6 +36260,10 @@ def main(stdscr):
                 or ("  ~ a taxi is pulling up ~" if taxi is not None else "")
                 or ("  ~ a vending machine: p looks in ~"
                     if vending_near(cam_x, cam_z) is not None else "")
+                or tackle_hint(cam_x, cam_z, tackle)
+                or ("  ~ water: f casts a line ~" if tackle.rod is not None
+                    and water_ahead(cam_x, cam_z, yaw, tackle.rod_kind()[2] + 3.0)
+                    else "")
                 or ("  ~ the big wheel: p rides, $%d ~" % SEA_WHEEL_FEE
                     if sea_wheel_near(cam_x, cam_z) is not None else "")
                 or launch_hint(cam_x, cam_z, now)

@@ -27,7 +27,7 @@ ac.COAST = False
 # And the ways to the coast come off the lists till then: with no sea there
 # is no beach for the taxi or the checks' jumps to find.
 COAST_KINDS = ("beach", "seapier", "seawheel", "launchpad", "mission",
-               "harbour", "gangway", "marina")
+               "harbour", "gangway", "marina", "piertackle")
 coast_jumps_ = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] in COAST_KINDS]
 coast_fares_ = [p_ for p_ in ac.TAXI_DESTS if p_[1] in COAST_KINDS]
 ac.CHEAT_HIDDEN[:] = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] not in COAST_KINDS]
@@ -192,7 +192,7 @@ for _, name, kind in ac.CHEAT_PLACES + ac.CHEAT_HIDDEN:
         # These are meant to put you nose to the door - and a club fronts an
         # alley on purpose, so there is nowhere to stand back to.
         continue
-    if kind in ("bank", "pier", "lake"):
+    if kind in ("bank", "pier", "lake", "kiosk", "piertackle"):
         # probe() measures how far you could walk, and the whole point of these
         # is that they face water. Checked below on their own terms.
         continue
@@ -9992,6 +9992,343 @@ for w_, h_ in ((40, 14), (60, 20), (100, 30), (211, 67), (300, 90)):
     except Exception as e_:
         bad_.append((w_, h_, repr(e_)))
 check("at the helm, at any size: the bow, the wheel, the knots", not bad_, str(bad_))
+
+# --- fishing ----------------------------------------------------------------
+# A rod, bait and a float from a tackle shop - one on every ocean pier, a
+# kiosk on every river pier - and f by any water. What bites is the water the
+# float goes into and the bait on the hook; then the strike and the fight.
+ks_ = ac.find_place(x0, z0, "kiosk")
+kat_ = ac.tackle_near(ks_[0], ks_[1])
+kiosks_ = [r_ for r_ in range(-3000, 3000, ac.PIER_WIDE) if ac.river_kiosk(r_)]
+check("a bait kiosk on the river's piers: a counter to stand at, p goes in",
+      kat_ is not None and kat_["kind"] == "kiosk" and ac.can_stand(ks_[0], ks_[1])
+      and "p goes in" in ac.tackle_hint(ks_[0], ks_[1], ac.Tackle())
+      and len(kiosks_) >= 30, "%d kiosks in 6000 columns" % len(kiosks_))
+
+
+def to_street_(x_, z_, limit_=400):
+    """Can you walk from here to a street: cell by cell, over what you can
+    stand on."""
+    start_ = (int(x_ // ac.CELL), int(z_ // ac.CELL))
+    seen_, todo_ = {start_}, [start_]
+    while todo_ and len(seen_) < limit_:
+        i_, j_ = todo_.pop(0)
+        if ac.road_at(i_, j_) and not ac.deck_at(i_, j_):
+            return True
+        for a_, b_ in ((i_ + 1, j_), (i_ - 1, j_), (i_, j_ + 1), (i_, j_ - 1)):
+            if (a_, b_) not in seen_ and ac.can_stand((a_ + 0.5) * ac.CELL,
+                                                      (b_ + 0.5) * ac.CELL):
+                seen_.add((a_, b_))
+                todo_.append((a_, b_))
+    return False
+
+
+walk_on_ = sum(to_street_(*ac.river_kiosk(r_)[1]) for r_ in kiosks_)
+check("and you can walk to each one from a street",
+      walk_on_ >= len(kiosks_) - 1, "%d of %d" % (walk_on_, len(kiosks_)))
+ps_ = ac.find_place(x0, z0, "piertackle")
+pat_ = ac.tackle_near(ps_[0], ps_[1])
+pier_ = ac.sea_pier(int(ps_[1] / ac.CELL))
+check("and a tackle shop on every ocean pier, on the boards",
+      pat_ is not None and pat_["kind"] == "pier" and ac.can_stand(ps_[0], ps_[1])
+      and ac.coast_kind(int(pat_["x"] / ac.CELL), int(pat_["z"] / ac.CELL)) == "pier"
+      and all(ac.coast_kind(int(ac.pier_tackle(p_)[1][0] / ac.CELL),
+                            int(ac.pier_tackle(p_)[1][1] / ac.CELL)) == "pier"
+              for p_ in (ac.sea_pier(k_ * ac.PIER_GAP + ac.PIER_ROW)
+                         for k_ in range(-6, 6)) if p_ is not None))
+ts_ = ac.find_place(x0, z0, "tackle")
+check("the taxi goes to the nearest of them",
+      ("the tackle shop", "tackle") in ac.TAXI_DESTS and ts_ is not None
+      and ac.tackle_near(ts_[0], ts_[1]) is not None)
+huts_ = 0
+for vx_, vz_, vy_ in ((ks_[0] - 2.0, ks_[1] - 8.0, 0.35), (ps_[0] - 12.0, ps_[1] - 4.0,
+                                                           1.1)):
+    vv_ = ac.View(vx_, vz_, vy_, 160, 45)
+    gg_ = ac.render_street(vv_, 300.0)[0]
+    txt_ = "\n".join("".join(r_) for r_ in gg_)
+    huts_ += any(n_ in txt_ for n_ in ac.KIOSK_NAMES + ac.TACKLE_NAMES)
+check("from the boards both are there, their names in lights over the roof",
+      huts_ == 2, "%d of 2" % huts_)
+
+# What the float goes into.
+bank_ = ac.find_place(x0, z0, "bank")
+lake_ = ac.find_place(x0, z0, "lake")
+foun_ = ac.find_place(x0, z0, "fountain")
+mi_ = ac.COAST_I - 20
+mz_ = (ac.river_centre(mi_) + 0.5) * ac.CELL
+zs_ = -150.0 * ac.CELL
+waters_ = {
+    "sea, 8 out": ac.fish_water(ac.shore_x(zs_) + 8.0, zs_) == "surf",
+    "sea, 60 out": ac.fish_water(ac.shore_x(zs_) + 60.0, zs_) == "inshore",
+    "sea, 200 out": ac.fish_water(ac.shore_x(zs_) + 200.0, zs_) == "deep",
+    "sea, 700 out": ac.fish_water(ac.shore_x(zs_) + 700.0, zs_) == "offshore",
+    "the sand": ac.fish_water(ac.shore_x(zs_) - 6.0, zs_) is None,
+    "the mouth": ac.fish_water((mi_ + 0.5) * ac.CELL, mz_) == "mouth",
+    "the pier's boards": ac.fish_water(pat_["x"], pat_["z"]) is None,
+    "a kiosk's boards": ac.fish_water(ks_[0], ks_[1]) is None,
+    "the street": ac.fish_water(x0, z0) is None,
+    "the river": any(ac.fish_water(bank_[0] + math.sin(bank_[2]) * d_,
+                                   bank_[1] + math.cos(bank_[2]) * d_) == "river"
+                     for d_ in range(2, 30)),
+    "the lake": any(ac.fish_water(lake_[0] + math.sin(a_ / 6.0) * d_,
+                                  lake_[1] + math.cos(a_ / 6.0) * d_) == "lake"
+                    for a_ in range(38) for d_ in range(2, 30, 2)),
+    "the fountain": any(ac.fish_water(foun_[0] + math.sin(a_ / 6.0) * d_,
+                                      foun_[1] + math.cos(a_ / 6.0) * d_) == "fountain"
+                        for a_ in range(38) for d_ in range(2, 30, 2)),
+    "the harbour": ac.fish_water(ac.gangway(hb_)[0], hb_[0] * ac.CELL - 3.0
+                                 ) in ("harbour", None)
+    and ac.fish_water(ac.marina(hb_)[0], ac.marina(hb_)[1] + 6.0) == "harbour",
+    "the ship's deck": ac.fish_water(*ac.liner_berth(hb_)) is None,
+}
+check("the float's water: river, lake, mouth, surf, off the pier, deep, open sea",
+      all(waters_.values()), str([k_ for k_, v_ in waters_.items() if not v_]))
+
+# Every fish can be had somewhere, on something; rubbish on anything.
+night_ = ac.night(9000.0)
+reach_ = set()
+for w_ in ac.WATER_NAMES:
+    for _, _, _, b_ in ac.BAIT_KINDS:
+        reach_ |= {n_ for n_, _ in ac.bite_pool(w_, b_, 9000.0)}
+alien_ = [n_ for n_, sp_ in enumerate(ac.FISH) if sp_["alien"]]
+check("every fish there is can be caught somewhere, on some bait",
+      set(range(len(ac.FISH))) - reach_ <= set(alien_) and not night_["alien"],
+      str(sorted(set(range(len(ac.FISH))) - reach_)))
+fresh_ = {ac.FISH[n_]["name"] for n_, _ in ac.bite_pool("river", "bread", 9000.0)}
+salt_ = {ac.FISH[n_]["name"] for n_, _ in ac.bite_pool("deep", "squid", 9000.0)}
+lure_ = {ac.FISH[n_]["name"] for n_, _ in ac.bite_pool("river", "biglure", 9000.0)}
+check("bread in the river is roach and carp; squid off the pier's head is conger",
+      "roach" in fresh_ and "carp" in fresh_ and "pike" not in fresh_
+      and "conger eel" in salt_ and "roach" not in salt_
+      and all(ac.FISH[n_]["junk"] for n_, _ in ac.bite_pool("river", "biglure",
+                                                           9000.0)),
+      "%s / %s / %s" % (sorted(fresh_)[:4], sorted(salt_)[:4], sorted(lure_)))
+check("the open sea has the big ones, and only there",
+      {"blue marlin", "yellowfin tuna"} <= {ac.FISH[n_]["name"] for n_, _ in
+                                             ac.bite_pool("offshore", "biglure", 0.0)}
+      and not any(ac.FISH[n_]["name"] == "blue marlin"
+                  for w_ in ac.WATER_NAMES if w_ != "offshore"
+                  for n_, _ in ac.bite_pool(w_, "biglure", 0.0)))
+
+# The shop.
+tw_ = ac.Wallet(100)
+tt_ = ac.Tackle()
+sh_ = ac.new_shop(kat_, 0.0)
+ac.shop_key(sh_, tt_, "down", tw_, 0.0)                 # the spinning rod, $55
+ac.shop_key(sh_, tt_, "buy", tw_, 0.0)
+ac.shop_key(sh_, tt_, "down", tw_, 0.0)                 # the surf caster: too dear
+ac.shop_key(sh_, tt_, "buy", tw_, 0.0)
+dear_ = sh_["say"]
+ac.shop_key(sh_, tt_, "right", tw_, 0.0)                # the bait
+ac.shop_key(sh_, tt_, "down", tw_, 0.0)
+ac.shop_key(sh_, tt_, "buy", tw_, 0.0)                  # worms, $4 for ten
+ac.shop_key(sh_, tt_, "right", tw_, 0.0)                # a cork float, $4
+ac.shop_key(sh_, tt_, "buy", tw_, 0.0)
+check("the shop: a rod, bait and a float, paid for; what you cannot pay for, not",
+      tt_.rods == [1] and tt_.rod == 1 and tt_.bait_kind() == "worms"
+      and tt_.bait[1] == 10 and tt_.float_on == 1 and tw_.money == 100 - 55 - 4 - 4
+      and "$130" in dear_, "%s $%d" % (dear_, tw_.money))
+tt_.box = [(0, 0.5, "river"), (len(ac.FISH) - 2, 0.3, "fountain")]
+worth_ = tt_.box_worth()
+ac.shop_key(sh_, tt_, "sell", tw_, 0.0)
+check("and c sells the cool box: the fish by the kilo, the rest by what it is",
+      not tt_.box and tw_.money == 100 - 63 + worth_ and worth_ == 2 + 4,
+      "$%d" % worth_)
+
+# The cast, the bite, the strike.
+def rig_(rod_, bait_, float_=1):
+    t_ = ac.Tackle()
+    t_.rods, t_.rod = [rod_], rod_
+    t_.bait[bait_] = 20
+    t_.bait_on = bait_
+    t_.floats[float_] = 3
+    t_.float_on = float_
+    return t_
+
+
+fx_, fz_ = bank_[0], bank_[1]
+fyaw_ = ac.water_yaw(fx_, fz_, 25.0, bank_[2])
+fi_ = ac.Fishing(fx_, fz_, fyaw_, rig_(1, 1), 100.0, 7)
+dry_ = [ac.fish_ready(fi_.tackle, x0, z0, q_ * math.pi / 4.0) for q_ in range(8)]
+check("f fishes by the water with a rod; without one, or away from water, it says",
+      ac.fish_ready(fi_.tackle, fx_, fz_, fyaw_) is None
+      and "no rod" in ac.fish_ready(ac.Tackle(), fx_, fz_, fyaw_)
+      and any(d_ and "no water" in d_ for d_ in dry_))
+p0_, p1_ = fi_.swing(100.0), fi_.swing(100.0 + ac.FISH_SWING / 2.0)
+fi_.key("act", 100.0 + ac.FISH_SWING / 2.0)           # full power
+t_ = 100.0 + ac.FISH_SWING / 2.0
+for _ in range(40):
+    t_ += 1.0 / 30.0
+    fi_.step(t_)
+check("the meter swings there and back; a full cast goes the rod's whole way",
+      p0_ == 0.0 and abs(p1_ - 1.0) < 1e-9 and fi_.phase == "wait"
+      and fi_.water == "river"
+      and abs(math.hypot(fi_.land[0] - fx_, fi_.land[1] - fz_)
+              - (2.5 + ac.ROD_KINDS[1][2])) < 0.01, fi_.phase)
+check("a bite is coming, from something that takes worms in the river",
+      fi_.bite_at is not None and 1.5 <= fi_.bite_at - t_ <= 45.0
+      and ("worms" in ac.FISH[fi_.who]["baits"] or ac.FISH[fi_.who]["junk"])
+      and "river" in ac.FISH[fi_.who]["where"]
+      and all(n_ < fi_.bite_at - 0.6 for n_ in fi_.nibbles))
+fi_.key("strike", t_)
+early_ = fi_.said
+bait0_ = fi_.tackle.bait[1]
+bt_ = fi_.bite_at
+fi_.step(bt_ + fi_.window() + 0.05)
+missed_ = fi_.said
+check("too soon is nothing; too late and it is away with the bait",
+      "nothing there" in early_ and "took the bait" in missed_
+      and fi_.tackle.bait[1] == bait0_ - 1 and fi_.bite_at is not None
+      and fi_.bite_at > bt_, missed_)
+bt_ = fi_.bite_at
+fi_.step(bt_ + 0.05)
+fi_.key("strike", bt_ + 0.1)
+check("on time, and it is on", fi_.phase == "fight" and "ON" in fi_.said)
+
+
+def fight_(f_, t_, policy_, secs_=240.0):
+    """Play a fight out: "skilled" eases off when it runs or turns, and
+    leans the rod over against its pull; "naive" winds the whole time."""
+    end_ = t_ + secs_
+    while f_.phase == "fight" and t_ < end_:
+        t_ += 1.0 / 30.0
+        if policy_ == "skilled" and (f_.running(t_) or f_.turning(t_)
+                                     or f_.ten > f_.tackle.rod_kind()[3] * 0.9):
+            f_.key("back", t_)
+        elif policy_ != "idle":
+            f_.key("reel", t_)
+        if policy_ == "skilled" and f_.side:
+            f_.key("left" if f_.side > 0 else "right", t_)
+        f_.step(t_)
+    return t_
+
+
+def hooked_(name_, rod_, seed_):
+    n_ = [k_ for k_, sp_ in enumerate(ac.FISH) if sp_["name"] == name_][0]
+    f_ = ac.Fishing(0.0, 0.0, 0.0, rig_(rod_, 3), 0.0, seed_)
+    f_.land, f_.water, f_.who = (0.0, 20.0), ac.FISH[n_]["where"][0], n_
+    f_.hook(1.0)
+    return f_
+
+
+t_ = fight_(fi_, bt_ + 0.1, "skilled")
+book_ = dict(fi_.tackle.book)
+check("played well, it comes in: the card, and into the book",
+      fi_.phase == "landed" and fi_.catch[0] in book_ and fi_.catch[2] == "new",
+      "%s %s" % (fi_.phase, fi_.said))
+fi_.key("act", t_)
+check("f keeps it: into the cool box, and on with the fishing",
+      fi_.phase == "aim" and len(fi_.tackle.box) == 1)
+res_ = {}
+for name_, rod_, pol_ in (("roach", 0, "naive"), ("pike", 1, "skilled"),
+                          ("pike", 0, "naive"), ("yellowfin tuna", 3, "skilled"),
+                          ("blue marlin", 3, "skilled"), ("the old one", 3, "skilled"),
+                          ("the old one", 0, "skilled")):
+    won_ = 0
+    for s_ in range(6):
+        f_ = hooked_(name_, rod_, s_)
+        fight_(f_, 1.0, pol_)
+        won_ += f_.phase == "landed"
+    res_[(name_, rod_, pol_)] = won_
+check("a roach any old way; a pike if you give it line when it runs",
+      res_[("roach", 0, "naive")] == 6 and res_[("pike", 1, "skilled")] >= 5
+      and res_[("pike", 0, "naive")] <= 1, str(res_))
+lure_rig_ = ac.Fishing(0.0, 0.0, 0.0, rig_(2, 5), 0.0, 1)
+lure_rig_.key("act", 0.5)
+check("the big ones on the big game rod - its lure will not go on anything less",
+      res_[("yellowfin tuna", 3, "skilled")] >= 5
+      and res_[("blue marlin", 3, "skilled")] >= 4
+      and res_[("the old one", 3, "skilled")] >= 5
+      and res_[("the old one", 0, "skilled")] == 0
+      and lure_rig_.phase == "aim" and "too heavy" in lure_rig_.said, str(res_))
+slack_, kept_ = 0, 0
+for s_ in range(6):
+    sl_ = hooked_("carp", 2, s_)
+    fight_(sl_, 1.0, "idle", 60.0)
+    slack_ += sl_.phase == "gone" and "slack" in sl_.said
+    sk_ = hooked_("carp", 2, s_)
+    fight_(sk_, 1.0, "skilled")
+    kept_ += sk_.phase == "landed"
+check("when it swims at you, reel in the slack or it throws the hook",
+      slack_ >= 3 and kept_ == 6, "%d of 6 thrown, %d of 6 kept" % (slack_, kept_))
+sn_ = hooked_("conger eel", 0, 3)
+sn_.tackle.float_on = 1
+fight_(sn_, 1.0, "naive", 60.0)
+check("too much for the line, it goes - the float with it",
+      sn_.phase == "gone" and ("SNAP" in sn_.said or "line" in sn_.said)
+      and sn_.tackle.floats[1] == 2, sn_.said)
+full_ = hooked_("roach", 1, 1)
+full_.tackle.box = [(0, 0.2, "river")] * ac.FISH_BOX
+fight_(full_, 1.0, "naive")
+full_.key("act", 100.0)
+check("a full cool box: it goes back", len(full_.tackle.box) == ac.FISH_BOX
+      and "full" in full_.said)
+ac._fish_rare[0] = True
+rr_ = ac.Fishing(fx_, fz_, fyaw_, rig_(1, 1), 500.0, 1)
+rr_.water = "river"
+rr_.schedule(500.0)
+pool_ = ac.bite_pool("river", "worms", 500.0)
+check("the menu's g: the next bite is the rarest fish there, big, in seconds",
+      not ac._fish_rare[0] and rr_.who == min((p_ for p_ in pool_
+                                               if not ac.FISH[p_[0]]["junk"]),
+                                              key=lambda p_: p_[1])[0]
+      and rr_.bite_at - 500.0 <= 3.0 and rr_.big)
+keys_ = [k_ for k_, _, _ in ac.CHEAT_PLACES]
+check("g on the panel is free, and has no other case", "g" not in keys_
+      and "G" not in keys_ and ("9", "the pier's tackle shop", "piertackle")
+      in ac.CHEAT_HIDDEN)
+
+# Drawing it, at every size, every phase.
+bad_ = []
+for w_, h_ in ((30, 10), (40, 14), (60, 20), (100, 30), (160, 45), (211, 67),
+               (300, 90), (451, 133)):
+    f_ = ac.Fishing(fx_, fz_, fyaw_, rig_(1, 1), 100.0, 7)
+    try:
+        ac.render_fishing(f_, w_, h_, 100.3)
+        f_.key("act", 100.8)
+        ac.render_fishing(f_, w_, h_, 101.0)
+        for q_ in range(40):
+            f_.step(101.0 + q_ / 30.0)
+        ac.render_fishing(f_, w_, h_, 102.5)
+        f_.step(f_.bite_at + 0.05)
+        ac.render_fishing(f_, w_, h_, f_.bite_at + 0.05)
+        f_.key("strike", f_.bite_at + 0.1)
+        for q_ in range(20):
+            f_.key("reel", f_.bite_at + 0.1 + q_ / 30.0)
+            f_.step(f_.bite_at + 0.1 + q_ / 30.0)
+        ac.render_fishing(f_, w_, h_, f_.bite_at + 0.8)
+        fight_(f_, f_.bite_at + 0.8, "skilled")
+        g_, _, _ = ac.render_fishing(f_, w_, h_, 900.0)
+        if w_ >= 60 and f_.phase == "landed" and "keeps it" not in "".join(
+                "".join(r_) for r_ in g_):
+            bad_.append((w_, h_, "no card"))
+        sh2_ = ac.new_shop(kat_, 0.0)
+        for tab_ in range(len(ac.TACKLE_TABS)):
+            sh2_["tab"] = tab_
+            ac.render_tackle(sh2_, f_.tackle, w_, h_, 3.0)
+    except Exception as e_:
+        bad_.append((w_, h_, repr(e_)))
+check("fishing and the shop draw at any size, through every phase", not bad_,
+      str(bad_))
+shg_ = ac.render_tackle(ac.new_shop(pat_, 0.0), ac.Tackle(), 300, 90, 1.0)[0]
+shs_ = ac.render_tackle(ac.new_shop(pat_, 0.0), ac.Tackle(), 160, 45, 1.0)[0]
+big_ = "".join("".join(r_) for r_ in shg_)
+small_ = "".join("".join(r_) for r_ in shs_)
+ac._big_screens[0] = False
+shz_ = "".join("".join(r_) for r_ in ac.render_tackle(ac.new_shop(pat_, 0.0),
+                                                       ac.Tackle(), 300, 90, 1.0)[0])
+ac._big_screens[0] = True
+check("on a big window the shop's name is in block letters; small, and z, not",
+      pat_["name"] not in big_ and pat_["name"] in small_ and pat_["name"] in shz_
+      and "###" in big_)
+bf_ = ac.Fishing(ac.shore_x(400.0) + 650.0, 400.0, -math.pi / 2, rig_(3, 5), 300.0, 9,
+                 boat=ac.Boat(ac.shore_x(400.0) + 650.0, 400.0, -math.pi / 2, 300.0, 1))
+bf_.key("act", 300.8)
+for q_ in range(40):
+    bf_.step(300.8 + q_ / 30.0)
+check("off the boat, out at sea: the open sea's fish", bf_.water == "offshore"
+      and "offshore" in ac.FISH[bf_.who]["where"]
+      and ac.render_fishing(bf_, 160, 45, 302.0) is not None, str(bf_.water))
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

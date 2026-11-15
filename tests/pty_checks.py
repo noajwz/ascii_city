@@ -438,6 +438,31 @@ def cases(run, report):
         print("    did not get her out, or not back")
         sb_ok = False
     ok &= sb_ok
+    # Fishing: a kiosk on a river pier, a rod, worms and a float, out facing
+    # the water, the panel's big one next, a cast, the strike, the fight.
+    DOWN, RIGHT = b"\x1bOB", b"\x1bOC"
+    fi_st, fi_out = run([(F1, .5), (b"+", .3), (b"\x010", 1.5), (b"p", .8),
+                         (DOWN, .2), (b"p", .4), (RIGHT, .3), (DOWN, .2), (b"p", .4),
+                         (RIGHT, .3), (b"p", .4), (b"x", .6), (F1, .4), (b"g", .3),
+                         (F1, .4), (b"f", .8), (b"f", 1.2)] + [(b"f", .3)] * 16
+                        + [(b"w", .1)] * 15 + [(b"x", .8), (b"w", .4)],
+                        cols=160, rows=45)
+    fi_plain = ANSI.sub(b"", fi_out).decode("utf-8", "replace")
+    fi_ok = report("fishing: the kiosk, a cast, a bite, the fight", fi_st, fi_out)
+    if fi_ok and fi_out and not ("LIVE BAIT" in fi_plain and "CAST" in fi_plain
+                                 and "TENSION" in fi_plain):
+        print("    no shop, no cast, or nothing on the line")
+        fi_ok = False
+    ok &= fi_ok
+    # And off the speedboat: f with no rod says so.
+    fb_st, fb_out = run([(F1, .5), (b"+", .4), (b"\x018", 1.5), (b"p", 1.0),
+                         (b"f", .8)], cols=300, rows=60)
+    fb_plain = ANSI.sub(b"", fb_out).decode("utf-8", "replace")
+    fb_ok = report("fishing off the boat with no rod", fb_st, fb_out)
+    if fb_ok and fb_out and "no rod" not in fb_plain:
+        print("    the boat did not say there was no rod")
+        fb_ok = False
+    ok &= fb_ok
     return ok
 
 
