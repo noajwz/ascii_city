@@ -13,5 +13,5 @@ taxi by the fare, and
 a show from the lighthouse is `SHOW_FEE`; refused, the HUD says what it costs. The balance leads
 the HUD everywhere. Nothing tops it up for nothing — the casino's old stake when you were broke
 would have been money for nothing — but you can earn it driving a cab (see Driving it
-yourself), and `+` in the menu is `+$1000`. Like everything else you carry, it is
+yourself) or selling what you catch at a tackle shop (see Fishing), and `+` in the menu is `+$1000`. Like everything else you carry, it is
 for the session and nowhere else.

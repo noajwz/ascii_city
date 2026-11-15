@@ -49,6 +49,11 @@ case was open. They are on letters now (`b` `r` `h` `k` `t` `f`, the mystery `m`
 clue `c`), and a check asserts that no key on the panel does two things and none are a case
 pair.
 
+**`g`, big fish next** (under MONEY, beside `%`): the next bite is the rarest thing in that
+water on that bait, and big - see Fishing. The tackle shops are a taxi fare, so they have no
+key; ctrl-a `9` (the pier's tackle shop) and `0` (a bait kiosk) are the checks'. `g` stands
+aside for ctrl-a, whose `g` is the arcade.
+
 **Four columns** (`draw_cheats()`): NIGHTLIFE, MONEY, VIEWS and THE MYSTERY; the PARTS OF TOWN
 (the digits, `1`–`9` and `0`, with the placed zones); AND THE REST; then WEATHER & SKY and
 NIGHTS. A new place goes into a group, not on the end of a list. It was once grouped by where things were — the city, the streets, out of town —
