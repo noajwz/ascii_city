@@ -10428,8 +10428,9 @@ seen_red_ = sum(1 for t_ in (300.0, 300.6, 301.1) for r_ in ac.render_street(
     ac.View(wwx_ - 60.0, wwz_ - 20.0, math.atan2(60.0, 20.0), 160, 45), t_)[1]
     for c_ in r_ if c_ == 9911)
 ac.ROU_RED = old_red_
+# (a mast can stand over the M of her name, from here)
 check("up close her masts and her name; her buoy blinking red",
-      "MARY ELLEN" in wtxt_ and wtxt_.count("|") > 10 and seen_red_ > 0)
+      "ARY ELLEN" in wtxt_ and wtxt_.count("|") > 10 and seen_red_ > 0)
 wn_ = {sp_["name"]: n_ for n_, sp_ in enumerate(ac.FISH)}
 wpool_ = {ac.FISH[n_]["name"] for n_, _ in ac.bite_pool("wreck", "squid", 0.0)}
 check("her fish: conger and ling, wolffish, lobster, the grouper, and her bell",
@@ -10734,6 +10735,33 @@ check("the cave draws all the way round, the tide in or out, at any size",
 names_ = [e_["name"] for e_ in ac.expeditions_for(ac.Tackle())]
 check("the sea cave is on his list, seventh before you have a map",
       names_.index("the sea cave") == 6, str(names_))
+# Going out, on her or on the liner, the camera turns smoothly: the routes
+# looped where a short stretch met a long one, and the liner's camera swung
+# from rail to rail as she wavered going straight out (3 rad in a frame).
+
+
+def _turns(poses_):
+    return max(abs((b_ - a_ + math.pi) % math.tau - math.pi)
+               for a_, b_ in zip(poses_, poses_[1:]))
+
+
+worst_ = []
+for e_ in ac.EXPEDITIONS:
+    rt_ = ac.expedition_route(hh_, e_)
+    n_ = int(e_["sail"] * 30)
+    worst_.append((_turns([ac.route_pose(rt_, f_ / float(n_))[2]
+                           for f_ in range(n_ + 1)]), e_["name"]))
+lrt_ = ac.liner_sail(hh_, 5000.0)
+lys_, lxs_ = [], []
+for f_ in range(0, int(ac.liner_trip_time(lrt_) * 30), 2):
+    lv_ = ac.render_cruise(hh_, 0.0, 20, 10, 5000.0 + f_ / 30.0)[2]
+    lys_.append(lv_.yaw)
+    lxs_.append((lv_.x, lv_.z))
+ac.liner_home(hh_)
+lmove_ = max(math.hypot(b_[0] - a_[0], b_[1] - a_[1]) for a_, b_ in zip(lxs_, lxs_[1:]))
+check("out on the Herring or the liner the camera turns smoothly, never jumps",
+      max(worst_)[0] < 0.05 and _turns(lys_) < 0.05 and lmove_ < 4.0,
+      "%s, liner %.2f rad %.1f units" % (max(worst_), _turns(lys_), lmove_))
 hv_ = [sp_ for sp_ in ac.FISH if sp_["name"] == "halibut"][0]
 check("the halibut is heavy, and cod are under the ice too",
       hv_["heavy"] and any(ac.FISH[n_]["name"] == "cod"
