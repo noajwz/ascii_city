@@ -295,7 +295,9 @@ and walks east as readily as west. A check of something near the coast goes in t
 
 `checks.py` also asserts that **every name the code reads is defined somewhere** in the file.
 `py_compile` does not catch a list renamed by accident, and nothing draws it until you are on
-the roof it belongs to; one came within a commit of shipping that way.
+the roof it belongs to; one came within a commit of shipping that way. And that **no top-level
+name is defined twice**: a second definition silently replaces the first, and it has broken
+something far away more than once (`GOD_WORDS` is the one exception).
 
 **For a refactor, compare frames, not just tests.** Render a fixed set of views (streets in every
 part of town at two times, a roof, the skyline, the flight, the interiors) with each colour given

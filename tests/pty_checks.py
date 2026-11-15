@@ -70,6 +70,7 @@ IN = [(b"w", .25)] * 12
 # second press would be a key in the shop.
 WALK_IN = [(b"w", .3)] * 2
 TACKLE_IN = [(b"w", .5)]
+HERRING_IN = [(b"w", .5)]       # him too: a second w would be a key in his list
 
 def cases(run, report):
     """Every case, in order. Run twice: once to learn what each run() will be
@@ -463,7 +464,7 @@ def cases(run, report):
     ok &= fi_ok
     # The fishing boat: no rod and the captain sends you to the shop; then a
     # big game rod and lure from the pier, the trip out, a cast, and home.
-    nr_st, nr_out = run([(F1, .5), (b"\x01v", 1.5)] + WALK_IN + [(b"", .5), (b"p", .8),
+    nr_st, nr_out = run([(F1, .5), (b"\x01v", 1.5)] + HERRING_IN + [(b"", .5), (b"p", .8),
                          (b"x", .6)], cols=160, rows=45)
     nr_plain = ANSI.sub(b"", nr_out).decode("utf-8", "replace")
     nr_ok = report("the fishing boat's captain, no rod", nr_st, nr_out)
@@ -475,7 +476,7 @@ def cases(run, report):
                         + [(b"", .5)]
                         + [(DOWN, .15)] * 3 + [(b"p", .4), (RIGHT, .3)]
                         + [(DOWN, .15)] * 5 + [(b"p", .4), (b"x", .5),
-                                               (F1, .5), (b"\x01v", 1.5)] + WALK_IN + [
+                                               (F1, .5), (b"\x01v", 1.5)] + HERRING_IN + [
                                                (b"", .5),
                                                (b"p", 1.0)]
                         + [(b" ", .3)] * 9 + [(b"", 1.5), (b"c", .8), (b"1", .6),
@@ -492,6 +493,19 @@ def cases(run, report):
         print("    did not sail, fish, or come home")
         ex_ok = False
     ok &= ex_ok
+    # The wreck: the second on his list, out, and the captain on her.
+    wr_st, wr_out = run([(F1, .5), (b"+", .3), (b"\x019", 1.5)] + TACKLE_IN
+                        + [(b"", .5), (DOWN, .15), (DOWN, .15), (b"p", .4), (b"x", .5),
+                           (F1, .5), (b"\x01v", 1.5)] + HERRING_IN
+                        + [(b"", .5), (DOWN, .3), (b"p", 1.0)] + [(b" ", .3)] * 8
+                        + [(b"", 2.0), (b"x", 1.0)], cols=160, rows=45)
+    wr_plain = ANSI.sub(b"", wr_out).decode("utf-8", "replace")
+    wr_ok = report("the wreck: out to the Mary Ellen", wr_st, wr_out)
+    if wr_ok and wr_out and not ("going out to the wreck" in wr_plain
+                                 and "THE WRECK" in wr_plain):
+        print("    he did not take you to the wreck")
+        wr_ok = False
+    ok &= wr_ok
     return ok
 
 

@@ -62,6 +62,23 @@ unknown_ = sorted({(n_.id, n_.lineno) for n_ in ast_.walk(tree_)
                    and n_.id not in known_})
 check("every name the code reads is defined somewhere", not unknown_, str(unknown_))
 
+# --- and no top-level name is defined twice --------------------------------
+# A second def or assignment of a name silently replaces the first, and what
+# breaks is far away: draw_plane, TOWER_TOP, BAR_NAMES, SEAFRONT_DEEP, COMPASS,
+# and - caught before it shipped - the sea wreck's draw_wreck replacing the
+# crashed plane's windscreen. GOD_WORDS is two lists on purpose.
+seen_ = {}
+twice_ = set()
+for n_ in tree_.body:
+    names_ = ([n_.name] if isinstance(n_, (ast_.FunctionDef, ast_.ClassDef)) else
+              [t_.id for t_ in n_.targets if isinstance(t_, ast_.Name)]
+              if isinstance(n_, ast_.Assign) else [])
+    for name_ in names_:
+        if name_ in seen_:
+            twice_.add(name_)
+        seen_[name_] = n_.lineno
+check("no top-level name is defined twice", twice_ <= {"GOD_WORDS"}, str(sorted(twice_)))
+
 # --- weather: a storm is its own kind, and the rarest -------------------
 def old_rain(now):
     v = (0.42 + 0.42*math.sin(now/41.0) + 0.26*math.sin(now/13.7+1.2)
@@ -9901,9 +9918,20 @@ old_red_ = ac.ROU_RED
 ac.ROU_RED = 1907
 bv_ = ac.View(ac.shore_x(lbz_ - 140.0) - 14.0, lbz_ - 140.0, math.pi * 0.5 - 0.6,
               160, 48)
-fun_ = sum(1 for r_ in ac.render_street(bv_, cn_)[1] for c_ in r_ if c_ == 1907)
+# Only up where her funnel is, over her top deck: there is other red out there
+# now, low on the water - the fishing boat's hull and her port light, which
+# the ship hides till she sails, and a wreck's buoy up the coast.
+top_ = bv_.project(lbx_, ac.LINER_TOP, lbz_)[1]
+
+
+def red_(grid_):
+    return sum(1 for y_, r_ in enumerate(grid_) for c_ in r_
+               if c_ == 1907 and y_ < top_ + 1)
+
+
+fun_ = red_(ac.render_street(bv_, cn_)[1])
 ac.liner_sail(hb_, cn_)
-gone_ = sum(1 for r_ in ac.render_street(bv_, cn_ + 90.0)[1] for c_ in r_ if c_ == 1907)
+gone_ = red_(ac.render_street(bv_, cn_ + 90.0)[1])
 ac.liner_home(hb_)
 ac._launch_shift[0] = 0.0
 ac.ROU_RED = old_red_
@@ -10377,6 +10405,81 @@ bf_ = ac.Fishing(ax_, az_, ah_, rig_(3, 5), 300.0, 9, deck=ac.HerringDeck())
 bf_.key("act", 300.8)
 for q_ in range(40):
     bf_.step(300.8 + q_ / 30.0)
+# The wreck: the second expedition. Her water is hers within WRECK_REACH, her
+# fish make for her, and a fish that gets into her snags you.
+wexp_ = ac.wreck_exp()
+wrt_ = ac.expedition_route(hh_, wexp_)
+wax_, waz_, wah_ = ac.route_pose(wrt_, 1.0)
+wwx_, wwz_, _ = ac.wreck_site(hh_)
+check("the wreck: on his list, out off the beach, her water round her and only there",
+      wexp_ in ac.EXPEDITIONS and 300.0 < wwx_ - ac.shore_x(wwz_) < 500.0
+      and ac.fish_water(wax_ + math.sin(wah_) * 30.0, waz_ + math.cos(wah_) * 30.0)
+      == "wreck"
+      and ac.fish_water(wax_ - math.sin(wah_) * 90.0, waz_ - math.cos(wah_) * 90.0)
+      not in ("wreck", None)
+      and not ac.boat_water(wwx_, wwz_) and ac.boat_water(wwx_ + 40.0, wwz_ + 40.0))
+wv_ = ac.View(wwx_ - 60.0, wwz_ - 20.0, math.atan2(60.0, 20.0), 160, 45)
+wtxt_ = "".join("".join(r_) for r_ in ac.render_street(wv_, 300.0)[0])
+wfar_ = ac.View(ac.shore_x(wwz_) - 5.0, wwz_, math.pi * 0.5, 160, 45)
+ac.ROU_RED, old_red_ = 9911, ac.ROU_RED
+seen_red_ = sum(1 for t_ in (300.0, 300.6, 301.1) for r_ in ac.render_street(
+    ac.View(wwx_ - 60.0, wwz_ - 20.0, math.atan2(60.0, 20.0), 160, 45), t_)[1]
+    for c_ in r_ if c_ == 9911)
+ac.ROU_RED = old_red_
+check("up close her masts and her name; her buoy blinking red",
+      "MARY ELLEN" in wtxt_ and wtxt_.count("|") > 10 and seen_red_ > 0)
+wn_ = {sp_["name"]: n_ for n_, sp_ in enumerate(ac.FISH)}
+wpool_ = {ac.FISH[n_]["name"] for n_, _ in ac.bite_pool("wreck", "squid", 0.0)}
+check("her fish: conger and ling, wolffish, lobster, the grouper, and her bell",
+      {"conger eel", "ling", "wolffish", "lobster", "giant grouper", "ship's bell"}
+      <= wpool_ and "roach" not in wpool_)
+
+
+def wreck_fight_(name_, rod_, seed_, policy_):
+    f_ = ac.Fishing(0.0, 0.0, 0.0, rig_(rod_, 3), 0.0, seed_)
+    f_.land, f_.water, f_.who = (0.0, 25.0), "wreck", wn_[name_]
+    f_.hook(1.0)
+    t_ = 1.0
+    while f_.phase == "fight" and t_ < 241.0:
+        t_ += 1.0 / 30.0
+        if policy_ == "skilled":
+            if f_.snagged is not None or f_.running(t_) or f_.turning(t_) or (
+                    f_.ten > f_.tackle.rod_kind()[3] * 0.9):
+                f_.key("back", t_)
+            else:
+                f_.key("reel", t_)
+        elif policy_ == "slack":                # gives it line, never reels it up
+            f_.key("back", t_)
+        f_.step(t_)
+    return f_
+
+
+sk_ = [wreck_fight_("conger eel", 2, s_, "skilled") for s_ in range(8)]
+lazy_ = [wreck_fight_("wolffish", 2, s_, "slack") for s_ in range(4)]
+check("kept up off her, a conger comes in; let it be, and it is into her",
+      sum(f_.phase == "landed" for f_ in sk_) >= 6
+      and all(f_.phase == "gone" and f_.snags >= 1 for f_ in lazy_),
+      "%d of 8 landed; %s" % (sum(f_.phase == "landed" for f_ in sk_), lazy_[0].said))
+sn_ = wreck_fight_("wolffish", 2, 1, "idle")
+held_ = sn_.phase == "gone" and ("iron" in sn_.said or "frayed" in sn_.said
+                                 or "slack" in sn_.said)
+fr_ = ac.Fishing(0.0, 0.0, 0.0, rig_(2, 3), 0.0, 4)
+fr_.land, fr_.water, fr_.who = (0.0, 25.0), "wreck", wn_["wolffish"]
+fr_.hook(1.0)
+fr_.snag, t_ = 0.99, 1.0
+while fr_.snagged is None and t_ < 10.0:
+    t_ += 1.0 / 30.0
+    fr_.step(t_)
+for q_ in range(30):
+    t_ += 1.0 / 30.0
+    fr_.key("back", t_)
+    fr_.step(t_)
+check("snagged: slack frees it; holding on, the line parts on her",
+      fr_.snags == 1 and fr_.snagged is None and fr_.phase == "fight"
+      and "free" in fr_.said and held_, "%s / %s" % (fr_.said, sn_.said))
+check("he says when you have not the rod she wants",
+      wexp_["rod"] == 2 and "surf caster" in wexp_["short"]
+      and "Mary Ellen" in wexp_["there"])
 # The captain's cabin: c from the deck, the whole turn round, drinks and bait.
 cw_ = ac.Wallet(100)
 ct_ = rig_(3, 5)

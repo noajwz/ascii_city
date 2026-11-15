@@ -1676,7 +1676,8 @@ def coast_reset():
                  "_tower_blocks", "_cinema_blocks", "_wash_blocks", "_ramen_picks",
                  "_ramen_firsts", "_vend_picks", "_vend_faces", "_sewer_cache",
                  "_lair_cache", "_cab_seen", "_station_cache", "_center_cache",
-                 "_shore_cache", "_coast_cache", "_beach_blocks", "_kiosk_cache"):
+                 "_shore_cache", "_coast_cache", "_beach_blocks", "_kiosk_cache",
+                 "_wreck_cache"):
         globals()[name].clear()
 
 
@@ -23852,6 +23853,8 @@ def render_street(v, now):
             draw_launch_site(ch, co, v, walls, site_, now, wet)
         for h_ in near_harbours(v.x, v.z, LINER_SEEN):
             draw_harbour(ch, co, v, walls, h_, now, wet)
+        for wx_, wz_, wa_ in near_wrecks(v.x, v.z, 1400.0):
+            draw_sea_wreck(ch, co, v, walls, wx_, wz_, wa_, now, wet)
     for bx, bz in near_rowboats(v, now, 120.0):
         draw_rowboat(ch, co, v, walls, bx, bz, now, wet)
     ci_ = int(v.x / CELL + BIG) - BIG
@@ -31821,7 +31824,7 @@ def _marina_spot(x, z):
 def boat_water(x, z):
     """Can she be here: open sea or the river's mouth, and not in the ship."""
     i, j = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
-    if coast_kind(i, j) not in ("sea", "mouth") or herring_in(x, z):
+    if coast_kind(i, j) not in ("sea", "mouth") or herring_in(x, z) or wreck_in(x, z):
         return False
     for h_ in near_harbours(x, z, 120.0):
         lx, lz, head = liner_pose(h_, _clock[0])
@@ -32933,7 +32936,17 @@ EXPEDITIONS = [
     {"name": "the open ocean", "fee": 45, "out": 700.0, "along": -160.0,
      "sail": 24.0, "water": None, "rod": 3,
      "says": "Tuna, swordfish - an' the marlin, if ye've the arm fer it.",
-     "fish": "tuna, mahi-mahi, swordfish, blue shark, marlin"},
+     "fish": "tuna, mahi-mahi, swordfish, blue shark, marlin",
+     "short": ("Out there ye'll want the big game rod an' the big lure. Ye've not "
+               "got 'em. Still - yer money. Arr.")},
+    {"name": "the wreck", "fee": 60, "out": 380.0, "along": 260.0, "sail": 20.0,
+     "water": None, "rod": 2, "site": "wreck",
+     "says": "The Mary Ellen. Went down in a storm in '71, rum an' all.",
+     "fish": "conger, ling, wolffish, lobster - an' the grouper in her hold",
+     "short": ("The wreck's fish fight dirty. Ye'll want a stout rod - the surf "
+               "caster at least. Ye've a twig. Still - yer money."),
+     "there": ("There she lies - the Mary Ellen. Keep 'em off her iron, matey, "
+               "or ye'll leave yer line in her!")},
 ]
 CAP_HELLO = [
     "Arr! " + CAPTAIN + ", master o' the " + HERRING_NAME.title()
@@ -32944,8 +32957,9 @@ CAP_HELLO = [
 CAP_NO_ROD = ("A fishin' trip with no rod? Ye'd be fishin' with yer teeth! The tackle "
               "shop be on the pier, arr.")
 CAP_NO_CASH = "That be $%d, matey. The Herring don't run on smiles."
-CAP_WRONG_ROD = ("Out there ye'll want the big game rod an' the big lure. Ye've not "
-                 "got 'em. Still - yer money. Arr.")
+CAP_SNAG = ["She's got ye on the iron! Slack! Give it slack!",
+            "Into the wreck it goes - ease off, ease off!",
+            "Arr, the Mary Ellen wants yer fish. Don't let her have it!"]
 CAP_AWAY = [
     "Cast off! Hold on to yer hat - an' yer lunch.",
     "Arr, smell that? That be the open sea. Or it be the bait bucket.",
@@ -33288,6 +33302,128 @@ def render_voyage(trip, width, height, now):
     return ch, co, v
 
 
+# --- the wreck --------------------------------------------------------------------
+# The first expedition after the open ocean, asked for on 2026-11-15: a cargo
+# ship that went down off the coast, out from every harbour, her masts and her
+# bow still out of the water, surf breaking on her, a red buoy blinking over
+# her. The fish that live in her and round her: cast within WRECK_REACH of her
+# and what bites is the wreck's. And they dive for her: hooked, a fish heads
+# for the iron, and a fish that gets there has you snagged - give it slack and
+# it may swim back out; hold on, or let it happen too often, and the line
+# parts on her plates.
+WRECK_NAME = "MARY ELLEN"
+WRECK_AHEAD = 55.0     # she lies this far on from where the Herring anchors
+WRECK_REACH = 70.0     # a float within this of her is in the wreck's water
+WRECK_HOLD = 2.5       # seconds snagged before the line parts on her
+WRECK_FREE = 0.7       # seconds of slack that free a snagged fish
+WRECK_WEAR = 3         # snags in one fight, and the line is frayed through
+_wreck_cache = {}
+
+
+def wreck_exp():
+    return next(e for e in EXPEDITIONS if e.get("site") == "wreck")
+
+
+def wreck_site(h):
+    """(x, z, how she lies) of the wreck off this harbour: on from where the
+    Herring anchors to fish her, so she is in front of you."""
+    hit = _wreck_cache.get(h)
+    if hit is None:
+        x, z, th = route_pose(expedition_route(h, wreck_exp()), 1.0)
+        hit = (x + math.sin(th) * WRECK_AHEAD, z + math.cos(th) * WRECK_AHEAD,
+               th + math.pi * 0.5 + 0.25)          # broadside on, near enough
+        _wreck_cache[h] = hit
+    return hit
+
+
+def near_wrecks(x, z, reach):
+    """The wrecks within reach."""
+    if not COAST or x + reach < COAST_LAND * CELL:
+        return
+    for h in near_harbours(x, z, reach + 400.0):
+        wx, wz, wa = wreck_site(h)
+        if (wx - x) ** 2 + (wz - z) ** 2 < reach * reach:
+            yield wx, wz, wa
+
+
+def wreck_in(x, z):
+    """Is this point her: her bow and her masts, which the speedboat stops at."""
+    return any(True for _ in near_wrecks(x, z, 9.0))
+
+
+def _wreck_line(ch, co, v, walls, a, b, glyph, attr, n):
+    """A line of points in the world, from a to b, (x, y, z) each."""
+    for k in range(n + 1):
+        u = k / float(n)
+        put_point(ch, co, v, walls, a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u,
+                  a[2] + (b[2] - a[2]) * u, glyph, attr)
+
+
+def draw_sea_wreck(ch, co, v, walls, wx, wz, wa, now, wet):
+    """The Mary Ellen: two masts leaning out of the water with their yards
+    and a tangle of rigging, her bow up out of it with her name on it in
+    rust, surf breaking over her, and the red buoy blinking - two short
+    flashes, isolated danger."""
+    d = math.hypot(wx - v.x, wz - v.z)
+    if d > 1400.0:
+        return
+    ax, az = math.sin(wa), math.cos(wa)         # along her
+    px, pz = az, -ax                            # across her
+    lean = (0.25 * px + 0.1 * ax, 0.25 * pz + 0.1 * az)
+    far = d > 260.0
+    n = 4 if far else 14
+    tops = []
+    for along, tall in ((-9.0, 11.0), (7.0, 8.5)):
+        bx, bz = wx + ax * along, wz + az * along
+        top = (bx + lean[0] * tall, tall, bz + lean[1] * tall)
+        tops.append(top)
+        _wreck_line(ch, co, v, walls, (bx, -0.5, bz), top, "|", CURB, n)
+        if not far and tall > 10.0 and int(now * 0.3) % 3:
+            put_point(ch, co, v, walls, top[0], top[1] + 0.5, top[2], "v", MOON)
+        if not far:
+            y = tall * 0.72
+            cx, cz = bx + lean[0] * y, bz + lean[1] * y
+            _wreck_line(ch, co, v, walls, (cx - px * 3.5, y - 0.4, cz - pz * 3.5),
+                        (cx + px * 3.5, y + 0.4, cz + pz * 3.5), "-", CURB, 10)
+    # The bow, up out of the water at one end, raked.
+    sx, sz = wx + ax * 16.0, wz + az * 16.0
+    stem = (sx + ax * 2.5, 4.2, sz + az * 2.5)
+    for s in (-1, 1):
+        _wreck_line(ch, co, v, walls, (sx + px * s * 2.2, 0.0, sz + pz * s * 2.2), stem,
+             "/" if s < 0 else "\\", EMBER, 6 if far else 10)
+    if not far:
+        _wreck_line(ch, co, v, walls, (sx - px * 2.2, 0.6, sz - pz * 2.2),
+             (sx + px * 2.2, 0.6, sz + pz * 2.2), "_", EMBER, 8)
+        # The rigging, slack from the masts to the bow and between.
+        stern = (wx - ax * 18.0, 0.0, wz - az * 18.0)
+        for a_, b_ in ((tops[0], tops[1]), (tops[1], stem), (tops[0], stern)):
+            for k in range(1, 12):
+                u = k / 12.0
+                put_point(ch, co, v, walls, a_[0] + (b_[0] - a_[0]) * u,
+                          a_[1] + (b_[1] - a_[1]) * u - 1.8 * u * (1.0 - u) * 4.0,
+                          a_[2] + (b_[2] - a_[2]) * u, ".", CURB)
+        if d < 160.0:
+            # Her name on the bow, in rust, a letter a column, at the end.
+            v.tackle_signs.append((sx, 2.0, sz, 0, WRECK_NAME, EMBER))
+        # Surf breaking on her: round the bow and the masts.
+        for k in range(18):
+            m = _mix(k, int(now * 3.0), 6601)
+            at = (-9.0, 7.0, 16.0)[k % 3]
+            r = 1.0 + (m & 7) * 0.4
+            a = (m >> 3 & 63) / 10.0
+            put_point(ch, co, v, walls, wx + ax * at + math.cos(a) * r,
+                      0.05 + ((m >> 9) & 1) * 0.2, wz + az * at + math.sin(a) * r,
+                      "~" if m & 512 else "'", SNOW)
+    # The buoy, off her side: two short red flashes, and dark.
+    bx, bz = wx + px * 14.0, wz + pz * 14.0
+    t = (now + wx * 0.01) % 4.0
+    on = t < 0.25 or 0.5 < t < 0.75
+    if not far:
+        put_point(ch, co, v, walls, bx, 0.4, bz, "A", ROU_RED)
+    put_lit(ch, co, v, walls, bx, 1.5, bz, "*" if on else ".",
+            ROU_RED if on else CONCRETE, max(wet, 0.5), now)
+
+
 # --- the captain's cabin ---------------------------------------------------------
 # Asked for on 2026-11-15: while fishing at anchor, c goes in to the captain's
 # cabin, the wheelhouse, with the rooftop bar's whole turn round: the sea and the
@@ -33457,15 +33593,6 @@ def cabin_key(cab, n, tackle, wallet, now):
 def cabin_talk(cab):
     cab["tale"] = (cab["tale"] + 1) % len(CAB_TALES)
     cab["say"] = CAB_TALES[cab["tale"]]
-
-
-def _label(ch, co, y, x, text, attr):
-    """Words in the cabin, on a blank of their own: the planking showed
-    between them."""
-    if 0 <= y < len(ch):
-        for n, c in enumerate(text):
-            if 0 <= x + n < len(ch[0]):
-                ch[y][x + n], co[y][x + n] = c, attr
 
 
 def _col_bearing(v, sx):
@@ -33717,6 +33844,7 @@ FISH_BOX = 20          # what the cool box holds
 WATER_NAMES = {"river": "the river", "lake": "the lake", "mouth": "the river's mouth",
                "surf": "the surf", "inshore": "off the pier", "deep": "deep water",
                "offshore": "the open sea", "harbour": "the harbour",
+               "wreck": "the wreck",
                "fountain": "the fountain"}
 _fish_rare = [False]   # the menu's: the next bite is the rarest thing there
 
@@ -33805,10 +33933,12 @@ FISH = [
         likes=("moon",), say="a mouth you could put your fist in"),
     _sp("squid", ("inshore", "harbour"), ("spinner",), 0.3, 1.5, 0.3, 8, 14, "neon0",
         "squid", say="it inks your shoes"),
-    _sp("conger eel", ("inshore", "deep", "harbour"), ("squid",), 3.0, 30.0, 1.1, 5,
-        6, "CURB", "eel", likes=("rain",), say="it pulls like a car going backwards"),
+    _sp("conger eel", ("inshore", "deep", "harbour", "wreck"), ("squid",), 3.0, 30.0,
+        1.1, 5,
+        6, "CURB", "eel", likes=("rain",),
+        say="it pulls like a car going backwards"),
     # Past the pier's head.
-    _sp("ling", ("deep",), ("squid",), 4.0, 20.0, 0.95, 8, 9, "GOLD_DIM", "eel",
+    _sp("ling", ("deep", "wreck"), ("squid",), 4.0, 20.0, 0.95, 8, 9, "GOLD_DIM", "eel",
         say="long, mottled, and not pleased"),
     _sp("turbot", ("deep",), _SEA, 2.0, 12.0, 0.85, 5, 30, "GOLD_DIM", "flat",
         say="a king's fish, they say"),
@@ -33841,6 +33971,20 @@ FISH = [
         120, "FIREFLY", "glow", alien=True,
         say="it is warm, and it hums. it looks at you"),
     # Rubbish: no fight but its weight, and what the shop will give you.
+    # In the wreck, and round her.
+    _sp("wreck pollock", ("wreck",), ("spinner", "squid"), 3.0, 12.0, 0.9, 14, 10,
+        "GOLD_DIM", "long", say="fat on whatever lives in a shipwreck"),
+    _sp("black bream", ("wreck",), ("lugworm", "squid"), 0.5, 2.5, 0.45, 18, 9,
+        "MOON_DIM", "round", say="they nest along her plates"),
+    _sp("cuckoo wrasse", ("wreck",), ("lugworm",), 0.3, 1.0, 0.35, 12, 7, "neon2",
+        "round", say="blue and orange, like a parrot that took up swimming"),
+    _sp("wolffish", ("wreck",), ("squid", "lugworm"), 3.0, 15.0, 0.95, 7, 8, "CURB",
+        "cat", say="teeth like a dog's, and it uses them"),
+    _sp("lobster", ("wreck",), ("squid",), 0.5, 4.0, 0.4, 6, 30, "ROU_RED", "crab",
+        say="it was living in the captain's cabin. the old captain's"),
+    _sp("giant grouper", ("wreck",), ("squid", "biglure"), 40.0, 180.0, 2.1, 0.8, 12,
+        "GOLD_DIM", "round", legend=True,
+        say="it lives in her hold. it is most of her hold"),
     _sp("old boot", ("river", "mouth", "harbour", "lake"), (), 0.6, 1.4, 0.3, 4, 0,
         "BARK", "boot", junk=True, say="the other one is still down there"),
     _sp("shopping trolley", ("river",), (), 9.0, 16.0, 0.45, 2.5, 0, "CURB",
@@ -33861,6 +34005,14 @@ FISH = [
         junk=True, say="it has a crab living in it. had"),
     _sp("deckchair", ("harbour",), (), 3.0, 5.0, 0.4, 1, 0, "neon3", "junk",
         junk=True, say="off the Midnight Star, by the stripes"),
+    _sp("ship's bell", ("wreck",), (), 6.0, 9.0, 0.5, 2, 40, "GOLD", "bell",
+        junk=True, say="MARY ELLEN, it says round it. it still rings"),
+    _sp("porthole", ("wreck",), (), 2.0, 4.0, 0.35, 3, 15, "GOLD_DIM", "porthole",
+        junk=True, say="you can see the bottom of the sea through it"),
+    _sp("rusty chain", ("wreck",), (), 8.0, 14.0, 0.55, 3, 0, "EMBER", "junk",
+        junk=True, say="the rest of it is still attached to the sea"),
+    _sp("treasure chest", ("wreck",), (), 15.0, 25.0, 0.6, 0.4, 350, "GOLD", "chest",
+        junk=True, legend=True, say="the rum's gone. the gold isn't"),
     _sp("casino chip", ("fountain",), (), 0.01, 0.02, 0.1, 10, 25, "neon3", "chip",
         junk=True, say="somebody made a wish with it"),
     _sp("handful of coins", ("fountain",), (), 0.05, 0.3, 0.1, 18, 4, "GOLD", "coins",
@@ -33981,6 +34133,20 @@ FISH_ART = {
     "coins": ["  (o) (o)  ",
               " (o)(o)(o) ",
               "(o)(o)(o)(o)"],
+    "bell": ["   _   ",
+             "  ( )  ",
+             " /   \\ ",
+             "/_____\\",
+             "   o   "],
+    "porthole": [" .---. ",
+                 "/ .-. \\",
+                 "|( ~ )|",
+                 "\\ '-' /",
+                 " '---' "],
+    "chest": ["  ______  ",
+              " /______\\ ",
+              " |  $$  | ",
+              " |__[]__| "],
     "junk": ["  ,--.  ",
              " ( ?? ) ",
              "  `--'  "],
@@ -34036,6 +34202,8 @@ def fish_water(x, z):
                 return None
             if _in_harbour(x, z):
                 return "harbour"
+            if out > 250.0 and any(True for _ in near_wrecks(x, z, WRECK_REACH)):
+                return "wreck"
             return ("surf" if out < FISH_SURF else "inshore" if out < FISH_INSHORE
                     else "deep" if out < FISH_DEEP else "offshore")
     if river_at(i, j):
@@ -34284,12 +34452,12 @@ def draw_tackle_signs(ch, co, v, walls, now):
     """The tackle shops' names in neon, a letter a column over their roofs,
     the gaps between the words blanked so they read."""
     n = len(NEON)
-    for x, y, z, seed, name in v.tackle_signs:
+    for x, y, z, seed, name, *own in v.tackle_signs:
         pr = v.project(x, y, z)
-        if pr is None or pr[2] > 90.0:
+        if pr is None or pr[2] > 160.0 or (pr[2] > 90.0 and not own):
             continue
         sx0 = int(round(pr[0])) - len(name) // 2
-        sign = NEON[(seed >> 6) % n]
+        sign = (own[0], own[0]) if own else NEON[(seed >> 6) % n]
         for k, c in enumerate(name):
             flick = (now * 1.1 + seed % 5) % 9.0 < 0.12 and k == seed % len(name)
             put_cell(ch, co, v, walls, sx0 + k, int(round(pr[1])), pr[2], c,
@@ -34449,6 +34617,7 @@ class Fishing:
         self.crank_until = self.give_until = self.rod_until = 0.0
         self.rod_side = 0
         self.charge_at = self.charge_until = 0.0
+        self.snag, self.snagged, self.free, self.snags = 0.0, None, 0.0, 0
         self.big = False
         self.kg = self.cast_power = 0.0
 
@@ -34616,6 +34785,7 @@ class Fishing:
         self.over = self.slack = 0.0
         self.run_until = self.charge_at = self.charge_until = 0.0
         self.run_at = now + 1.0 + self.rng.random() * 2.0
+        self.snag, self.snagged, self.free, self.snags = 0.0, None, 0.0, 0
         self.crank_until = self.give_until = 0.0
         self.to("fight", now)
         self.say("something heavy..." if sp["junk"] else "FISH ON!", now)
@@ -34691,7 +34861,13 @@ class Fishing:
             pull = p
         else:
             pull = p * (0.35 + 0.65 * self.stam) * (1.6 if run else 0.55)
-        if self.charging(now):
+        if self.water == "wreck" and not junk and self.wreck(dt, now, cranking,
+                                                              giving, run, p):
+            return
+        if self.snagged is not None:
+            # Caught on her: the line is fast to the iron, not the fish.
+            want = rod[3] * 1.3 if cranking else 0.05 if giving else 0.5
+        elif self.charging(now):
             # Coming in by itself: no pull, and the line goes slack unless
             # you take it up.
             self.line -= speed * 0.3 * dt
@@ -34748,6 +34924,46 @@ class Fishing:
             what = "" if junk else tk.log(n, self.kg, self.water)
             self.catch = (n, self.kg, what)
             self.to("landed", now)
+
+    def wreck(self, dt, now, cranking, giving, run, p):
+        """At the wreck, a frame of it: the fish heading down for her, and a
+        snag when it gets there. True if that was the end of it."""
+        tk = self.tackle
+        if self.snagged is not None:
+            if giving:
+                self.free += dt
+            if self.free >= WRECK_FREE:
+                self.snagged, self.snag = None, 0.55
+                self.say("it swims back out of her - free! now keep it up", now)
+            elif now - self.snagged > WRECK_HOLD:
+                tk.lose_rig()
+                self.say("the line parted on the wreck's iron - keep 'em up off her",
+                         now)
+                self.to("gone", now)
+                return True
+            return False
+        # Fresh and strong, it makes for her; a heavy reel winches it up off her.
+        dive = min(p, 1.5) * (0.3 + 0.7 * self.stam)
+        # A run goes away from you, not down; it is let alone, between runs,
+        # that it sounds for her - so give it line when it runs, and get it
+        # coming up again the moment it stops.
+        if cranking:
+            self.snag -= 0.045 * tk.rod_kind()[4] * dt
+        elif run or self.turning(now):         # easing off for the run is no fault
+            self.snag += dive * (0.14 if giving else 0.2) * dt
+        else:
+            self.snag += dive * 0.6 * dt
+        self.snag = max(0.0, self.snag)
+        if self.snag >= 1.0:
+            self.snags += 1
+            if self.snags > WRECK_WEAR:
+                tk.lose_rig()
+                self.say("snagged once too often - the line's frayed through", now)
+                self.to("gone", now)
+                return True
+            self.snagged, self.free = now, 0.0
+            self.say("SNAGGED on the wreck - give it slack!", now)
+        return False
 
     def fish_at(self):
         """Where the fish is, on the line: (x, z)."""
@@ -34966,11 +35182,15 @@ def render_fishing(f, width, height, now):
     draw_rod(ch, co, f, v, now, k)
     rod = tk.rod_kind()
     mid = width // 2
+    # The rows from the bottom up: the strip, what was said over it, and the
+    # meters and words over that - all lifted on a deck, over her side.
+    strip_y = height - 1 - (2 if f.deck is not None else 0)
+    base = strip_y - 2
     if f.phase == "aim":
         bw = min(40, width // 3) * (1 if k == 1 else 2)
         p = f.swing(now)
         bx = mid - bw // 2 - 4
-        y = height - 4 - 2 * (k - 1)
+        y = base - 2 * (k - 1)
         _text(ch, co, y, bx, "CAST [" + " " * bw + "]", HUD)
         for q in range(int(p * bw)):
             c = ROU_GREEN if q < bw * 0.6 else GOLD if q < bw * 0.85 else ROU_RED
@@ -34992,7 +35212,25 @@ def render_fishing(f, width, height, now):
             _text(ch, co, y, gx, ("[" + ("#" if lit else " ") * (1 + k) + "]"),
                   c if lit else CURB)
         _text(ch, co, g1 + 1, gx - 2, "LINE %2dm" % int(f.line), GOLD)
-        if f.running(now):
+        if f.water == "wreck" and not sp["junk"]:
+            # How near the fish is to getting into her.
+            wx_ = gx - 10 - 2 * (k - 1)
+            _text(ch, co, g0 - 1, wx_ - 1, "WRECK", HUD)
+            snag = 1.0 if f.snagged is not None else f.snag
+            for y in range(g0, g1):
+                u = (y - g0) / float(g1 - g0)       # filling from the top down
+                lit = u <= snag
+                c = (FLASH if f.snagged is not None and int(now * 8) % 2 else
+                     ROU_RED if u > 0.7 else GOLD if u > 0.4 else RAIN)
+                _text(ch, co, y, wx_, "[" + ("~" if lit else " ") * (1 + k) + "]",
+                      c if lit else CURB)
+            _text(ch, co, g1 + 2, wx_ - 1, "frays %d/%d" % (f.snags, WRECK_WEAR),
+                  ROU_RED if f.snags else HUD)
+        if f.snagged is not None:
+            word, c = "SNAGGED ON THE WRECK - s gives it slack!", ROU_RED
+        elif f.water == "wreck" and f.snag > 0.6 and not sp["junk"]:
+            word, c = "it is diving for the wreck - reel it up!", GOLD
+        elif f.running(now):
             word, c = "IT RUNS - s gives line", ROU_RED
         elif f.charging(now):
             word, c = "IT SWIMS AT YOU - reel in the slack!", ROU_RED
@@ -35006,28 +35244,28 @@ def render_fishing(f, width, height, now):
             word, c = "%s - keep it tight" % ("pulling left" if f.side < -0.3 else
                                               "pulling right" if f.side > 0.3 else
                                               "on the line"), HUD
-        y = height - 4 - (5 * (k - 1) if k > 1 else 0)
+        y = base - (5 * (k - 1) if k > 1 else 0)
         if k > 1 and f.running(now):
             _blocks(ch, co, y - 1, mid - blocks_width("RUNS", k - 1) // 2, "RUNS",
                     ROU_RED, k - 1, k - 1)
-            _text(ch, co, y + 5 * (k - 1), mid - len(word) // 2, word, c)
+            _label(ch, co, y + 5 * (k - 1), mid - len(word) // 2, word, c)
         else:
-            _text(ch, co, y, mid - len(word) // 2, word, c)
+            _label(ch, co, y, mid - len(word) // 2, word, c)
         if f.running(now) and int(now * 10) % 2:
-            _text(ch, co, height - 4 - 2 * k, int(width * 0.84) - 10, "zzzZZZ", FLASH)
+            _text(ch, co, base - 2 * k, int(width * 0.84) - 10, "zzzZZZ", FLASH)
     elif f.phase == "wait" and f.biting(now):
         if k > 1:
             _blocks(ch, co, height // 2 + 2, mid - blocks_width("STRIKE", k - 1) // 2,
                     "STRIKE", FLASH, k - 1, k - 1)
         else:
-            _text(ch, co, height - 5, mid - 8, "!! f STRIKES !!", FLASH)
+            _text(ch, co, base - 1, mid - 8, "!! f STRIKES !!", FLASH)
     # What is on, along the bottom.
     bait = ("%s x%d" % (BAIT_KINDS[tk.bait_on][0], tk.bait[tk.bait_on])
             if tk.bait_on is not None else "no bait")
     strip = " %s  |  %s  |  %s  |  cool box %d  |  book %d/%d " % (
         rod[0], bait, tk.float_kind()[0], len(tk.box), len(tk.book),
         len(fish_species()))
-    y = height - 1 - (2 if f.deck is not None else 0)
+    y = strip_y
     for x in range(min(width, len(strip) + 2)):
         ch[y][x], co[y][x] = " ", 0
     _text(ch, co, y, 1, strip[:width - 2], HUD)
@@ -35867,8 +36105,8 @@ def main(stdscr):
                             trip.update(phase="out", t0=now, exp=exp_, look=0.0,
                                         dur=exp_["sail"],
                                         route=expedition_route(trip["h"], exp_))
-                            note, note_at = ("%s: %s" % (CAPTAIN, CAP_WRONG_ROD)
-                                             if tackle.rod != exp_["rod"] else
+                            note, note_at = ("%s: %s" % (CAPTAIN, exp_["short"])
+                                             if tackle.rod < exp_["rod"] else
                                              "%s: %s" % (CAPTAIN, CAP_AWAY[0])), now
                 else:
                     if key in (curses.KEY_LEFT, ord("a"), ord("A")):
@@ -36645,7 +36883,8 @@ def main(stdscr):
             if trip["phase"] == "out":
                 # There: anchored, and you fish off her side.
                 tx_, tz_, th_ = route_pose(trip["route"], 1.0)
-                trip.update(phase="fish", quip=CAP_THERE, quip_at=now, seen="aim")
+                trip.update(phase="fish", quip=trip["exp"].get("there", CAP_THERE),
+                            quip_at=now, seen="aim", snags=0)
                 fishing = Fishing(tx_, tz_, th_, tackle, now, int(now * 1000.0),
                                   deck=HerringDeck(), water=trip["exp"]["water"])
             else:
@@ -36665,6 +36904,11 @@ def main(stdscr):
                 trip.update(quip=CAP_LANDED[pick_ % len(CAP_LANDED)], quip_at=now)
             elif fishing.phase == "gone" and was_ == "fight":
                 trip.update(quip=CAP_LOST[pick_ % len(CAP_LOST)], quip_at=now)
+        if (trip is not None and fishing is not None
+                and fishing.snags != trip.get("snags", 0)):
+            trip["snags"] = fishing.snags
+            if fishing.snags:
+                trip.update(quip=CAP_SNAG[fishing.snags % len(CAP_SNAG)], quip_at=now)
         if cab is not None:
             cab.step(now - cab.clock, now)
             if cab.pay:
