@@ -249,3 +249,39 @@ windscreen - it would have broken crashing the plane) and `_label` (the cabin's 
 cockpit's, harmless). checks.py now asserts no top-level name is defined twice (`GOD_WORDS` is
 on purpose).
 
+## The glowing sea
+
+The third expedition, asked for on 2026-11-15: "a cove where the water lights up blue-green with
+plankton on still nights. Every wave, the boat's wake and your float leave trails of light ...
+only runs on nights with little moon. Your line and the fish you're fighting glow, so you can see
+a fight happening underwater."
+
+**The cove** (`bio_site()`, cached in `_bio_cache`): where the Herring anchors, `out` 260 off the
+beach and `along` 620 down the coast from every harbour - far enough out that a cast from the
+sand does not reach it, clear of the piers either side and of the space centre. Its water is
+`"bio"` within `BIO_REACH` (150). Rocks stand out of the water round it on the land's side
+(`bio_rocks()`, `ROCK`; `draw_bio()`), black against it, and the speedboat stops at them
+(`bio_in()` in `boat_water()`).
+
+**A dark night** (`dark_night()`): the moon less than `BIO_MOON` of full (`moon_light()`, off
+the night's phase) and no morning coming up - about one night in three. The captain will not go
+on any other (`CAP_TOO_BRIGHT`; his list says "not tonight - too much moon"); `"when": "dark"`
+on the expedition. **`e` on the panel** (`skip_to_dark()`) goes on to the next dark night - in
+AND THE REST, since WEATHER & SKY's NIGHTS was full: one more row there and the panel no
+longer opened on 80x24, which its check caught.
+
+**The glow** (`bio_glow()`, from `coast_ground()`): on a dark night `render_street()` lists the
+coves in reach (`v.bio`), and every point of the sea inside one is drawn lit instead - the
+crests as they come in, cyan and green, dim far off (the first try lit every crest at full and
+the sea was a sheet of light that hid the float); a few dim dots behind each crest; sparks. The
+float leaves rings of light going out from it, its cast leaves a trail hanging in the air, the
+line glows cyan, the Herring's bow wave sparkles as she comes in (`render_voyage()`), and in a
+fight **the fish shows under the water** (`draw_lit_fish()`): a lit shape pointing the way it
+swims, sparks round it, and a trail of where it has been (`Fishing.trail`, a point every 0.08 s,
+the last sixteen).
+
+**Its fish**: lanternfish (lights down its sides), flashlight fish, firefly squid (both worth a
+lot by the kilo, and weigh nothing), moonfish (5-40 kg, a proper fight), the oarfish (legendary:
+a silver sea-serpent with a red crest, 20-80 kg), and the glowing jellyfish, rubbish that stings.
+$50, 22 s out, the spinning rod at least.
+
