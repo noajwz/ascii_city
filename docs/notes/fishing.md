@@ -371,15 +371,20 @@ in its foot, the dark through it the dark behind) stands `CAVE_AHEAD` on from wh
 On arrival you are not on her deck: he rows you in, and you fish from the dinghy
 (`DinghyDeck`, low) at the middle of the chamber, facing in, the arch behind you.
 `Fishing.cave` is `(x, z, mouth)`, and `render_fishing()` asks `render_cave()` for the picture
-instead of `render_street()`: the wall all the way round by screen column (`cave_wall()`, round
-and not quite, `CAVE_R`), its foot wet, glowworms high on it and on the roof; the arch in it at
-the `mouth` bearing with the night through it and the Herring's mast light; a hole in the roof
-and the moonbeam coming down through it to the water (`cave_beam()`); your lantern's ring of
-lit water (`CAVE_LAMP`); drips - a falling drop and a ring where you can see them, the word
-"drip" where you cannot; and the lantern itself at the bow. It makes `v.walls` of the wall, so
-`put_point()` and the rest work as on the street. 2 ms a frame at 160x45, 5 at 300x90.
+instead of `render_street()`. **It is black** - the owner asked for it "completely dark" the
+day it was built, and the first version's glowworms on the roof, the texture on the wall, and a
+moonbeam down through a hole in the roof all came out again. What is left: the wall is still
+there by screen column (`cave_wall()`, round and not quite, `CAVE_R`) - it makes `v.walls`, so
+it hides what is behind it and `put_point()` and the rest work as on the street - but nothing on
+it is drawn; **behind you**, the arch at the `mouth` bearing with the night, the moonlit sea and
+the Herring's mast light through it, and **the moon on the water coming in under it**
+(`cave_moonlit()`: fanning in from the arch `CAVE_MOON` units, fading the further in and as the
+tide closes the arch); your lantern's ring of lit water round the dinghy (`CAVE_LAMP`) and the
+lantern itself at the bow; and drips - a falling drop and a ring inside the lantern's light,
+the word "drip" where you cannot see them. 2 ms a frame at 160x45, 5 at 300x90.
 
-**The dark.** `cave_seen()`: the lantern's ring and the beam are seen, the rest is not. Cast
+**The dark.** `cave_seen()`: the lantern's ring and the moonlight by the arch are seen,
+the rest is not. Cast
 out there (`cave_dark()`) and the float is not drawn at all: the line goes from the rod to the
 edge of the lantern's ring and off into the black (`cave_end()`, for `draw_rod()`), the rod
 tip knocks at a nibble and a bite as with no float, and `cave_cues()` writes what you hear

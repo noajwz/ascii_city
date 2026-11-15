@@ -34001,21 +34001,20 @@ def render_dig(trip, tackle, width, height, now):
 # --- the sea cave -------------------------------------------------------------------
 # The eighth expedition, asked for on 2026-11-15: a great rock off the coast with a
 # black arch in its foot. The Herring anchors outside and the captain rows you in
-# in the dinghy, and you fish from it in the dark: rock all round, glowworms on
-# the roof, a shaft of moonlight down through a hole in it, the arch behind you
-# the one grey shape of the night. Two twists. The tide is coming in: the arch
-# gets lower the longer you stay, and when it is gone he rows you out, whatever
-# you have on. And your lantern lights only a ring of water round the dinghy:
-# cast past it, out of the moonbeam, and you fish blind - no float, only the
-# line going off into the dark, and a plip where something is at the bait. The
-# Old One only bites out there.
+# in the dinghy, and you fish from it in the dark: it is black all round, and
+# the only light is your lantern and, behind you, the moon on the water coming
+# in under the arch (2026-11-15: "completely dark"). Two twists. The tide is
+# coming in: the arch gets lower the longer you stay, and when it is gone he
+# rows you out, whatever you have on. And your lantern lights only a ring of
+# water round the dinghy: cast past it, out of the moonlight by the arch, and
+# you fish blind - no float, only the line going off into the dark, and a plip
+# where something is at the bait. The Old One only bites out there.
 CAVE_AHEAD = 90.0      # the rock's middle, this far on from where the Herring anchors
 CAVE_ROCK = 55.0       # the rock: the speedboat stops at it
 CAVE_R = 31.0          # the chamber inside it, round where the dinghy lies
 CAVE_LAMP = 11.0       # how far your lantern lights the water round the dinghy
-CAVE_BEAM = (19.0, 0.6, 4.5)  # the moonbeam: this far in, this far round, how wide
+CAVE_MOON = 13.0       # how far in from the arch the moon lies on the water
 CAVE_ROOF = 9.0        # the roof where it meets the wall
-CAVE_DOME = 15.0       # and over the middle, where the hole is
 CAVE_ARCH = (0.2, 6.5)  # the arch: half its width, a bearing; its height at low tide
 CAVE_TIDE = 180.0      # seconds from rowing in to the arch going under
 CAP_TIDE = ["Tide's comin' in, matey. The arch be half gone.",
@@ -34076,20 +34075,32 @@ def cave_wall(cx, b):
                      + 0.05 * math.sin(7.0 * b + 2.0 * s))
 
 
-def cave_beam(cx, cz, mouth):
-    """(x, z) of where the moonbeam comes down on the water."""
-    b = mouth + math.pi + CAVE_BEAM[1]
-    return cx + math.sin(b) * CAVE_BEAM[0], cz + math.cos(b) * CAVE_BEAM[0]
+def cave_moonlit(cave, x, z, tide=0.0):
+    """How much of the moon is on the water here, 0 to 1: just inside the
+    arch, fanning in from it, less the further in, and less as the tide
+    closes it."""
+    cx, cz, mouth = cave
+    b = math.atan2(x - cx, z - cz)
+    da = abs((b - mouth + math.pi) % math.tau - math.pi)
+    if da > CAVE_ARCH[0] * 1.4:
+        return 0.0
+    inn = cave_wall(cx, mouth) - math.hypot(x - cx, z - cz)    # in from the arch
+    if not -1.0 < inn < CAVE_MOON:
+        return 0.0
+    fan = CAVE_ARCH[0] * (1.0 + 0.4 * max(0.0, inn) / CAVE_MOON)
+    if da > fan:
+        return 0.0
+    return (1.0 - max(0.0, inn) / CAVE_MOON) * (1.0 - da / fan) ** 0.5 * (
+        max(0.0, 1.0 - tide) ** 0.5)
 
 
 def cave_seen(cave, x, z):
     """Can you see this bit of the water: in your lantern's ring round the
-    dinghy, or in the moonbeam."""
+    dinghy, or in the moonlight coming in under the arch."""
     cx, cz, mouth = cave
     if (x - cx) ** 2 + (z - cz) ** 2 < CAVE_LAMP * CAVE_LAMP:
         return True
-    bx, bz = cave_beam(cx, cz, mouth)
-    return (x - bx) ** 2 + (z - bz) ** 2 < CAVE_BEAM[2] * CAVE_BEAM[2]
+    return cave_moonlit(cave, x, z) > 0.15
 
 
 def cave_water(x, z):
@@ -34133,10 +34144,10 @@ def draw_cave_rock(ch, co, v, walls, cx, cz, mouth, now, wet):
 
 
 def render_cave(v, f, now):
-    """Inside the cave, from the dinghy: the wall all the way round with the
-    arch in it (lower as the tide comes in, the night through it), the roof
-    over that with its glowworms and the hole the moon comes down through,
-    and the black water - lit only in your lantern's ring and the beam."""
+    """Inside the cave, from the dinghy: black. The wall is there - it hides
+    what is behind it - but nothing on it can be seen; only the arch, lower as
+    the tide comes in, with the night and the sea through it, the moon on the
+    water coming in under it, and your lantern's ring round the dinghy."""
     w, h = v.width, v.height
     ch = [[" "] * w for _ in range(h)]
     co = [[0] * w for _ in range(h)]
@@ -34145,7 +34156,6 @@ def render_cave(v, f, now):
     arch_h = CAVE_ARCH[1] * max(0.0, 1.0 - tide)
     wall_d, wall_top, wall_base = [None] * w, [h] * w, [-1] * w
     runs = [[] for _ in range(w)]
-    glow, glow_dim = NEON[2][0], NEON[2][1]
     for sx in range(w):
         rx, rz = v.ray(sx)
         b = math.atan2(rx, rz)
@@ -34159,79 +34169,39 @@ def render_cave(v, f, now):
         runs[sx] = [(t, top, base)]
         da = (b - mouth + math.pi) % math.tau - math.pi
         half = CAVE_ARCH[0]
+        if abs(da) >= half:
+            continue                                    # black rock
+        # Through the arch: the night, the moonlit sea, and the Herring's light.
+        ah = arch_h * math.sqrt(max(0.0, 1.0 - (da / half) ** 2))
         bb = int(b * 140.0)
         for y in range(max(0, top), min(h, base + 1)):
             hy = v.eye - (y - v.horizon) * t / v.fy        # how high on the wall
-            m = _mix(bb, y, 6951)
-            if abs(da) < half:
-                ah = arch_h * math.sqrt(max(0.0, 1.0 - (da / half) ** 2))
-                if hy < ah:
-                    # Through the arch: the night, the sea, and the Herring's light.
-                    if (abs(da) < half / 12.0 and int(round(v.horizon - (
-                            min(ah - 0.8, 2.6) - v.eye) * v.fy / t)) == y and
-                            ch[y][sx - 1 if sx else 0] != "o"):
-                        ch[y][sx], co[y][sx] = "o", SNOW
-                    elif hy < 0.5:
-                        ch[y][sx], co[y][sx] = ("~" if m % 3 else " "), RAIN_FAR
-                    elif m % 11 == 0:
-                        ch[y][sx], co[y][sx] = ".", MOON_DIM
-                    continue
-                if hy < ah + 0.6:
-                    ch[y][sx], co[y][sx] = ("(" if da < -half * 0.8 else ")" if
-                                            da > half * 0.8 else "_"), CURB
-                    continue
-            if hy < 0.5:
-                if m % 3 == 0:                                  # the wet rock
-                    ch[y][sx], co[y][sx] = ("-" if m & 8 else "_"), ROU_BLACK
-            elif hy > CAVE_ROOF * 0.55 and m % 19 == 0:
-                lit = _mix(bb, y, int(now * 0.7)) % 5 == 0
-                ch[y][sx], co[y][sx] = ".", glow if lit else glow_dim
-            elif m % 17 == 0:
-                ch[y][sx], co[y][sx] = ("'" if m & 64 else "."), ROU_BLACK
-        # The roof over the wall, to the top of the screen: glowworms.
-        for y in range(0, max(0, top)):
-            m = _mix(bb, y, 6953)
-            if m % 23 == 0:
-                lit = _mix(bb, y, int(now * 0.5)) % 4 == 0
-                ch[y][sx], co[y][sx] = ("'" if lit and m & 32 else "."), (
-                    glow if lit else glow_dim)
+            if hy >= ah:
+                continue
+            m = _mix(bb, y + int(now * 1.5) * (hy < 0.6), 6951)
+            if (abs(da) < half / 12.0 and int(round(v.horizon - (
+                    min(ah - 0.8, 2.6) - v.eye) * v.fy / t)) == y and
+                    ch[y][sx - 1 if sx else 0] != "o"):
+                ch[y][sx], co[y][sx] = "o", SNOW
+            elif hy < 0.6:
+                ch[y][sx], co[y][sx] = ("~" if m % 3 else "-"), (
+                    MOON if m % 4 == 0 else MOON_DIM)
+            elif m % 9 == 0:
+                ch[y][sx], co[y][sx] = ".", MOON_DIM if m & 16 else STAR
     v.walls = walls = (wall_d, wall_top, wall_base, [0] * w, runs)
-    # The hole in the roof, and the moonbeam coming down through it.
-    bx, bz = cave_beam(cx, cz, mouth)
-    hole = v.project(bx, CAVE_DOME, bz)
-    if hole is not None:
-        hx, hy_ = int(round(hole[0])), int(round(hole[1]))
-        for q in range(-4, 5):
-            for r in range(-1, 2):
-                if 0 <= hy_ + r < h and 0 <= hx + q < w and abs(q) + 2 * abs(r) < 5:
-                    m = _mix(q, r, 6955)
-                    ch[hy_ + r][hx + q] = "*" if m % 5 == 0 else " "
-                    co[hy_ + r][hx + q] = MOON
-        if 0 <= hy_ < h and 0 <= hx < w:
-            ch[hy_][hx], co[hy_][hx] = "(", MOON          # the moon, a sliver of it
-    r_ = CAVE_BEAM[2]
-    foot = v.project(bx, 0.0, bz)
-    if foot is not None:
-        # The shaft: as wide as the beam where it is, from the hole (or the
-        # top of the screen) down to the water, the light drifting in it.
-        half = r_ * 0.55 * v.fx / foot[2]
-        fy_ = int(round(foot[1]))
-        top_ = int(round(hole[1])) if hole is not None else 0
-        for y in range(max(0, top_ + 2), min(h, fy_)):
-            for x in range(int(foot[0] - half), int(foot[0] + half) + 1):
-                if 0 <= x < w and not hidden(walls, x, y, foot[2]):
-                    m = _mix(x, y + int(now * 3.0), 6957)
-                    edge = abs(x - foot[0]) > half * 0.7
-                    if m % (5 if edge else 3) == 0:
-                        ch[y][x] = ":" if m & 32 else "'" if m & 64 else "."
-                        co[y][x] = MOON_DIM if edge or m & 128 else MOON
-    for k in range(70):
+    # The moon on the water, coming in under the arch behind you: fanning in
+    # from it, glittering, fading the further in - and as the tide closes it.
+    wb = cave_wall(cx, mouth)
+    for k in range(360):
         m = _mix(k, int(now * 1.5), 6959)
-        a = (m & 255) / 255.0 * math.tau
-        rr = r_ * math.sqrt(((m >> 8) & 255) / 255.0)
-        put_point(ch, co, v, walls, bx + math.sin(a) * rr, 0.02,
-                  bz + math.cos(a) * rr, "~" if m & 1024 else "-",
-                  MOON if rr < r_ * 0.5 else MOON_DIM)
+        inn = CAVE_MOON * (((m >> 8) & 255) / 255.0) ** 1.5 - 0.5
+        a = mouth + ((m & 255) / 127.5 - 1.0) * CAVE_ARCH[0] * (
+            1.0 + 0.4 * max(0.0, inn) / CAVE_MOON)
+        px, pz = cx + math.sin(a) * (wb - inn), cz + math.cos(a) * (wb - inn)
+        lit = cave_moonlit(f.cave, px, pz, tide)
+        if lit > 0.05 and ((m >> 16) & 255) / 255.0 < lit * 1.6:
+            put_point(ch, co, v, walls, px, 0.02, pz, "~" if m & 1 << 24 else "-",
+                      MOON if lit > 0.5 else MOON_DIM)
     # Your lantern's ring on the water.
     step = 0.9
     n = int(CAVE_LAMP / step)

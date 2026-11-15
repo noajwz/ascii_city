@@ -10677,10 +10677,11 @@ check("the sea cave: a rock off the coast the speedboat stops at, a chamber insi
       and ac.fish_water(ccx_ + 3.0, ccz_ + 3.0) == "cave"
       and ac.fish_water(ccx_ + math.sin(inb_) * 22.0, ccz_ + math.cos(inb_) * 22.0)
       == "cavedark" and ac.fish_water(ccx_ + 45.0, ccz_) is None)
-bx_, bz_ = ac.cave_beam(ccx_, ccz_, cmo_)
+wm_ = ac.cave_wall(ccx_, cmo_) - 3.0
+bx_, bz_ = ccx_ + math.sin(cmo_) * wm_, ccz_ + math.cos(cmo_) * wm_     # by the arch
 lit_pool_ = {ac.FISH[n_]["name"] for n_, _ in ac.bite_pool("cave", "worms", 0.0)}
 dark_pool_ = {ac.FISH[n_]["name"] for n_, _ in ac.bite_pool("cavedark", "worms", 0.0)}
-check("the moonbeam is lit water; the Old One only bites out in the dark",
+check("the moon on the water by the arch is lit; the Old One only bites in the dark",
       ac.fish_water(bx_, bz_) == "cave" and "the Old One" in dark_pool_
       and "the Old One" not in lit_pool_
       and {"blind cave fish", "cave eel", "skeleton's boot"} <= lit_pool_,
