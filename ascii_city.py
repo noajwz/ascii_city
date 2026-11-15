@@ -16647,15 +16647,16 @@ def gangway(h):
     return bx - 22.0, h[0] * CELL + 1.2
 
 
-def gangway_near(x, z):
-    """The harbour whose gangway you are at the foot of, ready to board."""
+def gangway_near(x, z, reach=3.0):
+    """The harbour whose gangway you are at the foot of, ready to board - or
+    within `reach` of, for the top bar."""
     if not COAST or x < COAST_LAND * CELL:
         return None
     h = harbour_site(int(z / CELL + BIG) - BIG)
     if h is None or h in _liner_trips:
         return None
     gx, gz = gangway(h)
-    return h if (gx - x) ** 2 + (gz - z) ** 2 < 4.0 ** 2 else None
+    return h if (gx - x) ** 2 + (gz - z) ** 2 < reach ** 2 else None
 
 
 def _catmull(pts, step=20.0):
@@ -16806,13 +16807,15 @@ def _harbour_spot(x, z):
 
 
 def _gangway_spot(x, z):
-    """At the foot of the nearest gangway, facing the ship."""
+    """A few steps back from the foot of the nearest gangway, facing the
+    ship: walking up to it boards her, so this is short of it - where the
+    cruise leaves you, too, or you would be straight back aboard."""
     sp = _harbour_spot(x, z)
     if sp is None:
         return None
     h = harbour_site(int(sp[1] / CELL + BIG) - BIG)
     gx, gz = gangway(h)
-    return gx, gz + 1.0, math.pi
+    return gx, gz + 5.5, math.pi
 
 
 def _face(ch, co, v, walls, pts, glyph, attr, tex=None):
@@ -17267,10 +17270,10 @@ def harbour_hint(x, z, now):
         return ""
     if h in _liner_trips:
         return "  ~ the %s is out - she will be back ~" % LINER_NAME.title()
-    if gangway_near(x, z) is not None:
-        return "  ~ the %s: p boards, $%d - a cruise down the coast ~" % (
-            LINER_NAME.title(), LINER_FEE)
-    if herring_near(x, z) is not None:
+    if gangway_near(x, z, 8.0) is not None:
+        return ("  ~ the %s: up the gangway to board, $%d - a cruise down the coast ~"
+                % (LINER_NAME.title(), LINER_FEE))
+    if herring_near(x, z, 9.0) is not None:
         return herring_hint(x, z)
     if marina_near(x, z) is not None:
         return "  ~ boat hire: p takes a speedboat out, $%d ~" % BOAT_FEE
@@ -25845,6 +25848,18 @@ def venue_at(x, z):
     room drawn around you."""
     ci = int(x / CELL + BIG) - BIG
     cj = int(z / CELL + BIG) - BIG
+    # Walked up to, like a door: the cruise ship's gangway, the fishing boat's
+    # gangplank and her captain, a tackle shop's counter (they were p once).
+    if COAST and x >= COAST_LAND * CELL:
+        h = gangway_near(x, z)
+        if h is not None:
+            return "gangway", {"seed": h[0], "h": h}
+        h = herring_near(x, z)
+        if h is not None:
+            return "herring", {"seed": h[0], "h": h}
+    at = tackle_near(x, z)
+    if at is not None:
+        return "tackle", at
     bar = beach_bar_near(x, z)
     if bar is not None:
         return "beachbar", {"seed": bar[3], "u": int(bar[2])}
@@ -32903,6 +32918,7 @@ def render_rave(club, width, height, now):
 HERRING_NAME = "SALTY HERRING"
 CAPTAIN = "Cap'n Redgill"
 HERRING_GAP = 1.5      # between the end of the quay and her stern
+HERRING_BACK = 4.5     # where you are left on the quay, back from the plank
 HERRING_L = 16.0       # long
 HERRING_B = 5.0        # and across
 HERRING_HUD = (" %s  -  w s choose  -  p or enter: pay and cast off  -  x walks away "
@@ -33021,24 +33037,26 @@ def herring_plank(h):
     return (end + 1) * CELL - 1.6, (r0 + QUAY_BROAD * 0.5) * CELL
 
 
-def herring_near(x, z):
-    """The harbour whose fishing boat's gangplank you are at, or None."""
+def herring_near(x, z, reach=2.5):
+    """The harbour whose fishing boat's gangplank you are at, or None -
+    or within `reach` of it, for the top bar."""
     if not COAST or x < COAST_LAND * CELL:
         return None
     h = harbour_site(int(z / CELL + BIG) - BIG)
     if h is None or _herring_out[0] == h:
         return None
     px, pz = herring_plank(h)
-    return h if (px - x) ** 2 + (pz - z) ** 2 < 3.0 ** 2 else None
+    return h if (px - x) ** 2 + (pz - z) ** 2 < reach ** 2 else None
 
 
 def _herring_spot(x, z):
-    """By the nearest fishing boat's gangplank, facing her."""
+    """A few steps back along the quay from the nearest fishing boat's
+    gangplank, facing her: walking up to it is talking to the captain."""
     sp = _harbour_spot(x, z)
     if sp is None:
         return None
     px, pz = herring_plank(harbour_site(int(sp[1] / CELL + BIG) - BIG))
-    return px, pz, math.pi * 0.5
+    return px - HERRING_BACK, pz, math.pi * 0.5
 
 
 def herring_in(x, z):
@@ -33116,9 +33134,9 @@ def draw_herring(ch, co, v, walls, h, now, wet):
 
 
 def herring_hint(x, z):
-    if herring_near(x, z) is not None:
-        return "  ~ the %s: p talks to %s - fishing trips ~" % (HERRING_NAME.title(),
-                                                                 CAPTAIN)
+    if herring_near(x, z, 9.0) is not None:
+        return "  ~ the %s: walk up to %s - fishing trips ~" % (
+            HERRING_NAME.title(), CAPTAIN)
     return ""
 
 
@@ -34162,17 +34180,19 @@ def river_kiosk(run):
     return hit
 
 
-def tackle_near(x, z):
-    """The tackle shop or kiosk whose counter you are at, as a dict, or None."""
+def tackle_near(x, z, reach=TACKLE_REACH):
+    """The tackle shop or kiosk whose counter you are at, as a dict, or None -
+    or within `reach` of, for the top bar. The dict has the hut (x, z) and its
+    counter (sx, sz)."""
     i, j = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
     if COAST and i >= COAST_LAND:
         pier = sea_pier(j) or sea_pier(j + 1)
         if pier is not None:
             (hx, hz), (sx, sz) = pier_tackle(pier)
-            if (sx - x) ** 2 + (sz - z) ** 2 < TACKLE_REACH ** 2:
+            if (sx - x) ** 2 + (sz - z) ** 2 < reach ** 2:
                 seed = _mix(pier[0], 0, 6301)
-                return {"kind": "pier", "x": hx, "z": hz, "seed": seed,
-                        "name": TACKLE_NAMES[seed % len(TACKLE_NAMES)]}
+                return {"kind": "pier", "x": hx, "z": hz, "sx": sx, "sz": sz,
+                        "seed": seed, "name": TACKLE_NAMES[seed % len(TACKLE_NAMES)]}
         return None
     if not near_river(i, j):
         return None
@@ -34182,11 +34202,23 @@ def tackle_near(x, z):
         if k is None:
             continue
         (hx, hz), (sx, sz) = k
-        if (sx - x) ** 2 + (sz - z) ** 2 < TACKLE_REACH ** 2:
+        if (sx - x) ** 2 + (sz - z) ** 2 < reach ** 2:
             seed = _mix(r, 1, 6301)
-            return {"kind": "kiosk", "x": hx, "z": hz, "seed": seed,
-                    "name": KIOSK_NAMES[seed % len(KIOSK_NAMES)]}
+            return {"kind": "kiosk", "x": hx, "z": hz, "sx": sx, "sz": sz,
+                    "seed": seed, "name": KIOSK_NAMES[seed % len(KIOSK_NAMES)]}
     return None
+
+
+TACKLE_BACK = 3.6      # where you are left, back from a counter
+
+
+def tackle_back(hx, hz, sx, sz):
+    """A few steps back from a counter, away from the hut, facing it: where
+    a jump leaves you, and where you are when you come out."""
+    dx, dz = sx - hx, sz - hz
+    d = math.hypot(dx, dz) or 1.0
+    return (sx + dx / d * TACKLE_BACK, sz + dz / d * TACKLE_BACK,
+            math.atan2(-dx, -dz))
 
 
 def _kiosk_spot(x, z):
@@ -34199,9 +34231,9 @@ def _kiosk_spot(x, z):
         k = river_kiosk(i)
         if k is None:
             continue
-        sx, sz = k[1]
-        if (sx - x) ** 2 + (sz - z) ** 2 >= CHEAT_SKIP ** 2 and can_stand(sx, sz):
-            return sx, sz, math.pi * 0.5
+        bx, bz, by = tackle_back(k[0][0], k[0][1], *k[1])
+        if (bx - x) ** 2 + (bz - z) ** 2 >= CHEAT_SKIP ** 2 and can_stand(bx, bz):
+            return bx, bz, by
     return None
 
 
@@ -34211,8 +34243,8 @@ def _pier_tackle_spot(x, z):
     if sp is None:
         return None
     pier = sea_pier(int(sp[1] / CELL + BIG) - BIG)
-    sx, sz = pier_tackle(pier)[1]
-    return sx, sz, 0.0
+    (hx, hz), (sx, sz) = pier_tackle(pier)
+    return tackle_back(hx, hz, sx, sz)
 
 
 def _tackle_spot(x, z):
@@ -34266,9 +34298,9 @@ def draw_tackle_signs(ch, co, v, walls, now):
 
 def tackle_hint(x, z, tackle):
     """What the top bar says at a tackle shop, or with a rod by the water."""
-    shop = tackle_near(x, z)
+    shop = tackle_near(x, z, 9.0)
     if shop is not None:
-        return "  ~ %s - bait & tackle: p goes in ~" % shop["name"].lower()
+        return "  ~ %s - bait & tackle: walk up to the counter ~" % shop["name"].lower()
     return ""
 
 
@@ -35814,6 +35846,8 @@ def main(stdscr):
                 if trip["phase"] == "talk":
                     n_ = len(EXPEDITIONS)
                     if key in (27, ord("x"), ord("X")):
+                        px_, pz_ = herring_plank(trip["h"])
+                        cam_x, cam_z = px_ - HERRING_BACK, pz_     # back along the quay
                         trip = None
                         note, note_at = "\"Arr. Another time, matey.\"", now
                     elif key in (curses.KEY_UP, ord("w"), ord("W")):
@@ -35845,7 +35879,11 @@ def main(stdscr):
                         trip["t0"] -= 3.0       # he leans on the throttle
             elif shop is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (27, ord("x"), ord("X")):
-                    # Back out, and round to the water, rod or no rod.
+                    # Back out from the counter, and round to the water.
+                    at_ = shop["at"]
+                    bx_, bz_, _ = tackle_back(at_["x"], at_["z"], at_["sx"], at_["sz"])
+                    if can_stand(bx_, bz_):
+                        cam_x, cam_z = bx_, bz_
                     shop = None
                     yaw = water_yaw(cam_x, cam_z, 30.0, yaw)
                     note, note_at = "the bell over the door rings behind you", now
@@ -36367,21 +36405,6 @@ def main(stdscr):
                     autopilot = False
             elif (street and on_roof is None and sewer is None and venue is None
                   and key in (ord("p"), ord("P"))
-                  and herring_near(cam_x, cam_z) is not None):
-                h_ = herring_near(cam_x, cam_z)
-                trip = {"phase": "talk", "h": h_, "sel": 0, "t0": now,
-                        "say": CAP_HELLO[int(now) % len(CAP_HELLO)], "quip": "",
-                        "quip_at": -1e9, "seen": ""}
-                fwd = side = spin = 0.0
-                autopilot = False
-            elif (street and on_roof is None and sewer is None and venue is None
-                  and key in (ord("p"), ord("P"))
-                  and tackle_near(cam_x, cam_z) is not None):
-                shop = new_shop(tackle_near(cam_x, cam_z), now)
-                fwd = side = spin = 0.0
-                autopilot = False
-            elif (street and on_roof is None and sewer is None and venue is None
-                  and key in (ord("p"), ord("P"))
                   and marina_near(cam_x, cam_z) is not None):
                 if wallet.take(BOAT_FEE):
                     h_ = marina_near(cam_x, cam_z)
@@ -36393,19 +36416,6 @@ def main(stdscr):
                     note, note_at = "she is yours - w opens her up", now
                 else:
                     note, note_at = "a speedboat is $%d" % BOAT_FEE, now
-            elif (street and on_roof is None and sewer is None and venue is None
-                  and key in (ord("p"), ord("P"))
-                  and gangway_near(cam_x, cam_z) is not None):
-                if wallet.take(LINER_FEE):
-                    h_ = gangway_near(cam_x, cam_z)
-                    liner_sail(h_, now)
-                    cruise = {"h": h_, "look": 0.0}
-                    fwd = side = spin = 0.0
-                    autopilot = False
-                    note, note_at = ("all aboard - she casts off. a and d look "
-                                     "round"), now
-                else:
-                    note, note_at = "a cruise is $%d" % LINER_FEE, now
             elif (street and on_roof is None and sewer is None and venue is None
                   and key in (ord("p"), ord("P"))
                   and sea_wheel_near(cam_x, cam_z) is not None):
@@ -36639,7 +36649,8 @@ def main(stdscr):
                 fishing = Fishing(tx_, tz_, th_, tackle, now, int(now * 1000.0),
                                   deck=HerringDeck(), water=trip["exp"]["water"])
             else:
-                cam_x, cam_z = herring_plank(trip["h"])
+                px_, pz_ = herring_plank(trip["h"])
+                cam_x, cam_z = px_ - HERRING_BACK, pz_
                 yaw = -math.pi * 0.5            # down the gangplank, facing the town
                 note, note_at = "%s: %s" % (CAPTAIN, CAP_HOME[1]), now
                 trip = None
@@ -36709,6 +36720,29 @@ def main(stdscr):
             reading = True
             fwd = side = spin = 0.0
             autopilot = False
+            venue = None
+        if venue is not None and venue[0] == "tackle":
+            shop = new_shop(venue[1], now)
+            fwd = side = spin = 0.0
+            autopilot = False
+            venue = None
+        if venue is not None and venue[0] == "herring":
+            trip = {"phase": "talk", "h": venue[1]["h"], "sel": 0, "t0": now,
+                    "say": CAP_HELLO[int(now) % len(CAP_HELLO)], "quip": "",
+                    "quip_at": -1e9, "seen": ""}
+            fwd = side = spin = 0.0
+            autopilot = False
+            venue = None
+        if venue is not None and venue[0] == "gangway":
+            h_ = venue[1]["h"]
+            if wallet.take(LINER_FEE):
+                liner_sail(h_, now)
+                cruise = {"h": h_, "look": 0.0}
+                fwd = side = spin = 0.0
+                autopilot = False
+                note, note_at = "all aboard - she casts off. a and d look round", now
+            else:
+                note, note_at = "a cruise is $%d" % LINER_FEE, now
             venue = None
         # The sky deck: walking into the lobby is stepping into the lift.
         if lift is not None:

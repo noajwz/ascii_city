@@ -57,7 +57,7 @@ read as holes in the night sky: a faint texture now (`tex`: plating `-` on the h
 decks), and **the stern is lit** - the aft end of each deck rows of suites with balconies, deck
 edges, portholes across the stern, her name across it.
 
-**Aboard** (`p` at the gangway, `LINER_FEE`; `cruise` in `main()`, counted by `elsewhere()`):
+**Aboard** (walking up to the gangway, `LINER_FEE`; `cruise` in `main()`, counted by `elsewhere()`):
 `liner_sail()` lays out her way (`liner_route()`: a Catmull-Rom line through waypoints set
 off the coast's own line, `shore_x()`, a point every 20 units) - out past the quay, south
 **`LINER_OFF` (340) off the beach**, past the ocean pier's head and its wheel (200 clear),
