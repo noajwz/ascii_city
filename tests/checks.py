@@ -10665,6 +10665,74 @@ for w_, h_ in ((40, 14), (80, 24), (160, 45), (300, 90), (451, 133)):
     except Exception as e_:
         bad_.append((w_, h_, repr(e_)))
 check("the beach draws at any size", not bad_, str(bad_))
+# The sea cave.
+cexp_ = ac.cave_exp()
+crt_ = ac.expedition_route(hh_, cexp_)
+cave_ = ac.cave_site(hh_)
+ccx_, ccz_, cmo_ = cave_
+inb_ = cmo_ + math.pi
+check("the sea cave: a rock off the coast the speedboat stops at, a chamber inside",
+      all(ac.boat_water(*p_) or ac.herring_in(*p_) for p_ in crt_[0])
+      and ac.cave_in(ccx_ + 40.0, ccz_) and not ac.boat_water(ccx_ + 40.0, ccz_)
+      and ac.fish_water(ccx_ + 3.0, ccz_ + 3.0) == "cave"
+      and ac.fish_water(ccx_ + math.sin(inb_) * 22.0, ccz_ + math.cos(inb_) * 22.0)
+      == "cavedark" and ac.fish_water(ccx_ + 45.0, ccz_) is None)
+bx_, bz_ = ac.cave_beam(ccx_, ccz_, cmo_)
+lit_pool_ = {ac.FISH[n_]["name"] for n_, _ in ac.bite_pool("cave", "worms", 0.0)}
+dark_pool_ = {ac.FISH[n_]["name"] for n_, _ in ac.bite_pool("cavedark", "worms", 0.0)}
+check("the moonbeam is lit water; the Old One only bites out in the dark",
+      ac.fish_water(bx_, bz_) == "cave" and "the Old One" in dark_pool_
+      and "the Old One" not in lit_pool_
+      and {"blind cave fish", "cave eel", "skeleton's boot"} <= lit_pool_,
+      "%s / %s" % (sorted(lit_pool_), sorted(dark_pool_)))
+cf_ = ac.Fishing(ccx_, ccz_, inb_, rig_(1, 1), 0.0, 9, deck=ac.DinghyDeck())
+cf_.cave, cf_.tide = cave_, 0.2
+cf_.aim = 0.0
+t_ = 0.0
+while cf_.phase == "aim" or cf_.swing(t_) < 0.75:
+    t_ += 0.01
+    if cf_.phase == "aim" and cf_.swing(t_) >= 0.75:
+        cf_.key("act", t_)
+        break
+for _ in range(60):
+    t_ += 1.0 / 30.0
+    cf_.step(t_)
+end_ = ac.cave_end(cf_, t_)
+ac.FIREFLY, ac.RAIN, was_ = 9941, 9942, (ac.FIREFLY, ac.RAIN)
+cf_.nibbles = [t_]
+cg_ = ac.render_fishing(cf_, 160, 45, t_ + 0.05)[0]
+ac.FIREFLY, ac.RAIN = was_
+txt_ = "\n".join("".join(r_) for r_ in cg_)
+check("cast past the lantern you fish blind: no float, the line into the dark, a plip",
+      cf_.water == "cavedark" and ac.cave_dark(cf_, t_)
+      and abs(math.hypot(end_[0] - ccx_, end_[2] - ccz_) - ac.CAVE_LAMP) < 0.01
+      and "plip" in txt_ and "ARCH" in txt_, "%s %s" % (cf_.water, cf_.land))
+eel_ = [n_ for n_, sp_ in enumerate(ac.FISH) if sp_["name"] == "cave eel"][0]
+ef_ = ac.Fishing(ccx_, ccz_, inb_, rig_(1, 3), 0.0, 4, deck=ac.DinghyDeck())
+ef_.cave, ef_.water, ef_.who = cave_, "cave", eel_
+ef_.land = (ccx_ + math.sin(inb_) * 8.0, ccz_ + math.cos(inb_) * 8.0)
+ef_.hook(1.0)
+t_ = 1.0
+while ef_.snag < 0.5 and t_ < 30.0 and ef_.phase == "fight":
+    t_ += 1.0 / 30.0
+    ef_.step(t_)
+check("the cave eel pulls for the cracks, the way the wreck's fish dive for her",
+      ac.FISH[eel_]["cracks"] and ef_.snag >= 0.5, "%.2f %s" % (ef_.snag, ef_.phase))
+check("his voice comes back off the rock",
+      ac.cave_echo("Mind yer head, matey.") == "Mind yer head, matey... atey... tey...")
+bad_ = []
+for w_, h_ in ((40, 14), (80, 24), (110, 34), (160, 45), (300, 90), (451, 133)):
+    for q_ in range(16):
+        cf_.aim, cf_.tide = q_ * math.tau / 16.0 - math.pi, q_ / 15.0
+        try:
+            ac.render_fishing(cf_, w_, h_, 50.0 + q_)
+        except Exception as e_:
+            bad_.append((w_, h_, q_, repr(e_)))
+check("the cave draws all the way round, the tide in or out, at any size",
+      not bad_, str(bad_[:3]))
+names_ = [e_["name"] for e_ in ac.expeditions_for(ac.Tackle())]
+check("the sea cave is on his list, seventh before you have a map",
+      names_.index("the sea cave") == 6, str(names_))
 hv_ = [sp_ for sp_ in ac.FISH if sp_["name"] == "halibut"][0]
 check("the halibut is heavy, and cod are under the ice too",
       hv_["heavy"] and any(ac.FISH[n_]["name"] == "cod"

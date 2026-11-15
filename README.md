@@ -346,7 +346,9 @@ the city is infinite, identical every time you walk back to it, and held in no m
   launch pad**, where he times it so a rocket goes up over you (and scares the three-eyed
   flounder off for a minute). Sit through enough of his tales and he gives you a **treasure
   map**: then **Treasure Island** is on his list, with its palm, its skull rock and the golden
-  fish - and `g` rows you ashore with a shovel. Out there `c` takes you
+  fish - and `g` rows you ashore with a shovel - or **the sea cave**, where he rows you in
+  under the arch in the dinghy: past your lantern's light you fish blind, for the Old One, and
+  the tide is coming in. Out there `c` takes you
   into **his cabin**: look all the way
   round, the sea through the windows, the wheel, a chart with an X where you are, the parrot,
   your biggest fish over the door - and him behind his counter, with grog, bait at sea prices

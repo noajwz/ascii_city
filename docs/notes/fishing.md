@@ -359,3 +359,45 @@ the chest, `TREASURE` ($1200), and the map is used up - six more tales for the n
 Fixed with these: the halibut never had its `heavy` flag (`_sp()` had no such argument), and
 cod were not under the ice.
 
+## The sea cave
+
+The eighth expedition, asked for on 2026-11-15 (pitched as under the headland's lighthouse,
+but the headland is on the river, where the Herring cannot go - so it is a rock of its own off
+the coast). $65, 30 s, the spinning rod; last on `EXPEDITIONS`, so seventh on his list before a
+map and eighth after. The rock (`draw_cave_rock()`, `CAVE_ARCH_ART`, pitted grey with the arch
+in its foot, the dark through it the dark behind) stands `CAVE_AHEAD` on from where she anchors,
+420 off the beach and 950 up the coast; the speedboat stops at it (`cave_in()`).
+
+On arrival you are not on her deck: he rows you in, and you fish from the dinghy
+(`DinghyDeck`, low) at the middle of the chamber, facing in, the arch behind you.
+`Fishing.cave` is `(x, z, mouth)`, and `render_fishing()` asks `render_cave()` for the picture
+instead of `render_street()`: the wall all the way round by screen column (`cave_wall()`, round
+and not quite, `CAVE_R`), its foot wet, glowworms high on it and on the roof; the arch in it at
+the `mouth` bearing with the night through it and the Herring's mast light; a hole in the roof
+and the moonbeam coming down through it to the water (`cave_beam()`); your lantern's ring of
+lit water (`CAVE_LAMP`); drips - a falling drop and a ring where you can see them, the word
+"drip" where you cannot; and the lantern itself at the bow. It makes `v.walls` of the wall, so
+`put_point()` and the rest work as on the street. 2 ms a frame at 160x45, 5 at 300x90.
+
+**The dark.** `cave_seen()`: the lantern's ring and the beam are seen, the rest is not. Cast
+out there (`cave_dark()`) and the float is not drawn at all: the line goes from the rod to the
+edge of the lantern's ring and off into the black (`cave_end()`, for `draw_rod()`), the rod
+tip knocks at a nibble and a bite as with no float, and `cave_cues()` writes what you hear
+where the float is - plip at a nibble, PLOP! when it goes under, splash in a fight. The water
+there is `"cavedark"`, the seen water `"cave"`: **the Old One bites only in `"cavedark"`.**
+
+**The tide.** `Fishing.tide` (0 to 1 over `CAVE_TIDE`, 180 s, from `trip["cave_t0"]`) lowers
+the arch (`CAVE_ARCH`) and fills the ARCH bar along the top (`draw_tide()`). He warns you at
+half and at 0.8 (`CAP_TIDE`); at 1 he rows you out whatever is on: a fish on the line is cut
+loose (`Fishing.key("stop")`: the rig with it, as cutting one loose always does), a card on the
+screen is kept, and she goes home (`trip_home()`, which the x key now uses too).
+
+There is no cabin in the cave: `c` gets `CAP_CAVE_CABIN`. Everything he says in there comes back
+off the rock (`cave_echo()`: "matey... atey... tey...").
+
+Its fish: blind cave fish (no eye on its card, art `blind`), the cave eel (`cracks=True`: the
+wreck's snag, `Fishing.wreck()`, works for it in the cave - it pulls for a crack, IN A CRACK,
+s gives it slack; the gauge says CRACK), the cave lobster ($45 a kilo, squid only), the Old One
+(legendary, 30-90 kg, art `catfish`), and the smuggler's rum keg ($60), a rusty lantern and a
+skeleton's boot.
+

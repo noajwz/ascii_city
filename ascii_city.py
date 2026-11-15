@@ -1677,7 +1677,8 @@ def coast_reset():
                  "_ramen_firsts", "_vend_picks", "_vend_faces", "_sewer_cache",
                  "_lair_cache", "_cab_seen", "_station_cache", "_center_cache",
                  "_shore_cache", "_coast_cache", "_beach_blocks", "_kiosk_cache",
-                 "_wreck_cache", "_bio_cache", "_anchor_cache", "_island_cache"):
+                 "_wreck_cache", "_bio_cache", "_anchor_cache", "_island_cache",
+                 "_cave_cache"):
         globals()[name].clear()
 
 
@@ -23880,6 +23881,8 @@ def render_street(v, now):
             draw_ice(ch, co, v, walls, ix_, iz_, now, wet)
         for ix_, iz_ in near_islands(v.x, v.z, 1600.0):
             draw_island(ch, co, v, walls, ix_, iz_, now, wet)
+        for cx_, cz_, cm_ in near_caves(v.x, v.z, 1500.0):
+            draw_cave_rock(ch, co, v, walls, cx_, cz_, cm_, now, wet)
     for bx, bz in near_rowboats(v, now, 120.0):
         draw_rowboat(ch, co, v, walls, bx, bz, now, wet)
     ci_ = int(v.x / CELL + BIG) - BIG
@@ -31851,7 +31854,7 @@ def boat_water(x, z):
     """Can she be here: open sea or the river's mouth, and not in the ship."""
     i, j = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
     if (coast_kind(i, j) not in ("sea", "mouth") or herring_in(x, z) or wreck_in(x, z)
-            or bio_in(x, z) or ice_in(x, z) or island_in(x, z)):
+            or bio_in(x, z) or ice_in(x, z) or island_in(x, z) or cave_in(x, z)):
         return False
     for h_ in near_harbours(x, z, 120.0):
         lx, lz, head = liner_pose(h_, _clock[0])
@@ -33012,6 +33015,12 @@ EXPEDITIONS = [
      "short": ("Ye'll want the spinnin' rod at least. Still - yer money."),
      "there": ("Treasure Island! Row ashore an' dig where the map says - g. I'll "
                "mind the boat. An' the rum.")},
+    {"name": "the sea cave", "fee": 65, "out": 420.0, "along": 950.0, "sail": 30.0,
+     "water": None, "rod": 1, "site": "cave",
+     "says": "In the dinghy, into the rock, where the light don't go. Mind the tide.",
+     "fish": "blind cave fish, cave eel, cave lobster - an' the Old One",
+     "short": ("Ye'll want the spinnin' rod at least. Still - yer money."),
+     "there": "In we go, in the dinghy. Mind yer head, matey."},
 ]
 CAP_TOO_BRIGHT = ("Not with a moon like that up, matey - the sea won't glow. Come back "
                   "on a dark night.")
@@ -33989,6 +33998,349 @@ def render_dig(trip, tackle, width, height, now):
     return ch, co
 
 
+# --- the sea cave -------------------------------------------------------------------
+# The eighth expedition, asked for on 2026-11-15: a great rock off the coast with a
+# black arch in its foot. The Herring anchors outside and the captain rows you in
+# in the dinghy, and you fish from it in the dark: rock all round, glowworms on
+# the roof, a shaft of moonlight down through a hole in it, the arch behind you
+# the one grey shape of the night. Two twists. The tide is coming in: the arch
+# gets lower the longer you stay, and when it is gone he rows you out, whatever
+# you have on. And your lantern lights only a ring of water round the dinghy:
+# cast past it, out of the moonbeam, and you fish blind - no float, only the
+# line going off into the dark, and a plip where something is at the bait. The
+# Old One only bites out there.
+CAVE_AHEAD = 90.0      # the rock's middle, this far on from where the Herring anchors
+CAVE_ROCK = 55.0       # the rock: the speedboat stops at it
+CAVE_R = 31.0          # the chamber inside it, round where the dinghy lies
+CAVE_LAMP = 11.0       # how far your lantern lights the water round the dinghy
+CAVE_BEAM = (19.0, 0.6, 4.5)  # the moonbeam: this far in, this far round, how wide
+CAVE_ROOF = 9.0        # the roof where it meets the wall
+CAVE_DOME = 15.0       # and over the middle, where the hole is
+CAVE_ARCH = (0.2, 6.5)  # the arch: half its width, a bearing; its height at low tide
+CAVE_TIDE = 180.0      # seconds from rowing in to the arch going under
+CAP_TIDE = ["Tide's comin' in, matey. The arch be half gone.",
+            "Duck yer head an' wind in - we're leavin' soon!",
+            "Out we go! Heads down, matey!"]
+CAP_CAVE_CABIN = "Hush now - the cabin's back on the Herring, matey."
+CAVE_HUD = (" the sea cave  -  ad turns  -  f casts  -  x rows you out ")
+CAVE_ARCH_ART = [
+    "            __..--~~^~~~~~^~~--..__            ",
+    "       _.-~~ .:  ' .:  .  ' :. .  ' ~~-._       ",
+    "    .-~ ' .:  .  ' :.  '.  : .' . :.  '  ~-.    ",
+    "   / .: '  . :' .  ' :. '  . :'  . '  .: . \\   ",
+    "  | :. ' .:  .' :  ___.....___  .: ' . :' . |  ",
+    "  |.  :' . :' . .-~           ~-.  :. ' .: |  ",
+    " / .: ' :.  .' /                 \\ ' .: .' \\ ",
+    "/____.:'.____.|                   |.____.:'__\\",
+]
+_cave_cache = {}
+
+
+def cave_exp():
+    return next(e for e in EXPEDITIONS if e.get("site") == "cave")
+
+
+def cave_site(h):
+    """(x, z, the bearing from the middle out through the arch) of the cave
+    off this harbour: the rock on from where the Herring anchors, its arch
+    facing her."""
+    hit = _cave_cache.get(h)
+    if hit is None:
+        x, z, th = route_pose(expedition_route(h, cave_exp()), 1.0)
+        hit = _cave_cache[h] = (x + math.sin(th) * CAVE_AHEAD,
+                                z + math.cos(th) * CAVE_AHEAD, th + math.pi)
+    return hit
+
+
+def near_caves(x, z, reach):
+    """The caves within reach, as (x, z, mouth)."""
+    if not COAST or x + reach + 3000.0 < COAST_LAND * CELL:
+        return
+    exp = cave_exp()
+    for h in near_harbours(x, z - exp["along"], reach + 400.0):
+        cx, cz, mouth = cave_site(h)
+        if (cx - x) ** 2 + (cz - z) ** 2 < reach * reach:
+            yield cx, cz, mouth
+
+
+def cave_in(x, z):
+    """Is this point the rock: for the speedboat."""
+    return any(True for _ in near_caves(x, z, CAVE_ROCK))
+
+
+def cave_wall(cx, b):
+    """How far the chamber's wall is from its middle on this bearing: round,
+    and not quite."""
+    s = (int(cx) % 97) * 0.13
+    return CAVE_R * (1.0 + 0.09 * math.sin(3.0 * b + s)
+                     + 0.05 * math.sin(7.0 * b + 2.0 * s))
+
+
+def cave_beam(cx, cz, mouth):
+    """(x, z) of where the moonbeam comes down on the water."""
+    b = mouth + math.pi + CAVE_BEAM[1]
+    return cx + math.sin(b) * CAVE_BEAM[0], cz + math.cos(b) * CAVE_BEAM[0]
+
+
+def cave_seen(cave, x, z):
+    """Can you see this bit of the water: in your lantern's ring round the
+    dinghy, or in the moonbeam."""
+    cx, cz, mouth = cave
+    if (x - cx) ** 2 + (z - cz) ** 2 < CAVE_LAMP * CAVE_LAMP:
+        return True
+    bx, bz = cave_beam(cx, cz, mouth)
+    return (x - bx) ** 2 + (z - bz) ** 2 < CAVE_BEAM[2] * CAVE_BEAM[2]
+
+
+def cave_water(x, z):
+    """In a cave: "cave" where you can see it, "cavedark" where you cannot,
+    "rock" for the rock itself; None outside every cave."""
+    for cave in near_caves(x, z, CAVE_ROCK):
+        cx, cz, _ = cave
+        if math.hypot(x - cx, z - cz) < cave_wall(cx, math.atan2(x - cx, z - cz)) - 1.0:
+            return "cave" if cave_seen(cave, x, z) else "cavedark"
+        return "rock"
+    return None
+
+
+def cave_echo(s):
+    """What he says, and the cave saying the end of it back: "matey...
+    atey... tey"."""
+    words = s.rstrip(" .!?-").split()
+    if not words:
+        return s
+    w = "".join(c for c in words[-1] if c.isalpha()).lower()
+    if len(w) < 4:
+        return s
+    return "%s... %s... %s..." % (s.rstrip(" .!?-"), w[1:], w[len(w) // 2:])
+
+
+class DinghyDeck:
+    """The dinghy: low on the water, rocking a little."""
+
+    def eye(self, now):
+        return 1.5 + 0.08 * math.sin(now * 1.6) + 0.04 * math.sin(now * 3.1)
+
+
+def draw_cave_rock(ch, co, v, walls, cx, cz, mouth, now, wet):
+    """The rock from outside, from the sea: grey and pitted, with the arch in
+    its foot - the dark through it is the dark behind."""
+    if (cx - v.x) ** 2 + (cz - v.z) ** 2 > 1500.0 ** 2:
+        return
+    aw = max(len(r) for r in CAVE_ARCH_ART)
+    blit_sprite(ch, co, v, walls, [r.ljust(aw) for r in CAVE_ARCH_ART], cx, cz, -0.3,
+                24.0, CAVE_ROCK * 2.1, CURB)
+
+
+def render_cave(v, f, now):
+    """Inside the cave, from the dinghy: the wall all the way round with the
+    arch in it (lower as the tide comes in, the night through it), the roof
+    over that with its glowworms and the hole the moon comes down through,
+    and the black water - lit only in your lantern's ring and the beam."""
+    w, h = v.width, v.height
+    ch = [[" "] * w for _ in range(h)]
+    co = [[0] * w for _ in range(h)]
+    cx, cz, mouth = f.cave
+    tide = f.tide or 0.0
+    arch_h = CAVE_ARCH[1] * max(0.0, 1.0 - tide)
+    wall_d, wall_top, wall_base = [None] * w, [h] * w, [-1] * w
+    runs = [[] for _ in range(w)]
+    glow, glow_dim = NEON[2][0], NEON[2][1]
+    for sx in range(w):
+        rx, rz = v.ray(sx)
+        b = math.atan2(rx, rz)
+        t = cave_wall(cx, b) / math.hypot(rx, rz)       # along the view
+        wx, wz = v.x + rx * t, v.z + rz * t
+        top_p, base_p = v.project(wx, CAVE_ROOF, wz), v.project(wx, 0.0, wz)
+        if top_p is None or base_p is None:
+            continue
+        top, base = int(round(top_p[1])), int(round(base_p[1]))
+        wall_d[sx], wall_top[sx], wall_base[sx] = t, top, base
+        runs[sx] = [(t, top, base)]
+        da = (b - mouth + math.pi) % math.tau - math.pi
+        half = CAVE_ARCH[0]
+        bb = int(b * 140.0)
+        for y in range(max(0, top), min(h, base + 1)):
+            hy = v.eye - (y - v.horizon) * t / v.fy        # how high on the wall
+            m = _mix(bb, y, 6951)
+            if abs(da) < half:
+                ah = arch_h * math.sqrt(max(0.0, 1.0 - (da / half) ** 2))
+                if hy < ah:
+                    # Through the arch: the night, the sea, and the Herring's light.
+                    if (abs(da) < half / 12.0 and int(round(v.horizon - (
+                            min(ah - 0.8, 2.6) - v.eye) * v.fy / t)) == y and
+                            ch[y][sx - 1 if sx else 0] != "o"):
+                        ch[y][sx], co[y][sx] = "o", SNOW
+                    elif hy < 0.5:
+                        ch[y][sx], co[y][sx] = ("~" if m % 3 else " "), RAIN_FAR
+                    elif m % 11 == 0:
+                        ch[y][sx], co[y][sx] = ".", MOON_DIM
+                    continue
+                if hy < ah + 0.6:
+                    ch[y][sx], co[y][sx] = ("(" if da < -half * 0.8 else ")" if
+                                            da > half * 0.8 else "_"), CURB
+                    continue
+            if hy < 0.5:
+                if m % 3 == 0:                                  # the wet rock
+                    ch[y][sx], co[y][sx] = ("-" if m & 8 else "_"), ROU_BLACK
+            elif hy > CAVE_ROOF * 0.55 and m % 19 == 0:
+                lit = _mix(bb, y, int(now * 0.7)) % 5 == 0
+                ch[y][sx], co[y][sx] = ".", glow if lit else glow_dim
+            elif m % 17 == 0:
+                ch[y][sx], co[y][sx] = ("'" if m & 64 else "."), ROU_BLACK
+        # The roof over the wall, to the top of the screen: glowworms.
+        for y in range(0, max(0, top)):
+            m = _mix(bb, y, 6953)
+            if m % 23 == 0:
+                lit = _mix(bb, y, int(now * 0.5)) % 4 == 0
+                ch[y][sx], co[y][sx] = ("'" if lit and m & 32 else "."), (
+                    glow if lit else glow_dim)
+    v.walls = walls = (wall_d, wall_top, wall_base, [0] * w, runs)
+    # The hole in the roof, and the moonbeam coming down through it.
+    bx, bz = cave_beam(cx, cz, mouth)
+    hole = v.project(bx, CAVE_DOME, bz)
+    if hole is not None:
+        hx, hy_ = int(round(hole[0])), int(round(hole[1]))
+        for q in range(-4, 5):
+            for r in range(-1, 2):
+                if 0 <= hy_ + r < h and 0 <= hx + q < w and abs(q) + 2 * abs(r) < 5:
+                    m = _mix(q, r, 6955)
+                    ch[hy_ + r][hx + q] = "*" if m % 5 == 0 else " "
+                    co[hy_ + r][hx + q] = MOON
+        if 0 <= hy_ < h and 0 <= hx < w:
+            ch[hy_][hx], co[hy_][hx] = "(", MOON          # the moon, a sliver of it
+    r_ = CAVE_BEAM[2]
+    foot = v.project(bx, 0.0, bz)
+    if foot is not None:
+        # The shaft: as wide as the beam where it is, from the hole (or the
+        # top of the screen) down to the water, the light drifting in it.
+        half = r_ * 0.55 * v.fx / foot[2]
+        fy_ = int(round(foot[1]))
+        top_ = int(round(hole[1])) if hole is not None else 0
+        for y in range(max(0, top_ + 2), min(h, fy_)):
+            for x in range(int(foot[0] - half), int(foot[0] + half) + 1):
+                if 0 <= x < w and not hidden(walls, x, y, foot[2]):
+                    m = _mix(x, y + int(now * 3.0), 6957)
+                    edge = abs(x - foot[0]) > half * 0.7
+                    if m % (5 if edge else 3) == 0:
+                        ch[y][x] = ":" if m & 32 else "'" if m & 64 else "."
+                        co[y][x] = MOON_DIM if edge or m & 128 else MOON
+    for k in range(70):
+        m = _mix(k, int(now * 1.5), 6959)
+        a = (m & 255) / 255.0 * math.tau
+        rr = r_ * math.sqrt(((m >> 8) & 255) / 255.0)
+        put_point(ch, co, v, walls, bx + math.sin(a) * rr, 0.02,
+                  bz + math.cos(a) * rr, "~" if m & 1024 else "-",
+                  MOON if rr < r_ * 0.5 else MOON_DIM)
+    # Your lantern's ring on the water.
+    step = 0.9
+    n = int(CAVE_LAMP / step)
+    for gi in range(-n, n + 1):
+        for gj in range(-n, n + 1):
+            px, pz = cx + gi * step, cz + gj * step
+            d = math.hypot(px - cx, pz - cz)
+            if d > CAVE_LAMP or d < 1.5:
+                continue
+            m = _mix(gi, gj + int(now * 1.2), 6961)
+            if m % (2 + int(d / 4.0)) == 0:
+                put_point(ch, co, v, walls, px, 0.02, pz, "~" if m & 16 else "-",
+                          GOLD_DIM if d < CAVE_LAMP * 0.6 else EMBER)
+    # Drips from the roof: a ring where you can see it, a sound where not.
+    for k in range(3):
+        period = 2.3 + k * 0.7
+        n_ = int((now + k * 0.9) / period)
+        u = ((now + k * 0.9) % period) / period
+        m = _mix(n_, k, 6963)
+        a = (m & 255) / 255.0 * math.tau
+        rr = CAVE_R * 0.85 * math.sqrt(((m >> 8) & 255) / 255.0)
+        px, pz = cx + math.sin(a) * rr, cz + math.cos(a) * rr
+        if cave_seen(f.cave, px, pz):
+            if u < 0.25:
+                put_point(ch, co, v, walls, px, CAVE_ROOF * (1.0 - u * 4.0), pz, "'",
+                          SNOW)
+            elif u < 0.6:
+                r = (u - 0.25) * 4.0
+                for q in range(8):
+                    a2 = q * 0.785
+                    put_point(ch, co, v, walls, px + math.cos(a2) * r, 0.02,
+                              pz + math.sin(a2) * r, ".", SNOW)
+        elif 0.25 < u < 0.4:
+            pr = v.project(px, 0.0, pz)
+            if pr is not None:
+                _text(ch, co, int(pr[1]), int(pr[0]) - 2, "drip", ROU_BLACK)
+    # And the lantern itself, hung on the dinghy's bow at your left.
+    if h > 14 and w > 40:
+        lx, ly = int(w * 0.12), h - 6
+        flick = _mix(int(now * 9.0), 0, 6965) % 7 == 0
+        for r, line in enumerate((" _ ", "[" + ("*" if flick else "o") + "]", " ' ")):
+            _text(ch, co, ly + r, lx, line, GOLD if r == 1 else CURB)
+    return ch, co, 0.0
+
+
+def cave_cues(ch, co, v, f, now):
+    """Fishing in the dark: what you hear of the float you cannot see - a plip
+    at a nibble, a plop when it goes under, splashing out there in a fight."""
+    pt = f.float_at(now)
+    if pt is None or f.cave is None or cave_seen(f.cave, pt[0], pt[2]):
+        return
+    pr = v.project(*pt)
+    if pr is None:
+        return
+    sx, sy = int(round(pr[0])), int(round(pr[1]))
+    if f.phase == "wait" and f.biting(now):
+        _label(ch, co, sy - 1, sx - 2, "PLOP!", FLASH)
+    elif f.phase == "wait" and f.nibbling(now):
+        _text(ch, co, sy - 1, sx - 2, "plip", RAIN)
+    elif f.phase == "fight" and (f.running(now) or int(now * 3.0) % 4 == 0):
+        _text(ch, co, sy - 1, sx - 3, "splash", RAIN if f.running(now) else CURB)
+
+
+def cave_end(f, now):
+    """Where the line goes off into the dark, for the rod to draw it to: the
+    edge of the lantern's ring on the way to the float - or the float, where
+    you can see it."""
+    pt = f.float_at(now)
+    if pt is None or f.cave is None or cave_seen(f.cave, pt[0], pt[2]):
+        return pt
+    cx, cz, _ = f.cave
+    d = math.hypot(pt[0] - cx, pt[2] - cz)
+    if d < 1e-6:
+        return pt
+    u = CAVE_LAMP / d
+    return cx + (pt[0] - cx) * u, 0.05, cz + (pt[2] - cz) * u
+
+
+def draw_tide(ch, co, f, now, k):
+    """In the cave: how much of the arch is left above the water."""
+    bw = 20 * k
+    left = max(0.0, 1.0 - (f.tide or 0.0))
+    _label(ch, co, 2, 2, "ARCH  ", HUD)
+    c = GOLD if left > 0.5 else RAIN if left > 0.2 else ROU_RED
+    for q in range(bw):
+        on = q < int(left * bw)
+        _text(ch, co, 2, 8 + q, "#" if on else "~", c if on else RAIN_FAR)
+    word = ("plenty of room under the arch" if left > 0.5 else
+            "the tide is coming in" if left > 0.2 else
+            "the arch is nearly under - he'll row you out")
+    _label(ch, co, 3, 2, word, ROU_RED if left <= 0.2 else HUD)
+
+
+def cave_dark(f, now):
+    """Is the float out in the dark of the cave, where you cannot see it."""
+    if f.cave is None:
+        return False
+    pt = f.float_at(now)
+    return pt is not None and not cave_seen(f.cave, pt[0], pt[2])
+
+
+def trip_home(trip, now):
+    """He weighs anchor and takes you home, the way you came."""
+    line_, along_ = trip["route"]
+    trip.update(phase="home", t0=now, dur=trip["dur"] * 0.7, look=0.0,
+                route=(list(reversed(line_)),
+                       [along_[-1] - a_ for a_ in reversed(along_)]))
+
+
 # --- the captain's cabin ---------------------------------------------------------
 # Asked for on 2026-11-15: while fishing at anchor, c goes in to the captain's
 # cabin, the wheelhouse, with the rooftop bar's whole turn round: the sea and the
@@ -34419,19 +34771,20 @@ WATER_NAMES = {"river": "the river", "lake": "the lake", "mouth": "the river's m
                "wreck": "the wreck", "bio": "the glowing sea",
                "trench": "the deep trench", "ice": "the ice floes",
                "pad": "the launch pad", "island": "treasure island",
+               "cave": "the sea cave", "cavedark": "the dark of the sea cave",
                "fountain": "the fountain"}
 _fish_rare = [False]   # the menu's: the next bite is the rarest thing there
 
 
 def _sp(name, where, baits, lo, hi, power, odds, price, colour, art, likes=(),
-        say="", junk=False, alien=False, legend=False, heavy=False):
+        say="", junk=False, alien=False, legend=False, heavy=False, cracks=False):
     """One kind of fish (or of rubbish): the waters it is in, what it takes,
     how heavy it comes, how hard it pulls, how common it is, $ a kilo (flat,
     for rubbish), its colour and its drawing."""
     return {"name": name, "where": where, "baits": baits, "lo": lo, "hi": hi,
             "power": power, "odds": odds, "price": price, "colour": colour,
             "art": art, "likes": likes, "say": say, "junk": junk, "alien": alien,
-            "legend": legend, "heavy": heavy}
+            "legend": legend, "heavy": heavy, "cracks": cracks}
 
 
 _FRESH = ("bread", "worms")
@@ -34608,6 +34961,18 @@ FISH = [
     _sp("orange mackerel", ("pad",), ("spinner", "squid"), 0.3, 1.2, 0.45, 26, 12,
         "neon4", "long", say="they glow faintly orange. nobody at the space centre "
                              "will say why"),
+    # In the sea cave - and the Old One, only out in the dark.
+    _sp("blind cave fish", ("cave", "cavedark"), ("worms", "lugworm", "bread"), 0.1,
+        0.6, 0.25, 30, 14, "SNOW", "blind", say="white, and no eyes at all. it has "
+                                               "never needed them"),
+    _sp("cave eel", ("cave", "cavedark"), ("squid", "lugworm", "worms"), 1.0, 6.0, 0.85,
+        14, 12, "CURB", "eel", cracks=True,
+        say="it lives in the cracks, and it fights to get back in one"),
+    _sp("cave lobster", ("cave", "cavedark"), ("squid",), 0.5, 3.0, 0.4, 8, 45, "SNOW",
+        "crab", say="pale, near enough see-through. the restaurants pay anything"),
+    _sp("the Old One", ("cavedark",), ("worms", "squid", "lugworm", "bread"), 30.0,
+        90.0, 1.6, 0.9, 20, "SNOW", "catfish", legend=True,
+        say="a white catfish the size of the dinghy. it knew his grandfather"),
     # Round Treasure Island.
     _sp("parrotfish", ("island",), ("lugworm", "squid"), 1.0, 5.0, 0.55, 22, 12,
         "neon1", "round", say="the captain's parrot is deeply insulted"),
@@ -34640,6 +35005,12 @@ FISH = [
         junk=True, say="brass, and empty. you hope"),
     _sp("chunk of ice", ("ice",), (), 2.0, 6.0, 0.3, 4, 0, "SNOW", "icecube",
         junk=True, say="it melts in the cool box. the cool box is very cool now"),
+    _sp("smuggler's rum keg", ("cave", "cavedark"), (), 8.0, 14.0, 0.5, 2.5, 60, "BARK",
+        "keg", junk=True, say="the captain wants it. the captain is not getting it"),
+    _sp("rusty lantern", ("cave", "cavedark"), (), 1.0, 2.0, 0.3, 4, 5, "EMBER",
+        "lantern", junk=True, say="somebody came in here before you, once"),
+    _sp("skeleton's boot", ("cave", "cavedark"), (), 0.5, 1.0, 0.25, 4, 0, "CURB",
+        "boot", junk=True, say="there is still a foot in it. you do not look closer"),
     _sp("booster fragment", ("pad",), (), 5.0, 15.0, 0.55, 2.5, 200, "CURB", "booster",
         junk=True, say="the space centre pays well to get these back. no questions"),
     _sp("coconut", ("island",), (), 1.0, 2.0, 0.2, 5, 2, "BARK", "coconut", junk=True,
@@ -34807,6 +35178,18 @@ FISH_ART = {
                 "/_____/ | ",
                 "|     | / ",
                 "|_____|/  "],
+    "blind": ["      _.-~~-._    ",
+              " |\\ .'  (((    '. ",
+              " | >   )))      _>",
+              " |/ '._______.-'  "],
+    "catfish": ["         _.-~~~~~~~~-._         ",
+                "  |\\ .-'    .    .     '-.  ~~  ",
+                "  | >        .    .   .   o  ==-",
+                "  |/ '-._.______._____.-'   ~~  "],
+    "keg": ["  .------.  ",
+            " /| ~~~~ |\\ ",
+            "| | RUM  | |",
+            " \\|______|/ "],
     "flat3": ["     .-~~~~~~~-.     ",
               "   .'  o  o  o  `.   ",
               " <(  .  .  .  .  )>  ",
@@ -34897,6 +35280,9 @@ def fish_water(x, z):
     if COAST and i >= COAST_LAND:
         kind = coast_kind(i, j)
         if kind is not None:
+            cw_ = cave_water(x, z) if kind == "sea" else None
+            if cw_ is not None:
+                return None if cw_ == "rock" else cw_
             if kind == "mouth":
                 return "mouth"
             if kind not in ("sea", "surf"):
@@ -35340,6 +35726,8 @@ class Fishing:
         self.trail = []         # in the glowing sea: where the fish has been
         self.sink_until = 0.0   # in the deep trench: when the lead gets to the bottom
         self.scared_until = 0.0  # off the launch pad: nothing bites till then
+        self.cave = None        # in the sea cave: (x, z, mouth) of it
+        self.tide = None        # and how far the tide has come in, 0..1
         self.chill = False      # among the floes: your hands go cold
         self.cold = 0.0         # and how cold they are, 0 warm to 1 numb
         self.big = False
@@ -35547,7 +35935,9 @@ class Fishing:
             if self.water is not None and self.force:
                 self.water = self.force
             if self.water is None:
-                self.say("it lands on dry ground - reel in and try again", now)
+                self.say("it clatters off the cave wall - reel in and try again"
+                         if self.cave is not None else
+                         "it lands on dry ground - reel in and try again", now)
                 self.to("gone", now)
             else:
                 self.to("wait", now)
@@ -35611,8 +36001,8 @@ class Fishing:
         reel = rod[4] * (TRENCH_REEL if self.water == "trench" else 1.0) * (
             1.0 - 0.45 * self.cold)
         rod = rod[:4] + (reel,) + rod[5:]
-        if self.water == "wreck" and not junk and self.wreck(dt, now, cranking,
-                                                              giving, run, p):
+        if (self.water == "wreck" or sp.get("cracks")) and not junk and self.wreck(
+                dt, now, cranking, giving, run, p):
             return
         if self.snagged is not None:
             # Caught on her: the line is fast to the iron, not the fish.
@@ -35686,10 +36076,14 @@ class Fishing:
                 self.free += dt
             if self.free >= WRECK_FREE:
                 self.snagged, self.snag = None, 0.55
-                self.say("it swims back out of her - free! now keep it up", now)
+                self.say("it comes back out of the crack - free! keep it out"
+                         if self.water != "wreck" else
+                         "it swims back out of her - free! now keep it up", now)
             elif now - self.snagged > WRECK_HOLD:
                 tk.lose_rig()
-                self.say("the line parted on the wreck's iron - keep 'em up off her",
+                self.say("the line parted on the rock - keep it out of the cracks"
+                         if self.water != "wreck" else
+                         "the line parted on the wreck's iron - keep 'em up off her",
                          now)
                 self.to("gone", now)
                 return True
@@ -35714,7 +36108,8 @@ class Fishing:
                 self.to("gone", now)
                 return True
             self.snagged, self.free = now, 0.0
-            self.say("SNAGGED on the wreck - give it slack!", now)
+            self.say("IN A CRACK - give it slack!" if self.water != "wreck" else
+                     "SNAGGED on the wreck - give it slack!", now)
         return False
 
     def fish_at(self):
@@ -35770,7 +36165,7 @@ def draw_rod(ch, co, f, v, now, k):
     bx, by = int(w * 0.84), h - 1
     tx, ty = int(w * 0.63), int(h * 0.42)
     end = None
-    pt = f.float_at(now)
+    pt = cave_end(f, now)
     if pt is not None:
         pr = v.project(*pt)
         if pr is not None:
@@ -35779,8 +36174,8 @@ def draw_rod(ch, co, f, v, now, k):
         b = min(0.4, f.ten * 0.18)
         tx = int(tx + (end[0] - tx) * b * 0.6)
         ty = int(ty + max(0.0, end[1] - ty) * b + b * h * 0.12)
-    elif f.phase == "wait" and f.tackle.float_on == 0 and (f.nibbling(now)
-                                                          or f.biting(now)):
+    elif f.phase == "wait" and (f.tackle.float_on == 0 or cave_dark(f, now)) and (
+            f.nibbling(now) or f.biting(now)):
         ty += 1 + (k if f.biting(now) else 0)     # with no float, the tip knocks
     # Bent: a curve from the butt, through a point off the straight line.
     cx, cy = bx + (tx - bx) * 0.55, by + (ty - by) * 0.75
@@ -35972,19 +36367,26 @@ def render_fishing(f, width, height, now):
     something."""
     eye = f.deck.eye(now) if f.deck is not None else EYE_Y
     v = View(f.x, f.z, f.yaw, width, height, eye=eye)
-    ch, co, wet = render_street(v, now)
+    if f.cave is not None:
+        ch, co, wet = render_cave(v, f, now)
+    else:
+        ch, co, wet = render_street(v, now)
     walls = v.walls
     k = big_scale(width, height)
     tk = f.tackle
     if f.deck is not None and height > 12:
         # Her side, under your elbows.
         for x in range(width):
-            ch[height - 2][x], co[height - 2][x] = "=", SNOW
+            ch[height - 2][x], co[height - 2][x] = "=", (
+                WOOD_LIT if f.cave is not None else SNOW)
             ch[height - 1][x], co[height - 1][x] = (
                 "|" if x % 9 == 0 else " "), CURB
     if f.phase == "aim":
         draw_aim(ch, co, v, walls, f, now)
-    draw_float(ch, co, v, walls, f, now, wet)
+    if cave_dark(f, now):
+        cave_cues(ch, co, v, f, now)          # out in the dark: only what you hear
+    else:
+        draw_float(ch, co, v, walls, f, now, wet)
     if width < 40 or height < 14:
         _text(ch, co, height - 1, 0, (" " + f.phase + "  " + f.said)[:width], GOLD)
         return ch, co, v
@@ -36021,10 +36423,11 @@ def render_fishing(f, width, height, now):
             _text(ch, co, y, gx, ("[" + ("#" if lit else " ") * (1 + k) + "]"),
                   c if lit else CURB)
         _text(ch, co, g1 + 1, gx - 2, "LINE %2dm" % int(f.line), GOLD)
-        if f.water == "wreck" and not sp["junk"]:
-            # How near the fish is to getting into her.
+        if (f.water == "wreck" or sp.get("cracks")) and not sp["junk"]:
+            # How near the fish is to getting into her - or into a crack.
             wx_ = gx - 10 - 2 * (k - 1)
-            _text(ch, co, g0 - 1, wx_ - 1, "WRECK", HUD)
+            _text(ch, co, g0 - 1, wx_ - 1, "WRECK" if f.water == "wreck" else "CRACK",
+                  HUD)
             snag = 1.0 if f.snagged is not None else f.snag
             for y in range(g0, g1):
                 u = (y - g0) / float(g1 - g0)       # filling from the top down
@@ -36036,12 +36439,15 @@ def render_fishing(f, width, height, now):
             _text(ch, co, g1 + 2, wx_ - 1, "frays %d/%d" % (f.snags, WRECK_WEAR),
                   ROU_RED if f.snags else HUD)
         if f.snagged is not None:
-            word, c = "SNAGGED ON THE WRECK - s gives it slack!", ROU_RED
+            word, c = ("SNAGGED ON THE WRECK - s gives it slack!" if f.water == "wreck"
+                       else "IN A CRACK - s gives it slack!"), ROU_RED
         elif f.water == "trench" and f.line > 40.0 and not (
                 f.running(now) or f.charging(now) or f.turning(now)):
             word, c = "it is coming up from a long way down - keep at it", RAIN
-        elif f.water == "wreck" and f.snag > 0.6 and not sp["junk"]:
-            word, c = "it is diving for the wreck - reel it up!", GOLD
+        elif ((f.water == "wreck" or sp.get("cracks")) and f.snag > 0.6
+              and not sp["junk"]):
+            word, c = ("it is diving for the wreck - reel it up!" if f.water == "wreck"
+                       else "it is pulling for a crack - reel it out!"), GOLD
         elif f.running(now):
             word, c = "IT RUNS - s gives line", ROU_RED
         elif f.charging(now):
@@ -36090,6 +36496,8 @@ def render_fishing(f, width, height, now):
     _text(ch, co, y, 1, strip[:width - 2], HUD)
     if f.chill:
         draw_cold(ch, co, f, now, k)
+    if f.tide is not None:
+        draw_tide(ch, co, f, now, k)
     if f.said and now - f.said_at < 3.5 and f.phase != "landed":
         _text(ch, co, y - 1, max(1, mid - len(f.said) // 2), f.said[:width - 2], BULB)
     if f.phase == "landed":
@@ -36926,6 +37334,9 @@ def main(stdscr):
                         trip["dig"] = new_dig(tackle, now)
                     else:
                         note, note_at = "not now - land it first", now
+                elif (trip is not None and key in (ord("c"), ord("C"))
+                      and fishing.cave is not None):
+                    trip.update(quip=CAP_CAVE_CABIN, quip_at=now)
                 elif trip is not None and key in (ord("c"), ord("C")):
                     if fishing.phase in ("aim", "wait", "gone"):
                         fishing.to("aim", now)      # reeled in, and inside
@@ -36953,12 +37364,7 @@ def main(stdscr):
                     note_at = now
                     fishing = None
                     if trip is not None:
-                        # He weighs anchor and takes you home, the way you came.
-                        line_, along_ = trip["route"]
-                        back_ = list(reversed(line_))
-                        trip.update(phase="home", t0=now, dur=trip["dur"] * 0.7,
-                                    look=0.0, route=(back_, [along_[-1] - a_ for a_
-                                                             in reversed(along_)]))
+                        trip_home(trip, now)
             elif trip is not None and key not in (ord("q"), CHEAT_KEY):
                 if trip["phase"] == "talk":
                     n_ = len(expeditions_for(tackle))
@@ -37775,9 +38181,18 @@ def main(stdscr):
                         _launch_shift[0] += (-PAD_LIFT - launch_t(site_, now)) % (
                             LAUNCH_EVERY)
                         trip["site"] = site_
+                cave_ = None
+                if trip["exp"].get("site") == "cave":
+                    # Into the dinghy, and he rows you in under the arch.
+                    cave_ = cave_site(trip["h"])
+                    tx_, tz_, th_ = cave_[0], cave_[1], cave_[2] + math.pi
+                    trip.update(cave_t0=now, tide_said=0)
                 fishing = Fishing(tx_, tz_, th_, tackle, now, int(now * 1000.0),
-                                  deck=HerringDeck(), water=trip["exp"]["water"])
+                                  deck=DinghyDeck() if cave_ else HerringDeck(),
+                                  water=trip["exp"]["water"])
                 fishing.chill = trip["exp"].get("cold", False)
+                if cave_ is not None:
+                    fishing.cave, fishing.tide = cave_, 0.0
             else:
                 px_, pz_ = herring_plank(trip["h"])
                 cam_x, cam_z = px_ - HERRING_BACK, pz_
@@ -37800,6 +38215,21 @@ def main(stdscr):
             if 0.0 <= lt_ < 1.0 and now - trip.get("scared", -1e9) > 30.0:
                 fishing.scare(now + PAD_SCARE)
                 trip.update(scared=now, quip=CAP_SCARED, quip_at=now)
+        if trip is not None and fishing is not None and fishing.cave is not None:
+            fishing.tide = min(1.0, (now - trip["cave_t0"]) / CAVE_TIDE)
+            said_ = 2 if fishing.tide >= 0.8 else 1 if fishing.tide >= 0.5 else 0
+            if said_ > trip["tide_said"]:
+                trip.update(tide_said=said_, quip=CAP_TIDE[said_ - 1], quip_at=now)
+            if fishing.tide >= 1.0:
+                # The arch is going under: he rows you out, whatever is on.
+                was_ = fishing.phase
+                fishing.key("stop", now)
+                note, note_at = {
+                    "fight": "the arch went under - you had to cut it loose",
+                    "landed": "you keep it, and he rows you out, heads down"}.get(
+                        was_, "he rows you out under the arch, heads down"), now
+                fishing = None
+                trip_home(trip, now)
         if trip is not None and fishing is not None and fishing.chill:
             if trip.get("cabin") is not None:
                 # His stove: warmer in here, slowly, than it gets cold outside.
@@ -38206,14 +38636,19 @@ def main(stdscr):
             hud = FISH_HUD[fishing.phase] % (
                 WATER_NAMES.get(fishing.water, "") if fishing.phase in (
                     "wait", "fight", "landed") else
+                "in the dinghy, in the cave" if fishing.cave is not None else
                 "off the " + HERRING_NAME.title() if fishing.deck is not None else "")
             if trip is not None:
                 hud = hud.replace("x packs up", "c the cabin  -  x heads for home")
                 if trip["exp"].get("site") == "island":
                     hud = hud.replace("c the cabin", "g dig ashore  -  c the cabin")
+                if fishing.cave is not None:
+                    hud = hud.replace("c the cabin  -  x heads for home",
+                                      "x rows you out")
                 hud = hud.replace("x keeps it and packs up", "x keeps it, home")
                 if now - trip["quip_at"] < 5.0 and height > 3:
-                    q_ = "%s: %s" % (CAPTAIN.upper(), trip["quip"])
+                    q_ = "%s: %s" % (CAPTAIN.upper(), cave_echo(trip["quip"])
+                                     if fishing.cave is not None else trip["quip"])
                     _text(ch, co, 1, max(1, width // 2 - len(q_) // 2), q_[:width - 2],
                           GOLD)
         elif street and trip is not None and trip["phase"] == "talk":
