@@ -59,9 +59,10 @@ edges, portholes across the stern, her name across it.
 
 **Aboard** (`p` at the gangway, `LINER_FEE`; `cruise` in `main()`, counted by `elsewhere()`):
 `liner_sail()` lays out her way (`liner_route()`: a Catmull-Rom line through waypoints set
-off the coast's own line, `shore_x()`, a point every 20 units) - out past the quay, south,
-past the ocean pier's head and its wheel, past the space centre half a gap down **nearly 500
-units off the pad**, round, and back up further out - and she follows it at `LINER_SPEED`,
+off the coast's own line, `shore_x()`, a point every 20 units) - out past the quay, south
+**`LINER_OFF` (340) off the beach**, past the ocean pier's head and its wheel (200 clear),
+swinging wide round the space centre half a gap down **nearly 500 units off the pad**, round,
+and back up the coast as close in - and she follows it at `LINER_SPEED`,
 easing off and in over `LINER_EASE`. About three minutes and a quarter. `render_cruise()` is
 `render_street()` from her top deck's rail on the side towards the land, `a`/`d` to look round,
 her rail along the bottom and her lights along the top; she is not drawn round you
@@ -78,8 +79,20 @@ it is going (`launch_hint()` at her rail).
 **Getting there**: the taxi, "the harbour" (`_harbour_spot()`: the road at the quay's foot).
 ctrl-a `6` the harbour, `7` the gangway, for the checks.
 
-**What it costs**, at 300x90: on the beach with her in view 26 ms; from her rail 29 to 36 -
-it is a view from 26 units up, roof-like, all coast; a ride, nothing to steer, so left as is.
+**Closer in, and the town as buildings (2026-11-15)**: "at the moment the coastline is the
+horizon and not buildings themself." She sailed 600 to 980 off the beach, and from her deck -
+eye 26.6, so the renderer's up-high mode - real buildings went only to `WALL_REACH_ROOF` (250);
+past that the town was `draw_far_blocks()`' dark shapes, a line on the horizon. Now she keeps
+`LINER_OFF` off the beach except round the launch pad, and `render_cruise()` sets
+`v.high_walls` to `LINER_WALLS` (420): the hotel row with its lit windows and neon names, the
+town stepping up behind, the pier going by close. Sailing at 250 off would have been closer
+still, but 46 ms a frame looking straight in; 350 off with 400 of buildings was 32.
+
+**What it costs**, at 300x90: on the beach with her in view 26 ms; from her rail 33 to 41 -
+a view from 26 units up across the whole coast. The sea is twelve thousand ground points a
+frame from up there; `coast_ground()` now looks up a point's glow only where it would be used
+(a third of them), which is exact and paid for some of the closer view. A ride, nothing to
+steer, so the few ms over 33 were taken for the buildings.
 
 ## The speedboat
 
