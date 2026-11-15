@@ -6,21 +6,21 @@ and fishing anywhere you are carrying a rod and near water.
 
 **Carry a rod, stand by water, `f`.** In the street (not on a roof, in a doorway or down a
 manhole) `f` checks `fish_ready()`: a rod in hand, and water to cast into within the rod's
-reach in front of you (`water_ahead()`, three bearings either side of where you face). Off the
-speedboat, stopped (`FISH_SLOW`), `f` fishes from her side: the view rides her swell and her
-gunwale runs along the bottom. `Fishing` is the state, `render_fishing()` the view - the
-ordinary `render_street()` from where you stand with the rod, the line, the float and the
-meters over it. It counts in `elsewhere()`, so you do not walk or go through doors while
-fishing; `x` packs up.
+reach in front of you (`water_ahead()`, three bearings either side of where you face).
+**Not off the speedboat** - that went in first and was taken out on 2026-11-15: the speedboat
+is for driving, and the open sea is the fishing boat's (below). `Fishing` is the state,
+`render_fishing()` the view - the ordinary `render_street()` from where you stand with the
+rod, the line, the float and the meters over it. It counts in `elsewhere()`, so you do not
+walk or go through doors while fishing; `x` packs up.
 
 **What bites is decided by where the float goes in, not where you stand.** `fish_water(x, z)`:
 the river (and the moat round the headland) is `"river"`, the woods' lake `"lake"`, the
 fountain on the Strip `"fountain"`, the river's last `MOUTH_REACH` cells and its water across
 the beach `"mouth"`, and the sea by how far out from the waterline the float is: `"surf"` under
 `FISH_SURF` (22 units), `"inshore"` to `FISH_INSHORE` (110 - off the ocean pier), `"deep"` to
-`FISH_DEEP` (400 - from the pier's head out), `"offshore"` past that, which only the boat
-reaches. Water round a quay is `"harbour"`. Decks, land, the docked cruise ship: `None`, and the
-cast "lands on dry ground". `WATER_NAMES` are the words for them.
+`FISH_DEEP` (400 - from the pier's head out), `"offshore"` past that, which only the fishing
+boat reaches. Water round a quay is `"harbour"`. Decks, land, the docked cruise ship: `None`,
+and the cast "lands on dry ground". `WATER_NAMES` are the words for them.
 
 **The fish** (`FISH`, made with `_sp()`): 44 kinds for the book and 13 kinds of rubbish. Each
 has the waters it is in, the baits it takes, a weight range, how hard it pulls (`power`), how
@@ -111,3 +111,48 @@ big window the gauges and the rod thicken, RUNS and STRIKE go in block letters.
 **What it costs**: the water check for the top bar's "f casts a line" is a tenth of a
 millisecond, and only with a rod. The fishing view is the street view plus a few hundred cells:
 22 to 29 ms at 300x90.
+
+## The fishing boat, and expeditions
+
+Asked for on 2026-11-15, in place of fishing off the speedboat: "an actual fishing boat. We can go
+aboard for a fishing expedition but we don't drive the fishing boat ourselves we have a funny
+pirate like captain that asks where we want to go. We pay him ofcourse. A fishing expedition can
+only go to one of the destinations at a time. Right now we only have 1 destination and that is
+your open ocean but I plan on having more expeditions added later on."
+
+**The Salty Herring** (`HERRING_NAME`) lies off the end of every harbour's quay, bow out
+(`herring_berth()`, `HERRING_GAP` from it). She went alongside on the boat hire's side first,
+and a speedboat just hired, opened up, ran straight into her - the checks' speedboat run caught
+it; off the end she is clear of that lane and of the cruise ship's way out. `draw_herring()`
+(from `draw_harbour()`): a red hull, a white wheelhouse with lit windows, a mast and its light,
+her name in lights on the hull, a gangplank from the end of the quay, and by it **Cap'n Redgill**
+(`CAPTAIN`, the `PIRATE` sprite) under FISHING TRIPS. The names go up with the tackle shops'
+(`v.tackle_signs`). She is solid to the speedboat (`herring_in()` in `boat_water()`) while she
+is moored. A taxi goes to "the fishing boat"; ctrl-a `v` for the checks.
+
+**Talking to him** (`p` at the plank, `herring_near()`): `trip` in `main()`, phase `"talk"`,
+`render_captain()` - the quay behind, him big (`CAPTAIN_ART`, coloured by `captain_colours()`:
+hat and skull, eye patch, the red beard, the parrot, the coat with its gold), what he says, and
+**where to** - `EXPEDITIONS`. `w`/`s` choose, `p` or enter pays and casts off, `x` walks away.
+No rod and he will not go ("ye'd be fishin' with yer teeth"); not the fee, he says so; without
+the rod an expedition wants (`"rod"`) he goes anyway and tells you.
+
+**`EXPEDITIONS` is where the next ones go.** One dict each: `name`, `fee`, where she anchors
+(`out` units off the beach, `along` the coast from the harbour), `sail` (seconds out; home is
+0.7 of it), `water` (a `WATER_NAMES` key for the fish there - `None` is whatever `fish_water()`
+says of the sea where she anchors), the `rod` it wants, what he `says` and the `fish` the list
+shows. One for now: **the open ocean**, 700 off and 160 down the coast, $45, 24 s out. A new
+destination with fish of its own wants a new water key in `WATER_NAMES` and the fish that live
+in it in `FISH`; `Fishing(..., water=)` forces it (`self.force`). Only one expedition at a time:
+she is either at the quay or out with you (`_herring_out`).
+
+**The trip.** `expedition_route()`: along the quay, past its end, out and along the coast, through
+`_catmull()`; `route_pose()` eases along it. Phase `"out"`, `render_voyage()`: the view from her
+deck, the bow out in front, her mast and its light, and along the bottom what the captain says
+(`CAP_AWAY`) and now and then the parrot (`PARROT`); `a`/`d` look round, space leans on the
+throttle (three seconds on). There: anchored, `fishing` is a `Fishing` with `deck=HerringDeck()`
+(its eye rides the swell, her side runs along the bottom of the view) and the aim goes all the
+way round. He has something to say when one is on, landed or lost (`CAP_HOOKED`, `CAP_LANDED`,
+`CAP_LOST`, over the top of the view). `x` - and he weighs anchor and takes you home the same
+way back, phase `"home"`, and you are down the gangplank facing the town.
+

@@ -454,15 +454,31 @@ def cases(run, report):
         print("    no shop, no cast, or nothing on the line")
         fi_ok = False
     ok &= fi_ok
-    # And off the speedboat: f with no rod says so.
-    fb_st, fb_out = run([(F1, .5), (b"+", .4), (b"\x018", 1.5), (b"p", 1.0),
-                         (b"f", .8)], cols=300, rows=60)
-    fb_plain = ANSI.sub(b"", fb_out).decode("utf-8", "replace")
-    fb_ok = report("fishing off the boat with no rod", fb_st, fb_out)
-    if fb_ok and fb_out and "no rod" not in fb_plain:
-        print("    the boat did not say there was no rod")
-        fb_ok = False
-    ok &= fb_ok
+    # The fishing boat: no rod and the captain sends you to the shop; then a
+    # big game rod and lure from the pier, the trip out, a cast, and home.
+    nr_st, nr_out = run([(F1, .5), (b"\x01v", 1.5), (b"p", .8), (b"p", .8),
+                         (b"x", .6)], cols=160, rows=45)
+    nr_plain = ANSI.sub(b"", nr_out).decode("utf-8", "replace")
+    nr_ok = report("the fishing boat's captain, no rod", nr_st, nr_out)
+    if nr_ok and nr_out and not ("WHERE TO" in nr_plain and "teeth" in nr_plain):
+        print("    no captain, or he took you without a rod")
+        nr_ok = False
+    ok &= nr_ok
+    ex_st, ex_out = run([(F1, .5), (b"+", .3), (b"\x019", 1.5), (b"p", .8)]
+                        + [(DOWN, .15)] * 3 + [(b"p", .4), (RIGHT, .3)]
+                        + [(DOWN, .15)] * 5 + [(b"p", .4), (b"x", .5),
+                                               (F1, .5), (b"\x01v", 1.5), (b"p", .8),
+                                               (b"p", 1.0)]
+                        + [(b" ", .3)] * 9 + [(b"", 1.5), (b"f", 1.5), (b"x", 1.0)]
+                        + [(b" ", .3)] * 7 + [(b"", 1.5), (b"w", .4)],
+                        cols=160, rows=45)
+    ex_plain = ANSI.sub(b"", ex_out).decode("utf-8", "replace")
+    ex_ok = report("a fishing trip: out, a cast, and home", ex_st, ex_out)
+    if ex_ok and ex_out and not ("going out to the open ocean" in ex_plain
+                                 and "CAST" in ex_plain and "going home" in ex_plain):
+        print("    did not sail, fish, or come home")
+        ex_ok = False
+    ok &= ex_ok
     return ok
 
 

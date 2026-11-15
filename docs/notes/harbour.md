@@ -122,3 +122,8 @@ it, or the word KNOTS fell off the bottom at 300x90). `x` anywhere: back at the 
 
 **What it costs**, at 300x90: 22 to 27 ms a frame at the helm.
 ctrl-a `8` for the checks: the hire stand.
+
+## The fishing boat
+
+The Salty Herring lies off the end of the quay, clear of the boat hire's lane and of the cruise
+ship's way out; her captain takes you fishing, to one place at a time. See Fishing.
