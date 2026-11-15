@@ -321,3 +321,41 @@ shouts when your hands go blue (`CAP_COLD`). Its fish: arctic char, halibut (20-
 it never tires below 0.7 - it is just heavy), cod (off the pier too), snow crab, the unicorn
 fish (legendary; he insists it is real), and a chunk of ice.
 
+## The launch pad, and Treasure Island
+
+The sixth and seventh expeditions, asked for together on 2026-11-15 (the seventh is the payoff
+for the treasure map, an idea from the cabin). Both are appended to `EXPEDITIONS`, so the pty
+cases' counts down his list still hold.
+
+**The launch pad**: $55, 30 s, the spinning rod. Harbours and space centres have the same gap
+(720 cells) and the pads fall half-way between harbours, so one fixed `along` (1670) reaches the
+pad from every harbour: she anchors 330 off the beach, about 170 short of it. On arrival she
+turns to face it (`"face": "pad"`, `nearest_pad()`) and the clock of that pad is moved
+(`_launch_shift`, as the menu's launch does) so it lifts off `PAD_LIFT` (40 s) after she
+anchors - "Timed it, I did". **The twist**: at liftoff `Fishing.scare()` puts any bite and the
+nibbles back past `PAD_SCARE` (60 s), and nothing new is chosen to bite before then
+(`scared_until`), and he shouts `CAP_SCARED`. Its water, `"pad"`, is within `PAD_FISH` (220)
+of any pad and more than 60 out - so the causeway is a place to fish from too. Its fish: the
+three-eyed flounder (art `flat3`), the rocket fish, orange mackerel, plain mackerel, and the
+booster fragment ($200 flat: the space centre buys them back).
+
+**Treasure Island**: $80, 34 s, the spinning rod; 1700 off the beach (past the shipping lanes,
+650-1500, so no ship sails through it) and 2200 down the coast. On his list only once you have
+had a map (`"needs": "chart"`, `expeditions_for(tackle)`): `cabin_talk()` counts his tales on
+`Tackle.tales`, and the sixth (`MAP_TALES`) is `CAP_MAP` and a map (`Tackle.map`, 4-11 paces;
+`Tackle.charted` keeps the island on the list after). The island (`draw_island()`): a mound
+of sand, one palm, a lagoon, and the skull rock with its lantern guttering on top. It stands
+`ISLAND_AHEAD` on from where she anchors; the speedboat stops at its sand (`island_in()`), and
+its water `"island"` is within `ISLAND_SEA`. The route out passes the floes of the harbour to
+the south; she noses through them, as she does there. Its fish: parrotfish ("the captain's
+parrot is deeply insulted"), lagoon barracuda, the golden fish (legendary, found nowhere else),
+and coconuts. **The twist**: at anchor, `g` rows you ashore to the beach (`render_dig()`, a
+drawn screen, not cast: the sea with the Herring lying off, the lagoon, the palm, the skull
+rock): a d walk along it, space digs. The map says how many paces from the skull toward the
+palm (`DIG_PACE` of the screen each); the line under the map's words counts your paces. A wrong
+hole turns up something (`DIG_FINDS`) and the parrot calls WARMER! or COLDER!; the right one is
+the chest, `TREASURE` ($1200), and the map is used up - six more tales for the next.
+
+Fixed with these: the halibut never had its `heavy` flag (`_sp()` had no such argument), and
+cod were not under the ice.
+

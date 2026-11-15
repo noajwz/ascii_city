@@ -526,13 +526,17 @@ def cases(run, report):
                                           (DOWN, .15), (b"p", .4), (RIGHT, .3),
                                           (DOWN, .15), (DOWN, .15), (DOWN, .15),
                                           (b"p", .4), (b"x", .5)]
-    for name_, downs_, look_ in (("the deep trench", 2, "SINKING"),
-                                 ("the ice floes", 3, "warms your hands")):
+    # The launch pad: and in his cabin, six of his tales for the treasure map.
+    for name_, downs_, look_, more_ in (
+            ("the deep trench", 2, "SINKING", []),
+            ("the ice floes", 3, "warms your hands", []),
+            ("the launch pad", 5, "X marks it", [(b"t", .4)] * 6)):
         tr_st, tr_out = run([(F1, .5), (b"+", .3), (b"+", .3)] + BUY
                             + [(F1, .5), (b"\x01v", 1.5)] + HERRING_IN + [(b"", .5)]
                             + [(DOWN, .3)] * downs_ + [(b"p", 1.0)]
                             + [(b" ", .3)] * 13 + [(b"", 2.0), (b"f", 2.5),
-                                                   (b"c", .8), (b"4", .8), (b"x", .6)],
+                                                   (b"c", .8), (b"4", .8)]
+                            + more_ + [(b"x", .6)],
                             cols=300, rows=60)
         tr_plain = ANSI.sub(b"", tr_out).decode("utf-8", "replace")
         tr_ok = report("out to " + name_, tr_st, tr_out)
@@ -541,6 +545,26 @@ def cases(run, report):
             print("    did not get there, or no %r" % look_)
             tr_ok = False
         ok &= tr_ok
+    # Treasure Island: his map from six tales in the cabin, home, then back to
+    # him - it is on his list now, last - out to it, ashore with g, and a dig.
+    ti_st, ti_out = run([(F1, .5), (b"+", .3), (b"+", .3)] + BUY
+                        + [(F1, .5), (b"\x01v", 1.5)] + HERRING_IN
+                        + [(b"", .5), (b"p", 1.0)] + [(b" ", .3)] * 13
+                        + [(b"", 2.0), (b"c", .8)] + [(b"t", .4)] * 6
+                        + [(b"x", .6), (b"x", 1.0)] + [(b" ", .3)] * 13 + [(b"", 3.0)]
+                        + [(F1, .5), (b"\x01v", 1.5)] + HERRING_IN + [(b"", .5)]
+                        + [(DOWN, .3)] * 6 + [(b"p", 1.0)] + [(b" ", .3)] * 13
+                        + [(b"", 2.0), (b"g", 1.0)] + [(b"a", .05)] * 30
+                        + [(b" ", 1.6), (b"", 1.0), (b"x", 1.5)],
+                        cols=300, rows=60)
+    ti_plain = ANSI.sub(b"", ti_out).decode("utf-8", "replace")
+    ti_ok = report("a map, and ashore on Treasure Island", ti_st, ti_out)
+    if ti_ok and ti_out and not ("going out to treasure island" in ti_plain
+                                 and "THE MAP: from the skull" in ti_plain
+                                 and "you row back" in ti_plain):
+        print("    no map, no island, or no dig")
+        ti_ok = False
+    ok &= ti_ok
     return ok
 
 

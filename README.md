@@ -342,8 +342,11 @@ the city is infinite, identical every time you walk back to it, and held in no m
   moonfish, and the oarfish, a silver sea-serpent - or **the deep trench**, far out past the
   shipping lanes, where the lead takes a long count to sink and the giant squid comes up a long
   way, slowly - or **the ice floes**, far up the coast in the snow, where halibut the size of a
-  door and the unicorn fish live, and your hands go numb unless he makes you a cocoa. Out there
-  `c` takes you
+  door and the unicorn fish live, and your hands go numb unless he makes you a cocoa - or **the
+  launch pad**, where he times it so a rocket goes up over you (and scares the three-eyed
+  flounder off for a minute). Sit through enough of his tales and he gives you a **treasure
+  map**: then **Treasure Island** is on his list, with its palm, its skull rock and the golden
+  fish - and `g` rows you ashore with a shovel. Out there `c` takes you
   into **his cabin**: look all the way
   round, the sea through the windows, the wheel, a chart with an X where you are, the parrot,
   your biggest fish over the door - and him behind his counter, with grog, bait at sea prices
