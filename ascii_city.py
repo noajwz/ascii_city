@@ -16672,21 +16672,62 @@ def gangway_near(x, z, reach=3.0):
 
 
 def _catmull(pts, step=20.0):
-    """A smooth line through the points, a point every `step` units or so."""
+    """A smooth line through the points, a point every `step` units or so.
+    Centripetal (each stretch's knot spacing the square root of its length):
+    the plain kind overshoots where a short stretch meets a long one, and a
+    boat leaving her berth - forty units to the quay's end, then a thousand
+    out to sea - looped back on herself, and the camera with her."""
     out = []
-    p = [pts[0]] + list(pts) + [pts[-1]]
+    p = list(pts)
+    # Ends a little further on, the way each end is going, so the first and
+    # last stretches have something to curve towards.
+    p = ([(2 * p[0][0] - p[1][0], 2 * p[0][1] - p[1][1])] + p
+         + [(2 * p[-1][0] - p[-2][0], 2 * p[-1][1] - p[-2][1])])
+
+    def knot(a, b):
+        return max(1e-6, math.hypot(b[0] - a[0], b[1] - a[1]) ** 0.5)
+
     for k in range(1, len(p) - 2):
         p0, p1, p2, p3 = p[k - 1], p[k], p[k + 1], p[k + 2]
+        t1 = knot(p0, p1)
+        t2 = t1 + knot(p1, p2)
+        t3 = t2 + knot(p2, p3)
         n = max(4, int(math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / step))
         for s in range(n):
-            t = s / float(n)
-            out.append(tuple(
-                0.5 * (2 * p1[c] + (-p0[c] + p2[c]) * t
-                       + (2 * p0[c] - 5 * p1[c] + 4 * p2[c] - p3[c]) * t * t
-                       + (-p0[c] + 3 * p1[c] - 3 * p2[c] + p3[c]) * t ** 3)
-                for c in (0, 1)))
-    out.append(pts[-1])
+            t = t1 + (t2 - t1) * s / float(n)
+            pt = []
+            for c in (0, 1):
+                a1 = ((t1 - t) * p0[c] + t * p1[c]) / t1
+                a2 = ((t2 - t) * p1[c] + (t - t1) * p2[c]) / (t2 - t1)
+                a3 = ((t3 - t) * p2[c] + (t - t2) * p3[c]) / (t3 - t2)
+                b1 = ((t2 - t) * a1 + t * a2) / t2
+                b2 = ((t3 - t) * a2 + (t - t1) * a3) / (t3 - t1)
+                pt.append(((t2 - t) * b1 + (t - t1) * b2) / (t2 - t1))
+            out.append(tuple(pt))
+    out.append(tuple(pts[-1]))
     return out
+
+
+ROUTE_LOOK = 25.0      # a boat's heading: from this far behind her to this far on
+
+
+def _route_at(line, along, s):
+    """(x, z) this far along a route."""
+    s = max(0.0, min(along[-1], s))
+    k = max(0, min(len(along) - 2, _bisect(along, s) - 1))
+    f = (s - along[k]) / max(1e-6, along[k + 1] - along[k])
+    (ax, az), (bx, bz) = line[k], line[k + 1]
+    return ax + (bx - ax) * f, az + (bz - az) * f
+
+
+def _route_pose_at(line, along, s):
+    """(x, z, heading) this far along a route, the heading the way she is
+    going over a few units - not the one short piece of the line she is on,
+    which turned the camera in steps."""
+    x, z = _route_at(line, along, s)
+    ax, az = _route_at(line, along, s - ROUTE_LOOK)
+    bx, bz = _route_at(line, along, s + ROUTE_LOOK)
+    return x, z, math.atan2(bx - ax, bz - az)
 
 
 def liner_route(h):
@@ -16754,11 +16795,7 @@ def liner_pose(h, now):
         t0, route = trip
         s = _liner_s(now - t0, route[1][-1])
         if s is not None:
-            line, along = route[0], route[1]
-            k = max(0, min(len(along) - 2, _bisect(along, s) - 1))
-            f = (s - along[k]) / max(1e-6, along[k + 1] - along[k])
-            (ax, az), (bx, bz) = line[k], line[k + 1]
-            return ax + (bx - ax) * f, az + (bz - az) * f, math.atan2(bx - ax, bz - az)
+            return _route_pose_at(route[0], route[1], s)
     bx, bz = liner_berth(h)
     return bx, bz, math.pi * 0.5
 
@@ -17249,12 +17286,17 @@ def render_cruise(h, look, width, height, now):
     along the bottom of the picture, a string of her lights along the top."""
     x, z, head = liner_pose(h, now)
     hx, hz = math.sin(head), math.cos(head)
+    # Across her, to whichever side is towards the land (west) - by how much
+    # it is, so that going straight out from the quay, with the land astern,
+    # you are amidships and not jumping rail to rail as she wavers (choosing
+    # a side by its sign swung the camera half round, twenty units over).
+    # And you look at the land, west, whichever way she is heading.
     px, pz = -hz, hx
-    if px > 0.0:
-        px, pz = -px, -pz               # the side towards the land, which is west
+    side = max(-1.0, min(1.0, -px * 3.0))
     eye = LINER_TOP + 1.6
-    v = View(x + px * (LINER_B * 0.5 - 1.5), z + pz * (LINER_B * 0.5 - 1.5),
-             math.atan2(px, pz) + look, width, height, eye=eye, reach=ROOF_REACH)
+    rail = (LINER_B * 0.5 - 1.5) * side
+    v = View(x + px * rail, z + pz * rail, -math.pi * 0.5 + look, width, height,
+             eye=eye, reach=ROOF_REACH)
     v.high_walls = LINER_WALLS          # the town as buildings, not block shapes
     _aboard[0] = h
     try:
@@ -33181,11 +33223,7 @@ def route_pose(route, u):
     """(x, z, heading) u of the way along a route (0..1), eased at both ends."""
     line, along = route
     e = u * u * (3.0 - 2.0 * u)
-    s = along[-1] * max(0.0, min(1.0, e))
-    k = max(0, min(len(along) - 2, _bisect(along, s) - 1))
-    f = (s - along[k]) / max(1e-6, along[k + 1] - along[k])
-    (ax, az), (bx, bz) = line[k], line[k + 1]
-    return ax + (bx - ax) * f, az + (bz - az) * f, math.atan2(bx - ax, bz - az)
+    return _route_pose_at(line, along, along[-1] * max(0.0, min(1.0, e)))
 
 
 class HerringDeck:

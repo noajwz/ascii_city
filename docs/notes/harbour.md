@@ -127,3 +127,20 @@ ctrl-a `8` for the checks: the hire stand.
 
 The Salty Herring lies off the end of the quay, clear of the boat hire's lane and of the cruise
 ship's way out; her captain takes you fishing, to one place at a time. See Fishing.
+
+**The camera going out, on the liner and on the Herring** (2026-11-15: "the camera goes pretty
+crazy jumping all over the place"). Three things, measured frame by frame before and after:
+- `_catmull()` is centripetal now. The plain kind overshoots where a short stretch meets a long
+  one, and the Herring's way out - forty units to the quay's end, then a thousand out to sea -
+  looped back on itself: 2.6 rad of turn in one frame going out to the trench.
+- A boat's heading is the way she is going over `ROUTE_LOOK` (25) units either side of her
+  (`_route_pose_at()`, for `route_pose()` and `liner_pose()`), not the one short piece of
+  the line she is on, which turned the camera in steps. The sharpest turn left is rounding
+  the quay's end, 0.04 rad a frame.
+- On the liner you look west, at the land, whichever way she heads, and stand across her
+  towards the land side by how much it is the land side (`render_cruise()`). Choosing the rail
+  by the sign of a number that was near nought going straight out from the quay swung the
+  camera half round and twenty units over, sixty times a cruise.
+A check in `checks.py` sails every expedition and a whole cruise and holds the camera to
+0.05 rad and 4 units a frame.
+
