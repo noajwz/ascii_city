@@ -206,3 +206,46 @@ for the jump and where the cruise sets you down. The top bar says what is there 
 off than the trigger (`reach` on `tackle_near()`, `herring_near()`, `gangway_near()`). The pty
 cases walk in with `w`: one press for a counter (a second would be a key in the shop), two for
 the rest. The speedboat hire, the pier's big wheel and the vending machines are still `p`.
+
+## The wreck
+
+The second expedition, asked for on 2026-11-15 from a list of seven (the wreck, the glowing
+sea, the launch pad, the deep trench, the storm front, the ice floes, Treasure Island - the rest
+are the owner's to pick from next). **The Mary Ellen** (`WRECK_NAME`) lies off every harbour,
+`out` 380 off the beach and `along` 260 up the coast, `WRECK_AHEAD` on from where the Herring
+anchors to fish her and broadside on, so she is in front of you (`wreck_site()`, cached in
+`_wreck_cache`, which `coast_reset()` clears). `draw_sea_wreck()`: two masts leaning out of the
+water with their yards and slack rigging, a gull on the tall one, her bow up out of it with her
+name in rust (a sign with a colour of its own: `v.tackle_signs` takes one now), surf breaking
+on her, and her buoy off her side, two short red flashes - from the beach her masts are a
+mark on the horizon. The speedboat stops at her (`wreck_in()` in `boat_water()`). $60, 20 s
+out, the surf caster at least (`"rod": 2` - the captain's warning is now each expedition's
+`"short"`, said when your rod is less than it wants), and he has his own line on arrival
+(`"there"`).
+
+**Her water** is `"wreck"`: `fish_water()` says so for sea more than 250 out within
+`WRECK_REACH` of a wreck - cast the other way from her and it is the open sea's. **Her fish**:
+wreck pollock, black bream, cuckoo wrasse, wolffish, lobster ($30 a kilo), conger and ling
+(which live off the pier's head too), the giant grouper (legendary: 40-180 kg, squid or the big
+lure), and her rubbish - the ship's bell ($40), a porthole, a rusty chain, and now and then a
+treasure chest ($350).
+
+**The snag** (`Fishing.wreck()`, every frame of a fight there): the fish makes for her - `snag`
+climbs by how strong and how fresh it is, fastest when it is let alone between runs, slower
+while it runs (a run goes away, not down, and easing off at "it turns" is no fault), and
+reeling lifts it, faster on a heavier reel. At 1 it is **SNAGGED**: give it slack for
+`WRECK_FREE` and it swims back out (snag back to 0.55); hold on for `WRECK_HOLD` and the line
+parts on her iron (reel against the snag and it snaps sooner); `WRECK_WEAR` snags in one fight
+and the line is frayed through. The view has a WRECK meter beside the tension (filling down,
+blue, gold, red, flashing when snagged), how many frays, and the words: "it is diving for the
+wreck - reel it up!", "SNAGGED ON THE WRECK - s gives it slack!". The captain shouts too
+(`CAP_SNAG`). **Tuned with the simulated player**: quick (0.45 s) - bream and lobster in 7 s,
+pollock, wolffish, ling never lost, a conger lost one time in sixteen, the grouper six in sixteen
+on the big game rod; slower (0.9 s) - a pollock lost three in sixteen. The first try made the
+fish dive while you gave it line in a run, and the grouper could not be landed at all.
+
+**Three name clashes, caught**: `_seg` (the launch site's), `draw_wreck` (the crashed plane's
+windscreen - it would have broken crashing the plane) and `_label` (the cabin's copy of the
+cockpit's, harmless). checks.py now asserts no top-level name is defined twice (`GOD_WORDS` is
+on purpose).
+
