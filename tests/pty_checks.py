@@ -530,7 +530,9 @@ def cases(run, report):
     for name_, downs_, look_, more_ in (
             ("the deep trench", 2, "SINKING", []),
             ("the ice floes", 3, "warms your hands", []),
-            ("the launch pad", 5, "X marks it", [(b"t", .4)] * 6)):
+            ("the launch pad", 5, "X marks it", [(b"t", .4)] * 6),
+            # The sea cave: into the dinghy, the ARCH bar, his echo off the rock.
+            ("the sea cave", 6, "atey...", [(b"f", 2.0)])):
         tr_st, tr_out = run([(F1, .5), (b"+", .3), (b"+", .3)] + BUY
                             + [(F1, .5), (b"\x01v", 1.5)] + HERRING_IN + [(b"", .5)]
                             + [(DOWN, .3)] * downs_ + [(b"p", 1.0)]
@@ -541,7 +543,8 @@ def cases(run, report):
         tr_plain = ANSI.sub(b"", tr_out).decode("utf-8", "replace")
         tr_ok = report("out to " + name_, tr_st, tr_out)
         if tr_ok and tr_out and not ("going out to " + name_ in tr_plain
-                                     and look_ in tr_plain):
+                                     and look_ in tr_plain
+                                     and (name_ != "the sea cave" or "ARCH" in tr_plain)):
             print("    did not get there, or no %r" % look_)
             tr_ok = False
         ok &= tr_ok
