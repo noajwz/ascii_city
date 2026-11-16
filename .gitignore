@@ -3,4 +3,4 @@ __pycache__/
 .claude/
 History/
 tools/
-ghostty.conf
+docs/ghostty.conf

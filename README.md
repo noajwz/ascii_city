@@ -3,12 +3,12 @@
 An endless, procedurally generated city at night that you walk around in your terminal — and
 fly over, and go into, and get lost in.
 
-![The city from across the river, on a clear night](docs/ASCII-CITY.png)
+![The city from across the river, on a clear night](docs/screenshots/ASCII-CITY.png)
 
 <table>
   <tr>
-    <td><img src="docs/street.svg" alt="A Chinatown street: neon signs in Chinese, NOODLES and RAMEN, people on the pavement"></td>
-    <td><img src="docs/arcade.svg" alt="Inside the arcade: six lit cabinets under the arcade's name in block letters"></td>
+    <td><img src="docs/screenshots/street.svg" alt="A Chinatown street: neon signs in Chinese, NOODLES and RAMEN, people on the pavement"></td>
+    <td><img src="docs/screenshots/arcade.svg" alt="Inside the arcade: six lit cabinets under the arcade's name in block letters"></td>
   </tr>
 </table>
 
