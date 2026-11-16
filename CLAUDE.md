@@ -39,6 +39,7 @@ or change something. Notes cross-reference each other by title ("see The univers
 - `promenade.md` - The promenade, and what is on the water
 - `coast.md` - The coast
 - `space-centre.md` - The space centre, its launch pad out on the sea, and the launches
+- `rocket.md` - Flying the rocket
 - `harbour.md` - The harbour, the cruise ship, and a cruise down the coast
 - `submarine.md` - The submarine, and the sea from inside it
 - `fishing.md` - Fishing, and the tackle shops

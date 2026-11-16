@@ -493,6 +493,22 @@ def cases(run, report):
         print("    no show, or the surf not glowing")
         dr_ok = False
     ok &= dr_ok
+    # The rocket: i on the panel straps you in; space lights it; a tap of w
+    # tips her over; the map and back, the view from outside and back; x
+    # twice is the escape motor, and x once more is out on the causeway.
+    rk_st, rk_out = run([(F1, .5), (b"i", 1.5), (b" ", 6.0), (b"w", .6), (b"w", .6),
+                         (b"m", 1.0), (b"m", 1.0), (b"v", 1.2), (b"v", 1.0), (b"z", .5),
+                         (b"z", .5), (b"x", .6), (b"x", 1.5), (b"x", 1.5), (b"w", 1.0)],
+                        cols=300, rows=60)
+    rk_plain = ANSI.sub(b"", rk_out).decode("utf-8", "replace")
+    rk_ok = report("the rocket: strapped in, liftoff, the map, out by the escape motor",
+                   rk_st, rk_out)
+    if rk_ok and rk_out and not ("IGNITION" in rk_plain and "CAPCOM" in rk_plain
+                                 and "MAP" in rk_plain and "ABORT" in rk_plain
+                                 and "abort" in rk_plain):
+        print("    not strapped in, no liftoff, no map, or not out")
+        rk_ok = False
+    ok &= rk_ok
     # The submarine: from the pen, out, down, a ping, the lamp, back.
     su_st, su_out = run([(F1, .5), (b"+", .4), (b"\x01[", 1.5), (b"p", 1.0)]
                         + [(b"w", .2)] * 3 + [(b"f", .3)] * 4 + [(b"", 4.0),

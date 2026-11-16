@@ -109,3 +109,6 @@ whose `y` is the lit alley and `j` the claw machine.
 
 **`m`, corner store** (AND THE REST, 2026-11-16): across the pavement from the nearest one, facing
 its window - see The corner store.
+
+**`i`, fly the rocket** (AND THE REST, 2026-11-16): strapped in on the nearest pad - see Flying
+the rocket. The Moon has no key: it is an easter egg, found by flying.

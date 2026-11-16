@@ -27,7 +27,8 @@ ac.COAST = False
 # And the ways to the coast come off the lists till then: with no sea there
 # is no beach for the taxi or the checks' jumps to find.
 COAST_KINDS = ("beach", "seapier", "seawheel", "launchpad", "mission",
-               "harbour", "gangway", "marina", "piertackle", "herring", "subpen")
+               "harbour", "gangway", "marina", "piertackle", "herring", "subpen",
+               "rocket")
 coast_jumps_ = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] in COAST_KINDS]
 coast_panel_ = [p_ for p_ in ac.CHEAT_PLACES if p_[2] in COAST_KINDS]
 ac.CHEAT_PLACES[:] = [p_ for p_ in ac.CHEAT_PLACES if p_[2] not in COAST_KINDS]
@@ -11226,6 +11227,162 @@ lit_g = [ac.glowsea_surf(gv_, ac.shore_x(dsz_) + d_, dsz_ + d_ * 0.37, d_, 10 + 
 check("on a glowing night only the surf changes: the sea further out does not",
       far_ == [False, False, False]
       and sum(1 for g_ in lit_g if g_ is not None and g_[1] == ac.NEON[2][0]) > 20)
+
+# --- flying the rocket ------------------------------------------------------------
+# Real orbital mechanics on a small world: the Earth 600 km across the middle
+# with its own pull and air, the Moon 12,000 km out. The guidance computer
+# flies whole missions here, which is what proves the rocket can do them: the
+# fuel is enough, the corridor home is wide enough, nothing creeps.
+ac.FOG, ac.FOG_DIM, ac.STAR_DIM, ac.CROWN_BLUE, ac.MOON, ac.MOON_DIM = 1, 1, 1, 1, 1, 1
+rsite_ = ac._launch_at(ac.LAUNCH_ROW0)
+
+
+def fly_(sc_, until_, limit_=6000.0, t_=0.0):
+    """Frames at 30 a second till until_(sc_) or it is over; the real seconds."""
+    while not until_(sc_) and sc_.state != "over" and t_ < limit_:
+        t_ += 1.0 / 30.0
+        sc_.step(1.0 / 30.0, t_)
+    return t_
+
+
+up_ = ac.Spacecraft(rsite_, 0.0)
+up_.key("auto", 0.0)
+up_.ap = {"goal": "orbit"}
+tr_ = fly_(up_, lambda s_: not s_.auto, 900.0)
+_, apo_r, peri_r, _, _, _ = up_.orbit()
+check("the guidance computer flies her to orbit: the booster spent and dropped",
+      up_.reached_orbit and peri_r > ac.RK_ATM and apo_r < 100000.0 and up_.stage == 1
+      and up_.fuel[0] == 0.0 and up_.fuel[1] > ac.RK_STAGES[1][2] * 0.6,
+      "%.0f by %.0f km, in %.0f s; %d kg left" % (apo_r / 1000, peri_r / 1000, tr_,
+                                                  up_.fuel[1]))
+period_ = 2 * math.pi * math.sqrt(((apo_r + peri_r) / 2 + ac.RK_R) ** 3 / ac.RK_MU)
+t_end_ = up_.t + 20 * period_
+while up_.warp < len(ac.RK_WARPS) - 1 and ac.RK_WARPS[up_.warp + 1] <= up_.max_warp():
+    up_.key("warp+", tr_, False)
+lo_ = []
+while up_.t < t_end_:
+    tr_ += 1.0 / 30.0
+    up_.step(1.0 / 30.0, tr_)
+    lo_.append(up_.orbit()[2])
+check("and it stays an orbit: twenty of them at full warp, nothing creeps",
+      ac.RK_WARPS[up_.warp] == ac.RK_WARPS[-1]
+      and (max(lo_) - min(lo_)) / (ac.RK_R + peri_r) < 0.001,
+      "periapsis %.2f to %.2f km" % (min(lo_) / 1000, max(lo_) / 1000))
+up_.key("auto", tr_)
+up_.ap = {"goal": "home"}
+fly_(up_, lambda s_: False, tr_ + 3000.0, tr_)
+check("and home: a burn back, the stages away, in on the shield, the chutes, the sea",
+      up_.result is not None and up_.result[0] == "SPLASHDOWN"
+      and up_.result[3] == ac.RK_PAY[0] and up_.heat < 1.0 and up_.chutes == 2,
+      str(up_.result and up_.result[:2]))
+mn_ = ac.Spacecraft(rsite_, 0.0)
+mn_.auto = True
+mn_.ap = {"goal": "moon"}
+fly_(mn_, lambda s_: False, 4000.0)
+check("the whole way to the Moon and back: down on it, up off it, home in the sea",
+      mn_.landed_moon and mn_.result is not None and mn_.result[0] == "SPLASHDOWN"
+      and mn_.result[3] == ac.RK_PAY[1] and min(mn_.fuel[1:]) >= 0.0,
+      "%s; fuel left %s" % (mn_.result and mn_.result[0], [int(f_) for f_ in mn_.fuel]))
+
+
+def reentry_(peri_km_, retro_=True):
+    """In from the Moon's distance on a path this low over the Earth: the
+    heat at its worst, and how it ended."""
+    sc_ = ac.Spacecraft(rsite_, 0.0)
+    sc_.state, sc_.stage, sc_.chutes = "flight", 2, 1
+    rp_, ra_ = ac.RK_R + peri_km_ * 1000.0, ac.RK_MOON_D * 0.9
+    a_ = (rp_ + ra_) / 2.0
+    r0_ = ac.RK_R + 400000.0
+    v0_ = math.sqrt(ac.RK_MU * (2.0 / r0_ - 1.0 / a_))
+    h_ = math.sqrt(ac.RK_MU * a_ * (1.0 - ((ra_ - rp_) / (ra_ + rp_)) ** 2))
+    sc_.x, sc_.y, sc_.vx = 0.0, r0_, h_ / r0_
+    sc_.vy = -math.sqrt(max(0.0, v0_ * v0_ - sc_.vx * sc_.vx))
+    sc_.t = 5.0e5
+    sc_.hold = "retro" if retro_ else None
+    sc_.ang = math.atan2(sc_.vy, sc_.vx) + (math.pi if retro_ else 0.0)
+    peak_, t_ = 0.0, 0.0
+    while sc_.state != "over" and t_ < 20000.0:
+        t_ += 1.0 / 30.0
+        sc_.step(1.0 / 30.0, t_)
+        peak_ = max(peak_, sc_.heat)
+    return peak_, sc_.result[0] if sc_.result else None
+
+
+corridor_ = {p_: reentry_(p_) for p_ in (40, 30, 20)}
+check("home from the Moon: a corridor to come in by - too steep and it burns",
+      corridor_[40][1] == "SPLASHDOWN" and corridor_[30][1] == "SPLASHDOWN"
+      and corridor_[20][1] == "BURNED UP",
+      ", ".join("%d km: %s %.2f" % (p_, r_[1], r_[0]) for p_, r_ in corridor_.items()))
+ks_ = ac.Spacecraft(rsite_, 0.0)
+ks_.key("stage", 0.0)
+fly_(ks_, lambda s_: s_.rel()[5] > 2000.0, 60.0)
+p0_ = ks_.pitch()
+ks_.key("over", 40.0)
+fly_(ks_, lambda s_: False, 41.0, 40.0)
+p1_ = ks_.pitch()
+ks_.key("back", 41.0)
+fly_(ks_, lambda s_: False, 42.0, 41.0)
+ks_.key("less", 42.0)
+thr_ = ks_.throttle
+ks_.key("cut", 42.0)
+ks_.key("hold", 42.0)
+ks_.key("warp+", 42.0)
+ks_.key("warp+", 42.0)
+ks_.key("warp+", 42.0)
+check("the plane's keys: w tips her over east, s back, W S the throttle, c cuts, h holds",
+      p1_ > p0_ + 3.0 and ks_.pitch() < p1_ and abs(thr_ - 0.9) < 1e-9
+      and ks_.throttle == 0.0 and ks_.hold == "pro" and ac.RK_WARPS[ks_.warp] <= 10,
+      "pitch %.1f -> %.1f -> %.1f" % (p0_, p1_, ks_.pitch()))
+check("x once only warns; twice, from the air, is the escape motor",
+      not ks_.abort(50.0) and ks_.abort(51.0) and ks_.result[0] == "ABORT")
+gs_ = ac.find_place(x0, z0, "rocket")
+gin_ = None
+for n_ in range(30):
+    if ac.venue_at(gs_[0] + n_ * 0.25, gs_[1]) is not None:
+        gin_ = ac.venue_at(gs_[0] + n_ * 0.25, gs_[1])[0]
+        break
+ac._crewed[0] = ac.crew_gate_near(*ac.crew_gate(ac.launch_site(int(gs_[1] / ac.CELL))))
+busy_ = ac.venue_at(*ac.crew_gate(ac._crewed[0]))
+ac._crewed[0] = None
+check("the crew gate, out at the end of the causeway: walk in and you are in her",
+      gs_ is not None and ac.can_stand(gs_[0], gs_[1]) and gin_ == "crew"
+      and busy_ is None and "fly the rocket" in ac.crew_hint(*ac.crew_gate(
+          ac.launch_site(int(gs_[1] / ac.CELL)))))
+# Every view, at every size, all the way through.
+snaps_ = []
+vs_ = ac.Spacecraft(rsite_, 0.0)
+vs_.auto = True
+vs_.ap = {"goal": "moon"}
+snaps_.append(("pad", vs_))
+t_ = 0.0
+import copy as copy_
+for name_, until_ in (("low", lambda s_: s_.rel()[5] > 400.0),
+                      ("climb", lambda s_: s_.rel()[5] > 30000.0),
+                      ("orbit", lambda s_: s_.ap.get("orbit")),
+                      ("out", lambda s_: s_.rel()[5] > 3.0e6),
+                      ("moon", lambda s_: s_.rel()[0] == "moon" and s_.rel()[5] < 50000.0),
+                      ("down", lambda s_: s_.state == "moon"),
+                      ("home", lambda s_: s_.landed_moon and s_.rel()[0] == "earth"
+                       and s_.rel()[5] < 80000.0),
+                      ("chutes", lambda s_: s_.chutes == 2),
+                      ("over", lambda s_: s_.state == "over")):
+    t_ = fly_(vs_, until_, 6000.0, t_)
+    snaps_.append((name_, copy_.deepcopy(vs_)))
+bad_ = []
+for name_, s_ in snaps_:
+    for view_ in ("window", "outside", "map"):
+        s_.view = view_
+        for w_, h_ in ((40, 14), (80, 24), (120, 36), (211, 67), (300, 90)):
+            try:
+                g_, _, _ = ac.render_spaceflight(s_, w_, h_, t_)
+                txt_ = "".join("".join(r_) for r_ in g_)
+                if len(g_) != h_ or any(len(r_) != w_ for r_ in g_) or (
+                        w_ >= 80 and "CAPCOM" not in txt_):
+                    bad_.append((name_, view_, w_, h_))
+            except Exception as e_:
+                bad_.append((name_, view_, w_, h_, repr(e_)))
+check("in the capsule: every view at every size, from the pad to the sea",
+      not bad_ and snaps_[-1][1].result[0] == "SPLASHDOWN", str(bad_[:3]))
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
