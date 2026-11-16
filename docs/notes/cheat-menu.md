@@ -54,6 +54,9 @@ water on that bait, and big - see Fishing. The tackle shops are a taxi fare, so 
 key; ctrl-a `9` (the pier's tackle shop) and `0` (a bait kiosk) are the checks'. `g` stands
 aside for ctrl-a, whose `g` is the arcade. **`e`, a dark night** (AND THE REST): on to the next
 night with little enough moon for the glowing sea.
+**`*`, dragon dance** (AND THE REST, since NIGHTS is full): on to
+the festival's night if this is not it, and in front of the dragon - see The
+festival in Chinatown.
 
 **Four columns** (`draw_cheats()`): NIGHTLIFE, MONEY, VIEWS and THE MYSTERY; the PARTS OF TOWN
 (the digits, `1`–`9` and `0`, with the placed zones); AND THE REST; then WEATHER & SKY and
