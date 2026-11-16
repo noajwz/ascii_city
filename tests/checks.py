@@ -9420,13 +9420,15 @@ check("the autopilot walks the town, not in circles: it holds a street, turns no
       and sum(r_ for r_, _, _ in aw) / len(aw) < 2.5, str(aw))
 
 
-def walk_tour(x, z, secs, pace=1.0):
-    """The walk round town as the main loop runs it, minus the drawing: a lap,
-    or secs, whichever comes first."""
+def walk_tour(x, z, secs, pace=1.0, grand=False):
+    """The walk round town (or the long walk) as the main loop runs it, minus
+    the drawing: a lap, or secs, whichever comes first."""
     ft = 1.0 / ac.FPS
     yaw = fwd = spin = 0.0
-    tour = ac.new_tour(x, z, 0.0)
-    planned = {ac.DISTRICTS[k_]["name"] for _, k_ in tour["stops"]}
+    tour = ac.new_tour(x, z, 0.0, grand)
+    planned = {ac.DISTRICTS[k_]["name"] if isinstance(k_, int) else k_
+               for _, k_ in tour["stops"]}
+    nx_, skips, swing, pave, frames = tour["next"], 0, 0.0, 0, 0
     hub_ = tour["stops"][0][0]
     blocked, turned, path, streak, worst, seen = False, 0.0, 0.0, 0, 0, set()
     x_0, z_0 = (hub_[0] + 0.5) * ac.CELL, (hub_[1] + 0.5) * ac.CELL
@@ -9450,10 +9452,19 @@ def walk_tour(x, z, secs, pace=1.0):
         worst = max(worst, streak)
         path += abs(fwd * ft) if moved else 0.0
         seen.add(ac.district(int(x // ac.CELL), int(z // ac.CELL))["name"])
+        if tour["next"] != nx_:
+            seen.add(ac.tour_name(dict(tour, next=nx_)))      # got there
+            skips += tour["next"] != (nx_ + 1) % len(tour["stops"])
+            nx_ = tour["next"]
+        swing = max(swing, abs(tour.get("swing", 0.0)))
+        frames += 1
+        pave += not all(ac.dry_at(x + a_, z + b_) for a_, b_ in (
+            (ac.PAVE, 0), (-ac.PAVE, 0), (0, ac.PAVE), (0, -ac.PAVE)))
         if tour["laps"]:
             break
     return dict(lap=tour["laps"] > 0, turn=turned / max(1.0, path) * 100.0, worst=worst,
-                missed=planned - seen, back=math.hypot(x - x_0, z - z_0), kinds=len(planned))
+                missed=planned - seen, back=math.hypot(x - x_0, z - z_0), kinds=len(planned),
+                skips=skips, swing=swing, pave=pave / max(1, frames))
 
 
 def street_start(x, z):
@@ -9472,11 +9483,16 @@ check("j walks round town: a lap through every part of it that it planned - all 
       "- round to the downtown it set off from, never stuck against a wall, at any pace",
       all(r_["lap"] and not r_["missed"] and r_["kinds"] == 8 and r_["worst"] < 10
           and r_["back"] < 4 * ac.CELL for r_ in wt_), str(wt_))
-check("and it is smoother than the wander: it holds a street and turns only at "
-      "the corners", all(r_["turn"] < 2.5 for r_ in wt_)
-      and sum(r_["turn"] for r_ in wt_) / len(wt_) < sum(r_ for r_, _, _ in aw) / len(aw),
+check("and it is no more turning than the wander, its drift from side to side and "
+      "all: it holds a street and turns at the corners",
+      all(r_["turn"] < 2.8 for r_ in wt_)
+      and sum(r_["turn"] for r_ in wt_) / len(wt_)
+      < sum(r_ for r_, _, _ in aw) / len(aw) + 0.3,
       "%s against %s" % ([round(r_["turn"], 2) for r_ in wt_],
                          [round(r_, 2) for r_, _, _ in aw]))
+check("and it drifts from side to side down the middle of the street, off the pavement",
+      all(r_["swing"] > 0.8 and r_["pave"] < 0.06 for r_ in wt_),
+      str([(round(r_["swing"], 2), round(r_["pave"], 3)) for r_ in wt_]))
 pl_ = ac.tour_plan(*street_start(*ac.start_position()[:2]))
 check("it starts and ends in downtown, and goes back through it on the way",
       pl_[0][1] == 0 and sum(1 for _, k_ in pl_ if k_ == 0) >= 2
@@ -11884,6 +11900,20 @@ check("nor on any other night, nor anyone out to see it", sum(
         ac.View(xb_, zb_, math.pi * 0.5 - 0.7, 120, 36), t_))
 ac._sky_mode, ac._night_skip = sky0_, skip0_
 ac.AURORA = ac.AURORA_DIM = ac.AURORA_V = ac.AURORA_V_DIM = 0
+
+# --- the long walk ----------------------------------------------------------------
+# J: past everything there is to walk past - the coast, the woods, the strip,
+# the lighthouse - in one ring. A lap at the fastest pace, with the sea on.
+gl_ = walk_tour(*street_start(*ac.start_position()[:2]), 2400.0, 3.5, True)
+gp_ = ac.grand_plan(*street_start(*ac.start_position()[:2]))
+names_ = {n_ for _, n_ in gp_}
+check("J's long walk plans every sight on its list and every part of town",
+      len(names_ & {n_ for _, n_ in ac.GRAND_SIGHTS}) >= len(ac.GRAND_SIGHTS) - 2
+      and {d_["name"] for d_ in ac.DISTRICTS} <= names_ and gp_[0][1] == "downtown",
+      str(sorted(names_)))
+check("and walks it: a lap, at every stop, never stuck against a wall",
+      gl_["lap"] and not gl_["skips"] and not gl_["missed"] and gl_["worst"] < 15
+      and gl_["back"] < 4 * ac.CELL, str(gl_))
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

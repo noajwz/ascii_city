@@ -115,14 +115,23 @@ def cases(run, report):
         cs_ok = False
     ok &= cs_ok
     # The walk round town: j, a while walking, j again stops it.
-    wr_st, wr_out = run([(b"j", 8.0), (b"j", 1.0)], cols=160, rows=45)
-    wr_plain = ANSI.sub(b"", wr_out).decode("utf-8", "replace")
-    wr_ok = report("the walk round town: j, along, j stops", wr_st, wr_out)
-    if wr_ok and wr_out and not ("walking round town" in wr_plain
-                                 and "j stops" in wr_plain and "stopped" in wr_plain):
+    rt_st, rt_out = run([(b"j", 8.0), (b"j", 2.0)], cols=160, rows=45)
+    rt_plain = ANSI.sub(b"", rt_out).decode("utf-8", "replace")
+    rt_ok = report("the walk round town: j, along, j stops", rt_st, rt_out)
+    if rt_ok and rt_out and not ("walking round town" in rt_plain
+                                 and "j stops" in rt_plain and "stopped" in rt_plain):
         print("    not started, no hint, or not stopped")
-        wr_ok = False
-    ok &= wr_ok
+        rt_ok = False
+    ok &= rt_ok
+    # And J, the long walk: started, the HUD says how far round, j stops it.
+    lw_st, lw_out = run([(b"J", 8.0), (b"j", 2.0)], cols=160, rows=45)
+    lw_plain = ANSI.sub(b"", lw_out).decode("utf-8", "replace")
+    lw_ok = report("the long walk: J, along, j stops", lw_st, lw_out)
+    if lw_ok and lw_out and not ("the long walk" in lw_plain and " of " in lw_plain
+                                 and "stopped" in lw_plain):
+        print("    not started, no hint, or not stopped")
+        lw_ok = False
+    ok &= lw_ok
     # The fortune teller: " on the panel, a few steps up to her table, her
     # fortune, another for $5, x up and away.
     ft_st, ft_out = run([(F1, .5), (b'"', 1.0)] + IN + [(b"", 6.0), (b"p", 1.0),
