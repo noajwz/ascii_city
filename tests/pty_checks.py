@@ -102,6 +102,26 @@ def cases(run, report):
     ok &= report("casino slot: bet up, pull, bet down", *run(
         [(F1, .5), (b"\x01c", 1.0)] + IN + [(b"+", .3), (b"p", 3.0), (b"-", .3),
          (b"p", 3.0), (b"b", .6), (b"k", 3.0)], cols=100, rows=30))
+    # x leaves: in at the casino's door, and x walks you out. And with the
+    # doors shut on the panel, walking at the same door takes you nowhere.
+    xl_st, xl_out = run([(F1, .5), (b"\x01c", 1.0)] + IN + [(b"", 1.0), (b"x", 1.5),
+                                                            (b"w", .3)],
+                        cols=300, rows=60)      # wide: the note goes after the HUD
+    xl_plain = ANSI.sub(b"", xl_out).decode("utf-8", "replace")
+    xl_ok = report("x walks you out of the casino", xl_st, xl_out)
+    if xl_ok and xl_out and not ("FAITES VOS JEUX" in xl_plain
+                                 and "you step back out" in xl_plain):
+        print("    not in, or not out again")
+        xl_ok = False
+    ok &= xl_ok
+    ds_st, ds_out = run([(F1, .5), (b"o", .6), (b"\x01c", 1.0)] + IN + [(b"", 1.5)],
+                        cols=110, rows=34)
+    ds_plain = ANSI.sub(b"", ds_out).decode("utf-8", "replace")
+    ds_ok = report("doors shut: past the casino's door", ds_st, ds_out)
+    if ds_ok and ds_out and ("FAITES VOS JEUX" in ds_plain or "shut" not in ds_plain):
+        print("    the door still took you in")
+        ds_ok = False
+    ok &= ds_ok
     ok &= report("sky deck: lift up, look round, lift down", *run(
         [(F1, .5), (b"\x01^", 1.0), (b"w", 6.0), (b"d", .5), (b"a", .5), (b"s", 6.0),
          (b"w", .4)], cols=100, rows=30))

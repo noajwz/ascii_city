@@ -173,6 +173,15 @@ lighthouse door the same. Slow to a walk or stop at a door and in you go, as bef
 through a pty along the pavement past a casino door: walking takes you in, hurrying and running do
 not.
 
+**x leaves, everywhere** (asked for on 2026-11-16: "in some places S is leaving and in others
+it's X"). In a doorway `x` steps you back out (`step_out()`: back the way you came in, or
+whichever way is clear); on any roof it is the way down; in a game or a song it stops that
+first, and a second `x` leaves. Every hint says `x`. `s` still walks you backwards out of a
+doorway, because it is walking. The confession booth is the one exception: you type there, so
+it is `esc`. **`o` on the panel shuts the doors** (`_doors_shut`): no doorway, fire escape or
+lighthouse door takes you in, and `p`, `e` and `f` in the street do nothing - for wandering
+without being pulled into things. The taxi still comes.
+
 **The autopilot** (spacebar, `auto_step()`) holds a heading **in the world** and eases onto it,
 slowing through the corner. It used to be `wander()`, which blended every direction it probed by
 score *relative to your nose*, plus a slow sine bias stronger than its pull to go straight: for
