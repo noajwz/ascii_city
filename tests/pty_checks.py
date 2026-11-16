@@ -252,6 +252,14 @@ def cases(run, report):
     print("%-34s %s" % ("  and the reader came up, and went",
                         "ok" if seen else "FAIL"))
     ok &= seen
+    # The festival: the menu goes on to its night and in front of the dragon.
+    fest_st, fest_out = run([(F1, .5), (b"*", 2.0), (b"\x1bOD", .4), (b"\x1bOC", .4)],
+                            cols=120, rows=34)
+    ok &= report("the festival: the dragon dance", fest_st, fest_out)
+    fest_txt = ANSI.sub(b"", fest_out).decode("utf-8", "replace")
+    seen = "dragon dance" in fest_txt and "no dragon dance near" not in fest_txt
+    print("%-34s %s" % ("  and the menu took you there", "ok" if seen else "FAIL"))
+    ok &= seen
     ok &= report("a flight: the gate, a seat, off, doze, land, out", *run(
         [(F1, .5), (b".", 1.5)] + [(b"w", .3)] * 6 + [(b"\r", 4.0), (b"\x1bOD", .3),
          (b"\x1bOC", .3), (b"x", 1.0)] + [(b"", 3.0)] * 9 + [(b"w", .3)],

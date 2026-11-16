@@ -1393,6 +1393,78 @@ ac.NEON = [(100 + k, 200 + k) for k in range(8)]
 while ac.weather_name() != "auto":
     ac.cycle_weather()
 
+# --- the festival in Chinatown ----------------------------------------------
+ac._night_skip = 0.0
+fest_nights = [k for k in range(1100)
+               if ac.night(k * ac.NIGHT_LENGTH + 100)["festival"]]
+check("one night in a dozen or so is Chinatown's festival", 50 < len(fest_nights) < 120,
+      "%d of 1100" % len(fest_nights))
+check("never the strange night, a blackout or the fog", not any(
+    ac.night(k * ac.NIGHT_LENGTH + 100)[w_] for k in fest_nights
+    for w_ in ("alien", "blackout", "fog")))
+# Every parade near the start runs down a Chinatown street and nowhere else.
+pars_ = ac.near_parades(x0, z0, 1500.0)
+bad_ = []
+for p_ in pars_:
+    for j_ in range(int(p_[1] / ac.CELL), int(p_[2] / ac.CELL)):
+        for i_ in range(int(p_[3] / ac.CELL), int(p_[4] / ac.CELL)):
+            if (not ac.road_at(i_, j_) or ac.district(i_, j_) is not ac.CHINATOWN
+                    or ac.water_at(i_, j_) or ac.hwy_at(i_)):
+                bad_.append((i_, j_))
+check("a parade in every Chinatown with a street through it, on that street alone",
+      len(pars_) >= 3 and not bad_ and all(
+          p_[2] - p_[1] >= ac.PARADE_MIN * ac.CELL for p_ in pars_),
+      "%d parades, %d bad cells" % (len(pars_), len(bad_)))
+p_ = pars_[0]
+pts_ = [ac.parade_point(p_, k * 0.1) for k in range(int(3 * (p_[2] - p_[1]) / 0.1 * 2))]
+jump_ = max(math.hypot(b_[0] - a_[0], b_[1] - a_[1]) for a_, b_ in zip(pts_, pts_[1:]))
+check("the dragon goes round its street without a jump, and stays on it",
+      jump_ < 0.3 and all(p_[3] + 1.0 < x_ < p_[4] - 1.0 and p_[1] < z_ < p_[2]
+                          for x_, z_, _, _ in pts_), "biggest step %.2f" % jump_)
+check("the menu skips to one",
+      ac.skip_to_festival(300.0) and ac.night(300.0)["festival"])
+spot_ = ac.find_place(x0, z0, "festival")
+fx_, fz_, fyaw_ = ac.festival_front(spot_[0], spot_[1], 300.0)
+fp_ = ac.near_parades(fx_, fz_, 400.0)[0]
+hx_, hz_, _, _ = ac.parade_point(fp_, ac.parade_head(fp_, 300.0))
+check("and the menu stands you in front of the dragon, looking at it",
+      ac.can_stand(fx_, fz_) and 8.0 < math.hypot(hx_ - fx_, hz_ - fz_) < 16.0
+      and abs(ac._wrap(math.atan2(hx_ - fx_, hz_ - fz_) - fyaw_)) < 0.01)
+while ac.weather_name() != "dry":
+    ac.cycle_weather()
+ac.GOLD, ac.ROU_RED = 1201, 1202
+ac.NEON = [(1100 + k, 1110 + k) for k in range(8)]
+fv_ = ac.View(fx_, fz_, fyaw_, 110, 30)
+_, fcol_, _ = ac.render_street(fv_, 300.0)
+dragon_ = sum(1 for r in fcol_ for a in r if a in (1201, 1202))
+strung_ = sum(1 for r in fcol_ for a in r if a in (1103, 1107))
+quiet_ = next(k * ac.NIGHT_LENGTH + 100 for k in range(1, 200)
+              if not ac.night(k * ac.NIGHT_LENGTH + 100)["festival"])
+fv_ = ac.View(fx_, fz_, fyaw_, 110, 30)
+_, qcol_, _ = ac.render_street(fv_, quiet_)
+check("on the night, the dragon in red and gold and the lanterns over the street",
+      dragon_ > 60
+      and strung_ > sum(1 for r in qcol_ for a in r if a in (1103, 1107)) + 20
+      and sum(1 for r in qcol_ for a in r if a in (1201, 1202)) < dragon_ / 4,
+      "%d dragon cells, %d red and gold lights" % (dragon_, strung_))
+ac.GOLD = ac.ROU_RED = 1
+ac.NEON = [(100 + k, 200 + k) for k in range(8)]
+mz_ = (fp_[1] + fp_[2]) * 0.5
+cars_ = [c_ for c_ in ac.near_cars(ac.View(fp_[0], mz_, 0.0, 2, 2), 300.0, 200.0,
+                                   every=True)
+         if ac.on_parade(c_[1], c_[2]) and c_[3][0] == 0.0]
+walk_ = [w_ for w_ in ac.near_walkers(ac.View(fp_[0], mz_, 0.0, 100, 30), 300.0)
+         if ac.on_parade(w_[1], w_[2])]
+check("the street is shut: no traffic up it and nobody walking down the middle",
+      not cars_ and not walk_, "%d cars, %d walkers" % (len(cars_), len(walk_)))
+check("the HUD: the dragon dance there, and the drums and their way from off",
+      "dragon dance" in ac.festival_hint(fx_, fz_, 300.0)
+      and "drums to the" in ac.festival_hint(fp_[0] + 300.0, mz_, 300.0)
+      and ac.festival_hint(fx_, fz_, quiet_) == "")
+ac._night_skip = 0.0
+while ac.weather_name() != "auto":
+    ac.cycle_weather()
+
 # --- dawn ------------------------------------------------------------------
 ac._night_skip = 0.0
 dn = [k for k in range(1200) if ac.night(k * ac.NIGHT_LENGTH + 100)["dawn"]]

@@ -301,6 +301,32 @@ FW_LIFE = 2.4          # and how long the sparks last once it bursts
 FW_FINALE = 180.0      # seconds between finales
 FW_REACH = 900.0       # how far off you can see them from
 
+# --- the festival in Chinatown ---
+# One night in FESTIVAL_ODDS Chinatown has its festival. Every front without
+# a sign is strung with lanterns and more are slung across the streets; the
+# avenue down the middle of each Chinatown is shut to traffic and lined with
+# people, and a dragon dances up and down it on its poles after the pearl,
+# firecrackers going off under its nose and a drum behind. Sky lanterns go
+# up over the roofs all night, which is how you find it from across town.
+FESTIVAL_ODDS = 11
+DRAGON_SEGS = 11       # poles behind the head, the tail the last of them
+DRAGON_GAP = 1.5       # world units between one pole and the next
+DRAGON_PACE = 1.7      # how fast it goes along the street, units a second
+DRAGON_LANE = 1.8      # up one side of the middle, round, and down the other
+DRAGON_SWAY = 1.0      # weaving this far either side of that
+DRAGON_BPM = 112.0     # the drum behind it
+PARADE_MIN = 12        # cells of unbroken street a parade needs
+FEST_SEEN = 120.0      # how far off the dragon is drawn
+FEST_CROWD = 70.0      # and the people watching it
+FEST_STRINGS = 55.0    # and the lanterns over the streets
+FEST_HEARD = 600.0     # how far off the HUD hears the drums
+FC_SLOT = 0.16         # seconds between firecrackers that might go off
+FC_SMOKE = 2.2         # how long the smoke of one hangs about
+SKY_LANTERNS = 30      # in the air over each parade at once
+SKY_RISE = 0.8         # units a second going up
+SKY_LIFE = 160.0       # seconds until one is out of sight
+SKY_SEEN = 900.0
+
 # --- your own show, fired from the lighthouse ---
 # In at the lighthouse's door and up its stair to the gallery. f up there
 # lights a show with you on the button: cues come along a bar at the bottom
@@ -17497,6 +17523,464 @@ def draw_river_lanterns(ch, co, v, walls, now, wet):
                     "o", (EMBER_HOT, GOLD, BULB)[s % 3], max(wet, 0.5), now)
 
 
+# ---------------------------------------------------------------------------
+# The festival in Chinatown
+#
+# One parade to each Chinatown, down the avenue nearest its middle for as far
+# as that runs unbroken through it. The dragon goes up one side of the road,
+# round at the end and back down the other - a loop, so the body follows the
+# head without ever folding back through itself - and everything about it is a
+# function of the clock, like everything else that moves here.
+# ---------------------------------------------------------------------------
+
+CHINATOWN = next(d for d in DISTRICTS if d["name"] == "chinatown")
+
+# The dragon, in layers blitted at one anchor the way Aku is: gold for the
+# horns, the outline and the whiskers, red for the face, white for the eyes
+# and the teeth.
+DRAGON_HEAD = [
+    " \\\\_          _// ",
+    "  \\\\_.------._//  ",
+    " {#( O )##( O )#} ",
+    "  \\####(oo)####/  ",
+    "   ~\\VVVVVVVV/~   ",
+]
+DRAGON_BODY = [
+    "/\\/\\/\\/\\/\\/\\",
+    "(@@@@@@@@@@)",
+    "''''''''''''",
+]
+DRAGON_TAIL = [
+    "/\\/\\/\\    ",
+    "(@@@@@)~~~",
+    "''''''    ",
+]
+# Under every pole, somebody holding it up over their head.
+DANCER_A = [
+    " _|_ ",
+    " (_) ",
+    " /#\\ ",
+    "  #  ",
+    " / | ",
+    "_|  \\",
+]
+DANCER_B = [
+    " _|_ ",
+    " (_) ",
+    " /#\\ ",
+    "  #  ",
+    " | \\ ",
+    " |_ \\",
+]
+# The drum on its cart behind the tail, and the one beating it.
+DRUMMER = [
+    " ,-.   ",
+    " (_)  \\",
+    " /#\\_| ",
+    "[=====]",
+    "|#####|",
+    "o-----o",
+]
+# Along the kerbs, watching.
+WATCHER = [
+    " ,-. ",
+    "(o o)",
+    " /|\\ ",
+    " |#| ",
+    " | | ",
+    "_| |_",
+]
+
+
+def _layer(art, keep):
+    """The art with only these characters left in it, for drawing one colour
+    of a sprite over another at the same anchor."""
+    return ["".join(c if c in keep else " " for c in row) for row in art]
+
+
+HEAD_GOLD = _layer(DRAGON_HEAD, "\\/_{}~.-()")
+HEAD_RED = _layer(DRAGON_HEAD, "#")
+HEAD_WHITE = _layer(DRAGON_HEAD, "OVo")
+BODY_GOLD = _layer(DRAGON_BODY, "/\\'")
+BODY_SCALES = _layer(DRAGON_BODY, "(@)")
+TAIL_GOLD = _layer(DRAGON_TAIL, "/\\'~")
+TAIL_SCALES = _layer(DRAGON_TAIL, "(@)")
+
+
+def district_tile(i, j):
+    """Which tile of the district grid a cell is in: the sum district_at()
+    does, staggered row by row."""
+    dj = j // DISTRICT_CELLS
+    return (i + _mix(dj, 0, 71) % DISTRICT_CELLS) // DISTRICT_CELLS, dj
+
+
+_parade_cache = {}
+
+
+def _parade_cell(cols, j):
+    return all(road_at(a, j) and district(a, j) is CHINATOWN
+               and not water_at(a, j) and not tunnel_at(a, j) for a in cols)
+
+
+def parade(di, dj):
+    """(x of the middle, z0, z1, x0, x1, seed) of this tile's parade, or None.
+
+    Only a Chinatown has one: down the avenue nearest the middle of it, for as
+    far as that runs through Chinatown with no river, tunnel or anything else
+    in the way, and not under the highway, whose piers stand in the road."""
+    key = (di, dj)
+    if key in _parade_cache:
+        return _parade_cache[key]
+    _evict(_parade_cache, 4000)
+    got = None
+    if DISTRICTS[DISTRICT_PICK[_mix(di, dj, 313) % len(DISTRICT_PICK)]] is CHINATOWN:
+        i0 = di * DISTRICT_CELLS - _mix(dj, 0, 71) % DISTRICT_CELLS
+        j0 = dj * DISTRICT_CELLS
+        mi, mj = i0 + DISTRICT_CELLS // 2, j0 + DISTRICT_CELLS // 2
+        seen = set()
+        for i in sorted(range(i0, i0 + DISTRICT_CELLS), key=lambda a: abs(a - mi)):
+            span = road_span(i, XP, 91)
+            if span is None or span[0] in seen:
+                continue
+            seen.add(span[0])
+            if (span[0] < i0 or span[0] + span[1] > i0 + DISTRICT_CELLS
+                    or hwy_at(span[0])):
+                continue
+            cols = range(span[0], span[0] + span[1])
+            if not _parade_cell(cols, mj):
+                continue
+            a = b = mj
+            while a > j0 and _parade_cell(cols, a - 1):
+                a -= 1
+            while b < j0 + DISTRICT_CELLS - 1 and _parade_cell(cols, b + 1):
+                b += 1
+            if b - a + 1 >= PARADE_MIN:
+                got = ((span[0] + span[1] * 0.5) * CELL, a * CELL, (b + 1) * CELL,
+                       span[0] * CELL, (span[0] + span[1]) * CELL,
+                       _mix(di, dj, 4401))
+                break
+    _parade_cache[key] = got
+    return got
+
+
+def near_parades(x, z, reach):
+    """Every parade with its street within reach, nearest first."""
+    cj = int(z / CELL + BIG) - BIG
+    ci = int(x / CELL + BIG) - BIG
+    n = int(reach / (DISTRICT_CELLS * CELL)) + 1
+    found = []
+    for dj in range(cj // DISTRICT_CELLS - n, cj // DISTRICT_CELLS + n + 1):
+        di0 = (ci + _mix(dj, 0, 71) % DISTRICT_CELLS) // DISTRICT_CELLS
+        for di in range(di0 - n, di0 + n + 1):
+            p = parade(di, dj)
+            if p is None:
+                continue
+            d = math.hypot(p[0] - x, max(p[1] - z, 0.0, z - p[2]))
+            if d < reach:
+                found.append((d, p))
+    found.sort()
+    return [p for _, p in found]
+
+
+def on_parade(x, z):
+    """Is this point in a street shut for the parade - for the traffic and the
+    people walking, who keep out of it."""
+    i = int(x / CELL + BIG) - BIG
+    j = int(z / CELL + BIG) - BIG
+    p = parade(*district_tile(i, j))
+    return p is not None and p[3] - 1.0 <= x <= p[4] + 1.0 and p[1] <= z <= p[2]
+
+
+def parade_head(p, now):
+    """How far round its loop the dragon's head is."""
+    return now * DRAGON_PACE + (p[5] & 1023) / 1023.0 * 600.0
+
+
+def parade_point(p, s):
+    """(x, z, dx, dz) s units round the parade's loop: up the street one side
+    of the middle, round in a half circle, down the other side and round
+    again - and the weave on top of that."""
+    r = DRAGON_LANE
+    lo, hi = p[1] + 2.0 + r, p[2] - 2.0 - r
+    st = max(1.0, hi - lo)
+    t = s % (2.0 * st + 2.0 * math.pi * r)
+    x = p[0]
+    if t < st:
+        px, pz, dx, dz = x + r, lo + t, 0.0, 1.0
+    elif t < st + math.pi * r:
+        a = (t - st) / r
+        px, pz = x + r * math.cos(a), hi + r * math.sin(a)
+        dx, dz = -math.sin(a), math.cos(a)
+    elif t < 2.0 * st + math.pi * r:
+        px, pz, dx, dz = x - r, hi - (t - st - math.pi * r), 0.0, -1.0
+    else:
+        a = (t - 2.0 * st - math.pi * r) / r
+        px, pz = x - r * math.cos(a), lo - r * math.sin(a)
+        dx, dz = math.sin(a), -math.cos(a)
+    w = DRAGON_SWAY * math.sin(s / 2.6)
+    return px + dz * w, pz - dx * w, dx, dz
+
+
+def festival_front(x, z, now):
+    """(x, z, yaw): at the front of the crowd on the far side of the road
+    from the dragon, a dozen units ahead of it and looking at it coming - or
+    behind it, if it is about to turn. Not in the middle of the road: head
+    on, the head hides the whole of the rest of it."""
+    ps = near_parades(x, z, 400.0)
+    if not ps:
+        return None
+    p = ps[0]
+    hx, hz, _, hdz = parade_point(p, parade_head(p, now))
+    way = 1.0 if hdz >= 0.0 else -1.0
+    pz = hz + 12.0 * way
+    if not p[1] + 3.0 < pz < p[2] - 3.0:
+        pz = hz - 12.0 * way
+    pz = min(p[2] - 3.0, max(p[1] + 3.0, pz))
+    px = p[3] + 2.2 if hx >= p[0] else p[4] - 2.2
+    return px, pz, math.atan2(hx - px, hz - pz)
+
+
+def festival_hint(x, z, now):
+    """For the HUD: the drums, and which way they are."""
+    if not night(now)["festival"]:
+        return ""
+    ps = near_parades(x, z, FEST_HEARD)
+    if not ps:
+        return ""
+    p = ps[0]
+    mz = min(p[2], max(p[1], z))
+    if math.hypot(p[0] - x, mz - z) < 30.0:
+        return "  ~ the festival in Chinatown: the dragon dance ~"
+    way = COMPASS[int(((math.atan2(p[0] - x, mz - z)
+                        / math.tau % 1.0) * 8 + 0.5)) % 8]
+    return "  ~ drums to the %s: the festival in Chinatown ~" % way
+
+
+def draw_festival(ch, co, v, walls, now, wet):
+    """The night of the festival: the lanterns over the streets, the sky
+    lanterns, and at each parade near enough the paper on the road, the crowd
+    along the kerbs, the dragon and its firecrackers."""
+    if not night(now)["festival"]:
+        return
+    draw_festival_strings(ch, co, v, walls, now, wet)
+    for p in near_parades(v.x, v.z, SKY_SEEN):
+        draw_sky_lanterns(ch, co, v, walls, p, now)
+    for p in near_parades(v.x, v.z, FEST_SEEN):
+        draw_parade(ch, co, v, walls, p, now, wet)
+
+
+def draw_festival_strings(ch, co, v, walls, now, wet):
+    """Lanterns on wires across every street in Chinatown, every other cell -
+    across the avenues and the cross streets, but not over a crossing, where
+    two would cross each other."""
+    n = int(FEST_STRINGS / CELL) + 1
+    ci = int(v.x / CELL + BIG) - BIG
+    cj = int(v.z / CELL + BIG) - BIG
+    red, red_dark = NEON[3]
+    gold = NEON[7][0]
+    for i in range(ci - n, ci + n + 1):
+        for j in range(cj - n, cj + n + 1):
+            rx = (i + 0.5) * CELL - v.x
+            rz = (j + 0.5) * CELL - v.z
+            if rx * v.dx + rz * v.dz < -CELL:
+                continue
+            if not road_at(i, j) or district(i, j) is not CHINATOWN:
+                continue
+            av = road_span(i, XP, 91)
+            cr = road_span(j, ZP, 137)
+            if av is not None and cr is None and av[0] == i and j % 2 == 0:
+                a, b, at = i * CELL, (i + av[1]) * CELL, (j + 0.5) * CELL
+                across_x = True
+            elif cr is not None and av is None and cr[0] == j and i % 2 == 0:
+                a, b, at = j * CELL, (j + cr[1]) * CELL, (i + 0.5) * CELL
+                across_x = False
+            else:
+                continue
+            m = _mix(i, j, 4413)
+            steps = int((b - a) / 0.5)
+            for k in range(steps + 1):
+                t = k / float(steps)
+                run = a + (b - a) * t
+                y = 6.3 - 0.9 * math.sin(math.pi * t) + 0.06 * math.sin(now * 0.9 + k)
+                x, z = (run, at) if across_x else (at, run)
+                if k % 3 == 1 and 0 < k < steps:
+                    put_lit(ch, co, v, walls, x, y - 0.35, z, "o",
+                            gold if (k + m) % 4 == 0 else red, wet, now)
+                else:
+                    put_point(ch, co, v, walls, x, y, z, "-", red_dark)
+
+
+def draw_sky_lanterns(ch, co, v, walls, p, now):
+    """Paper lanterns going up over the roofs, drifting on the wind as they
+    climb and dimming to a dot. Each one comes round again from somewhere new
+    once it is out of sight."""
+    seed = p[5] & 0xFFFFF
+    for n in range(SKY_LANTERNS):
+        lap, t = divmod(now + n * SKY_LIFE / SKY_LANTERNS + (seed & 255), SKY_LIFE)
+        m = _mix(seed, n * 7919 + int(lap), 4409)
+        x = (p[0] + ((m & 255) / 255.0 - 0.5) * 60.0 + t * 0.22
+             + 1.5 * math.sin(t * 0.07 + n))
+        z = (p[1] + ((m >> 8) & 255) / 255.0 * (p[2] - p[1])
+             + 1.5 * math.cos(t * 0.05 + n))
+        y = 5.0 + t * SKY_RISE
+        put_point(ch, co, v, walls, x, y, z, "o" if y < 50.0 else ".",
+                  EMBER_HOT if (m >> 16) & 1 else GOLD)
+
+
+def draw_parade(ch, co, v, walls, p, now, wet):
+    """One parade: red paper on the road, the people along the kerbs, the
+    pearl, the dragon on its poles and the drum behind, farthest first."""
+    s = parade_head(p, now)
+    hx, hz, hdx, hdz = parade_point(p, s)
+    seed = p[5] & 0xFFFFF
+
+    # The paper from a night of firecrackers, all down the road.
+    z0 = max(p[1], v.z - 45.0)
+    z1 = min(p[2], v.z + 45.0)
+    gz = math.floor(z0 / 1.25) * 1.25
+    while gz <= z1:
+        gx = p[3] + 1.0
+        while gx < p[4] - 1.0:
+            m = _mix(int(gx * 4.0), int(gz * 4.0), 4415)
+            if m % 6 == 0 and (gx - v.x) * v.dx + (gz - v.z) * v.dz > 1.0:
+                put_point(ch, co, v, walls, gx + (m >> 4 & 7) * 0.1, 0.02,
+                          gz + (m >> 7 & 7) * 0.1, "'" if m & 8 else ",",
+                          ROU_RED if (m >> 10) % 3 else GOLD_DIM)
+            gx += 1.25
+        gz += 1.25
+
+    things = []
+
+    def add(x, z, kind, data):
+        rx, rz = x - v.x, z - v.z
+        if rx * v.dx + rz * v.dz >= SPRITE_NEAR:
+            things.append((rx * rx + rz * rz, kind, x, z, data))
+
+    # The crowd, either side, three in five places along the kerb taken.
+    z0 = max(p[1] + 0.5, v.z - FEST_CROWD)
+    z1 = min(p[2] - 0.5, v.z + FEST_CROWD)
+    for side, kx in ((0, p[3] + 0.7), (1, p[4] - 0.7)):
+        for k in range(int(math.floor(z0 / 1.6)), int(z1 / 1.6) + 1):
+            g = _mix(seed * 2 + side, k, 4403)
+            if g % 5 < 2:
+                continue
+            z = k * 1.6 + (g >> 4 & 7) * 0.12
+            if road_span(int(z / CELL + BIG) - BIG, ZP, 137) is not None:
+                continue                # a crossing is kept clear
+            x = kx + ((g >> 7 & 7) - 3.5) * 0.06 * (1 if side == 0 else -1)
+            add(x, z, "watcher", g)
+
+    for k in range(DRAGON_SEGS + 1):
+        x, z, _, _ = parade_point(p, s - k * DRAGON_GAP)
+        add(x, z, "pole", (k, s - k * DRAGON_GAP))
+    x, z, _, _ = parade_point(p, s + 2.6)
+    add(x, z, "pearl", s + 2.6)
+    x, z, _, _ = parade_point(p, s - (DRAGON_SEGS + 2.5) * DRAGON_GAP)
+    add(x, z, "drum", None)
+    things.sort(key=lambda t_: -t_[0])
+
+    beat = (now * DRAGON_BPM / 60.0) % 1.0
+    for _, kind, x, z, data in things:
+        if kind == "watcher":
+            g = data
+            coat = (CURB, BARK, tone_colour("warm", (g >> 8 & 15) / 15.0),
+                    tone_colour("cold", (g >> 12 & 15) / 15.0))[g >> 16 & 3]
+            cheer = (abs(z - hz) < 6.0 and (g >> 18) & 1
+                     and int(now * 3.0 + (g >> 19 & 3)) % 2)
+            blit_sprite(ch, co, v, walls, RAVER_UP if cheer else WATCHER, x, z,
+                        0.0, SMOKER_H, SMOKER_W, coat)
+        elif kind == "pole":
+            k, sk = data
+            stride = DANCER_A if (sk / 0.9) % 2.0 < 1.0 else DANCER_B
+            blit_sprite(ch, co, v, walls, stride, x, z, 0.0, SMOKER_H, SMOKER_W,
+                        GOLD_DIM)
+            y = 2.45 + 0.5 * math.sin(now * 2.6 - k * 0.8)
+            py = SMOKER_H
+            while py < y - 0.4:
+                put_point(ch, co, v, walls, x, py, z, "|", BARK)
+                py += 0.3
+            if k == 0:
+                x += 0.25 * math.sin(now * 7.0)          # it shakes its head
+                y += 0.2
+                for art, colour in ((HEAD_GOLD, GOLD), (HEAD_RED, ROU_RED),
+                                    (HEAD_WHITE, FLASH)):
+                    blit_sprite(ch, co, v, walls, art, x, z, y - 0.8, y + 1.1,
+                                2.4, colour)
+            else:
+                tail = k == DRAGON_SEGS
+                scales = ROU_RED if k % 3 else GOLD
+                for art, colour in (((TAIL_GOLD, GOLD), (TAIL_SCALES, scales))
+                                    if tail else
+                                    ((BODY_GOLD, GOLD), (BODY_SCALES, scales))):
+                    blit_sprite(ch, co, v, walls, art, x, z, y - 0.45, y + 0.45,
+                                1.4 if tail else 1.75, colour)
+        elif kind == "pearl":
+            blit_sprite(ch, co, v, walls,
+                        DANCER_A if (data / 0.9) % 2.0 < 1.0 else DANCER_B,
+                        x, z, 0.0, SMOKER_H, SMOKER_W, GOLD_DIM)
+            y = 3.0 + 0.35 * math.sin(now * 3.1)
+            py = SMOKER_H
+            while py < y - 0.2:
+                put_point(ch, co, v, walls, x, py, z, "|", BARK)
+                py += 0.3
+            put_lit(ch, co, v, walls, x, y, z, "@",
+                    FLASH if int(now * 4.0) % 3 == 0 else GOLD, wet, now)
+        else:
+            blit_sprite(ch, co, v, walls, DRUMMER, x, z, 0.0, SMOKER_H * 0.95,
+                        SMOKER_W * 1.45, ROU_RED)
+            if beat < 0.18:
+                put_point(ch, co, v, walls, x, SMOKER_H * 0.75, z, "*", FLASH)
+
+    draw_firecrackers(ch, co, v, walls, p, now, wet)
+
+
+def draw_firecrackers(ch, co, v, walls, p, now, wet):
+    """Strings of them thrown down in front of the dragon: a white crack and a
+    spray of red and gold, then smoke hanging about where it went off. Each
+    goes off where the head was at that moment, not where it is now."""
+    seed = p[5] & 0xFFFFF
+    k1 = int(now / FC_SLOT)
+    for k in range(k1 - int(FC_SMOKE / FC_SLOT), k1 + 1):
+        m = _mix(seed, k, 4407)
+        if m % 3:
+            continue
+        t0 = k * FC_SLOT + (m >> 2 & 15) / 15.0 * FC_SLOT
+        t = now - t0
+        if not 0.0 <= t < FC_SMOKE:
+            continue
+        hx, hz, hdx, hdz = parade_point(p, parade_head(p, t0))
+        ahead = 1.5 + (m >> 6 & 7) * 0.5
+        lat = ((m >> 9 & 15) / 15.0 - 0.5) * 6.0
+        x = hx + hdx * ahead + hdz * lat
+        z = hz + hdz * ahead - hdx * lat
+        if (x - v.x) * v.dx + (z - v.z) * v.dz < 1.0:
+            continue
+        if t < 0.28:
+            put_lit(ch, co, v, walls, x, 0.35, z, "*", FLASH, max(wet, 0.3), now)
+            r = 0.25 + t * 3.0
+            for n in range(6):
+                a = n * 1.047 + (m >> 13 & 7)
+                put_point(ch, co, v, walls, x + r * math.cos(a), 0.35 + 0.5 * t
+                          + 0.25 * math.sin(a), z + r * math.sin(a),
+                          "'" if n % 2 else ".", GOLD if n % 2 else ROU_RED)
+        if t > 0.15:
+            for n in range(2):
+                put_point(ch, co, v, walls, x + 0.35 * t + n * 0.3,
+                          0.4 + t * 0.55 + n * 0.35, z - 0.2 * t,
+                          ":" if t < 1.0 else ".", SMOKE)
+
+
+def _festival_spot(x, z):
+    """In the middle of the parade's street at one end, looking up it. The
+    menu then moves you to in front of the dragon, which needs the clock."""
+    for reach in (400.0, 1200.0, 3000.0, 6000.0):
+        for p in near_parades(x, z, reach):
+            px, pz = p[0], p[1] + 4.0
+            if (px - x) ** 2 + (pz - z) ** 2 >= CHEAT_SKIP ** 2 and can_stand(px, pz):
+                return px, pz, 0.0
+    return None
+
+
 def bay_centre(i):
     """(x, z) of the middle of the bay in this stretch of river, or None."""
     span = grand_avenue(i)
@@ -18213,6 +18697,7 @@ def near_cars(v, now, reach=CAR_REACH, every=False):
     odds = TRAFFIC_ODDS.get(TRAFFIC[_traffic])
     if odds is None:
         return []
+    fest = night(now)["festival"]
     if night(now)["alien"]:
         now = int((now + _night_skip) / NIGHT_LENGTH) * NIGHT_LENGTH - _night_skip
     out = []
@@ -18255,6 +18740,8 @@ def near_cars(v, now, reach=CAR_REACH, every=False):
                     j = int(z / CELL + BIG) - BIG
                     if not road_at(i, j) or not dry_at(x, z) or suburb_at(i, j):
                         continue                  # the river, the woods
+                    if fest and axis == 0 and on_parade(x, z):
+                        continue                  # shut for the dragon
                     kind = ("police" if (g >> 6) % POLICE_ODDS == 0 else
                             "bus" if axis == 0 and (g >> 11) % BUS_ODDS == 0
                             else "car")
@@ -19049,6 +19536,8 @@ def near_walkers(v, now):
                     j = int(z / CELL + BIG) - BIG
                     if not road_at(i, j) or not dry_at(x, z) or suburb_at(i, j):
                         continue
+                    if nt["festival"] and on_parade(x, z):
+                        continue                # the crowd is standing there
                     phase = (along / 0.8) % 2.0
                     yield (rx * rx + rz * rz, x, z, phase, g,
                            nt["alien"])
@@ -22624,6 +23113,7 @@ def draw_props(ch, co, v, walls, now, wet):
     """Everything hanging off a facade or standing in front of one, drawn
     farthest first so the near ones win."""
     props = []
+    fest = night(now)["festival"]
     for i, j, b in near_lots(v, 62.0):
         if b["tree"]:
             continue                    # nothing is hung on a tree
@@ -22698,9 +23188,17 @@ def draw_props(ch, co, v, walls, now, wet):
                         props.append((_d2(v, w), kind_, s_, w, (nx, nz)))
                 continue
             fc = b["faces"][f]
-            if fc["lanterns"] is not None:
+            lan = fc["lanterns"]
+            if (lan is None and fest and fc["hung"] is None
+                    and b["district"] is CHINATOWN):
+                # The festival: a string on every front that has no sign.
+                m_ = _mix(i * 4 + f, j, 4417)
+                lan = {"y": 4.3 + (m_ & 15) / 15.0 * 1.3,
+                       "tone": 7.5 / 8.0 if m_ & 16 else 3.5 / 8.0,
+                       "phase": (m_ >> 5 & 63) / 10.0}
+            if lan is not None:
                 w = face_point(i, j, f, CELL * 0.5, 0.6, 0.0)
-                props.append((_d2(v, w), "lanterns", (fc["lanterns"], i, j, f),
+                props.append((_d2(v, w), "lanterns", (lan, i, j, f),
                               w, (nx, nz)))
             lit = face_kind(i + nx, j + nz)
             if lit != "road":
@@ -23197,6 +23695,16 @@ def skip_to_lanterns(now):
     return False
 
 
+def skip_to_festival(now):
+    """Straight to the next night of Chinatown's festival."""
+    global _night_skip
+    for _ in range(FESTIVAL_ODDS * 8):
+        _night_skip += NIGHT_LENGTH
+        if night(now)["festival"]:
+            return True
+    return False
+
+
 def skip_night():
     """On to the next one. Waiting eleven minutes to see whether the next sky
     is any different is not a way to look at anything."""
@@ -23249,6 +23757,11 @@ def night(now):
         # Fog comes in off the water now and then; never on the strange night,
         # which wants its sky seen.
         got["fog"] = _mix(k, 7, 613) % FOG_ODDS == 0 and not got["alien"]
+        # Chinatown's festival: never on the strange night, when everyone is
+        # looking up, nor with the power off, which would take the lanterns,
+        # nor in the fog, which would hide the dragon from a dozen steps off.
+        got["festival"] = (_mix(k, 9, 613) % FESTIVAL_ODDS == 0 and not got["alien"]
+                           and not got["blackout"] and not got["fog"])
         if got["alien"]:
             # Whatever the weather was going to be up there, the sky is lit by
             # what is in it tonight.
@@ -23940,6 +24453,7 @@ def render_street(v, now):
         draw_river_lanterns(ch, co, v, walls, now, wet)
     for i, j in near_yokocho(v, 55.0):
         draw_lantern_string(ch, co, v, walls, i, j, now)
+    draw_festival(ch, co, v, walls, now, wet)
     for i, j in near_bridges(v, GRAND_SEEN):
         if grand_at(i):
             draw_grand_bridge(ch, co, v, walls, i, j, now, wet)
@@ -27805,6 +28319,7 @@ CHEAT_PLACES = [
     ("t", "the turtles", "lair"),
     ("f", "fly the plane", "pilot"),
     ("d", "vending machine", "vending"),
+    ("*", "dragon dance", "festival"),
 ]
 
 # Off the panel, for the pty checks alone: with ASCII_CITY_TEST set, ctrl-a and
@@ -28790,6 +29305,8 @@ def find_place(x, z, kind):
         return _ramen_spot(x, z)
     if kind == "vending":
         return _vending_spot(x, z)
+    if kind == "festival":
+        return _festival_spot(x, z)
     if kind == "beach":
         return _beach_spot(x, z)
     if kind == "seapier":
@@ -28958,7 +29475,7 @@ def find_place(x, z, kind):
 
 # The third column.
 CHEAT_MORE = ["university", "library", "metro", "flight", "pilot", "center", "bar",
-              "lowroof", "washing", "bowling", "lair", "vending"]
+              "lowroof", "washing", "bowling", "lair", "vending", "festival"]
 
 
 def draw_cheats(ch, co, note):
@@ -37287,6 +37804,14 @@ def main(stdscr):
                                 force_rave(now)
                                 note = "-> the woods rave (starting)"
                                 note_at = now
+                            if kind == "festival":
+                                # The same: on to the festival's night if this
+                                # is not it, and in front of the dragon.
+                                if not night(now)["festival"]:
+                                    skip_to_festival(now)
+                                front_ = festival_front(cam_x, cam_z, now)
+                                if front_ is not None:
+                                    cam_x, cam_z, yaw = front_
                         break
             elif (trip is not None and trip.get("dig") is not None
                   and key not in (ord("q"), CHEAT_KEY)):
@@ -38781,6 +39306,7 @@ def main(stdscr):
                 or fountain_hint(cam_x, cam_z, now)
                 or clock_hint(cam_x, cam_z)
                 or landmark_hint(cam_x, cam_z)
+                or festival_hint(cam_x, cam_z, now)
                 or rave_hint(v, now)
                 or ("  ~ something over the city ~" if night(now)["alien"]
                     else "")

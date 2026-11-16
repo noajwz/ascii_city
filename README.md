@@ -314,6 +314,10 @@ the city is infinite, identical every time you walk back to it, and held in no m
   round over all of it. Climb it, and up on its gallery `f` lights a fireworks show that you fire,
   one shell for every press on the beat.
 - One night in a dozen the river is lanterns, and now and then there are fireworks over the bay.
+- **Chinatown's festival**, one night in a dozen or so: lanterns strung across every street, the
+  avenue shut and lined with people, and a dragon dancing up and down it on its poles after the
+  pearl, firecrackers going off under its nose, a drum behind and sky lanterns going up over the
+  roofs. The HUD hears the drums from across town; `*` on the F1 panel takes you there.
 - **The sea.** A long way east the river runs out into it. Along the front: a row of hotels with
   their names in neon, a road, a boardwalk under a string of coloured bulbs, palms, and a beach
   — waves coming in, the moon's light lying on the water, a ship on the horizon now and then.
