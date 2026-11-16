@@ -598,7 +598,7 @@ CANDLES = 48           # how many the chart goes back, at most
 LOTS = [1, 10, 100, 0] # how many a trade is: 0 is as many as you can
 STARTING_MONEY = 1000.0  # dollars, to start the night with
 # What things cost, out of the one wallet.
-FEES = {"cinema": 12, "club": 20, "ramen": 14, "diner": 4}
+FEES = {"cinema": 12, "club": 20, "ramen": 14, "diner": 4, "fortune": 5}
 LIFT_FEES = {None: 15, "party": 30, "bar": 10}   # sky decks, the roof party, the bars
 SHOW_FEE = 50          # a show fired from the lighthouse
 CLAW_COST = 2
@@ -11879,6 +11879,11 @@ def collect_glow(v, now, wet):
                 # The store's window: white light out over the pavement.
                 p = face_point(i, j, f, CELL * 0.5, 1.8, 0.0)
                 _spill(glow, p[0], p[2], 5.0, SNOW)
+            tl_ = teller_at(i, j, f)
+            if tl_ is not None:
+                # Her glass and her candle, whatever the weather, like a bulb.
+                p = teller_spot(tl_, FORTUNE_OUT + 0.8)
+                _spill(glow, p[0], p[1], 3.2, NEON[6][1])
             if b["club"] is not None:
                 if f == b["club"]["door"]:
                     lamp = club_light(now, b["club"])
@@ -24493,6 +24498,12 @@ def draw_props(ch, co, v, walls, now, wet):
             if st_ is not None:
                 w = face_point(i, j, f, CELL * 0.5, 0.4, FLOOR_H * 1.15 + 0.35)
                 props.append((_d2(v, w), "store", st_, w, (nx, nz)))
+            tl_ = teller_at(i, j, f)
+            if tl_ is not None:
+                w = face_point(i, j, f, tl_["u"], FORTUNE_OUT, 0.0)
+                props.append((_d2(v, w), "teller", tl_, w, (nx, nz)))
+                w = face_point(i, j, f, tl_["u"], FORTUNE_OUT, FORTUNE_H + 0.75)
+                props.append((_d2(v, w) - 0.01, "tellerboard", tl_, w, (nx, nz)))
             if b["cinema"] is not None and f == b["cinema"]["door"]:
                 w = face_point(i, j, f, CELL * 0.5, 0.4, 3.9)
                 props.append((_d2(v, w), "cinema", b["cinema"], w, (nx, nz)))
@@ -24639,6 +24650,10 @@ def draw_props(ch, co, v, walls, now, wet):
             draw_diner_sign(ch, co, v, walls, s, world, now)
         elif kind == "store":
             draw_store_sign(ch, co, v, walls, s, world, now)
+        elif kind == "teller":
+            draw_teller(ch, co, v, walls, s, world, now)
+        elif kind == "tellerboard":
+            draw_teller_board(ch, co, v, walls, s, world, now)
         elif kind == "overdoor":
             tone = s[1]["tone"] if s[1] else 0.44
             draw_over_door(ch, co, v, walls, s[0], world, now, tone)
@@ -27956,6 +27971,473 @@ def _store_spot(x, z):
     return None
 
 
+# --- the fortune teller -------------------------------------------------------
+# Asked for on 2026-11-16, "with some quotes", and on condition that she not
+# take up a building: she is a card table on the pavement in front of an
+# ordinary one, under a striped canopy on two poles, a crystal ball and a
+# candle on the cloth and a painted board over it. The building behind is
+# whatever it was. One to a square of city FORTUNE_TILE cells across, in one
+# square in two. Walk up to the table and you are sat across it from her:
+# $5 and she looks into the glass, turns a card and tells you something.
+FORTUNE_TILE = 26      # at most one teller to a square of city this many cells across
+FORTUNE_ODDS = 2       # and one square in this many has none
+FORTUNE_OUT = 1.0      # how far out from the wall her table stands
+FORTUNE_H = 2.7        # the canopy's top, in world units
+FORTUNE_W = 2.3
+FORTUNE_COST = 5       # a reading; the first is paid sitting down (FEES)
+FORTUNE_LOOK = 2.6     # seconds she looks into the glass before the card turns
+FORTUNE_TYPE = 26.0    # and then the fortune comes, this many letters a second
+FORTUNE_NAMES = ["MADAME NOX", "MADAME VESPER", "AUNTIE MOTH", "MISS OPALINE",
+                 "MADAME LUNE", "THE GREAT ROSALIE", "MOTHER CORVINA", "MADAME SEPTIMA"]
+# The stall, from the street. Drawn in layers over the same box, so each part
+# is its own colour: all of it first in the dim, then over it the canopy in
+# its stripe, the ball and the candle.
+FORTUNE_STALL = [
+    "  ___________  ",
+    " /_/_/_/_/_/_\\ ",
+    " |   .-^-.   | ",
+    " |  ( o o )  | ",
+    " | i/\\___/\\  | ",
+    " |[====o====]| ",
+    " | |~~~~~~~| | ",
+    " | |_______| | ",
+]
+FORTUNE_CANOPY = [
+    "  ___________  ",
+    " /_/_/_/_/_/_\\ ",
+]
+_FB = " " * 15
+FORTUNE_FLAME = [_FB] * 4 + ["   i           "]
+FORTUNE_GLASS = [_FB] * 5 + ["       o       "]
+FORTUNE_CLOTH = [_FB] * 6 + ["   |~~~~~~~|   "]
+# Sat across the table from her: her hood, her hands either side of the ball.
+FORTUNE_HER = [
+    "       .--.       ",
+    "      /    \\      ",
+    "     | o  o |     ",
+    "     |  ~~  |     ",
+    "   __/\\____/\\__   ",
+    "  /  /      \\  \\  ",
+    " (__/        \\__) ",
+]
+FORTUNE_BLINK = "     | -  - |     "
+FORTUNE_CANDLE = [" ( ", " | ", "_|_"]
+FORTUNE_FLICKER = [" ) ", " ( ", " ' ", " ( "]
+# The cards she turns: the old ones, and a few the city has added.
+FORTUNE_CARDS = [
+    ("THE MOON", [" ,-. ", "( (  ", " `-' "]),
+    ("THE STAR", ["  .  ", "-=*=-", "  '  "]),
+    ("THE TOWER", ["  A  ", " |#| ", " |#| "]),
+    ("THE WHEEL", [" .-. ", "(-+-)", " `-' "]),
+    ("THE FOOL", [" o   ", "/|\\_ ", "/ \\  "]),
+    ("THE HERMIT", ["  o  ", " /|\\*", " / \\ "]),
+    ("THE LOVERS", ["o   o", "|\\ /|", "| v |"]),
+    ("THE SUN", ["\\ | /", "- O -", "/ | \\"]),
+    ("THE WORLD", [" .-. ", "( @ )", " `-' "]),
+    ("THE TAXI", [" _#_ ", "[___]", " o o "]),
+    ("THE LIGHTHOUSE", ["=*=  ", " |   ", "/_\\~~"]),
+    ("THE RIVER", ["~  ~ ", " ~  ~", "~  ~ "]),
+    ("THE NEON", [" ___ ", "|BAR|", " ~~~ "]),
+    ("THE RAIN", ["/ / /", " / / ", "/ / /"]),
+]
+FORTUNE_BACK = ["/\\/\\/", "\\/\\/\\", "/\\/\\/"]
+# What she says. In the city's voice: most of them about the city.
+FORTUNES = [
+    "You will cross water. Take the bridge. The ferryman cheats at cards.",
+    "A stranger in a yellow car will ask where you are going. Say: just here is fine.",
+    "The lighthouse sees everything. It has decided to say nothing. Be like the "
+    "lighthouse.",
+    "Someone across the river is thinking about you. Mostly about the twenty "
+    "dollars.",
+    "Your lucky number is the one the wheel did not land on.",
+    "Never trust a noodle shop with a clean curtain.",
+    "What you lost, you will find in the last pocket you look in. That is how "
+    "pockets work.",
+    "Rain before midnight. Neon after. A small regret by morning.",
+    "The cards say walk. The cards always say walk. It is a city for walking.",
+    "There is one door in this city that opens. You have been through it already.",
+    "You will meet a tall dark stranger. He works the door at the club. He will "
+    "not let you in.",
+    "The moon is in your house tonight. Draw the curtains.",
+    "Money will come to you from the sea. Sell the fish. Keep the boat.",
+    "Your road is long and full of streets. Some of them end. Back out of those.",
+    "One light will go out, and then all of them. Carry a candle. I do.",
+    "Something green will move over the sea one night. Look east, and up.",
+    "You will win at the machines once, and spend the night trying to again.",
+    "Your aura is pink. No - that is the sign behind you.",
+    "The glass is cloudy. So is the sky. Come back on a clear night.",
+    "I see a long journey on a short train.",
+    "I see a meter running. I see it running. It is still running.",
+    "Fortune favours whoever walks slowly past doors.",
+    "Love is near. Love is the noodle counter two alleys over.",
+    "Climb the fire escape tonight. Or don't. But the roof is nice.",
+    "You are going to get lost. That is what the city is for.",
+    "A great prize is coming to you. It is in a capsule, in a vending machine. It "
+    "is a rubber pigeon.",
+    "The cards have nothing to say tonight. It costs the same.",
+    "You have an old soul and new shoes. The shoes will not last.",
+    "Tomorrow will be very like tonight, but with the lights off.",
+    "Ask the river. It has been everywhere in this city and kept none of it.",
+    "Before dawn you will see a cat, a cab, and the bottom of a cup.",
+    "There will be fireworks. Not for you. Watch them anyway.",
+    "Lights will spell a word over the sea. It will not be your name.",
+    "The stock you are thinking of: no.",
+    "Somewhere under these streets, somebody is making pizza. Do not ask who.",
+    "Look up when the sky goes quiet. Something up there is looking back.",
+    "You will dance in a hollow in the woods, and only the trees will remember.",
+    "The tide goes out. The tide comes back. There is a lesson in that, and also "
+    "wet shoes.",
+    "Pick a card. No, the other one. Ah. Well.",
+    "You will be asked to pay for something you did not want. Pay. Smile. Walk on.",
+    "A door will be shut in your face tonight. Behind it is a bowling alley. You "
+    "were not missing much.",
+    "Go higher. Every roof in this city is better than the street under it.",
+    "An old friend is near. He is a pigeon. He is not your friend.",
+    "Your hands say you work too hard. Your feet say you walk too much. Both are "
+    "right.",
+    "Somebody will sing badly tonight, and it will be the best thing you hear.",
+    "You will be lucky at cards. Not these cards.",
+    "Do not go into the woods after midnight. Or do, and tell me what the music "
+    "was.",
+    "The city is endless. Your feet are not. Sit down more.",
+    "I see you, on a balcony, very high, with a drink you paid too much for.",
+]
+FORTUNE_DONE = "that is all I see."
+FORTUNE_HUD = " %s, fortunes told  -  p another, $%d  -  x walks out  -  q quit "
+_teller_tiles = {}
+_fortune_deck = []     # what she has left to say tonight, in the order she will
+
+
+def _teller_fits(i, j, f):
+    """Can a table stand on the pavement in front of face f of lot (i, j): an
+    ordinary building's, on a proper street, and none of the places that have
+    something of their own out front."""
+    nx, nz = FACES[f]
+    oi, oj = i + nx, j + nz
+    if is_open(i, j) or not is_open(oi, oj) or not road_at(oi, oj):
+        return False
+    if water_at(oi, oj) or tunnel_at(oi, oj) or woods_at(oi, oj):
+        return False
+    if COAST and (coast_kind(i, j) is not None or coast_kind(oi, oj) is not None):
+        return False
+    if ramen_at(i, j, f) or store_at(i, j, f) is not None:
+        return False
+    b = lot(i, j)
+    if not plain_front(b) or b["district"].get("park"):
+        return False
+    return not any(b.get(k) is not None for k in (
+        "tower", "cinema", "diner", "warehouse", "center", "landmark", "strip",
+        "airport", "campus"))
+
+
+def teller_in_tile(ti, tj):
+    """The fortune teller in this square of city, worked out once: the tile's
+    hash picks a cell, and the nearest front round it that will do is where
+    she sets up - at one end of it, whichever the bin is not at."""
+    key = (ti, tj)
+    if key in _teller_tiles:
+        return _teller_tiles[key]
+    _evict(_teller_tiles, 3000)
+    m = _mix(ti, tj, 7741)
+    hit = None
+    if m % FORTUNE_ODDS:
+        ci = ti * FORTUNE_TILE + (m >> 4) % FORTUNE_TILE
+        cj = tj * FORTUNE_TILE + (m >> 12) % FORTUNE_TILE
+        for r in range(6):
+            for i in range(ci - r, ci + r + 1):
+                for j in range(cj - r, cj + r + 1):
+                    if (max(abs(i - ci), abs(j - cj)) != r
+                            or i // FORTUNE_TILE != ti or j // FORTUNE_TILE != tj):
+                        continue
+                    for f in range(4):
+                        if not _teller_fits(i, j, f):
+                            continue
+                        u = 1.3 if (m >> 8) & 1 else CELL - 1.3
+                        bin_ = lot(i, j)["faces"][f]["bin"]
+                        if bin_ is not None and abs(bin_ - u) < 2.0:
+                            u = CELL - u
+                        # Room to stand at the table and in front of it: a
+                        # corner can be tighter than the middle of a front.
+                        for u in (u, CELL - u, CELL * 0.5):
+                            a_ = face_point(i, j, f, u, FORTUNE_OUT, 0.0)
+                            b_ = face_point(i, j, f, u, FORTUNE_OUT + 1.2, 0.0)
+                            if dry_at(a_[0], a_[2]) and can_stand(b_[0], b_[2]):
+                                break
+                        else:
+                            continue
+                        seed = _mix(i, j * 4 + f, 7743)
+                        hit = {"i": i, "j": j, "f": f, "u": u, "seed": seed,
+                               "name": FORTUNE_NAMES[(m >> 20) % len(FORTUNE_NAMES)],
+                               "tone": (0, 6, 2)[(m >> 24) % 3]}
+                        break
+                    if hit:
+                        break
+                if hit:
+                    break
+            if hit:
+                break
+    _teller_tiles[key] = hit
+    return hit
+
+
+def teller_at(i, j, f):
+    """The fortune teller set up in front of this face, or None."""
+    t = teller_in_tile(i // FORTUNE_TILE, j // FORTUNE_TILE)
+    if t is not None and t["i"] == i and t["j"] == j and t["f"] == f:
+        return t
+    return None
+
+
+def teller_spot(t, out=FORTUNE_OUT):
+    """Where her table stands, or a point `out` from the wall in front of it."""
+    p = face_point(t["i"], t["j"], t["f"], t["u"], out, 0.0)
+    return p[0], p[2]
+
+
+def near_tellers(x, z, reach):
+    """The fortune tellers within reach."""
+    t = int(reach // (FORTUNE_TILE * CELL)) + 1
+    ti, tj = int(x // (FORTUNE_TILE * CELL)), int(z // (FORTUNE_TILE * CELL))
+    for a in range(ti - t, ti + t + 1):
+        for b in range(tj - t, tj + t + 1):
+            tl = teller_in_tile(a, b)
+            if tl is not None:
+                dx, dz = teller_spot(tl)
+                if (dx - x) ** 2 + (dz - z) ** 2 < reach * reach:
+                    yield tl
+
+
+def _fortune_spot(x, z):
+    """Across the street from the nearest fortune teller, facing her table: a
+    few steps forward and you are sat at it."""
+    best = None
+    for tl in near_tellers(x, z, 1400.0):
+        dx, dz = teller_spot(tl)
+        d = (dx - x) ** 2 + (dz - z) ** 2
+        if d >= CHEAT_SKIP ** 2 and (best is None or d < best[0]):
+            best = (d, tl)
+    if best is None:
+        return None
+    tl = best[1]
+    nx, nz = FACES[tl["f"]]
+    for out in (8.0, 6.5, 5.0, FORTUNE_OUT + CASINO_REACH + 2.5):
+        px, pz = teller_spot(tl, out)
+        if can_stand(px, pz):
+            return px, pz, math.atan2(-nx, -nz)
+    return None
+
+
+def draw_teller(ch, co, v, walls, t, world, now):
+    """Her stall on the pavement: the canopy in its stripe, her under it, the
+    ball glowing on the cloth and the candle by it. Lit by the candle and the
+    ball, not the mains, so a blackout leaves her as she was - the one light
+    on the street."""
+    x, z = world[0], world[2]
+    w, h, n = FORTUNE_W, FORTUNE_H, len(FORTUNE_STALL)
+    blit_sprite(ch, co, v, walls, FORTUNE_STALL, x, z, 0.0, h, w, CURB)
+    tube = NEON[t["tone"] % len(NEON)]
+    blit_sprite(ch, co, v, walls, FORTUNE_CANOPY, x, z,
+                h * (1.0 - len(FORTUNE_CANOPY) / float(n)), h, w, tube[0])
+    blit_sprite(ch, co, v, walls, FORTUNE_CLOTH, x, z,
+                h * (1.0 - len(FORTUNE_CLOTH) / float(n)), h, w, tube[1])
+    swirl = 0.5 + 0.5 * math.sin(now * 1.7 + t["seed"] % 7)
+    blit_sprite(ch, co, v, walls, FORTUNE_GLASS, x, z,
+                h * (1.0 - len(FORTUNE_GLASS) / float(n)), h, w,
+                NEON[6][0] if swirl > 0.35 else NEON[1][0])
+    if _mix(int(now * 9.0), 0, t["seed"]) % 5:
+        blit_sprite(ch, co, v, walls, FORTUNE_FLAME, x, z,
+                    h * (1.0 - len(FORTUNE_FLAME) / float(n)), h, w, GOLD)
+
+
+def draw_teller_board(ch, co, v, walls, t, world, now):
+    """The painted board over the canopy - FORTUNES, and the price - in screen
+    space, like the store's sign, so it reads from across the street."""
+    pr = v.project(world[0], world[1], world[2])
+    if pr is None or pr[2] > 60.0:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    word = "* FORTUNES *" if dist < 40.0 else "FORTUNES"
+    tube = NEON[t["tone"] % len(NEON)][0]
+    for k, c in enumerate(word):
+        put_cell(ch, co, v, walls, sx - len(word) // 2 + k, sy, dist, c,
+                 GOLD if c == "*" else tube)
+    if dist < 25.0:
+        for k, c in enumerate("$%d" % FORTUNE_COST):
+            put_cell(ch, co, v, walls, sx - 1 + k, sy + 1, dist, c, GOLD_DIM)
+
+
+def new_reading(t, now):
+    """A reading: the card she will turn and what she will say. She does not
+    say the same thing twice in a night, till she has said everything."""
+    if not _fortune_deck:
+        order = list(range(len(FORTUNES)))
+        random.Random(int(time.time() * 1000.0)).shuffle(order)
+        _fortune_deck.extend(order)
+    said = _fortune_deck.pop()
+    return {"seed": t["seed"], "t0": now, "said": said,
+            "card": _mix(said, int(now * 1000.0), t["seed"]) % len(FORTUNE_CARDS)}
+
+
+def render_fortune(t, told, width, height, now, k=1):
+    """Sat across the card table from her, under the canopy. The cloth hangs
+    all round, painted with moons and stars; she is in her hood behind the
+    table, her hands either side of the glass, which swirls while she looks
+    into it. Then the card turns and she says it, a letter at a time. On a
+    big window the same, bigger: she, the card and the candle k times over,
+    the ball redrawn larger, her name in block letters, what she says still
+    words."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    since = now - told["t0"]
+    said = FORTUNES[told["said"]]
+    shown = said[:max(0, int((since - FORTUNE_LOOK - 0.4) * FORTUNE_TYPE))]
+    if width < 50 or height < 18:
+        _text(ch, co, height // 2 - 2, 1, ("~ %s ~" % t["name"].lower())[:width - 1],
+              GOLD)
+        lines = _wrap_words(shown, max(10, width - 2)) if shown else [
+            "she looks into the glass..."]
+        for r, line in enumerate(lines[:max(1, height // 2)]):
+            _text(ch, co, height // 2 + r, 1, line, BULB)
+        return ch, co
+    n = len(NEON)
+    tube = NEON[t["tone"] % n]
+    seed = t["seed"]
+    # The cloth hanging all round: folds, and the moons and stars on it.
+    for y in range(height):
+        for x in range(width):
+            if (x // k) % 6 == 0:
+                ch[y][x], co[y][x] = ("(" if (y // k) % 2 else ")"), tube[1]
+            elif x % (2 * k) == 0 and y % k == 0:
+                m = _mix(x // (2 * k), y // k, 7745 + seed % 89)
+                if m % 37 == 0:
+                    ch[y][x], co[y][x] = ("*" if m & 64 else ")"), GOLD_DIM
+    # The canopy's stripe along the top.
+    for y in range(k):
+        for x in range(width):
+            ch[y][x] = "/" if (x // k) % 2 else "_"
+            co[y][x] = tube[0] if (x // (4 * k)) % 2 else tube[1]
+    # Her name, over her, and the lot a little down from the top on a tall window.
+    top = k + 1 + max(0, (height - 15 * k - 16) // 3)
+    name = t["name"]
+    if k > 1:
+        bw = blocks_width(name, k - 1)
+        for y in range(top, top + 5 * (k - 1) + 1):
+            for x in range(width // 2 - bw // 2 - k, width // 2 + bw // 2 + k):
+                if 0 <= x < width:
+                    ch[y][x], co[y][x] = " ", 0
+        _blocks(ch, co, top, width // 2 - bw // 2, name, tube[0], k - 1, k - 1)
+        top += 5 * (k - 1) + k
+    else:
+        for x in range(width // 2 - len(name) // 2 - 2, width // 2 + len(name) // 2 + 3):
+            ch[top][x], co[top][x] = " ", 0
+        _text(ch, co, top, width // 2 - len(name) // 2, name, tube[0])
+        top += 2
+
+    def stamp(x, y, art, attr):
+        """A drawing k times over, and nothing showing through it."""
+        for yy in range(y, y + len(art) * k):
+            for xx in range(x, x + len(art[0]) * k):
+                if 0 <= yy < height and 0 <= xx < width:
+                    ch[yy][xx], co[yy][xx] = " ", 0
+        _blow_up(ch, co, x, y, art, [[attr] * len(r) for r in art], k)
+
+    def say(y, line, attr):
+        """A line of words in the middle, on a clear stretch of the cloth."""
+        x0 = width // 2 - len(line) // 2
+        for x in range(x0 - 1, x0 + len(line) + 1):
+            if 0 <= y < height and 0 <= x < width:
+                ch[y][x], co[y][x] = " ", 0
+        _text(ch, co, y, x0, line, attr)
+
+    # Her, and the table in front of her.
+    her = list(FORTUNE_HER)
+    if (now + seed % 5) % 4.3 < 0.15:
+        her[2] = FORTUNE_BLINK
+    hx = width // 2 - len(her[0]) * k // 2
+    stamp(hx, top, her, CURB)
+    looking = since < FORTUNE_LOOK
+    if not looking and int(now * 1.3) % 3 == 0:
+        for xx in range(hx, hx + len(her[0]) * k):     # her eyes catch the glass
+            for yy in range(top + 2 * k, top + 3 * k):
+                if 0 <= yy < height and 0 <= xx < width and ch[yy][xx] == "o":
+                    co[yy][xx] = NEON[6][0]
+    rb = 3 * k                                  # the glass's radius, in rows
+    table = min(height - 7, top + 4 * k + 2 * rb)
+    for x in range(width):
+        ch[table][x], co[table][x] = "=", tube[1]
+        for y in range(table + 1, height):
+            ch[y][x], co[y][x] = " ", 0
+            if y == table + 1 or (y - table) % (3 * k) == 0:
+                ch[y][x] = "~" if (x + y) % 2 else "-"
+                co[y][x] = tube[1]
+    # The glass, on the cloth between her hands: a circle worked out, its
+    # mist going round, faster while she looks into it.
+    bx, by = width // 2, table - rb
+    spin = now * (2.6 if looking else 0.7)
+    for y in range(by - rb, by + rb + 1):
+        for x in range(bx - 2 * rb - 1, bx + 2 * rb + 2):
+            dx, dy = (x - bx) / 2.0, float(y - by)
+            d = math.hypot(dx, dy) / rb
+            if d > 1.05 or not (0 <= y < height and 0 <= x < width):
+                continue
+            if d > 0.86:
+                if abs(dy) < rb * 0.45:
+                    ch[y][x] = "(" if dx < 0 else ")"
+                elif abs(dx) < rb * 0.55:
+                    ch[y][x] = "-" if dy < 0 else "_"
+                else:
+                    ch[y][x] = "/" if (dx < 0) == (dy < 0) else "\\"
+                co[y][x] = SNOW
+                continue
+            a = math.atan2(dy, dx)
+            w_ = math.sin(a * 2.0 + d * 5.0 - spin) + 0.6 * math.sin(d * 9.0 + spin * 0.7)
+            if w_ > 0.8:
+                ch[y][x], co[y][x] = "@" if d < 0.3 and looking else "*", NEON[6][0]
+            elif w_ > 0.1:
+                ch[y][x], co[y][x] = "~", NEON[0][0] if w_ > 0.5 else NEON[6][1]
+            elif w_ > -0.5:
+                ch[y][x], co[y][x] = ".", NEON[1][1]
+            else:
+                ch[y][x], co[y][x] = " ", 0
+            if d < 0.3 and since > FORTUNE_LOOK and int(now * 2) % 2:
+                ch[y][x], co[y][x] = "o", FLASH
+    for x in range(bx - 2 * k, bx + 2 * k + 1):            # its stand
+        if 0 <= x < width:
+            ch[table][x], co[table][x] = "_", GOLD
+    # The candle, to her left, and the card, to her right.
+    flame = [FORTUNE_FLICKER[int(now * 7.0 + seed) % len(FORTUNE_FLICKER)]]
+    cx = bx - 2 * rb - 8 * k
+    stamp(cx, table - len(FORTUNE_CANDLE) * k, FORTUNE_CANDLE, BULB)
+    stamp(cx, table - (len(FORTUNE_CANDLE) + 1) * k, flame, GOLD)
+    title, art = FORTUNE_CARDS[told["card"]]
+    face = since >= FORTUNE_LOOK
+    card = (["+-------+", "|       |"]
+            + ["| %s |" % row for row in (art if face else FORTUNE_BACK)]
+            + ["|       |", "+-------+"])
+    kx = bx + 2 * rb + 4 * k
+    ky = table - len(card) * k
+    stamp(kx, ky, card, SNOW if face else tube[1])
+    if face:
+        _blow_up(ch, co, kx + 2 * k, ky + 2 * k, art, [[GOLD] * 5 for _ in art], k)
+        tx = kx + len(card[0]) * k // 2 - len(title) // 2
+        for x in range(tx - 1, tx + len(title) + 1):
+            if 0 <= x < width:
+                ch[table + 1][x], co[table + 1][x] = " ", 0
+        _text(ch, co, table + 1, tx, title, GOLD)
+    # What she says, on the cloth under the table.
+    wrap = min(width - 6, 64)
+    lines = (_wrap_words('"' + shown + ('"' if shown == said else ""), wrap)
+             if shown else ["she looks into the glass..." if looking else ""])
+    y0 = table + 3
+    for r, line in enumerate(lines):
+        if y0 + r >= height - 1:
+            break
+        say(y0 + r, line, BULB if shown else GOLD_DIM)
+    if shown == said and y0 + len(lines) + 1 < height - 1:
+        say(y0 + len(lines) + 1, FORTUNE_DONE, GOLD_DIM)
+    return ch, co
+
+
 def store_window(ch, co, v, sx, dist, u, f, r_lo, r_hi, st):
     """The store's front from the street: the whole ground floor one window,
     white - lit so it is the one white thing on a street of neon - the
@@ -28298,6 +28780,11 @@ def venue_at(x, z):
         dx, dz = store_door(st)
         if (dx - x) ** 2 + (dz - z) ** 2 < CASINO_REACH ** 2:
             return "store", st
+    for tl in near_tellers(x, z, 12.0):
+        # Sat down at her table: walked up to from the street side of it.
+        dx, dz = teller_spot(tl, FORTUNE_OUT + 1.2)
+        if (dx - x) ** 2 + (dz - z) ** 2 < (CASINO_REACH * 0.7) ** 2:
+            return "fortune", tl
     c = carnival_over(ci)
     if c is not None:                           # the claw machine, on the fair
         bx, bz = claw_spot(c)
@@ -30148,6 +30635,7 @@ CHEAT_PLACES = [
     ("]", "drive the el", "eldrive"),
     ("d", "vending machine", "vending"),
     ("m", "corner store", "store"),
+    ('"', "fortune teller", "fortune"),
     ("*", "dragon dance", "festival"),
 ]
 
@@ -30189,7 +30677,7 @@ CHEAT_ZONES = ["industrial", "suburbs", "university", "beach"]
 
 # The panel's groups, by what you would go there for.
 CHEAT_GROUPS = [
-    ("NIGHTLIFE", ["rave", "warehouse", "strip", "lemonade", "telescope"]),
+    ("NIGHTLIFE", ["rave", "warehouse", "strip", "lemonade", "telescope", "fortune"]),
     ("VIEWS", ["billboard"]),
     ("TRAVEL", ["metro", "airport", "harbour"]),
 ]
@@ -31159,6 +31647,8 @@ def find_place(x, z, kind):
         return _marina_spot(x, z)
     if kind == "store":
         return _store_spot(x, z)
+    if kind == "fortune":
+        return _fortune_spot(x, z)
     if kind == "subpen":
         return _pen_spot(x, z)
     if kind == "rocket":
@@ -35152,6 +35642,8 @@ TURNED = {
     "club": ["the bouncer doesn't move.", "twenty at the door. not tonight."],
     "ramen": ["the cook taps the sign: cash only.", "$%d a bowl." % FEES["ramen"]],
     "diner": ["the drone hovers over your cup.", "$%d a coffee, hon." % FEES["diner"]],
+    "fortune": ["she lays a hand over the glass.",
+                "$%d to look. the spirits don't take cards." % FEES["fortune"]],
 }
 
 
@@ -42419,6 +42911,7 @@ def main(stdscr):
     vendor = None               # the vending machine whose glass you are at
     tiki = None                 # sat at a beach bar: your tab, for this visit
     shopping = None             # in a corner store: what is in your bag, this visit
+    told = None                 # at the fortune teller's table: this reading
     ride = None                 # up on the pier's wheel: {"pier", "t0"}
     cruise = None               # aboard the cruise ship: {"h", "look"}
     boat = None                 # at the wheel of a speedboat: a Boat
@@ -43221,6 +43714,15 @@ def main(stdscr):
                     lemon["at"] = now
                 else:
                     note, note_at = "the kid wants a dollar", now
+            elif (told is not None and visit_ok and venue is not None
+                  and key in (ord("p"), ord("P"), 10, 13, curses.KEY_ENTER)):
+                if now - told["t0"] < FORTUNE_LOOK + 1.0:
+                    note, note_at = "she is still looking into the glass", now
+                elif wallet.take(FORTUNE_COST):
+                    told = new_reading(venue[1], now)
+                    note, note_at = "$%d, and she looks again" % FORTUNE_COST, now
+                else:
+                    note, note_at = "$%d a reading" % FORTUNE_COST, now
             elif at_mission and key in (ord("c"), ord("C")):
                 mission_cam = (mission_cam + 1) % len(MISSION_CAMS)
             elif at_mission and ord("1") <= key < ord("1") + len(MISSION_CAMS):
@@ -43254,7 +43756,7 @@ def main(stdscr):
                     note, note_at = said, now
             elif ((wheel is not None or at_arcade or at_bar is not None or at_bowl
                    or at_kara or at_golf or tiki is not None or at_mission
-                   or shopping is not None)
+                   or shopping is not None or told is not None)
                   and key in (ord("z"), ord("Z"))):
                 _big_screens[0] = not _big_screens[0]     # big screens, off and on
                 note, note_at = ("big screens " + ("on" if _big_screens[0]
@@ -43924,6 +44426,10 @@ def main(stdscr):
         elif shopping is None or shopping["seed"] != venue[1]["seed"]:
             shopping = {"seed": venue[1]["seed"], "since": now, "bag": {}, "said": "",
                         "said_at": -1e9}
+        if venue is None or venue[0] != "fortune":
+            told = None                 # up from her table: a new reading next time
+        elif told is None or told["seed"] != venue[1]["seed"]:
+            told = new_reading(venue[1], now)
         if venue is None or venue[0] != "beachbar":
             tiki = None                 # and off the stool: a new tab next time
         elif tiki is None or tiki["seed"] != venue[1]["seed"]:
@@ -44169,6 +44675,10 @@ def main(stdscr):
             ch, co = render_store(venue[1], shopping, width, height, now,
                                   big_scale(width, height))
             hud = STORE_HUD % venue[1]["name"].title()
+        elif venue is not None and venue[0] == "fortune" and told is not None:
+            ch, co = render_fortune(venue[1], told, width, height, now,
+                                    big_scale(width, height))
+            hud = FORTUNE_HUD % (venue[1]["name"].title(), FORTUNE_COST)
         elif venue is not None and venue[0] == "beachbar" and tiki is not None:
             ch, co = render_tiki(venue[1], tiki, width, height, now)
             hud = TIKI_HUD % (TIKI_NAMES[venue[1]["seed"] % len(TIKI_NAMES)].lower(),

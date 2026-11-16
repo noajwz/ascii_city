@@ -9623,6 +9623,97 @@ for n_ in range(3000):
     wins_ += "nothing" not in ac.store_buy(vis_, 4, wl_, n_ * 0.37)
 check("the lotto: now and then a ticket wins", 100 < wins_ < 900, "%d in 3000" % wins_)
 
+# --- the fortune teller -----------------------------------------------------------
+# Her card table on the pavement in front of an ordinary building - not a
+# building of her own - on a proper street, one square of city in two. Walk
+# up and you are sat across from her: $5, the glass, a card, a fortune.
+tiles_ = [(a_, b_) for a_ in range(-8, 8) for b_ in range(-8, 8)]
+tellers_ = [ac.teller_in_tile(a_, b_) for a_, b_ in tiles_]
+have_ = [t_ for t_ in tellers_ if t_ is not None]
+bad_ = []
+for t_ in have_:
+    nx_, nz_ = ac.FACES[t_["f"]]
+    oi_, oj_ = t_["i"] + nx_, t_["j"] + nz_
+    dx_, dz_ = ac.teller_spot(t_, ac.FORTUNE_OUT + 1.2)
+    b_ = ac.lot(t_["i"], t_["j"])
+    got_ = ac.venue_at(dx_, dz_)
+    if not (ac.road_at(oi_, oj_) and not ac.is_open(t_["i"], t_["j"])
+            and ac.dry_at(*ac.teller_spot(t_)) and ac.can_stand(dx_, dz_)
+            and got_ is not None and got_[0] == "fortune"
+            and ac.store_at(t_["i"], t_["j"], t_["f"]) is None
+            and not ac.ramen_at(t_["i"], t_["j"], t_["f"])
+            and ac.plain_front(b_) and b_["tower"] is None and b_["cinema"] is None
+            and b_["diner"] is None and not ac.water_at(oi_, oj_)
+            and not ac.tunnel_at(oi_, oj_)
+            and 0.5 < t_["u"] < ac.CELL - 0.5):
+        bad_.append((t_["i"], t_["j"], t_["f"]))
+check("fortune tellers: in about one square of city in two, at a table in front of "
+      "an ordinary building on a proper street",
+      0.3 < len(have_) / len(tiles_) < 0.6 and not bad_,
+      "%d of %d squares; %s" % (len(have_), len(tiles_), bad_[:3]))
+ac._teller_tiles.clear()
+ac._lots.clear()
+check("and they are the same tellers whatever was cached",
+      [ac.teller_in_tile(a_, b_) for a_, b_ in tiles_] == tellers_)
+fsp_ = ac.find_place(x0, z0, "fortune")
+walk_ = None
+for n_ in range(60):
+    wx_ = fsp_[0] + math.sin(fsp_[2]) * n_ * 0.25
+    wz_ = fsp_[1] + math.cos(fsp_[2]) * n_ * 0.25
+    got_ = ac.venue_at(wx_, wz_)
+    if got_ is not None:
+        walk_ = (n_ * 0.25, got_[0])
+        break
+check('the menu\'s " stands you across the street from one, a few steps from '
+      "her table", walk_ is not None and walk_[1] == "fortune" and walk_[0] < 12.0,
+      str(walk_))
+vf_ = ac.View(fsp_[0], fsp_[1], fsp_[2], 120, 36)
+gf_ = "\n".join("".join(r_) for r_ in ac.render_street(vf_, now_s)[0])
+check("from across the street: her canopy and her board", "FORTUNES" in gf_
+      and "[====" in gf_ and "_/__/_" in gf_)
+tl_f = have_[0]
+told_ = ac.new_reading(tl_f, 100.0)
+said_ = ac.FORTUNES[told_["said"]]
+bad_ = []
+for w_, h_ in ((30, 10), (40, 14), (60, 20), (80, 24), (100, 30), (160, 45), (211, 67),
+               (299, 87), (300, 90), (301, 91), (451, 133)):
+    for t_ in (100.5, 100.0 + ac.FORTUNE_LOOK + 0.8, 130.0):
+        try:
+            g_, _ = ac.render_fortune(tl_f, told_, w_, h_, t_, ac.big_scale(w_, h_))
+            txt_ = " ".join("".join(r_) for r_ in g_)
+            if len(g_) != h_ or any(len(r_) != w_ for r_ in g_):
+                bad_.append((w_, h_, t_, "size"))
+            elif t_ == 130.0 and " ".join(said_.split()[:3]) not in txt_:
+                bad_.append((w_, h_, t_, "not said"))
+        except Exception as e_:
+            bad_.append((w_, h_, t_, repr(e_)))
+check("sat at her table at any size: she looks, the card turns, she says it",
+      not bad_, str(bad_[:3]))
+g1_ = "\n".join("".join(r_) for r_ in ac.render_fortune(tl_f, told_, 80, 24, 130.0)[0])
+card_ = ac.FORTUNE_CARDS[told_["card"]][0]
+check("at 80x24: her name, the card's name, all of what she says, and that is all",
+      tl_f["name"] in g1_ and card_ in g1_ and ac.FORTUNE_DONE in g1_
+      and "she looks" in "".join("".join(r_) for r_ in
+                                ac.render_fortune(tl_f, told_, 80, 24, 100.5)[0]))
+ac._big_screens[0] = True
+gb_ = ac.render_fortune(tl_f, told_, 300, 90, 130.0, ac.big_scale(300, 90))[0]
+gbt_ = "\n".join("".join(r_) for r_ in gb_)
+check("on a big window her name in block letters, the words still words, and z "
+      "takes it away", ac.big_scale(300, 90) == 2 and tl_f["name"] not in gbt_
+      and "###" in gbt_ and " ".join(said_.split()[:3]) in gbt_
+      and tl_f["name"] in "\n".join("".join(r_) for r_ in ac.render_fortune(
+          tl_f, told_, 300, 90, 130.0, 1)[0]))
+ac._fortune_deck[:] = []
+heard_ = [ac.new_reading(tl_f, float(n_))["said"] for n_ in range(len(ac.FORTUNES))]
+check("she says nothing twice till she has said it all, and it is all words",
+      sorted(heard_) == list(range(len(ac.FORTUNES)))
+      and all(f_.isascii() for f_ in ac.FORTUNES)
+      and all(len(f_) < 140 for f_ in ac.FORTUNES))
+check("a reading costs, and broke she will not look",
+      ac.FEES["fortune"] == ac.FORTUNE_COST > 0
+      and "glass" in "\n".join("".join(r_) for r_ in
+                               ac.render_turned_away("fortune", 80, 24, 1.0)[0]))
+
 # --- the blimp -----------------------------------------------------------------------
 # One night in BLIMP_ODDS, a blimp over every square of the city, going round,
 # a message along its side. Rare: asked for "I don't wanna see that blimp all

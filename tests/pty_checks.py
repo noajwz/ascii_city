@@ -114,6 +114,20 @@ def cases(run, report):
         print("    not in, no coffee, or not out")
         cs_ok = False
     ok &= cs_ok
+    # The fortune teller: " on the panel, a few steps up to her table, her
+    # fortune, another for $5, x up and away.
+    ft_st, ft_out = run([(F1, .5), (b'"', 1.0)] + IN + [(b"", 6.0), (b"p", 1.0),
+                                                       (b"z", .5), (b"z", .5),
+                                                       (b"x", 1.2), (b"w", .5)],
+                        cols=300, rows=60)
+    ft_plain = ANSI.sub(b"", ft_out).decode("utf-8", "replace")
+    ft_ok = report("the fortune teller: sit, a reading, another, out", ft_st, ft_out)
+    if ft_ok and ft_out and not ("fortunes told" in ft_plain and "all I see" in ft_plain
+                                 and "she looks again" in ft_plain
+                                 and "you step back out" in ft_plain):
+        print("    not sat down, nothing said, not paid twice, or not out")
+        ft_ok = False
+    ok &= ft_ok
     # x leaves: in at the casino's door, and x walks you out. And with the
     # doors shut on the panel, walking at the same door takes you nowhere.
     xl_st, xl_out = run([(F1, .5), (b"\x01c", 1.0)] + IN + [(b"", 1.0), (b"x", 1.5),

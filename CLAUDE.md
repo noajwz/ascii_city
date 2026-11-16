@@ -75,6 +75,7 @@ or change something. Notes cross-reference each other by title ("see The univers
 - `casino.md` - The casino, and the one door in the city that opens
 - `ramen-counter.md` - The ramen counter
 - `corner-store.md` - The corner store
+- `fortune-teller.md` - The fortune teller
 - `vending-machines.md` - Vending machines
 - `manholes.md` - Manholes, and the tunnels under the streets
 - `temple.md` - The temple, and the word of God
