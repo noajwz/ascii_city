@@ -29,6 +29,8 @@ ac.COAST = False
 COAST_KINDS = ("beach", "seapier", "seawheel", "launchpad", "mission",
                "harbour", "gangway", "marina", "piertackle", "herring", "subpen")
 coast_jumps_ = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] in COAST_KINDS]
+coast_panel_ = [p_ for p_ in ac.CHEAT_PLACES if p_[2] in COAST_KINDS]
+ac.CHEAT_PLACES[:] = [p_ for p_ in ac.CHEAT_PLACES if p_[2] not in COAST_KINDS]
 coast_fares_ = [p_ for p_ in ac.TAXI_DESTS if p_[1] in COAST_KINDS]
 ac.CHEAT_HIDDEN[:] = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] not in COAST_KINDS]
 ac.TAXI_DESTS[:] = [p_ for p_ in ac.TAXI_DESTS if p_[1] not in COAST_KINDS]
@@ -1894,12 +1896,13 @@ check("the panel lists everything it does",
       and ac.weather_name() in text and "strike now" in text and "people" in text
       and "sky " in text and "dawn" in text and "traffic" in text)
 taxi_kinds_ = {k_ for _, k_ in ac.TAXI_DESTS}
-check("nowhere a taxi goes is on the panel, nor its FUN, EAT, AROUND TOWN",
-      not taxi_kinds_ & {k_ for _, _, k_ in ac.CHEAT_PLACES}
+check("nowhere a taxi goes is on the panel but the coast and the harbour, "
+      "nor its FUN, EAT, AROUND TOWN",
+      not (taxi_kinds_ - {"beach", "harbour"}) & {k_ for _, _, k_ in ac.CHEAT_PLACES}
       and not {"FUN", "EAT", "AROUND TOWN", "OUT OF TOWN"}
       & {g_ for g_, _ in ac.CHEAT_GROUPS} and "AROUND TOWN" not in text)
 panel_keys_ = ([k_ for k_, _, _ in ac.CHEAT_PLACES] + [d_["key"] for d_ in ac.DISTRICTS]
-               + list("wLsa>nuz!@&#/+%\\mc`~"))
+               + list("wLsa>nuz!@&#/+%\\`~"))
 check("every key on the panel does one thing: no place hides a part of town",
       len(panel_keys_) == len(set(panel_keys_)),
       " ".join(sorted({k_ for k_ in panel_keys_ if panel_keys_.count(k_) > 1})))
@@ -9304,6 +9307,7 @@ check("with the sea off there is none: the city goes on east as it always did",
 ac.COAST = True
 ac.coast_reset()
 ac.CHEAT_HIDDEN += coast_jumps_
+ac.CHEAT_PLACES += coast_panel_
 ac.TAXI_DESTS += coast_fares_
 west_on = cells_(-150, 330, -150, 150)
 moved_ = [k_ for k_ in west_off if west_off[k_] != west_on[k_]]

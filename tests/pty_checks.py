@@ -203,8 +203,8 @@ def cases(run, report):
         [(b"+", .2)] * 4 + [(b"w", .5), (b"W", .2), (b"W", 1.0)] + [(b"-", .2)] * 3
         + [(b"w", .5)], cols=100, rows=30))
     ok &= report("the factories: the zone, the site, into the rave and out", *run(
-        [(F1, .5), (b"9", 1.5), (b"W", 1.0), (F1, .5), (b"]", 1.5), (F1, .5),
-         (b"}", 1.5), (b"w", 1.0), (F1, .5), (b"[", 1.5)] + [(b"w", .25)] * 14
+        [(F1, .5), (b"9", 1.5), (b"W", 1.0), (F1, .5), (b"\x01]", 1.5), (F1, .5),
+         (b"\x01}", 1.5), (b"w", 1.0), (F1, .5), (b"[", 1.5)] + [(b"w", .25)] * 14
         + [(b"x", 1.0), (b"s", .6), (b"s", .6)],
         cols=100, rows=30))
     ok &= report("the suburbs: to them, walk a curving street, a taxi out", *run(
@@ -228,7 +228,7 @@ def cases(run, report):
         [(F1, .5), (b"'", 6.0), (b"a", .4), (b"a", .4), (b"a", 3.0), (b"w", 1.0)],
         cols=100, rows=30))
     ok &= report("the fountain show: to it, and watch the start", *run(
-        [(F1, .5), (b"(", 14.0), (b"a", .4), (b"d", .4)], cols=100, rows=30))
+        [(F1, .5), (b"\x01(", 14.0), (b"a", .4), (b"d", .4)], cols=100, rows=30))
     ok &= report("the university: the quad, across it, the panel's other page", *run(
         [(F1, .5), (b"\t", .4), (b"{", 1.5), (b"w", 1.0), (b"w", 1.0), (F1, .5),
          (b"\t", .4), (b"\t", .4), (F1, .4)], cols=80, rows=24))
@@ -237,7 +237,7 @@ def cases(run, report):
     # the room; x out onto the quad. Not s after:
     # backing up is back through the doors. Up to walk in, not w: inside, w is
     # Wikipedia.
-    lib_st, lib_out = run([(F1, .5), (b'"', 1.5)] + [(b"\x1bOA", .3)] * 8   # up: in
+    lib_st, lib_out = run([(F1, .5), (b'\x01"', 1.5)] + [(b"\x1bOA", .3)] * 8   # up: in
                           + [(b"w", 2.5), (b"\x1b", 1.5), (b"q", 1.5),
                              (b"x", .8)] + [(b"w", .3)] * 4,
                           cols=100, rows=30)
@@ -261,11 +261,11 @@ def cases(run, report):
     print("%-34s %s" % ("  and the menu took you there", "ok" if seen else "FAIL"))
     ok &= seen
     ok &= report("a flight: the gate, a seat, off, doze, land, out", *run(
-        [(F1, .5), (b".", 1.5)] + [(b"w", .3)] * 6 + [(b"\r", 4.0), (b"\x1bOD", .3),
+        [(F1, .5), (b"\x01.", 1.5)] + [(b"w", .3)] * 6 + [(b"\r", 4.0), (b"\x1bOD", .3),
          (b"\x1bOC", .3), (b"x", 1.0)] + [(b"", 3.0)] * 9 + [(b"w", .3)],
         cols=100, rows=30))
     ok &= report("a flight: the gate, and straight back out", *run(
-        [(F1, .5), (b".", 1.5)] + [(b"w", .3)] * 6 + [(b"x", .8), (b"w", .4)],
+        [(F1, .5), (b"\x01.", 1.5)] + [(b"w", .3)] * 6 + [(b"x", .8), (b"w", .4)],
         cols=80, rows=24))
     # Up to walk in, not w; h to heal, c the PC - the type chart, which q quits -
     # then x out, and the street again: its "walk in" hint is back after the PC.
@@ -363,11 +363,11 @@ def cases(run, report):
                                   (b"", 1.0), (b"x", .8), (b"w", .3)],
             cols=ck_size[0], rows=ck_size[1]))
     ok &= report("the desk: a check ride, and the autopilot pushes back", *run(
-        [(F1, .5), (b".", 1.0)] + [(b"w", .25)] * 6 + [(b"t", .6), (b"p", 4.0), (b"k", 2.0),
+        [(F1, .5), (b"\x01.", 1.0)] + [(b"w", .25)] * 6 + [(b"t", .6), (b"p", 4.0), (b"k", 2.0),
                                                        (b"v", 1.0), (b"x", .8)],
         cols=110, rows=34))
     ok &= report("the desk: the keys, and straight into a wall", *run(
-        [(F1, .5), (b".", 1.0)] + [(b"w", .25)] * 6 + [(b"c", .6)]
+        [(F1, .5), (b"\x01.", 1.0)] + [(b"w", .25)] * 6 + [(b"c", .6)]
         + [(b"W", .1)] * 10 + [(b"d", .1)] * 12 + [(b"", 8.0)], cols=110, rows=34))
     for rb_size in ((110, 34), (300, 90)):
         ok &= report("a drink at the rooftop bar, %dx%d" % rb_size, *run(
@@ -376,7 +376,7 @@ def cases(run, report):
                (b"d", .3), (b"d", .3), (b"a", .3), (b"s", 8.0)],
             cols=rb_size[0], rows=rb_size[1]))
     ok &= report("a far storm out of the plane's window", *run(
-        [(F1, .5), (b".", 1.5)] + [(b"\x1bOA", .3)] * 6
+        [(F1, .5), (b"\x01.", 1.5)] + [(b"\x1bOA", .3)] * 6
         + [(b"\r", 12.0), (F1, .4), (b"\\", .4), (F1, .4), (b"", 4.0)],
         cols=300, rows=90))
     ok &= report("a far storm from a roof", *run(
