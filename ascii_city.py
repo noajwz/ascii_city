@@ -5675,7 +5675,7 @@ def render_lemonade(width, height, now, glasses, since_buy):
         co[height - 3][x] = GRASS
     _text(ch, co, ky - 5, max(1, cx - len(say) // 2), say, STAR)
     _text(ch, co, height - 1, max(1, cx - 18),
-          "-- p buys a glass ($1)  -  s walks away --", GOLD_DIM)
+          "-- p buys a glass ($1)  -  x walks away --", GOLD_DIM)
     return ch, co
 
 
@@ -5699,7 +5699,7 @@ def render_telescope(width, height, now, since, nt):
     if width < 40 or height < 16:
         _text(ch, co, 1, 1, "~ through the telescope ~", MOON)
         _text(ch, co, height // 2, 1, "the moon, close up", MOON_DIM)
-        _text(ch, co, height - 1, 1, "s steps back", GOLD_DIM)
+        _text(ch, co, height - 1, 1, "x steps back", GOLD_DIM)
         return ch, co
     cx, cy = width / 2.0, (height - 3) / 2.0
     R = min(cy - 1.0, width / 4.0 - 1.0)          # in rows; columns are twice
@@ -5781,7 +5781,7 @@ def render_telescope(width, height, now, since, nt):
         put(mx + ex - 1, int(my - mr * 0.25), right, MOON)
         put(mx - 3, int(my + mr * 0.35), "\\___/", MOON)
     _text(ch, co, height - 2, max(1, int(cx) - len(say) // 2), '"' + say + '"', HUD)
-    _text(ch, co, height - 1, max(1, int(cx) - 10), "-- s steps back --", GOLD_DIM)
+    _text(ch, co, height - 1, max(1, int(cx) - 10), "-- x steps back --", GOLD_DIM)
     return ch, co
 
 
@@ -5799,7 +5799,7 @@ def render_warehouse(wh, width, height, now):
     kick = beat < 0.2
     if width < 40 or height < 16:
         _text(ch, co, height // 2, 1, "~ a rave in the old factory ~", lit)
-        _text(ch, co, height - 1, 1, "s walks out", GOLD_DIM)
+        _text(ch, co, height - 1, 1, "x walks out", GOLD_DIM)
         return ch, co
     cx = width // 2
     # The roof: trusses, and the holes in the skylights.
@@ -10847,7 +10847,7 @@ def render_exchange(ex, broker, width, height, now):
     price = stock_now(s, now)
     if width < 50 or height < 18:
         _text(ch, co, height // 2, 1, "%s %.2f" % (sym, price), GOLD)
-        _text(ch, co, min(height - 1, height // 2 + 1), 1, "b buys  n sells  s leaves",
+        _text(ch, co, min(height - 1, height // 2 + 1), 1, "b buys  n sells  x leaves",
               GOLD_DIM)
         return ch, co
     runs = ticker(now)
@@ -10879,7 +10879,7 @@ def render_exchange(ex, broker, width, height, now):
             "+" if pl >= 0 else "-", abs(pl)), ROU_GREEN if pl >= 0 else ROU_RED),
         ("cash %.2f   worth %.2f   in lots of %s" % (
             broker.cash, worth, lot if lot else "max"), GOLD),
-        ("b buys  n sells  +/- lot  arrows pick  l %s  s walks out"
+        ("b buys  n sells  +/- lot  arrows pick  l %s  x walks out"
          % ("chart" if broker.listing else "list"), GOLD_DIM),
     ]
     for r, (line, attr) in enumerate(lines):
@@ -15000,7 +15000,7 @@ TIKI_SERVED = ["There. Mind the little umbrella, it is the expensive part.",
                "That one is stronger than it looks. So is the tide.",
                "I had a place in town. Then I looked this way one morning."]
 TIKI_WATER = "That is water. The sand is soft and the tide is going out: sleep it off."
-TIKI_HUD = " %s  -  1 to %d order  -  s walks back out  -  q quit "
+TIKI_HUD = " %s  -  1 to %d order  -  x walks out  -  q quit "
 TIKI_MAN = [
     "  ,--.  ",
     " ( -- ) ",
@@ -16242,7 +16242,7 @@ MISSION_EVENTS = [(0.0, "LIFTOFF"), (24.0, "MAX-Q"), (LAUNCH_MECO, "MECO"),
 MISSION_CAMS = ["PAD CAM", "TRACKING", "ONBOARD", "BOOSTER CAM"]
 MISSION_DESKS = ["FLIGHT", "PROP", "GNC", "WEATHER", "RANGE", "RECOVERY", "COMMS"]
 MISSION_HUD = (" mission control  -  l launch  -  c or 1-%d cameras  -  z big screen"
-               "  -  s walks back out  -  q quit ")
+               "  -  x walks out  -  q quit ")
 
 
 def control_row(j):
@@ -22258,7 +22258,7 @@ PIGEON_NOTES = (
     "The bartender at The Top Shelf says you owe for the last one.",
 )
 LOFT_HUD = (" pigeon loft, %s, facing %s  -  f feed, r let out, n note  -  ad look"
-            "  -  s down ")
+            "  -  x down ")
 LOFT_SACK = [" ____ ", "/FEED\\", "|    |", "|____|"]
 LOFT_BUCKET = ["\\___/", " |  |", " |__|"]
 WASH_SHIRT = ["_/-\\_", "|   |", "|   |", "|___|"]
@@ -26793,7 +26793,7 @@ def render_casino_room(spin, width, height, now, slot=None, table=None, party=Fa
                else "%s: ..." % spin.name)
         _text(ch, co, height // 2, 1, say,
               pocket_colour(spin.result) if spin.settled(now) else GOLD)
-        _text(ch, co, min(height - 1, height // 2 + 2), 1, "s to leave", GOLD_DIM)
+        _text(ch, co, min(height - 1, height // 2 + 2), 1, "x to leave", GOLD_DIM)
         return ch, co
 
     wa = spin.wheel_at(t)
@@ -27220,7 +27220,7 @@ def render_striker(st, width, height, now):
     say, rang = st.verdict(now)
     if width < 36 or height < 16:
         _text(ch, co, height // 2, 1, "STRENGTH TEST: " + say, GOLD)
-        _text(ch, co, min(height - 1, height // 2 + 2), 1, "s to leave", GOLD_DIM)
+        _text(ch, co, min(height - 1, height // 2 + 2), 1, "x to leave", GOLD_DIM)
         return ch, co
     n = len(NEON)
     for x in range(width):                           # bulbs strung overhead
@@ -27280,7 +27280,7 @@ def render_claw(claw, width, height, now):
     if width < CLAW_W + 2 or height < CLAW_H + 1:
         say, _ = claw.verdict(now)
         _text(ch, co, height // 2, 1, "CLAW: " + say, GOLD)
-        _text(ch, co, min(height - 1, height // 2 + 2), 1, "s to leave", GOLD_DIM)
+        _text(ch, co, min(height - 1, height // 2 + 2), 1, "x to leave", GOLD_DIM)
         return ch, co
     y0 = 1
     if height >= CLAW_H + 4:
@@ -27462,7 +27462,7 @@ def render_arcade(arc, width, height, now, sel=None):
         _text(ch, co, height // 2, 1, "%s ARCADE" % arc["name"], GOLD)
         _text(ch, co, min(height - 1, height // 2 + 1), 1, "the games are coming",
               GOLD_DIM)
-        _text(ch, co, min(height - 1, height // 2 + 2), 1, "s to leave", GOLD_DIM)
+        _text(ch, co, min(height - 1, height // 2 + 2), 1, "x to leave", GOLD_DIM)
         return ch, co
     for x in range(width):                           # the tube along the ceiling
         ch[1][x] = "="
@@ -29419,6 +29419,7 @@ def draw_cheats(ch, co, note):
     more.append(("^", "launch a rocket"))
     more.append(("e", "a dark night"))      # the glowing sea; NIGHTS is full
     more.append(("~", "the sea: " + ("on" if COAST else "off")))
+    more.append(("o", "doors: " + ("shut" if _doors_shut[0] else "open")))
     col = 18
     columns = (left, middle, more, sky)
     rows = max(len(c) for c in columns)
@@ -29498,7 +29499,7 @@ def render_ramen(shop, width, height, now, since):
         _text(ch, co, height // 2, 1, "~ at the ramen counter ~", warm)
         _text(ch, co, min(height - 1, height // 2 + 1), 1,
               "a bowl, steaming" if served else "irasshaimase!", BULB)
-        _text(ch, co, min(height - 1, height // 2 + 3), 1, "s to leave", GOLD_DIM)
+        _text(ch, co, min(height - 1, height // 2 + 3), 1, "x to leave", GOLD_DIM)
         return ch, co
 
     # The noren: split cloth panels across the top, moving a little.
@@ -33220,7 +33221,7 @@ def render_turned_away(kind, width, height, now):
     """What you get instead when you cannot pay for it."""
     ch = [[" "] * width for _ in range(height)]
     co = [[0] * width for _ in range(height)]
-    for k, line in enumerate(TURNED[kind] + ["", "s walks back out"]):
+    for k, line in enumerate(TURNED[kind] + ["", "x walks out"]):
         _text(ch, co, height // 2 - 2 + k, max(1, (width - len(line)) // 2), line,
               GOLD if k < 2 else GOLD_DIM)
     return ch, co
@@ -33242,7 +33243,7 @@ def render_cinema(cin, width, height, now):
         _text(ch, co, 1, 1, cin["title"], GOLD)
         for r, line in enumerate(frame):
             _text(ch, co, 3 + r, 1, line, STAR)
-        _text(ch, co, height - 1, 1, "s to leave", GOLD_DIM)
+        _text(ch, co, height - 1, 1, "x to leave", GOLD_DIM)
         return ch, co
     sx0, sx1 = 6, width - 7
     sy0, sy1 = 1, int(height * 0.6)
@@ -33319,7 +33320,7 @@ def render_rave(club, width, height, now):
     if width < 40 or height < 16:
         _text(ch, co, height // 2, 1, "*** in the club ***",
               lamp if lamp is not None else neon[1])
-        _text(ch, co, min(height - 1, height // 2 + 2), 1, "s to leave", GOLD_DIM)
+        _text(ch, co, min(height - 1, height // 2 + 2), 1, "x to leave", GOLD_DIM)
         return ch, co
 
     truss, floor = 1, height - 1
@@ -37390,55 +37391,55 @@ TAXI_HUD = " in a taxi  -  %s "
 METRO_HUD = " the metro  -  %s "
 FLIGHT_HUD = " " + FLIGHT_NO + "  -  %s  -  %s "
 ROULETTE_HUD = (" inside the %s casino at %d,%d  -  p slot  +/- bet  b/h/k"
-                " blackjack  o plinko  r races  f high flyer  -  s walks out"
+                " blackjack  o plinko  r races  f high flyer  -  x walks out"
                 "  -  q quit ")
 FLYER_HUD = (" at High Flyer, %s casino, %d,%d  -  p bets, then cashes out  +/- stake"
-             "  u auto  -  f back to the wheel  -  s walks out ")
+             "  u auto  -  f back to the wheel  -  x walks out ")
 RACES_HUD = (" at the races, %s casino, %d,%d  -  1-6 bet on a horse  +/- stake"
-             "  r back to the wheel  -  s walks out ")
+             "  r back to the wheel  -  x walks out ")
 PLINKO_HUD = (" at the plinko machine, %s casino, %d,%d  -  p drops a ball  +/- bet"
-              "  [ ] rows  1 2 3 risk  -  o back to the wheel  -  s walks out ")
-RAVE_HUD = " inside the club at %d,%d  -  s walks back out  -  q quit "
-RAMEN_HUD = " at the ramen counter at %d,%d  -  s walks back out  -  q quit "
+              "  [ ] rows  1 2 3 risk  -  o back to the wheel  -  x walks out ")
+RAVE_HUD = " inside the club at %d,%d  -  x walks out  -  q quit "
+RAMEN_HUD = " at the ramen counter at %d,%d  -  x walks out  -  q quit "
 LIFT_HUD = " in the lift, going %s "
-DINER_HUD = " at the diner, open 24/7, at %d,%d  -  s walks back out  -  q quit "
-CINEMA_HUD = " at the pictures: %s, at %d,%d  -  s walks back out  -  q quit "
-WAREHOUSE_HUD = " at the rave in the old factory  -  s walks back out  -  q quit "
-LEMONADE_HUD = " at a lemonade stand, 3am  -  p buys a glass ($1)  -  s walks away "
-TELESCOPE_HUD = " looking through the old man's telescope  -  s steps back "
+DINER_HUD = " at the diner, open 24/7, at %d,%d  -  x walks out  -  q quit "
+CINEMA_HUD = " at the pictures: %s, at %d,%d  -  x walks out  -  q quit "
+WAREHOUSE_HUD = " at the rave in the old factory  -  x walks out  -  q quit "
+LEMONADE_HUD = " at a lemonade stand, 3am  -  p buys a glass ($1)  -  x walks away "
+TELESCOPE_HUD = " looking through the old man's telescope  -  x steps back "
 TEMPLE_HUD = (" in %s  -  g asks for the word of god  -  c the confession booth"
-              "  -  s walks out  -  q quit ")
+              "  -  x walks out  -  q quit ")
 CONFESS_HUD = " in the confession booth  -  type, enter to confess  -  esc steps out "
 EXCHANGE_HUD = (" on the trading floor  -  b buys, n sells, arrows pick, l lists  -"
-                "  s walks out  -  q quit ")
+                "  x walks out  -  q quit ")
 BOWL_HUD = " %s  -  a d line up  -  p spin, p power  -  x stop playing "
-BOWL_OUT_HUD = " %s  -  p bowls a game  -  s walks out  -  q quit "
+BOWL_OUT_HUD = " %s  -  p bowls a game  -  x walks out  -  q quit "
 KARA_HUD = " %s  -  j k l sing the notes, on the beat  -  x stops the song "
 GOLF_HUD = (" %s  -  a d aim  -  p the power, p again hits  -  x stops the round ")
-GOLF_OUT_HUD = " %s  -  p plays a round, $%d  -  s walks out  -  q quit "
-KARA_OUT_HUD = (" %s  -  p sings a song, $%d  -  n the next one  -  s walks out  "
+GOLF_OUT_HUD = " %s  -  p plays a round, $%d  -  x walks out  -  q quit "
+KARA_OUT_HUD = (" %s  -  p sings a song, $%d  -  n the next one  -  x walks out  "
                 "-  q quit ")
-ARCADE_HUD = (" in the %s arcade  -  ad choose a game  -  p plays  -  s walks out"
+ARCADE_HUD = (" in the %s arcade  -  ad choose a game  -  p plays  -  x walks out"
               "  -  q quit ")
 GAME_HUD = " playing %s  -  %s  -  x leaves the cabinet  -  q quit "
-STRIKER_HUD = (" at the strength tester at %d,%d  -  p swings the hammer  -  s walks"
+STRIKER_HUD = (" at the strength tester at %d,%d  -  p swings the hammer  -  x walks"
                " back out  -  q quit ")
-CLAW_HUD = (" at the claw machine at %d,%d  -  p plays, p again drops  -  s walks"
+CLAW_HUD = (" at the claw machine at %d,%d  -  p plays, p again drops  -  x walks"
             " back out  -  q quit ")
 CLIMB_HUD = " on the fire escape, climbing %s "
 STAIRS_HUD = " on the lighthouse stair, climbing %s "
-TURNED_HUD = " turned away  -  s walks back out  -  q quit "
-SEWER_HUD = " somebody's place  -  p a slice  -  s back out  -  q quit "
+TURNED_HUD = " turned away  -  x walks out  -  q quit "
+SEWER_HUD = " somebody's place  -  p a slice  -  x back out  -  q quit "
 TUNNEL_HUD = " in the tunnels  -  w s walk, a d turn%s  -  q quit "
-PARTY_HUD = (" on the roof of %s, %s  -  ws walk  ad turn  -  into the lift hut to go"
+PARTY_HUD = (" on the roof of %s, %s  -  ws walk  ad turn  -  x or the lift hut to go"
              " down  -  q quit ")
-GALLERY_HUD = " up the lighthouse, %s  -  ad round  -  s down  -  q quit "
+GALLERY_HUD = " up the lighthouse, %s  -  ad round  -  x down  -  q quit "
 ESCAPE_ROOF_HUD = (" on a roof in the alleys, %d floors up, %s, facing %s  -  ad look"
                    " round  -"
-                   "  s climbs down  -  q quit ")
-BAR_HUD = (" %s, %s, facing %s  -  ad look round  -  1-4 order  -  s lift down  -"
+                   "  x climbs down  -  q quit ")
+BAR_HUD = (" %s, %s, facing %s  -  ad look round  -  1-4 order  -  x lift down  -"
            "  q quit ")
-ROOF_HUD = (" on the roof, %d floors up, %s, facing %s  -  ad look round  -  s takes the"
+ROOF_HUD = (" on the roof, %d floors up, %s, facing %s  -  ad look round  -  x takes the"
             " lift down  -  q quit ")
 
 
@@ -38697,6 +38698,21 @@ def render_sub(sub, width, height, now):
     return ch, co, v
 
 
+_doors_shut = [False]   # the menu's o: nothing in the street takes you in
+
+
+def step_out(x, z, yaw):
+    """Where x puts you, standing in a doorway: a step back the way you came
+    in, out of it - or, if that is blocked, whichever way out is clear."""
+    for turn in (math.pi, math.pi * 0.5, -math.pi * 0.5, 0.0):
+        a = yaw + turn
+        for d in (1.0, 1.6, 2.4, 3.4, 4.6, 6.0):
+            nx, nz = x + math.sin(a) * d, z + math.cos(a) * d
+            if can_stand(nx, nz) and venue_at(nx, nz) is None:
+                return nx, nz
+    return x, z
+
+
 def main(stdscr):
     global WIDE_OK
     init_colors()
@@ -38874,6 +38890,10 @@ def main(stdscr):
                 elif key == ord("+"):
                     wallet.give(1000)
                     note = "+$1000"
+                elif key == ord("o") and not hidden_next:
+                    _doors_shut[0] = not _doors_shut[0]
+                    note = ("doors shut: you walk past everything" if _doors_shut[0]
+                            else "doors open")
                 elif key == ord("e") and not hidden_next:
                     note = ("a dark night - the coves glow" if skip_to_dark(now)
                             else "no such night near")
@@ -39622,8 +39642,24 @@ def main(stdscr):
                 striker.swing(now)
             elif at_claw and key in (ord("p"), ord("P")):
                 claw.press(now)
+            elif (street and lift is None and key in (ord("x"), ord("X"))
+                  and (venue is not None or on_roof is not None)):
+                # x leaves, everywhere: down from a roof the way you came up,
+                # and out of a doorway the way s walks you out - back the
+                # way you came in, or whichever way is clear.
+                if on_roof is not None:
+                    lift = {"up": False, "t0": now, "t": on_roof}
+                else:
+                    cam_x, cam_z = step_out(cam_x, cam_z, yaw)
+                    note, note_at = "you step back out", now
+                fwd = side = spin = 0.0
+                autopilot = False
             elif lift is not None:
                 pass                            # nothing to do but ride
+            elif (_doors_shut[0] and street and on_roof is None and sewer is None
+                  and venue is None and key in (ord("p"), ord("P"), ord("e"),
+                                                ord("E"), ord("f"), ord("F"))):
+                note, note_at = "the doors are shut - F1 o opens them", now
             elif (street and on_roof is None and sewer is None and venue is None
                   and key in (ord("t"), ord("T"))):
                 ci_, cj_ = int(cam_x / CELL + BIG) - BIG, int(cam_z / CELL + BIG) - BIG
@@ -40012,6 +40048,8 @@ def main(stdscr):
         hurry_ = abs(fwd) > WALK * 1.05 or abs(side) > SIDESTEP * 1.05
         if venue is not None and hurry_ and not same_venue(venue, was_):
             venue = None
+        if venue is not None and _doors_shut[0] and not same_venue(venue, was_):
+            venue = None                # the menu's o: walking past everything
         if venue is not None and venue[0] == "gate":
             flight = {"phase": "gate", "home": venue[1]["home"],
                       "dest": flight_plan(venue[1]["home"], int(now))}
@@ -40086,7 +40124,8 @@ def main(stdscr):
                 lift = None
         elif on_roof is not None:
             venue = None
-        elif street and fwd > 0.0 and escape_at(cam_x, cam_z, yaw) is not None:
+        elif (street and fwd > 0.0 and not _doors_shut[0]
+              and escape_at(cam_x, cam_z, yaw) is not None):
             lift = {"up": True, "t0": now, "t": escape_at(cam_x, cam_z, yaw)}
             venue = None
         elif venue is not None and venue[0] == "tower":
@@ -40096,7 +40135,7 @@ def main(stdscr):
             else:
                 note, note_at = "the lift is $%d" % fee, now
             venue = None
-        elif (street and 0.0 < fwd <= WALK * 1.05
+        elif (street and 0.0 < fwd <= WALK * 1.05 and not _doors_shut[0]
               and lighthouse_door(cam_x, cam_z) is not None):
             # In at the lighthouse's door is on to its stair.
             lift = {"up": True, "t0": now, "t": lighthouse_door(cam_x, cam_z)}

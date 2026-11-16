@@ -1902,12 +1902,42 @@ check("nowhere a taxi goes is on the panel but the coast and the harbour, "
       and not {"FUN", "EAT", "AROUND TOWN", "OUT OF TOWN"}
       & {g_ for g_, _ in ac.CHEAT_GROUPS} and "AROUND TOWN" not in text)
 panel_keys_ = ([k_ for k_, _, _ in ac.CHEAT_PLACES] + [d_["key"] for d_ in ac.DISTRICTS]
-               + list("wLsa>nuz!@&#/+%\\`~"))
+               + list("wLsa>nuz!@&#/+%\\`~o"))
 check("every key on the panel does one thing: no place hides a part of town",
       len(panel_keys_) == len(set(panel_keys_)),
       " ".join(sorted({k_ for k_ in panel_keys_ if panel_keys_.count(k_) > 1})))
 case_twins_ = {k_ for k_ in panel_keys_ if k_.isalpha() and k_.swapcase() in panel_keys_}
 check("and no two differ only by case", not case_twins_, " ".join(sorted(case_twins_)))
+# x leaves, everywhere: from the doorway of each kind of place, a step out of
+# it and somewhere you can stand.
+stuck_ = []
+for kind_ in ("inside", "ramen", "diner", "arcade", "exchange", "temple", "cinema",
+              "karaoke", "bowling", "minigolf", "lemonade", "telescope", "claw",
+              "striker"):
+    sp_ = ac.find_place(x0, z0, kind_)
+    if sp_ is None:
+        stuck_.append(kind_ + "?")
+        continue
+    ix_, iz_ = sp_[0], sp_[1]
+    for n_ in range(40):
+        if ac.venue_at(ix_, iz_) is not None:
+            break
+        ix_ += math.sin(sp_[2]) * 0.25
+        iz_ += math.cos(sp_[2]) * 0.25
+    if ac.venue_at(ix_, iz_) is None:
+        stuck_.append(kind_ + " (no door)")
+        continue
+    ox_, oz_ = ac.step_out(ix_, iz_, sp_[2])
+    if ac.venue_at(ox_, oz_) is not None or not ac.can_stand(ox_, oz_):
+        stuck_.append(kind_)
+check("x steps you out of every kind of doorway", not stuck_, " ".join(stuck_))
+ac._doors_shut[0] = True
+sh_ = ([[" "] * 100 for _ in range(30)], [[0] * 100 for _ in range(30)])
+ac.draw_cheats(sh_[0], sh_[1], "")
+ac._doors_shut[0] = False
+check("o on the panel shuts the doors, and says so",
+      "doors: shut" in "\n".join("".join(r_) for r_ in sh_[0])
+      and "doors: open" in text)
 std = ([[" "] * 80 for _ in range(24)], [[0] * 80 for _ in range(24)])
 ac.draw_cheats(std[0], std[1], "-> somewhere")
 check("and it opens on an 80x24 terminal", any("close" in "".join(r) for r in std[0]))
@@ -5962,7 +5992,7 @@ nt_ = dict(ac.night(300.0), phase=0.4, alien=False)
 scope_ = {t_: "\n".join("".join(r) for r in ac.render_telescope(
     100, 30, 100.0 + t_, 100.0, nt_)[0]) for t_ in (4.0, 9.5, 11.5, 15.5, 21.3)}
 check("through the telescope: the moon close up, in its phase",
-      "#" in scope_[4.0] and ":" in scope_[4.0] and "s steps back" in scope_[4.0])
+      "#" in scope_[4.0] and ":" in scope_[4.0] and "x steps back" in scope_[4.0])
 check("then a lander, a flag, a cow, and a wink",
       "/T\\" in scope_[9.5] and "|>" in scope_[11.5] and "(oo)" in scope_[15.5]
       and "(-)" in scope_[21.3])

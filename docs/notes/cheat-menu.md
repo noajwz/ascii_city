@@ -98,3 +98,7 @@ schedule so a strike can be had on demand even when dry. The flash envelope came
 `_strike_flash()` so the one you asked for is the same strike the storm would have had. A test
 compares 400,000 samples of both functions on `auto` against the formulas they replaced and requires
 zero drift.
+
+**`o`, doors: open / shut** (AND THE REST, 2026-11-16): shut, nothing in the street takes you
+in - no doorway, fire escape or lighthouse door - and `p`, `e` and `f` there say the doors are
+shut. Somewhere you are already in stays. For walking about without being pulled into things.
