@@ -114,6 +114,15 @@ def cases(run, report):
         print("    not in, no coffee, or not out")
         cs_ok = False
     ok &= cs_ok
+    # The walk round town: j, a while walking, j again stops it.
+    wr_st, wr_out = run([(b"j", 8.0), (b"j", 1.0)], cols=160, rows=45)
+    wr_plain = ANSI.sub(b"", wr_out).decode("utf-8", "replace")
+    wr_ok = report("the walk round town: j, along, j stops", wr_st, wr_out)
+    if wr_ok and wr_out and not ("walking round town" in wr_plain
+                                 and "j stops" in wr_plain and "stopped" in wr_plain):
+        print("    not started, no hint, or not stopped")
+        wr_ok = False
+    ok &= wr_ok
     # The fortune teller: " on the panel, a few steps up to her table, her
     # fortune, another for $5, x up and away.
     ft_st, ft_out = run([(F1, .5), (b'"', 1.0)] + IN + [(b"", 6.0), (b"p", 1.0),

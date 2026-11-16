@@ -9,6 +9,7 @@ ascii_city.py - an endless, procedurally generated ASCII city, seen two ways.
 Controls:
     tab / v                     switch view
     space                       wander on its own
+    j                           walk round town: every part of it, downtown most
     q                           quit
 
     skyline   left / right    or  h / l   walk           H / L   run
@@ -26021,6 +26022,356 @@ def auto_step(auto, x, z, yaw, now, blocked):
     return turn, walk
 
 
+# --- the walk round town ------------------------------------------------------
+# Asked for on 2026-11-16: the autopilot above stays, and beside it a set
+# route - "through all the districts basically walking in a circle (emphasis on
+# downtown) but still lot of scenery change without it being distracting",
+# smooth and never stuck, the way the old one-street screensaver walked. So
+# it is planned, not decided as it goes: a ring of the parts of town round the
+# nearest downtown, back through downtown wherever it lies on the way, each
+# leg found on the street grid and pulled straight, and followed by steering
+# at a point a little way along it. Nothing on it takes you in at a door.
+TOUR_SQUARES = 6       # how far out it looks for each part of town, in districts
+TOUR_LOOK = 3.0        # how far along the path it steers at, near a corner; 5 cut it
+TOUR_LOOK_FAR = 8.0    # and on a straight, where looking close made it weave
+TOUR_TURN = 12        # what a turn costs the search, in steps along a street
+TOUR_STEPS = 250       # path search steps a frame (2-5 ms), for the leg after this
+TOUR_NODES = 60000     # and a leg that needs more than this is given up on
+TOUR_STUCK = 2.0       # seconds without getting anywhere before it finds a new way
+
+
+def _square_cells(di, dj):
+    """The cells of district square (di, dj): its rows are offset like brickwork."""
+    off = _mix(dj, 0, 71) % DISTRICT_CELLS
+    i0, j0 = di * DISTRICT_CELLS - off, dj * DISTRICT_CELLS
+    return i0, j0, i0 + DISTRICT_CELLS, j0 + DISTRICT_CELLS
+
+
+def _square_of(i, j):
+    dj = j // DISTRICT_CELLS
+    return (i + _mix(dj, 0, 71) % DISTRICT_CELLS) // DISTRICT_CELLS, dj
+
+
+def _tour_spot(di, dj, kind):
+    """A street in the middle of district square (di, dj) that is that part of
+    town, as a cell, or None: the middle of a square is often a building."""
+    i0, j0, i1, j1 = _square_cells(di, dj)
+    ci, cj = (i0 + i1) // 2, (j0 + j1) // 2
+    row = DISTRICTS[kind]
+    for r in range(DISTRICT_CELLS // 2 - 2):
+        for i in range(ci - r, ci + r + 1):
+            for j in range(cj - r, cj + r + 1):
+                if max(abs(i - ci), abs(j - cj)) != r:
+                    continue
+                if (road_at(i, j) and district(i, j) is row and not water_at(i, j)
+                        and not tunnel_at(i, j)
+                        and can_stand((i + 0.5) * CELL, (j + 0.5) * CELL)):
+                    return i, j
+    return None
+
+
+def tour_plan(x, z):
+    """The stops of a walk round town from here, as cells, and the name of
+    each: the nearest downtown square to start and end in, the nearest square
+    of every other part of town in TOUR_SQUARES round it, in order round it so
+    the walk is a ring and not a star, and a downtown square put in between
+    two stops wherever one lies near the way. Only the parts of town in
+    DISTRICTS: the woods, the airport and the rest are hours off, and the sea
+    is not walked through."""
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    si, sj = _square_of(ci, cj)
+    found = {}
+    downtown = []
+    n = TOUR_SQUARES
+    for a in range(si - n, si + n + 1):
+        for b in range(sj - n, sj + n + 1):
+            i0, j0, i1, j1 = _square_cells(a, b)
+            mi, mj = (i0 + i1) // 2, (j0 + j1) // 2
+            if COAST and i1 + 4 >= COAST_LAND:
+                continue
+            k = district_at(mi, mj)
+            if district(mi, mj) is not DISTRICTS[k]:
+                continue                    # a placed part of town over it
+            d = (a - si) ** 2 + (b - sj) ** 2
+            if k == 0:
+                downtown.append((d, a, b))
+            elif k not in found or d < found[k][0]:
+                found[k] = (d, a, b)
+    downtown.sort()
+    hub = None
+    for _, a, b in downtown:
+        hub = (a, b, _tour_spot(a, b, 0))
+        if hub[2] is not None:
+            break
+    if hub is None or hub[2] is None:
+        return None
+    ha, hb = hub[0], hub[1]
+    picked = [(a, b, k, _tour_spot(a, b, k)) for k, (_, a, b) in found.items()]
+    picked = [p for p in picked if p[3] is not None]
+    if not picked:
+        return None
+    # In order round the middle of them all, starting from the hub's side, so
+    # the walk goes round and not back and forth.
+    ma = (ha + sum(p[0] for p in picked)) / (len(picked) + 1.0)
+    mb = (hb + sum(p[1] for p in picked)) / (len(picked) + 1.0)
+    h0 = math.atan2(hb - mb, ha - ma)
+    rings = sorted(((math.atan2(b - mb, a - ma) - h0) % math.tau, a, b, k, spot)
+                   for a, b, k, spot in picked)
+    stops = [(hub[2], 0)]
+    used = {(ha, hb)}
+    for n_, (_, a, b, k, spot) in enumerate(rings):
+        pa, pb = (rings[n_ - 1][1], rings[n_ - 1][2]) if n_ else (ha, hb)
+        # Downtown on the way: a square of it near the middle of this leg.
+        best = None
+        for _, da, db in downtown:
+            if (da, db) in used:
+                continue
+            ma, mb = (pa + a) / 2.0, (pb + b) / 2.0
+            d = (da - ma) ** 2 + (db - mb) ** 2
+            leg = max(1.0, (a - pa) ** 2 + (b - pb) ** 2)
+            if d <= max(2.0, leg / 2.0) and (best is None or d < best[0]):
+                best = (d, da, db)
+        if best is not None:
+            mid = _tour_spot(best[1], best[2], 0)
+            if mid is not None:
+                stops.append((mid, 0))
+                used.add((best[1], best[2]))
+        stops.append((spot, k))
+    return stops
+
+
+def _walkable(i, j):
+    return dry_at((i + 0.5) * CELL, (j + 0.5) * CELL) and not tunnel_at(i, j)
+
+
+def tour_search(a, b, back=None):
+    """The way on foot from cell a to cell b, as a list of cells: a search over
+    the street grid that likes proper streets - downtown's best - takes an
+    alley or a lawn only for a good reason, never a tunnel, and turns only
+    when it is worth it, so it holds a street the way the old screensaver
+    did. A generator: it yields None every TOUR_STEPS steps so it can be done
+    a slice a frame, and the path (or [] for none) at the end."""
+    ti, tj = b
+    dirs = ((1, 0), (-1, 0), (0, 1), (0, -1))
+    start = (a, -1)
+    openl = [(0, 0, start)]
+    came = {start: None}
+    cost = {start: 0}
+    seen = 0
+    while openl:
+        _, g, st = heapq.heappop(openl)
+        c, d = st
+        if c == b:
+            path = []
+            while st is not None:
+                path.append(st[0])
+                st = came[st]
+            yield path[::-1]
+            return
+        if g > cost.get(st, 1e18):
+            continue
+        seen += 1
+        if seen > TOUR_NODES:
+            break
+        if seen % TOUR_STEPS == 0:
+            yield None
+        i, j = c
+        for nd, (di, dj) in enumerate(dirs):
+            ni, nj = i + di, j + dj
+            if not _walkable(ni, nj):
+                continue
+            nc = (ni, nj)
+            if road_at(ni, nj):
+                step = 2 if district_at(ni, nj) == 0 else 3
+            else:
+                step = 8
+            ng = g + step + (TOUR_TURN if d >= 0 and nd != d else 0)
+            if c == a and nc == back:
+                ng += 80                    # not straight back the way it came
+            ns = (nc, nd)
+            if ng < cost.get(ns, 1e18):
+                cost[ns] = ng
+                came[ns] = st
+                heapq.heappush(openl, (ng + 2 * (abs(ni - ti) + abs(nj - tj)), ng, ns))
+    yield []
+
+
+def _clear_line(x0, z0, x1, z1):
+    d = math.hypot(x1 - x0, z1 - z0)
+    n = max(1, int(d / 0.8))
+    for k in range(1, n):
+        f = k / float(n)
+        if not can_stand(x0 + (x1 - x0) * f, z0 + (z1 - z0) * f):
+            return False
+    return True
+
+
+def tour_points(cells, start=None):
+    """A path of cells as world points, pulled straight: each point goes as
+    far along as it can still see, so an avenue is one line and a corner is
+    a corner, never a staircase."""
+    pts = [((i + 0.5) * CELL, (j + 0.5) * CELL) for i, j in cells]
+    if start is not None:
+        pts[0] = start
+    if len(pts) < 3:
+        return pts
+    out = [pts[0]]
+    k = 0
+    while k < len(pts) - 1:
+        far = k + 1
+        # The furthest point in sight, looking a fair way along at most.
+        for m in range(min(len(pts) - 1, k + 40), k + 1, -1):
+            if _clear_line(pts[k][0], pts[k][1], pts[m][0], pts[m][1]):
+                far = m
+                break
+        out.append(pts[far])
+        k = far
+    return out
+
+
+def _found(search):
+    """A search run to the end, at once."""
+    for got in search:
+        if got is not None:
+            return got
+    return []
+
+
+def new_tour(x, z, now):
+    """The walk round town from where you stand, or None if there is no
+    downtown near enough to walk round."""
+    stops = tour_plan(x, z)
+    if not stops or len(stops) < 3:
+        return None
+    tour = {"stops": stops, "next": 0, "laps": 0, "legs": 0, "ahead": None}
+    _tour_leg(tour, x, z, now)
+    return tour
+
+
+def _tour_leg(tour, x, z, now, yaw=0.0):
+    """The way from here to the next stop, found now - and the way on from
+    that stop to the one after begun, to be found a slice a frame while this
+    one is walked, so arriving is no pause."""
+    for _ in range(len(tour["stops"])):
+        to = tour["stops"][tour["next"]][0]
+        ahead = tour["ahead"]
+        cells = None
+        if ahead is not None and ahead[0] == to and isinstance(ahead[1], list):
+            cells = ahead[1]
+            if (cells and (cells[0][0] + 0.5) * CELL - x) ** 2 + (
+                    (cells[0][1] + 0.5) * CELL - z) ** 2 > 3.0 ** 2:
+                cells = None                # not from here after all
+        if cells is None:
+            ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+            bi, bj = (int(x / CELL - 2.0 * math.sin(yaw) + BIG) - BIG,
+                      int(z / CELL - 2.0 * math.cos(yaw) + BIG) - BIG)
+            cells = _found(tour_search((ci, cj), to, (bi, bj)))
+        if cells:
+            break
+        # No way there from here: on to the stop after it.
+        tour["next"] = (tour["next"] + 1) % len(tour["stops"])
+    tour["path"] = tour_points(cells, (x, z)) if cells else [(x, z)]
+    tour["at"], tour["best"], tour["moved"] = 0, 0.0, now
+    nxt = tour["stops"][(tour["next"] + 1) % len(tour["stops"])][0]
+    tour["ahead"] = (nxt, tour_search(tour["stops"][tour["next"]][0], nxt,
+                                      cells[-2] if len(cells) > 1 else None))
+
+
+def tour_name(tour):
+    """The part of town it is walking to, for the HUD."""
+    return DISTRICTS[tour["stops"][tour["next"]][1]]["name"]
+
+
+def tour_step(tour, x, z, yaw, now, blocked, pace=1.0):
+    """One frame of the walk round town: which way to turn and how fast to
+    walk, as auto_step() gives them. Steers at the point TOUR_LOOK along the
+    path from the nearest point of it, and slows before a corner rather than
+    in it - sooner and harder the faster the pace, which the walk is
+    multiplied by while turning is not: through a corner it is a walk."""
+    ahead = tour["ahead"]
+    if ahead is not None and not isinstance(ahead[1], list):
+        got = next(ahead[1], [])            # the next leg, a slice a frame
+        if got is not None:
+            tour["ahead"] = (ahead[0], got)
+    path = tour["path"]
+    if len(path) < 2:
+        _tour_leg(tour, x, z, now)
+        path = tour["path"]
+        if len(path) < 2:
+            return 0.0, 0.0
+    # The nearest point on the path, from the segment it was on, forwards.
+    best = None
+    for s in range(tour["at"], min(len(path) - 1, tour["at"] + 4)):
+        (ax, az), (bx, bz) = path[s], path[s + 1]
+        sx, sz = bx - ax, bz - az
+        ln = max(1e-6, sx * sx + sz * sz)
+        f = max(0.0, min(1.0, ((x - ax) * sx + (z - az) * sz) / ln))
+        px, pz = ax + sx * f, az + sz * f
+        d = (px - x) ** 2 + (pz - z) ** 2
+        if best is None or d < best[0]:
+            best = (d, s, f)
+    if best is None:
+        s, f = len(path) - 1, 0.0
+    else:
+        _, s, f = best
+    tour["at"] = s
+    # How far along the whole path that is: if it stops going up, it is stuck.
+    done = s + f
+    if done > tour["best"] + 0.02:
+        tour["best"], tour["moved"] = done, now
+    end = path[-1]
+    if s >= len(path) - 1 or (s == len(path) - 2 and f > 0.98) or (
+            (end[0] - x) ** 2 + (end[1] - z) ** 2 < 2.0 ** 2):
+        # There: on to the next stop, and round again after the last. Back at
+        # the downtown it set off from, that is a lap.
+        if tour["next"] == 0 and tour["legs"]:
+            tour["laps"] += 1
+        tour["legs"] += 1
+        tour["next"] = (tour["next"] + 1) % len(tour["stops"])
+        _tour_leg(tour, x, z, now, yaw)
+        path, s, f = tour["path"], 0, 0.0
+    elif blocked or now - tour["moved"] > TOUR_STUCK:
+        tour["ahead"] = None
+        _tour_leg(tour, x, z, now, yaw)     # a new way, from here
+        path, s, f = tour["path"], 0, 0.0
+    if len(path) < 2:
+        return 0.0, 0.0
+    # The corner coming: how sharply the path turns within a few steps.
+    ahead = 0.0
+    see = 8.0 * max(1.0, pace)              # far enough to slow down in
+    if s + 2 < len(path):
+        (ax, az), (bx, bz), (cx, cz) = path[s], path[s + 1], path[s + 2]
+        left = math.hypot(bx - x, bz - z)
+        if left < see:
+            bend = abs(_wrap(math.atan2(cx - bx, cz - bz) - math.atan2(bx - ax, bz - az)))
+            ahead = bend * (1.0 - left / see)
+    # The point to steer at, along the path: near when a corner is, so it
+    # goes round it and not through it, and further off on a straight.
+    near = s + 1 < len(path) and math.hypot(path[s + 1][0] - x,
+                                            path[s + 1][1] - z) < 9.0 * max(1.0, pace)
+    left = TOUR_LOOK if near else TOUR_LOOK_FAR
+    k, (ax, az) = s, path[s]
+    ax, az = ax + (path[s + 1][0] - ax) * f, az + (path[s + 1][1] - az) * f
+    tx, tz = ax, az
+    while k < len(path) - 1:
+        bx, bz = path[k + 1]
+        seg = math.hypot(bx - ax, bz - az)
+        if seg >= left:
+            tx, tz = ax + (bx - ax) * left / seg, az + (bz - az) * left / seg
+            break
+        left -= seg
+        ax, az = bx, bz
+        tx, tz = bx, bz
+        k += 1
+    err = _wrap(math.atan2(tx - x, tz - z) - yaw)
+    turn = max(-1.0, min(1.0, err * 1.6))
+    sharp = min(1.0, max(abs(err), ahead) / 1.2)
+    walk = 0.66 - 0.40 * sharp
+    if pace > 1.0:
+        walk = walk * (1.0 - sharp) + (0.26 / pace) * sharp
+    return turn, walk
+
+
 # ===========================================================================
 # THE CASINO - the one place in the city you can walk into
 # ===========================================================================
@@ -42984,6 +43335,7 @@ def main(stdscr):
     note = ""                   # and what did it last do
     note_at = -1e9              # when, so the HUD can show it after the panel closes
     autopilot = False
+    tour = None                 # j: the walk round town, while the autopilot walks it
     pace = PACES[0][1]          # how fast you walk: + and - in the street
     venue = None                # the doorway you are standing in, if any
     frame_time = 1.0 / FPS
@@ -43705,6 +44057,19 @@ def main(stdscr):
             elif key == ord(" ") and not at_arcade:
                 autopilot = not autopilot
                 auto = {}
+                tour = None
+            elif (key == ord("j") and street and venue is None and on_roof is None
+                  and lift is None and not elsewhere()):
+                if tour is not None and autopilot:
+                    autopilot, tour = False, None
+                    note, note_at = "the walk round town: stopped", now
+                else:
+                    tour = new_tour(cam_x, cam_z, now)
+                    autopilot = tour is not None
+                    auto = {}
+                    note, note_at = ("walking round town: %s first" % tour_name(tour)
+                                     if tour is not None
+                                     else "no downtown near enough to walk round"), now
             elif (venue is not None and venue[0] == "lemonade"
                   and key in (ord("p"), ord("P"))):
                 if lemon["glasses"] >= len(KID_THANKS):
@@ -44069,10 +44434,15 @@ def main(stdscr):
 
         # A held-down key repeats, but with gaps. Rather than moving once per
         # keypress (jerky), we keep moving for a moment after each one.
+        if not autopilot:
+            tour = None                 # any key that stops the walk ends it
         if autopilot:
             # Hold a heading down the street and ease round onto the next one,
-            # slowing through the corner the way you would.
-            t_, w_ = auto_step(auto, cam_x, cam_z, yaw, now, blocked)
+            # slowing through the corner the way you would - or, on the walk
+            # round town, follow its way.
+            t_, w_ = (tour_step(tour, cam_x, cam_z, yaw, now, blocked, pace)
+                      if tour is not None
+                      else auto_step(auto, cam_x, cam_z, yaw, now, blocked))
             spin += (t_ * TURN * 0.85 - spin) * min(1.0, frame_time * 5.0)
             fwd += (WALK * pace * w_ - fwd) * min(1.0, frame_time * 2.5)
             side = 0.0
@@ -44306,7 +44676,8 @@ def main(stdscr):
         # this city. Walk back out and the wheel goes away; stand there and it
         # deals you another, because that is what a casino is for.
         was_ = venue
-        venue = venue_at(cam_x, cam_z) if street and not elsewhere() else None
+        venue = (venue_at(cam_x, cam_z) if street and not elsewhere() and tour is None
+                 else None)             # the walk round town goes past every door
         # Going past faster than a walk, a doorway does not take you in: you
         # were going somewhere else. Slow to a walk or stop at it and it does,
         # and once you are in, you stay in.
@@ -44403,7 +44774,7 @@ def main(stdscr):
                 lift = None
         elif on_roof is not None:
             venue = None
-        elif (street and fwd > 0.0 and not _doors_shut[0]
+        elif (street and fwd > 0.0 and not _doors_shut[0] and tour is None
               and escape_at(cam_x, cam_z, yaw) is not None):
             lift = {"up": True, "t0": now, "t": escape_at(cam_x, cam_z, yaw)}
             venue = None
@@ -44415,7 +44786,7 @@ def main(stdscr):
                 note, note_at = "the lift is $%d" % fee, now
             venue = None
         elif (street and 0.0 < fwd <= WALK * 1.05 and not _doors_shut[0]
-              and lighthouse_door(cam_x, cam_z) is not None):
+              and tour is None and lighthouse_door(cam_x, cam_z) is not None):
             # In at the lighthouse's door is on to its stair.
             lift = {"up": True, "t0": now, "t": lighthouse_door(cam_x, cam_z)}
             venue = None
@@ -44828,7 +45199,9 @@ def main(stdscr):
                 district(int(cam_x / CELL + BIG) - BIG,
                          int(cam_z / CELL + BIG) - BIG)["name"],
                 sky_word(now, wet),
-                show_hint(now, cam_x, cam_z)
+                ("  ~ walking round town: %s next  -  j stops ~" % tour_name(tour)
+                 if tour is not None else "")
+                or show_hint(now, cam_x, cam_z)
                 or ("  ~ a taxi is pulling up ~" if taxi is not None else "")
                 or ("  ~ a vending machine: p looks in ~"
                     if vending_near(cam_x, cam_z) is not None else "")
