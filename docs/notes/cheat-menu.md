@@ -45,8 +45,8 @@ jump lands.
 lines, bowling, the turtles and flying were on `1` `2` `3` `4` `5` `8`, and the mystery on `6`
 and `7` - the parts of town's digits. Places are matched first, so downtown, residential, old
 town, chinatown, market, park and financial could not be reached at all, and docks only when no
-case was open. They are on letters now (`b` `r` `h` `k` `t` `f`, the mystery `m` and its next
-clue `c`), and a check asserts that no key on the panel does two things and none are a case
+case was open. They are on letters now (`b` `r` `h` `k` `t` `f`; the mystery's `m` and `c`
+went with it, 2026-11-16), and a check asserts that no key on the panel does two things and none are a case
 pair.
 
 **`g`, big fish next** (under MONEY, beside `%`): the next bite is the rarest thing in that
@@ -58,7 +58,7 @@ night with little enough moon for the glowing sea.
 the festival's night if this is not it, and in front of the dragon - see The
 festival in Chinatown.
 
-**Four columns** (`draw_cheats()`): NIGHTLIFE, MONEY, VIEWS and THE MYSTERY; the PARTS OF TOWN
+**Four columns** (`draw_cheats()`): NIGHTLIFE, MONEY and VIEWS; the PARTS OF TOWN
 (the digits, `1`–`9` and `0`, with the placed zones); AND THE REST; then WEATHER & SKY and
 NIGHTS. A new place goes into a group, not on the end of a list. It was once grouped by where things were — the city, the streets, out of town —
 every new place went into the first, and it quietly grew past a 24-row terminal and then a 30-row

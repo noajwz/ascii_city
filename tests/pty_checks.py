@@ -96,7 +96,7 @@ def cases(run, report):
     ok &= report("20x8 window with panel", *run(
         [(F1,.5),(b"\x01c", .7),(b"w",.4)], cols=20, rows=8))
     ok &= report("240x70 window with panel", *run(
-        [(F1,.5),(b"m", .7),(b"w",.4)], cols=240, rows=70))
+        [(F1,.5),(b"n", .7),(b"w",.4)], cols=240, rows=70))
     ok &= report("ramen counter, sit and leave", *run(
         [(F1, .5), (b"\x01r", 1.0)] + IN + [(b"s", .6), (b"s", .6), (b"w", .4)]))
     ok &= report("casino slot: bet up, pull, bet down", *run(
@@ -350,9 +350,6 @@ def cases(run, report):
     ok &= report("a jump off a roof takes you off the roof", *run(
         [(F1, .5), (b"\x01^", 1.5)] + [(b"\x1bOA", .3)] * 6
         + [(b"", 7.0), (F1, .4), (b"\x01c", 1.0), (b"w", .3)], cols=110, rows=34))
-    ok &= report("the mystery, a note and the first clue", *run(
-        [(F1, .5), (b"m", .5), (b"c", 1.5), (b"j", .3), (b"j", .3),
-         (F1, .3), (b"c", 1.5)], cols=110, rows=34))
     for ck_size in ((110, 34), (300, 90)):
         ok &= report("flying the plane, %dx%d" % ck_size, *run(
             [(F1, .5), (b"f", 1.0)] + [(b"W", .1)] * 10 + [(b"", 5.0)]

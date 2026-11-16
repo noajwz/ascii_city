@@ -13,8 +13,7 @@ line `KARA_LINE` beats, in one of three lanes by the song's `tune`. `j`/`k`/`l` 
 judged against the nearest waiting note there (`KARA_GREAT`, `KARA_GOOD`): one key a note, since
 curses sees no key go up. A press with no note near is "flat" and breaks the run. The score is out
 of a hundred, `kara_verdict()` the machine's word on it. `KARAOKE_COST` a song, `n` the next song
-in the book, `x` stops one; `s` walks out when not singing. While a song is on, `j` is a note and
-not the mystery's clue line.
+in the book, `x` stops one; `s` walks out when not singing. While a song is on, `j` is a note.
 
 `render_karaoke()`: a disco ball throwing spots, neon chasing along the ceiling, the screen filling
 the room down to the couch, two friends swaying to the beat (cheering on a run of five), you at the

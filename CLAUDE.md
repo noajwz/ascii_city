@@ -72,7 +72,6 @@ or change something. Notes cross-reference each other by title ("see The univers
 - `ramen-counter.md` - The ramen counter
 - `vending-machines.md` - Vending machines
 - `manholes.md` - Manholes, and the tunnels under the streets
-- `case-of-the-last-slice.md` - The case of the last slice
 - `temple.md` - The temple, and the word of God
 - `sky-deck.md` - The sky deck
 - `landmark.md` - The landmark, and the party on its roof
