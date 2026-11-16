@@ -11481,6 +11481,11 @@ def draw_walls(ch, co, v, now):
                 face_kind(i + nx, j + nz), now))
             if b["diner"] is not None and f == b["diner"]["door"]:
                 diner_window(ch, co, v, sx, dist, u, f, r_lo, r_hi, b)
+            st_ = store_at(i, j, f)
+            if st_ is not None and not (v.blackout and power_off(i, j, now)):
+                # (In a blackout it is a dark front like the rest: its white
+                # is blank cells, which unpowered() leaves as they are.)
+                store_window(ch, co, v, sx, dist, u, f, r_lo, r_hi, st_)
             if (v.blackout and b["temple"] is None and not b["tree"]
                     and power_off(i, j, now)):
                 # The temple is candlelit anyway; everything else goes dark.
@@ -11854,6 +11859,10 @@ def collect_glow(v, now, wet):
             nx, nz = FACES[f]
             if not is_open(i + nx, j + nz):
                 continue
+            if store_at(i, j, f) is not None:
+                # The store's window: white light out over the pavement.
+                p = face_point(i, j, f, CELL * 0.5, 1.8, 0.0)
+                _spill(glow, p[0], p[2], 5.0, SNOW)
             if b["club"] is not None:
                 if f == b["club"]["door"]:
                     lamp = club_light(now, b["club"])
@@ -23274,7 +23283,7 @@ def fire_near(x, z):
 
 # What goes out in a blackout: anything on a facade that is lit by the mains.
 LIGHT_PROPS = {"arcade", "bowling", "karaoke", "minigolf", "blade", "bulb", "cinema",
-               "diner", "exchange",
+               "diner", "exchange", "store",
                "hung",
                "lanterns", "lobby", "marquee", "overdoor", "ramenfront", "clubdoor",
                "bass"}
@@ -23298,6 +23307,10 @@ def draw_props(ch, co, v, walls, now, wet):
             if b["diner"] is not None and f == b["diner"]["door"]:
                 w = face_point(i, j, f, CELL * 0.5, 0.4, 3.9)
                 props.append((_d2(v, w), "diner", b["diner"], w, (nx, nz)))
+            st_ = store_at(i, j, f)
+            if st_ is not None:
+                w = face_point(i, j, f, CELL * 0.5, 0.4, FLOOR_H * 1.15 + 0.35)
+                props.append((_d2(v, w), "store", st_, w, (nx, nz)))
             if b["cinema"] is not None and f == b["cinema"]["door"]:
                 w = face_point(i, j, f, CELL * 0.5, 0.4, 3.9)
                 props.append((_d2(v, w), "cinema", b["cinema"], w, (nx, nz)))
@@ -23442,6 +23455,8 @@ def draw_props(ch, co, v, walls, now, wet):
             draw_exchange_front(ch, co, v, walls, s, world, now)
         elif kind == "diner":
             draw_diner_sign(ch, co, v, walls, s, world, now)
+        elif kind == "store":
+            draw_store_sign(ch, co, v, walls, s, world, now)
         elif kind == "overdoor":
             tone = s[1]["tone"] if s[1] else 0.44
             draw_over_door(ch, co, v, walls, s[0], world, now, tone)
@@ -26607,6 +26622,429 @@ def same_venue(a, b):
     return all(a[1].get(k) == b[1].get(k) for k in keys)
 
 
+# --- the convenience store ---------------------------------------------------
+# Asked for on 2026-11-16: "a convenience store: a bright white interior
+# against the neon outside". One to a square of city STORE_TILE cells across
+# (two squares in three), on the ground floor of an ordinary building on a
+# proper street. From outside the whole ground floor is one window lit white -
+# the one white thing in a street of neon - its shelves of colour and the
+# clerk at the till dark inside it, a box sign over it and the light on the
+# pavement. Walk in and the room is white all round you, and through the
+# front window is the street you came in from, dark, its neon and its rain.
+STORE_TILE = 18        # at most one store to a square of city this many cells across
+STORE_ODDS = 3         # and one square in this many has none
+STORE_NAMES = ["NITE OWL", "MOON MART", "CORNER 24", "LUCKY MART", "ALL NITE",
+               "HAPPY STOP", "QUIKMART", "STAR MART"]
+STORE_ITEMS = [("onigiri", 2), ("hot coffee", 1), ("cup noodles", 3),
+               ("ice cream", 2), ("lotto ticket", 1)]
+STORE_CLERK = ["Evening.", "...", "Bag?", "Receipt's in the bag.", "Mm-hm.",
+               "Coffee's fresh. Ish.", "Have a good one.", "That all?"]
+STORE_LOTTO = [(2000, 1000), (100, 100), (8, 5)]   # one in this many wins this much
+STORE_HUD = " %s, open 24 hours  -  1-5 buy  -  x walks out  -  q quit "
+STORE_CLERK_ART = [" ___ ", "(o_o)", "/|#|\\", " |#| "]
+STORE_CLERK_BIG = [
+    "   _____   ",
+    "  /_____\\  ",
+    "  ( o o )  ",
+    "   \\ - /   ",
+    "  __| |__  ",
+    " /  |_|  \\ ",
+    "|  [   ]  |",
+    "|  |   |  |",
+]
+_store_tiles = {}
+_store_rooms = {}      # the room's still parts, drawn once a window size
+
+
+def _store_fits(i, j, f):
+    """Can face f of lot (i, j) be a store's front: an ordinary building's,
+    on a proper street, room for a shop on the ground floor."""
+    nx, nz = FACES[f]
+    if is_open(i, j) or not is_open(i + nx, j + nz) or not road_at(i + nx, j + nz):
+        return False
+    if water_at(i + nx, j + nz) or tunnel_at(i + nx, j + nz) or ramen_at(i, j, f):
+        return False
+    if COAST and coast_kind(i, j) is not None:
+        return False
+    b = lot(i, j)
+    if b["tree"] or b["height"] < FLOOR_H * 1.6 or b["district"].get("park"):
+        return False
+    return not any(b[k] is not None for k in (
+        "casino", "club", "tower", "cinema", "diner", "arcade", "bowling", "karaoke",
+        "minigolf", "temple", "exchange", "warehouse", "center", "landmark"))
+
+
+def store_in_tile(ti, tj):
+    """The store in this square of city, worked out once: the tile's hash
+    picks a cell, and the nearest front round it that will do is the store."""
+    key = (ti, tj)
+    if key in _store_tiles:
+        return _store_tiles[key]
+    _evict(_store_tiles, 3000)
+    m = _mix(ti, tj, 7701)
+    hit = None
+    if m % STORE_ODDS:
+        ci = ti * STORE_TILE + (m >> 4) % STORE_TILE
+        cj = tj * STORE_TILE + (m >> 12) % STORE_TILE
+        for r in range(6):
+            for i in range(ci - r, ci + r + 1):
+                for j in range(cj - r, cj + r + 1):
+                    if max(abs(i - ci), abs(j - cj)) != r:
+                        continue
+                    if i // STORE_TILE != ti or j // STORE_TILE != tj:
+                        continue
+                    for f in range(4):
+                        if _store_fits(i, j, f):
+                            hit = {"i": i, "j": j, "f": f, "seed": _mix(i, j * 4 + f, 7703),
+                                   "name": STORE_NAMES[(m >> 20) % len(STORE_NAMES)],
+                                   "stripe": (m >> 24) % 8}
+                            break
+                    if hit:
+                        break
+                if hit:
+                    break
+            if hit:
+                break
+    _store_tiles[key] = hit
+    return hit
+
+
+def store_at(i, j, f):
+    """The store whose front this is, or None."""
+    st = store_in_tile(i // STORE_TILE, j // STORE_TILE)
+    if st is not None and st["i"] == i and st["j"] == j and st["f"] == f:
+        return st
+    return None
+
+
+def store_door(st):
+    """The store's doorway, (x, z): in the middle of its front."""
+    p = face_point(st["i"], st["j"], st["f"], CELL * 0.5, 1.4, 0.0)
+    return p[0], p[2]
+
+
+def near_stores(x, z, reach):
+    """The stores within reach."""
+    t = int(reach // (STORE_TILE * CELL)) + 1
+    ti, tj = int(x // (STORE_TILE * CELL)), int(z // (STORE_TILE * CELL))
+    for a in range(ti - t, ti + t + 1):
+        for b in range(tj - t, tj + t + 1):
+            st = store_in_tile(a, b)
+            if st is not None:
+                dx, dz = store_door(st)
+                if (dx - x) ** 2 + (dz - z) ** 2 < reach * reach:
+                    yield st
+
+
+def _store_spot(x, z):
+    """Across the pavement from the nearest store, facing its window: a step
+    or two forward is the door."""
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    best = None
+    for st in near_stores(x, z, 900.0):
+        dx, dz = store_door(st)
+        d = (dx - x) ** 2 + (dz - z) ** 2
+        if d < CHEAT_SKIP ** 2:
+            continue
+        if best is None or d < best[0]:
+            best = (d, st)
+    if best is None:
+        return None
+    st = best[1]
+    nx, nz = FACES[st["f"]]
+    for out in (9.0, 7.5, 6.0, CASINO_REACH + 3.0):
+        p = face_point(st["i"], st["j"], st["f"], CELL * 0.5, out, 0.0)
+        if can_stand(p[0], p[2]):
+            return p[0], p[2], math.atan2(-nx, -nz)
+    return None
+
+
+def store_window(ch, co, v, sx, dist, u, f, r_lo, r_hi, st):
+    """The store's front from the street: the whole ground floor one window,
+    white - lit so it is the one white thing on a street of neon - the
+    shelves across it in rows of colour, the till at one end with the clerk
+    behind it, and the glass door in the middle."""
+    scale = v.fy / dist
+    top = int(round(v.horizon - (FLOOR_H * 1.15 - v.eye) * scale))
+    sill = int(round(v.horizon - (0.12 - v.eye) * scale))
+    white = SNOW | curses.A_REVERSE
+    su = sign_u(f, u)
+    door = abs(su - CELL * 0.5) < 0.65
+    till = su > CELL * 0.72
+    n = len(NEON)
+    for y in range(max(r_lo, top), min(r_hi, sill) + 1):
+        hgt = v.eye + (v.horizon - y) / scale       # how high, this row
+        if y == top or y == sill:
+            g, a = "=", CURB                        # the frame
+        elif su < 0.18 or su > CELL - 0.18 or abs(abs(su - CELL * 0.5) - 0.65) < 0.08:
+            g, a = "|", CURB                        # the corners, the door's edges
+        elif door:
+            g, a = (("-", white) if abs(hgt - 1.05) < 0.08 else (" ", white))
+        elif till:
+            if abs(hgt - 1.0) < 0.1:
+                g, a = "=", white                   # the counter
+            elif 1.0 < hgt < 1.75 and abs(su - CELL * 0.86) < 0.18:
+                g, a = ("o" if hgt > 1.45 else "M"), white   # the clerk, dark
+            else:
+                g, a = " ", white
+        else:
+            # Shelves: an edge every so high, and what is on them in colour.
+            shelf = (hgt % 0.42) < 0.07 and hgt < 1.7
+            if shelf:
+                g, a = "_", white
+            elif hgt < 1.7:
+                m = _mix(int(su * 3.0), int(hgt / 0.42), st["seed"])
+                g, a = (" ", NEON[m % n][0] | curses.A_REVERSE) if m & 3 else (" ", white)
+            else:
+                g, a = " ", white
+        ch[y][sx], co[y][sx] = g, a
+
+
+def draw_store_sign(ch, co, v, walls, st, world, now):
+    """Over the window: a white box with the name on it in black, a stripe of
+    the store's colour under it, OPEN 24 HOURS - in screen space, like the
+    diner's, so it reads."""
+    pr = v.project(world[0], world[1], world[2])
+    if pr is None or pr[2] > 90.0:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    name = " %s " % st["name"]
+    x0 = sx - len(name) // 2
+    white = SNOW | curses.A_REVERSE
+    stripe = NEON[st["stripe"] % len(NEON)][0] | curses.A_REVERSE
+    for k, c in enumerate(name):
+        put_cell(ch, co, v, walls, x0 + k, sy - 1, dist, c, white)
+        put_cell(ch, co, v, walls, x0 + k, sy, dist, " ", stripe)
+    if dist < 45.0:
+        for k, c in enumerate("OPEN 24 HOURS"):
+            put_cell(ch, co, v, walls, sx - 6 + k, sy + 1, dist, c, GOLD)
+
+
+def store_buy(visit, n, wallet, now):
+    """Buying item n: what the clerk says, or what is wrong. A lotto ticket
+    is scratched there and then."""
+    name, price = STORE_ITEMS[n]
+    if not wallet.take(price):
+        return "that's $%d" % price
+    visit["bag"][name] = visit["bag"].get(name, 0) + 1
+    m = _mix(int(now * 1000.0), n, visit["seed"])
+    if name == "lotto ticket":
+        for odds, win in STORE_LOTTO:
+            if m % odds == 0:
+                wallet.give(win)
+                visit["said"], visit["said_at"] = "A winner! $%d. Huh." % win, now
+                return "you scratch it: $%d!" % win
+        visit["said"], visit["said_at"] = "Better luck next time.", now
+        return "you scratch it: nothing"
+    visit["said"] = STORE_CLERK[m % len(STORE_CLERK)]
+    visit["said_at"] = now
+    return "%s, $%d" % (name, price)
+
+
+def _store_room(width, height):
+    """The still parts of the room, worked out once a window size: every cell
+    a ray from you into a white box of a room - its floor, its ceiling and
+    its tubes, the window down the left onto the street, the till and the
+    cigarettes down the right, a gondola of shelves, and the fridges at the
+    back. (glyph, colour key) per cell; the colours are looked up as drawn."""
+    key = (width, height)
+    hit = _store_rooms.get(key)
+    if hit is not None:
+        return hit
+    if len(_store_rooms) > 8:
+        _store_rooms.clear()
+    cx, vy = (width - 1) / 2.0, height * 0.42
+    f = width * 0.42
+    eye = 1.6
+    room = []
+    for y in range(height):
+        row = []
+        for x in range(width):
+            dx = (x - cx) / f
+            dy = (vy - y) / (f * 0.5)
+            hits = []
+            if dy < -1e-6:
+                hits.append((eye / -dy, "floor"))
+            if dy > 1e-6:
+                hits.append(((2.7 - eye) / dy, "ceiling"))
+            if dx < -1e-6:
+                hits.append((-3.0 / dx, "left"))
+            if dx > 1e-6:
+                hits.append((3.0 / dx, "right"))
+            hits.append((9.0, "back"))
+            # The gondola down the middle-left: its front, then its side.
+            for t_, side in (((3.0, "gfront")), ((-0.6 / dx if dx < -1e-6 else -1.0,
+                                                    "gside"))):
+                if t_ <= 0.0:
+                    continue
+                px, py = dx * t_, eye + dy * t_
+                if side == "gfront" and -1.8 <= px <= -0.6 and 0.0 <= py <= 1.6:
+                    hits.append((t_, "gfront"))
+                if side == "gside" and 3.0 <= t_ <= 7.0 and 0.0 <= py <= 1.6:
+                    hits.append((t_, "gside"))
+            t, what = min(hits)
+            px, py, pz = dx * t, eye + dy * t, t
+            g, c = " ", "wall"
+            if what == "floor":
+                lines = (px * 1.25) % 1.0 < 0.06 * t or (pz * 1.25) % 1.0 < 0.03 * t
+                g, c = ("+" if lines else " "), "floor"
+            elif what == "ceiling":
+                tube = (abs((pz % 1.5) - 0.75) < 0.1
+                        and 0.3 < abs(px) < 1.5)    # two rows of tubes
+                g, c = " ", ("tube" if tube else "ceiling")
+            elif what == "left":
+                # The front window, onto the street; the door near you.
+                if 0.35 < py < 2.4 and pz < 8.6:
+                    g, c = " ", "outside"
+                    if abs((pz % 2.2) - 1.1) < 0.05:
+                        g, c = "|", "frame"
+                else:
+                    g, c = " ", "wall"
+            elif what == "right":
+                if 1.2 < pz < 4.8:
+                    if abs(py - 1.0) < 0.06:
+                        g, c = "=", "counter"
+                    elif py < 1.0:
+                        g, c = ("|" if (pz * 2.0) % 1.0 < 0.08 else " "), "counter"
+                    elif 1.4 < py < 2.4:
+                        shelf = (py % 0.25) < 0.04
+                        g, c = ("_", "wall") if shelf else _store_pack(pz * 8.0, py / 0.25)
+                elif 5.0 < pz < 8.6 and 0.2 < py < 1.8:
+                    shelf = (py % 0.4) < 0.05
+                    g, c = ("_", "wall") if shelf else _store_pack(pz * 5.0, py / 0.4)
+            elif what == "back":
+                # The fridges: glass doors, cold light, rows of bottles.
+                if 0.15 < py < 2.3 and -2.8 < px < 2.8:
+                    if (px * 0.9) % 1.0 < 0.05:
+                        g, c = "|", "frame"
+                    elif (py % 0.38) < 0.05:
+                        g, c = "_", "cold"
+                    else:
+                        g, c = "|", "cold"
+                        if (px * 6.0) % 1.0 < 0.5:      # a bottle
+                            g, c = "|", "pack%d" % (_mix(int(px * 6.0), int(py / 0.38),
+                                                         7711) % 8)
+            elif what in ("gfront", "gside"):
+                shelf = (py % 0.4) < 0.05
+                if py > 1.55:
+                    g, c = "_", "frame"
+                elif shelf:
+                    g, c = "_", "wall"
+                else:
+                    u_ = px if what == "gfront" else pz
+                    g, c = _store_pack(u_ * 6.0, py / 0.4)
+            row.append((g, c))
+        room.append(row)
+    _store_rooms[key] = (room, cx, vy, f)
+    return _store_rooms[key]
+
+
+def _store_pack(u, v):
+    """Something on a shelf at (u, v) in shelf units: a packet of a colour,
+    with a mark on it - or a gap where one has been sold."""
+    m = _mix(int(u), int(v), 7709)
+    if m % 11 == 0:
+        return " ", "wall"
+    return " .:=o"[(m >> 4) % 5], "pack%d" % ((m >> 8) % 8)
+
+
+def render_store(st, visit, width, height, now, k=1):
+    """Inside: the room white all round, the window onto the dark street with
+    its neon and rain on the left, the clerk at the till on the right, what
+    you can buy along the bottom."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    if width < 40 or height < 14:
+        _text(ch, co, height // 2, 1, ("~ %s, open 24 hours ~" % st["name"].lower())
+              [:width - 1], SNOW)
+        _text(ch, co, min(height - 1, height // 2 + 2), 1, "x to leave", GOLD_DIM)
+        return ch, co
+    rev = curses.A_REVERSE
+    flick = _mix(int(now * 8.0), 1, st["seed"]) % 97 == 0
+    colours = {"wall": SNOW | rev, "floor": ROU_BLACK | rev, "ceiling": STAR | rev,
+               "tube": (FOG if flick else FLASH) | rev, "frame": CURB | rev,
+               "counter": STAR | rev, "cold": tone_colour("cold", 0.9) | rev,
+               "outside": 0}
+    for n in range(8):
+        colours["pack%d" % n] = NEON[n % len(NEON)][0] | rev
+    room, cx, vy, f = _store_room(width, height)
+    for y in range(height):
+        rr, cr, chy, coy = room[y], None, ch[y], co[y]
+        for x in range(width):
+            g, c = rr[x]
+            chy[x], coy[x] = g, colours[c]
+    # Through the window: the street outside, dark, its neon and its rain.
+    win = [(x, y) for y in range(height) for x in range(int(cx))
+           if room[y][x][1] == "outside"]
+    if win:
+        y_top = min(y for _, y in win)
+        y_bot = max(y for _, y in win)
+        for word, at, down in (("HOTEL", 0.3, 0.2), ("BAR", 0.62, 0.38),
+                               ("RAMEN", 0.45, 0.62)):
+            y0 = y_top + int((y_bot - y_top) * down)
+            xs = [x for x, y in win if y == y0]
+            if not xs:
+                continue
+            x0 = int(min(xs) + (max(xs) - min(xs)) * at) - len(word) // 2
+            lit = _mix(int(now * 3.0), x0, st["seed"]) % 23 != 0
+            attr = NEON[(len(word) + st["seed"]) % len(NEON)][0 if lit else 1]
+            for n, c in enumerate(word):
+                if 0 <= x0 + n < width and room[y0][x0 + n][1] == "outside":
+                    ch[y0][x0 + n], co[y0][x0 + n] = c, attr
+    wet = rain_intensity(now)
+    tick = int(now * 14.0)
+    for x, y in win:
+        m = _mix(x, y - tick, st["seed"])
+        if wet > 0.05 and m % 100 < wet * 14:
+            ch[y][x], co[y][x] = "|" if m & 1 else "'", RAIN
+        elif m % 211 == 0:
+            ch[y][x], co[y][x] = ".", HAZE         # a light far off
+    carx = int(((now * 9.0) % 60.0) / 60.0 * cx * 2.0) - 4
+    if win:
+        cy_ = max(y for _, y in win) - 1
+        for n, c in enumerate("o==o"):
+            if 0 <= carx + n < width and room[cy_][carx + n][1] == "outside":
+                ch[cy_][carx + n], co[cy_][carx + n] = c, BULB if n in (0, 3) else HAZE
+    # The clerk, behind the counter on the right.
+    kx = int(cx + 2.2 / 2.6 * f)
+    ky = int(vy - (1.75 - 1.6) / 2.6 * f * 0.5)
+    yawn = int(now / 9.0) % 5 == 0 and (now % 9.0) < 1.5
+    art = STORE_CLERK_BIG if f > 80.0 else STORE_CLERK_ART
+    for dy, line in enumerate(art):
+        if yawn:
+            line = line.replace("o_o", "O_O").replace("o o", "O O")
+        lo, hi = len(line) - len(line.lstrip()), len(line.rstrip())
+        for n in range(lo, hi):
+            # Filled in, or the shelves behind him show through his face.
+            c, x = line[n], kx - len(line) // 2 + n
+            if 0 <= ky + dy < height and 0 <= x < width:
+                ch[ky + dy][x], co[ky + dy][x] = c, (CURB if c != " " else SNOW | rev)
+    words = ""
+    if now - visit["since"] < 2.5:
+        words = "* ding-dong *"
+    elif now - visit["said_at"] < 4.0 and visit["said"]:
+        words = '"%s"' % visit["said"]
+    if words:
+        _text(ch, co, max(0, ky - 2), max(0, kx - len(words) // 2), words, GOLD)
+    # The name over it all, and what there is.
+    if k > 1:
+        _blocks(ch, co, 1, max(1, (width - blocks_width(st["name"], k - 1)) // 2),
+                st["name"], ROU_RED, k - 1, k - 1)
+    else:
+        _text(ch, co, 1, max(0, (width - len(st["name"]) - 4) // 2),
+              "[ %s ]" % st["name"], ROU_RED)
+    menu = "   ".join("%d %s $%d" % (n + 1, name, p)
+                      for n, (name, p) in enumerate(STORE_ITEMS))
+    bag = ", ".join("%d %s" % (c, name) for name, c in visit["bag"].items())
+    for y in (height - 2, height - 1):
+        for x in range(width):
+            ch[y][x], co[y][x] = " ", 0
+    _text(ch, co, height - 2, max(0, (width - len(menu)) // 2), menu[:width], HUD)
+    if bag:
+        _text(ch, co, height - 1, 2, ("in the bag: " + bag)[:width - 4], GOLD_DIM)
+    return ch, co
+
+
 def venue_at(x, z):
     """The club, casino or ramen counter you are standing in the doorway of,
     as (kind, dict), or None.
@@ -26653,6 +27091,10 @@ def venue_at(x, z):
         lx, lz = library_door(ci, cj)
         if (lx - x) ** 2 + (lz - z) ** 2 < CASINO_REACH ** 2:
             return "library", {"i": int(lx // CELL), "j": int(lz // CELL)}
+    for st in near_stores(x, z, 12.0):
+        dx, dz = store_door(st)
+        if (dx - x) ** 2 + (dz - z) ** 2 < CASINO_REACH ** 2:
+            return "store", st
     c = carnival_over(ci)
     if c is not None:                           # the claw machine, on the fair
         bx, bz = claw_spot(c)
@@ -28500,6 +28942,7 @@ CHEAT_PLACES = [
     ("t", "the turtles", "lair"),
     ("f", "fly the plane", "pilot"),
     ("d", "vending machine", "vending"),
+    ("m", "corner store", "store"),
     ("*", "dragon dance", "festival"),
 ]
 
@@ -29507,6 +29950,8 @@ def find_place(x, z, kind):
         return _gangway_spot(x, z)
     if kind == "marina":
         return _marina_spot(x, z)
+    if kind == "store":
+        return _store_spot(x, z)
     if kind == "subpen":
         return _pen_spot(x, z)
     if kind == "tackle":
@@ -29659,7 +30104,7 @@ def find_place(x, z, kind):
 
 # The third column.
 CHEAT_MORE = ["pilot", "center", "bar",
-              "lowroof", "washing", "bowling", "lair", "vending", "festival"]
+              "lowroof", "washing", "bowling", "lair", "vending", "store", "festival"]
 
 
 def draw_cheats(ch, co, note):
@@ -39029,6 +39474,7 @@ def main(stdscr):
     lemon = {"glasses": 0, "at": -1e9}   # the kid's best customer
     vendor = None               # the vending machine whose glass you are at
     tiki = None                 # sat at a beach bar: your tab, for this visit
+    shopping = None             # in a corner store: what is in your bag, this visit
     ride = None                 # up on the pier's wheel: {"pier", "t0"}
     cruise = None               # aboard the cruise ship: {"h", "look"}
     boat = None                 # at the wheel of a speedboat: a Boat
@@ -39782,13 +40228,17 @@ def main(stdscr):
                     said_[-1] += " " + word_
                 oracle["said"] = said_[-20:]
                 oracle["at"], oracle["sung"] = now, word_
+            elif (shopping is not None and venue is not None
+                  and ord("1") <= key < ord("1") + len(STORE_ITEMS)):
+                note, note_at = store_buy(shopping, key - ord("1"), wallet, now), now
             elif (tiki is not None and venue is not None
                   and ord("1") <= key < ord("1") + len(TIKI_DRINKS)):
                 said = tiki_order(tiki, key - ord("1"), wallet, now)
                 if said:
                     note, note_at = said, now
             elif ((wheel is not None or at_arcade or at_bar is not None or at_bowl
-                   or at_kara or at_golf or tiki is not None or at_mission)
+                   or at_kara or at_golf or tiki is not None or at_mission
+                   or shopping is not None)
                   and key in (ord("z"), ord("Z"))):
                 _big_screens[0] = not _big_screens[0]     # big screens, off and on
                 note, note_at = ("big screens " + ("on" if _big_screens[0]
@@ -40428,6 +40878,11 @@ def main(stdscr):
             venue = None
         if venue is None or venue[0] not in ("ramen", "diner"):
             seated = None               # stood up: the next visit is a new bowl
+        if venue is None or venue[0] != "store":
+            shopping = None             # out of the door: a new bag next time
+        elif shopping is None or shopping["seed"] != venue[1]["seed"]:
+            shopping = {"seed": venue[1]["seed"], "since": now, "bag": {}, "said": "",
+                        "said_at": -1e9}
         if venue is None or venue[0] != "beachbar":
             tiki = None                 # and off the stool: a new tab next time
         elif tiki is None or tiki["seed"] != venue[1]["seed"]:
@@ -40669,6 +41124,10 @@ def main(stdscr):
         elif venue is not None and venue[0] == "mission":
             ch, co = render_mission(venue[1]["site"], mission_cam, width, height, now)
             hud = MISSION_HUD % len(MISSION_CAMS)
+        elif venue is not None and venue[0] == "store" and shopping is not None:
+            ch, co = render_store(venue[1], shopping, width, height, now,
+                                  big_scale(width, height))
+            hud = STORE_HUD % venue[1]["name"].title()
         elif venue is not None and venue[0] == "beachbar" and tiki is not None:
             ch, co = render_tiki(venue[1], tiki, width, height, now)
             hud = TIKI_HUD % (TIKI_NAMES[venue[1]["seed"] % len(TIKI_NAMES)].lower(),
