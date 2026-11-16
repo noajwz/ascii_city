@@ -20526,9 +20526,10 @@ def el_stairs_near(x, z, reach=CASINO_REACH):
     return None
 
 
-def _el_stairs_spot(x, z):
+def _el_stairs_spot(x, z, back=3.5):
     """A step short of the foot of the nearest el station's stairs, facing
-    them: the panel's way to the train. The next press, the next line over."""
+    them: the panel's way to the train. The next press, the next line over.
+    With `back` further, down the pavement from them: the station to walk to."""
     k0 = int(x / (XP * CELL))
     for step in range(0, 400):
         k = k0 + (step + 1) // 2 * (1 if step % 2 else -1)
@@ -20546,8 +20547,9 @@ def _el_stairs_spot(x, z):
             if not el_runs((x0 + x1) * 0.5, sz):
                 continue
             sx, fz, d = el_stairs(x0, x1, sz)[0]
-            pz = fz - d * 3.5
-            if can_stand(sx, pz) and venue_at(sx, pz) is None:
+            pz = fz - d * back
+            if (can_stand(sx, pz) and venue_at(sx, pz) is None
+                    and probe(sx, pz, 0.0 if d > 0 else math.pi, back) >= back - 1.5):
                 return sx, pz, 0.0 if d > 0 else math.pi
     return None
 
@@ -30972,6 +30974,7 @@ CHEAT_PLACES = [
     ("-", "a metro station", "metro"),
     ("'", "the airport", "airport"),
     (".", "the harbour", "harbour"),
+    ("=", "an el station", "elstation"),
     (",", "pokemon center", "center"),
     (";", "lemonade, 3am", "lemonade"),
     ("?", "the stargazer", "telescope"),
@@ -31030,7 +31033,7 @@ CHEAT_ZONES = ["industrial", "suburbs", "university", "beach"]
 CHEAT_GROUPS = [
     ("NIGHTLIFE", ["rave", "warehouse", "strip", "lemonade", "telescope", "fortune"]),
     ("VIEWS", ["billboard"]),
-    ("TRAVEL", ["metro", "airport", "harbour"]),
+    ("TRAVEL", ["metro", "elstation", "airport", "harbour"]),
 ]
 
 
@@ -32031,6 +32034,8 @@ def find_place(x, z, kind):
         return _el_spot(x, z)
     if kind == "eldrive":
         return _el_stairs_spot(x, z)
+    if kind == "elstation":
+        return _el_stairs_spot(x, z, 10.0)
     if kind == "tower":
         return _tower_spot(x, z)
     if kind == "bar":
