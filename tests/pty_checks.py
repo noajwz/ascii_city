@@ -509,6 +509,21 @@ def cases(run, report):
         print("    not strapped in, no liftoff, no map, or not out")
         rk_ok = False
     ok &= rk_ok
+    # The el: ] on the panel puts you in a train's cab at a platform; n and
+    # w is power with the doors open, which the interlock refuses; z and z;
+    # x off, down the stairs; s walks you back into them and up; x off again.
+    el_st, el_out = run([(F1, .5), (b"]", 1.5), (b"n", .3), (b"w", .8), (b"z", .5),
+                         (b"z", .5), (b"x", 1.0), (b"s", 1.0), (b"x", 1.0)],
+                        cols=300, rows=60)
+    el_plain = ANSI.sub(b"", el_out).decode("utf-8", "replace")
+    el_ok = report("the el: into the cab, the doors' interlock, off and back up",
+                   el_st, el_out)
+    if el_ok and el_out and not ("THE CARD" in el_plain and "no power till" in el_plain
+                                 and "hand the train back" in el_plain
+                                 and "into the cab" in el_plain):
+        print("    not in the cab, no interlock, or not off and back up")
+        el_ok = False
+    ok &= el_ok
     # The submarine: from the pen, out, down, a ping, the lamp, back.
     su_st, su_out = run([(F1, .5), (b"+", .4), (b"\x01[", 1.5), (b"p", 1.0)]
                         + [(b"w", .2)] * 3 + [(b"f", .3)] * 4 + [(b"", 4.0),

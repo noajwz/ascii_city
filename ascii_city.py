@@ -20044,9 +20044,15 @@ def near_els(v, reach):
 
 
 def el_trains(x0, x1, z, reach, now):
-    """(z of the head, direction, track x) for each train within reach of z."""
+    """(z of the head, direction, track x) for each train within reach of z.
+    On the track of the train you are driving, the one train ahead of it."""
     xm = (x0 + x1) * 0.5
+    drv = _el_drive[0]
     for d, tx in ((1, xm - 1.6), (-1, xm + 1.6)):
+        if drv is not None and int(drv.x0) == int(x0) and drv.d == d:
+            if drv.lead_z is not None and abs(drv.lead_z - z) < reach + EL_CARS * EL_CAR:
+                yield drv.lead_z, d, tx
+            continue
         off = (_mix(int(x0), d, 1803) & 1023) / 1023.0 * EL_SPACING
         head0 = d * EL_SPEED * now + off
         n0 = int(math.floor((z - reach - head0) / EL_SPACING)) - 1
@@ -20097,21 +20103,27 @@ def draw_el(ch, co, v, walls, x0, x1, now, wet):
                 put_point(ch, co, v, walls, x, EL_H - 0.4, z, "=", CONCRETE)
                 x += 0.9
         z += EL_COL
-    # The girders and rails, and the station canopies.
+    # The girders and rails, and the station canopies. The rails under the
+    # train you are driving are drawn by draw_train_world(), two of them.
+    drv = _el_drive[0]
+    mine = drv.tx if drv is not None and int(drv.x0) == int(x0) else None
     z = math.floor(zs / 1.2) * 1.2
     while z <= ze:
         if el_runs(xm, z):
             for gx in (cx0, cx1):
                 put_point(ch, co, v, walls, gx, EL_H, z, "=", CURB)
             for tx in (xm - 1.6, xm + 1.6):
-                put_point(ch, co, v, walls, tx, EL_H + 0.25, z, "-", CONCRETE)
+                if mine is None or abs(tx - mine) > 0.1:
+                    put_point(ch, co, v, walls, tx, EL_H + 0.25, z, "-", CONCRETE)
         z += 1.2
+    # The stations: a canopy the length of a train, and the stairs up to it.
     gap = EL_STATION * CELL
+    end = int(EL_PLAT) - 1
     for k in range(int(zs / gap) - 1, int(ze / gap) + 2):
-        sz = (k * EL_STATION + (_mix(int(x0), k, 1805) % 8)) * CELL
-        if not el_runs(xm, sz) or not zs - 20 < sz < ze + 20:
+        sz = el_station_z(x0, k)
+        if not el_runs(xm, sz) or not zs - 30 < sz < ze + 30:
             continue
-        for dz in range(-6, 7, 2):
+        for dz in range(-end, end + 1, 2):
             for gx in (cx0 - 0.6, cx1 + 0.6):
                 put_point(ch, co, v, walls, gx, EL_H + 3.2, sz + dz, "_", CURB)
             if dz % 4 == 0:
@@ -20119,8 +20131,28 @@ def draw_el(ch, co, v, walls, x0, x1, now, wet):
                         max(wet, 0.3), now)
         for gx in (cx0 - 0.6, cx1 + 0.6):
             for y in (EL_H + 0.8, EL_H + 1.8, EL_H + 2.8):
-                put_point(ch, co, v, walls, gx, y, sz - 6, "|", CONCRETE)
-                put_point(ch, co, v, walls, gx, y, sz + 6, "|", CONCRETE)
+                put_point(ch, co, v, walls, gx, y, sz - end, "|", CONCRETE)
+                put_point(ch, co, v, walls, gx, y, sz + end, "|", CONCRETE)
+        if v.eye >= EL_H:
+            continue                    # from up there the stairs are under you
+        for sx, fz, d in el_stairs(x0, x1, sz):
+            for n in range(13):
+                f = n / 12.0
+                put_point(ch, co, v, walls, sx, f * (EL_H + 1.0), fz + d * f * 10.0,
+                          "=", CONCRETE)
+                put_point(ch, co, v, walls, sx, f * (EL_H + 1.0) + 1.0,
+                          fz + d * f * 10.0, "-", CURB)
+            for y in (0.4, 1.0, 1.6, 2.2):
+                put_point(ch, co, v, walls, sx, y, fz - d * 0.6, "|", CONCRETE)
+            put_lit(ch, co, v, walls, sx, 2.8, fz - d * 0.6, "E", GOLD,
+                    max(wet, 0.4), now)
+            pr = v.project(sx, 3.5, fz - d * 0.6)
+            if pr is not None and pr[2] < 40.0:
+                word = "EL " + el_station_name(sz)
+                for n, c in enumerate(word):
+                    put_cell(ch, co, v, walls, int(round(pr[0])) - len(word) // 2 + n,
+                             int(round(pr[1])), pr[2] - 0.2, c,
+                             GOLD if n < 2 else BULB)
     # The trains.
     for head, d, tx in el_trains(x0, x1, v.z, EL_REACH, now):
         for c in range(EL_CARS):
@@ -20148,6 +20180,787 @@ def draw_el(ch, co, v, walls, x0, x1, now, wet):
         if int(now * 7 + head) % 9 == 0:
             put_point(ch, co, v, walls, tx, EL_H + 0.1, head - d * 3.0, "*",
                       EMBER_HOT)
+
+
+# --- driving the el ----------------------------------------------------------
+# Up a station's stairs and into the cab of the train standing at the platform
+# with its doors open. One handle: power one way and brake the other, in
+# notches. A card of times to keep, a mark on each platform to stop the cab
+# at, and block signals - red while the train ahead is in the block past
+# them, or while a platform's own train has not been let go; yellow before a
+# red. The train ahead is real and drawn where it is: it runs the same card
+# TRAIN_HEADWAY earlier, and now and then stands too long at a station.
+# Where the stations are, which this train runs through and where the one
+# ahead is held are hashes, like everything here; only your train is state.
+EL_PLAT = 19.0          # half a platform: a train's length, and a bit
+EL_MARK = 18.0          # the cab stops this far on from the platform's middle
+EL_STAIR = 13.0         # the foot of a platform's stairs, back from its middle
+EL_START = 25.0         # the platform's starting signal, on from its middle
+EL_HOME = 39.0          # and the one in front of it, back from its middle
+TRAIN_LEN = EL_CARS * EL_CAR
+TRAIN_POWER = 4         # notches of power, P1 to P4
+TRAIN_BRAKES = 7        # of brake, B1 to B7; one past them is the emergency
+TRAIN_ACC = 1.1         # full power, units a second a second, up to TRAIN_BASE
+TRAIN_BASE = 9.0        # past this speed the motors give less and less
+TRAIN_BRAKE = 0.15      # each notch of brake: B7 is 1.05
+TRAIN_EB = 1.6          # the emergency brake
+TRAIN_LINE = 22.0       # the line's limit, units a second: 79 km/h
+TRAIN_KMH = 3.6         # a unit is a metre
+TRAIN_REF_A = 0.75      # the run the card is worked out from: gentler than
+TRAIN_REF_B = 0.75      # full power, braking at B5, never quite at the limit
+TRAIN_REF_V = 20.0
+TRAIN_SLACK = 3.0       # seconds the card allows over that run, a leg
+TRAIN_DWELL = 15.0      # the card's time at a platform
+TRAIN_FIRST = 20.0      # and at the first, while you settle in
+TRAIN_DOORS = 10.0      # the doors stay open at least this long
+TRAIN_CHIME = 2.5       # and take this long to close
+TRAIN_HEADWAY = 55.0    # the train ahead runs the card this much earlier
+TRAIN_PASS = 4          # one station in this many, this train runs through
+TRAIN_HELD = 5          # one in this many, the train ahead stands too long at
+TRAIN_SHORT = 2.0       # stopped this far short of the mark, the doors open
+TRAIN_OVER = 4.0        # and this far past it; further and they stay shut
+TRAIN_CARD = 4          # stops ahead the card is kept to
+TRAIN_SEE = 320.0       # how far ahead the signals and platforms are drawn
+TRAIN_PAY = 6           # a stop made; and the bonuses below for making it well
+TRAIN_SPAD_FINE = 40
+TRAIN_RUN_FINE = 10     # running through a stop, or past its mark
+TRAIN_BUFFER_FINE = 30
+TRAIN_HUD = " driving the el, %s  -  %s "
+TRAIN_KEYS = ("w s power and brake  n coast  space emergency  h horn  "
+              "r change ends  x step off")
+TRAIN_KEYS_SHORT = "ws power/brake  n coast  spc emergency  h r x"
+TRAIN_NOTCH_NAMES = (["EB"] + ["B%d" % n for n in range(TRAIN_BRAKES, 0, -1)]
+                     + ["N"] + ["P%d" % n for n in range(1, TRAIN_POWER + 1)])
+TRAIN_SAYS = {
+    "hello": "Control: \"She's yours, driver. Keep to the card.\"",
+    "doors": "the doors are open - no power till they shut",
+    "right": "DING DING - right away",
+    "red": "Control: \"Train in front's held at %s. Expect a red.\"",
+    "spad": "SIGNAL PASSED AT DANGER - the train trips: -$%d",
+    "over": "overspeed - the brakes come on",
+    "short": "%.1f m short - draw up to the mark",
+    "held": "held at a red - it clears when the train ahead moves on",
+    "overran": "overran the mark by %.1f m - the doors stay shut: -$%d",
+    "ran": "ran through %s! -$%d",
+    "buffers": "into the buffers: -$%d",
+    "end": "end of the line - r changes ends, x steps off",
+    "ends": "you walk through to the other cab - a new card",
+    "trip": "the emergency brake is on - stop, then w",
+    "moving": "stop at a platform first",
+    "jolt": "\"Steady on!\"",
+}
+_el_drive = [None]      # the Train you are driving, for el_trains() and draw_el()
+
+
+def el_station_z(x0, k):
+    """The middle of station k of the elevated over the avenue that starts at
+    x0: one every EL_STATION cells, give or take."""
+    return (k * EL_STATION + (_mix(int(x0), k, 1805) % 8)) * CELL
+
+
+def el_station_name(z):
+    """An el station is named for its cross street: numbered up the +z way,
+    and round again past 250 - which is a long ride from anywhere."""
+    n = ((int(z / CELL + BIG) - BIG) // ZP + 100) % 250 + 1
+    end = ("TH" if 10 <= n % 100 <= 20 else
+           {1: "ST", 2: "ND", 3: "RD"}.get(n % 10, "TH"))
+    return "%d%s ST" % (n, end)
+
+
+def el_stairs(x0, x1, sz):
+    """A station's two stairs, as (x, z of the foot, d): on the x0 side up to
+    the platform for the trains going +z, on the x1 side for -z. Each climbs
+    the way its trains go."""
+    return ((x0 + 1.3, sz - EL_STAIR, 1), (x1 - 1.3, sz + EL_STAIR, -1))
+
+
+def el_stairs_near(x, z, reach=CASINO_REACH):
+    """(x0, x1, k, d) of the stairs whose foot you are within reach of."""
+    k0 = int(x / (XP * CELL) + BIG) - BIG
+    for ka in (k0, k0 - 1):
+        span = el_span(ka)
+        if span is None:
+            continue
+        x0, x1 = span[0] * CELL, (span[0] + span[1]) * CELL
+        if not x0 - reach < x < x1 + reach:
+            continue
+        k1 = int(z / (EL_STATION * CELL) + BIG) - BIG
+        for k in (k1 - 1, k1, k1 + 1):
+            sz = el_station_z(x0, k)
+            if abs(sz - z) > EL_STAIR + reach + 1.0 or not el_runs((x0 + x1) * 0.5, sz):
+                continue
+            for sx, fz, d in el_stairs(x0, x1, sz):
+                if (sx - x) ** 2 + (fz - z) ** 2 < reach * reach:
+                    return x0, x1, k, d
+    return None
+
+
+def _el_stairs_spot(x, z):
+    """A step short of the foot of the nearest el station's stairs, facing
+    them: the panel's way to the train. The next press, the next line over."""
+    k0 = int(x / (XP * CELL))
+    for step in range(0, 400):
+        k = k0 + (step + 1) // 2 * (1 if step % 2 else -1)
+        span = el_span(k)
+        if span is None:
+            continue
+        x0, x1 = span[0] * CELL, (span[0] + span[1]) * CELL
+        if abs(x0 - x) < CHEAT_SKIP:
+            continue
+        gap = EL_STATION * CELL
+        k1 = int(z / gap + BIG) - BIG
+        for n in range(0, 40):
+            ks = k1 + (n + 1) // 2 * (1 if n % 2 else -1)
+            sz = el_station_z(x0, ks)
+            if not el_runs((x0 + x1) * 0.5, sz):
+                continue
+            sx, fz, d = el_stairs(x0, x1, sz)[0]
+            pz = fz - d * 3.5
+            if can_stand(sx, pz) and venue_at(sx, pz) is None:
+                return sx, pz, 0.0 if d > 0 else math.pi
+    return None
+
+
+def train_ref(L):
+    """The card's run over a leg of L: (accel, brake, top, run-up, slow-down)."""
+    a, b, top = TRAIN_REF_A, TRAIN_REF_B, TRAIN_REF_V
+    if top * top / (2 * a) + top * top / (2 * b) > L:
+        top = math.sqrt(2.0 * L * a * b / (a + b))
+    return a, b, top, top * top / (2 * a), top * top / (2 * b)
+
+
+def train_ref_time(L, s):
+    """How long the card's run takes to cover s of a leg of L."""
+    a, b, top, da, db = train_ref(L)
+    s = max(0.0, min(L, s))
+    if s <= da:
+        return math.sqrt(2.0 * s / a)
+    if s <= L - db:
+        return top / a + (s - da) / top
+    return top / a + (L - da - db) / top + top / b - math.sqrt(2.0 * (L - s) / b)
+
+
+def train_ref_pos(L, t):
+    """And how far along a leg of L it is t seconds in."""
+    a, b, top, da, db = train_ref(L)
+    if t <= 0.0:
+        return 0.0
+    if t <= top / a:
+        return 0.5 * a * t * t
+    t -= top / a
+    cruise = (L - da - db) / top
+    if t <= cruise:
+        return da + top * t
+    t = min(t - cruise, top / b)
+    return L - db + top * t - 0.5 * b * t * t
+
+
+class Train:
+    """The train you are driving: where its cab is along the line (s, the
+    distance the way it is going, so z is d * s), how fast, the handle, the
+    doors, the card of stations, the signals, and how you are keeping to it."""
+
+    def __init__(self, x0, x1, k, d, now):
+        self.x0, self.x1 = x0, x1
+        self.xm = (x0 + x1) * 0.5
+        self.wall0 = time.time() - now
+        self.clock = now
+        self.v = 0.0
+        self.trip = False       # the emergency brake, put on by the protection
+        self.over = False       # over the line's limit, so the brakes are on
+        self.pay = self.fine = 0
+        self.earned = self.made = 0
+        self.said, self.said_at = "", -1e9
+        self.horn_at = -1e9
+        self.result, self.result_at = "", -1e9
+        self.lead = None        # the train ahead, (tail, head) along the line
+        self.lead_z = None
+        self.warned = set()
+        self._start(k, d, now, TRAIN_SAYS["hello"])
+
+    @property
+    def z(self):
+        return self.d * self.s
+
+    def _start(self, k, d, now, say):
+        """At station k's platform going d, doors open, and a new card."""
+        self.d = d
+        self.tx = self.xm - 1.6 * d
+        sz = el_station_z(self.x0, k)
+        first = self._station(k, sz)
+        dep = math.ceil(self.wall0 + now + TRAIN_FIRST) - self.wall0
+        first.update(stop=True, arr=now, dep=dep, done="board",
+                     l_arr=dep - TRAIN_HEADWAY - TRAIN_DWELL,
+                     l_dep=dep - TRAIN_HEADWAY)
+        self.s = first["mark"]
+        self.stations = [first]
+        self.pending = []
+        self.end = False
+        self.notch = -TRAIN_BRAKES
+        self.trip = self.over = False
+        self.at = first
+        self.doors, self.doors_at, self.close_at = "open", now, dep
+        self._extend()
+        self.say(TRAIN_SAYS["end"] if self.end and len(self.stations) == 1 else say, now)
+
+    def _station(self, k, sz):
+        s = self.d * sz
+        return {"k": k, "z": sz, "s": s, "mark": s + EL_MARK,
+                "name": el_station_name(sz), "stop": True, "arr": None,
+                "dep": None, "pass": None, "l_arr": None, "l_dep": None,
+                "done": None, "left": False, "seed": _mix(int(self.x0), k, 1813)}
+
+    def _extend(self):
+        """Station after station along the line until the card has
+        TRAIN_CARD stops ahead, or the line ends."""
+        while not self.end and sum(1 for st in self.stations
+                                   if st["stop"] and st["done"] is None) < TRAIN_CARD:
+            last = (self.pending or self.stations)[-1]
+            k = last["k"] + self.d
+            sz = el_station_z(self.x0, k)
+            z, broken = last["z"], False
+            while self.d * (sz - z) > 0 and not broken:
+                broken = not el_runs(self.xm, z)
+                z += self.d * CELL
+            if broken or not el_runs(self.xm, sz):
+                self.end = True
+                if self.pending:            # the last station is a stop, always
+                    self._close_leg(self.pending.pop())
+                break
+            st = self._station(k, sz)
+            st["stop"] = _mix(int(self.x0), k * 2 + (self.d > 0), 1809) % TRAIN_PASS != 0
+            if st["stop"]:
+                self._close_leg(st)
+            else:
+                self.pending.append(st)
+                self.stations.append(st)
+        self.sigs = []
+        for n, st in enumerate(self.stations):
+            if st["arr"] is None and st["pass"] is None:
+                break
+            self.sigs.append({"s": st["s"] - EL_HOME, "st": st, "kind": "home"})
+            self.sigs.append({"s": st["s"] + EL_START, "st": st, "kind": "start"})
+            if n + 1 < len(self.stations):
+                a, b = st["s"] + EL_START, self.stations[n + 1]["s"] - EL_HOME
+                if b - a > 70.0:
+                    self.sigs.append({"s": (a + b) * 0.5, "st": st, "kind": "mid"})
+
+    def _close_leg(self, st):
+        """The times for a leg, now that its far end is known: the stop at
+        the end of it, the stations it runs through, and the train ahead's."""
+        prev = next(p for p in reversed(self.stations) if p["stop"] and p["arr"] is not None)
+        L = st["mark"] - prev["mark"]
+        for p in self.pending:
+            u = p["mark"] - prev["mark"]
+            p["pass"] = math.ceil(self.wall0 + prev["dep"] + train_ref_time(L, u)
+                                  + TRAIN_SLACK * u / L) - self.wall0
+        self.pending = []
+        run = train_ref_time(L, L)
+        st["stop"] = True
+        st["arr"] = math.ceil(self.wall0 + prev["dep"] + run + TRAIN_SLACK) - self.wall0
+        st["dep"] = st["arr"] + TRAIN_DWELL
+        held = 0.0
+        if _mix(int(self.x0), st["k"] * 2 + (self.d > 0), 1811) % TRAIN_HELD == 0:
+            held = 25.0 + st["seed"] % 25
+        st["l_arr"] = prev["l_dep"] + run
+        st["l_dep"] = max(st["dep"] - TRAIN_HEADWAY + held, st["l_arr"] + TRAIN_DOORS)
+        st["held"] = held > 0.0
+        if st not in self.stations:
+            self.stations.append(st)
+
+    def lead_at(self, now):
+        """Where the head of the train ahead is, along the line, or None once
+        it has turned back at the end of the line."""
+        prev = None
+        for st in self.stations:
+            if not st["stop"] or st["l_arr"] is None:
+                continue
+            if now < st["l_arr"] and prev is not None:
+                return prev["mark"] + train_ref_pos(st["mark"] - prev["mark"],
+                                                    now - prev["l_dep"])
+            if now < st["l_dep"]:
+                return st["mark"]
+            prev = st
+        return None if self.end or prev is None else prev["mark"]
+
+    def red(self, j):
+        sg = self.sigs[j]
+        st = sg["st"]
+        if sg["kind"] == "start" and ((st["stop"] and not st["left"])
+                                      or (self.end and st is self.stations[-1])):
+            return True                 # not let go yet, or the buffers
+        if self.lead is None:
+            return False
+        hi = self.sigs[j + 1]["s"] if j + 1 < len(self.sigs) else 1e18
+        return self.lead[1] > sg["s"] and self.lead[0] < hi
+
+    def aspect(self, j):
+        if self.red(j):
+            return "red"
+        return "yellow" if j + 1 < len(self.sigs) and self.red(j + 1) else "green"
+
+    def next_signal(self):
+        """(index, distance) of the first signal ahead of the cab."""
+        for j, sg in enumerate(self.sigs):
+            if sg["s"] > self.s + 0.01:
+                return j, sg["s"] - self.s
+        return None
+
+    def danger(self):
+        """How far ahead the first signal is that is red for the train ahead
+        or the buffers - not one that only waits for you to stop at its
+        platform. The desk shows it: the blocks are short, and one yellow
+        is not room enough to stop in from the line's speed."""
+        for j, sg in enumerate(self.sigs):
+            ahead = sg["s"] - self.s
+            if ahead <= 0.01:
+                continue
+            if ahead > TRAIN_SEE + 200.0:
+                break
+            st = sg["st"]
+            if self.end and sg["kind"] == "start" and st is self.stations[-1]:
+                return ahead
+            if self.lead is None:
+                continue
+            hi = self.sigs[j + 1]["s"] if j + 1 < len(self.sigs) else 1e18
+            if self.lead[1] > sg["s"] and self.lead[0] < hi:
+                return ahead
+        return None
+
+    def next_stop(self):
+        """The next station on the card not yet stopped at or run through."""
+        for st in self.stations:
+            if st["done"] is None and (st["arr"] is not None or st["pass"] is not None):
+                return st
+        return None
+
+    def wall(self, t):
+        return time.strftime("%H:%M:%S", time.localtime(self.wall0 + t))
+
+    def say(self, words, now):
+        self.said, self.said_at = words, now
+
+    def key(self, what, now):
+        if what == "power":
+            if self.trip:
+                self.say(TRAIN_SAYS["trip"], now)
+                return
+            self.notch = min(TRAIN_POWER, self.notch + 1)
+            if self.notch > 0 and self.doors != "shut":
+                self.say(TRAIN_SAYS["doors"], now)
+        elif what == "brake":
+            self.notch = max(-TRAIN_BRAKES - 1, self.notch - 1)
+        elif what == "coast" and not self.trip:
+            self.notch = 0
+        elif what == "emergency":
+            self.notch = -TRAIN_BRAKES - 1
+        elif what == "horn":
+            self.horn_at = now
+        elif what == "ends":
+            if self.v > 0.0 or self.at is None:
+                self.say(TRAIN_SAYS["moving"], now)
+            else:
+                self._start(self.at["k"], -self.d, now, TRAIN_SAYS["ends"])
+
+    def off(self):
+        """Where x puts you, stopped: down the stairs of the station you are
+        at, a step short of their foot, or on the pavement under the train."""
+        sx = self.x0 + 1.3 if self.d > 0 else self.x1 - 1.3
+        if self.at is not None:
+            fz = self.at["z"] - self.d * EL_STAIR
+            pz = fz - self.d * 3.5
+            if can_stand(sx, pz):
+                return sx, pz, math.pi if self.d > 0 else 0.0
+        z = self.z - self.d * TRAIN_LEN * 0.5
+        for n in range(80):
+            pz = z + (n + 1) // 2 * (1 if n % 2 else -1) * 1.5
+            if can_stand(sx, pz) and venue_at(sx, pz) is None:
+                return sx, pz, 0.0 if self.d > 0 else math.pi
+        return None
+
+    def step(self, dt, now):
+        self.clock = now
+        dt = max(0.0, min(dt, 0.1))
+        head = self.lead_at(now)
+        self.lead = None if head is None else (head - TRAIN_LEN, head)
+        self.lead_z = None if head is None else self.d * head
+        # The doors, and the platform let go.
+        if self.doors == "open" and now >= self.close_at and not (
+                self.end and self.at is self.stations[-1]):
+            self.doors, self.doors_at = "closing", now
+        if self.doors == "closing" and now - self.doors_at >= TRAIN_CHIME:
+            self.doors = "shut"
+            if self.at is not None:
+                self.at["left"] = True
+            if self.notch <= 0:
+                self.say(TRAIN_SAYS["right"], now)
+        # The handle, the protection and the doors' interlock.
+        v = self.v
+        shut = self.doors == "shut"
+        power = brake = 0.0
+        if self.notch > 0 and shut and not self.trip and not self.over:
+            power = (TRAIN_ACC * self.notch / TRAIN_POWER
+                     * min(1.0, TRAIN_BASE / max(v, 0.1)))
+        if self.notch < 0:
+            brake = (TRAIN_EB if self.notch < -TRAIN_BRAKES
+                     else TRAIN_BRAKE * -self.notch)
+        if self.trip:
+            brake = TRAIN_EB
+        if self.over:
+            brake = max(brake, TRAIN_BRAKE * TRAIN_BRAKES)
+        if not shut:
+            brake = max(brake, TRAIN_BRAKE * 3)
+        drag = 0.012 + 0.0003 * v * v
+        nv = max(0.0, v + (power - (drag + brake if v > 0.0 else brake)) * dt)
+        if v == 0.0 and power <= brake:
+            nv = 0.0
+        s0 = self.s
+        self.s += (v + nv) * 0.5 * dt
+        self.v = nv
+        if nv > TRAIN_LINE + 1.0 and not self.over:
+            self.over = True
+            self.say(TRAIN_SAYS["over"], now)
+        elif self.over and nv < TRAIN_LINE - 3.0:
+            self.over = False
+        if self.at is not None and abs(self.s - self.at["mark"]) > 12.0:
+            self.at = None
+        # Signals passed, and at danger.
+        for j, sg in enumerate(self.sigs):
+            if s0 < sg["s"] <= self.s and self.red(j):
+                self.trip = True
+                self.notch = -TRAIN_BRAKES - 1
+                self.fine += TRAIN_SPAD_FINE
+                self.say(TRAIN_SAYS["spad"] % TRAIN_SPAD_FINE, now)
+        nxt = self.next_signal()
+        if nxt is not None and nxt[1] < TRAIN_SEE and self.red(nxt[0]):
+            st = self.sigs[nxt[0]]["st"]
+            if (self.lead is not None and st.get("held") and st["name"] not in self.warned
+                    and self.lead[1] > self.sigs[nxt[0]]["s"]):
+                self.warned.add(st["name"])
+                self.say(TRAIN_SAYS["red"] % st["name"], now)
+        # Stations run through, by the card or not.
+        for st in self.stations:
+            if st["done"] is not None or (st["arr"] is None and st["pass"] is None):
+                continue
+            if not st["stop"] and s0 < st["mark"] <= self.s:
+                st["done"] = "pass"
+                late = now - st["pass"]
+                bonus = 2 if abs(late) <= 3.0 else 0
+                self._paid(st, "through %s" % self._late(late), bonus, now)
+            elif st["stop"] and self.s > st["s"] + EL_START:
+                st["done"], st["left"] = "missed", True
+                self.fine += TRAIN_RUN_FINE
+                self.result = "%s  ran through" % st["name"]
+                self.result_at = now
+                if not self.trip:
+                    self.say(TRAIN_SAYS["ran"] % (st["name"], TRAIN_RUN_FINE), now)
+        # Stopping.
+        if v > 0.0 and nv == 0.0:
+            if self.trip:
+                self.trip = False
+            st = self.next_stop()
+            if st is not None and st["stop"]:
+                err = self.s - st["mark"]
+                if -TRAIN_SHORT <= err <= TRAIN_OVER:
+                    self._arrive(st, err, brake, now)
+                elif err > TRAIN_OVER:
+                    st["done"], st["left"] = "missed", True
+                    self.fine += TRAIN_RUN_FINE
+                    self.result = "%s  overran" % st["name"]
+                    self.result_at = now
+                    self.say(TRAIN_SAYS["overran"] % (err, TRAIN_RUN_FINE), now)
+                elif (self.danger() or 1e9) < 15.0:
+                    self.say(TRAIN_SAYS["held"], now)
+                elif err > -60.0:
+                    self.say(TRAIN_SAYS["short"] % -err, now)
+        # The end of the line.
+        if self.end:
+            buf = self.stations[-1]["mark"] + 8.0
+            if self.s > buf:
+                if self.v > 2.0:
+                    self.fine += TRAIN_BUFFER_FINE
+                    self.say(TRAIN_SAYS["buffers"] % TRAIN_BUFFER_FINE, now)
+                self.s, self.v = buf, 0.0
+        if self.at is None or self.at["left"]:
+            # Never the last stop behind you: the train ahead's leg starts there.
+            while (len(self.stations) > 2 and self.stations[1]["stop"]
+                   and self.stations[1]["done"] is not None
+                   and self.stations[0]["done"] is not None
+                   and self.stations[1]["s"] < self.s - EL_START):
+                self.stations.pop(0)
+            self._extend()
+
+    def _late(self, late):
+        if abs(late) <= 3.0:
+            return "on time"
+        return "%d s %s" % (abs(late), "early" if late < 0 else "late")
+
+    def _paid(self, st, line, bonus, now):
+        self.pay += bonus
+        self.earned += bonus
+        self.result = "%s  %s%s" % (st["name"], line,
+                                    "  +$%d" % bonus if bonus else "")
+        self.result_at = now
+
+    def _arrive(self, st, err, brake, now):
+        """Stopped at the mark, near enough: what it was worth, and the doors."""
+        pay, bits = TRAIN_PAY, []
+        a = abs(err)
+        if a <= 0.5:
+            pay += 6
+            bits.append("on the mark")
+        else:
+            pay += 4 if a <= 1.5 else 2 if a <= 3.0 else 0
+            bits.append("%.1f m %s" % (a, "short" if err < 0 else "over"))
+        late = now - st["arr"]
+        pay += 6 if abs(late) <= 3.0 else 3 if -10.0 <= late <= 10.0 else 0
+        bits.append(self._late(late))
+        if brake > TRAIN_BRAKE * 4 + 1e-9:
+            bits.append("a jolt")
+            self.say(TRAIN_SAYS["jolt"], now)
+        else:
+            pay += 3
+            bits.append("smooth")
+        st["done"] = "stopped"
+        self.made += 1
+        self.at = st
+        self.doors, self.doors_at = "open", now
+        self.close_at = max(now + TRAIN_DOORS, st["dep"])
+        self._paid(st, ", ".join(bits), pay, now)
+        if self.end and st is self.stations[-1]:
+            self.say(TRAIN_SAYS["end"], now)
+
+    def status(self):
+        st = self.next_stop()
+        if st is None:
+            return "end of the line"
+        return "%s %s, %d m" % ("stop at" if st["stop"] else "through", st["name"],
+                                max(0, int(st["mark"] - self.s)))
+
+
+def draw_train_world(ch, co, v, tr, now):
+    """What is out there for the driver alone: your own rails and sleepers,
+    the signals with their lamps, the platforms with their edges and the
+    people waiting, the mark on each, and the buffers at the end."""
+    walls = v.walls
+    drop = v.eye - (EL_H + 0.25)
+    cam = tr.s - 0.5
+    # The rails, solved per row: each row of the screen below the horizon is
+    # one distance on the deck.
+    last = None
+    for y in range(v.horizon + 1, v.height):
+        dist = drop * v.fy / (y - v.horizon)
+        if dist > 200.0:
+            continue
+        lx = int(round(v.cx - 0.72 * v.fx / dist))
+        rx = int(round(v.cx + 0.72 * v.fx / dist))
+        put_cell(ch, co, v, walls, lx, y, dist, "/", CURB)
+        put_cell(ch, co, v, walls, rx, y, dist, "\\", CURB)
+    # The sleepers, near enough to be told apart.
+    s = math.floor(cam / 1.2) * 1.2 + 1.2
+    while s < cam + 30.0:
+        dist = s - cam
+        if dist > 0.7:
+            y = int(round(v.horizon + drop * v.fy / dist))
+            if y != last and y < v.height:
+                last = y
+                lx = int(round(v.cx - 0.72 * v.fx / dist))
+                rx = int(round(v.cx + 0.72 * v.fx / dist))
+                for x in range(lx + 1, rx):
+                    put_cell(ch, co, v, walls, x, y, dist, "=", BARK)
+        s += 1.2
+    side = tr.tx - tr.d * 1.45          # our platform's edge, and the signals
+    near = [st for st in tr.stations if -EL_PLAT - 30.0 < st["s"] - tr.s < TRAIN_SEE]
+    # The signals, first: everything else out here is nearer than they are.
+    for j, sg in enumerate(tr.sigs):
+        ahead = sg["s"] - tr.s
+        if not 0.3 < ahead < TRAIN_SEE:
+            continue
+        z = tr.d * sg["s"]
+        y = EL_H + 0.6
+        while y < EL_H + 3.0:
+            put_point(ch, co, v, walls, side, y, z, "|", CONCRETE)
+            y += 0.5
+        pr = v.project(side, EL_H + 3.3, z)
+        if pr is None:
+            continue
+        sx, sy = int(round(pr[0])), int(round(pr[1]))
+        asp = tr.aspect(j)
+        attr = ROU_RED if asp == "red" else GOLD if asp == "yellow" else ROU_GREEN
+        if pr[2] < 80.0:
+            put_cell(ch, co, v, walls, sx - 1, sy, pr[2], "(", CURB)
+            put_cell(ch, co, v, walls, sx + 1, sy, pr[2], ")", CURB)
+        put_cell(ch, co, v, walls, sx, sy, pr[2], "@" if pr[2] < 80.0 else "o", attr)
+    # The platforms, solid - from up here the street showed through them -
+    # solved per row as the rails are, with the yellow line along the edge.
+    pdrop = v.eye - (EL_H + 1.0)
+    back = max(2.5, tr.xm - tr.x0 - 1.5)
+    prev = None
+    for y in range(v.horizon + 1, v.height):
+        dist = pdrop * v.fy / (y - v.horizon)
+        u = cam + dist
+        if not any(abs(u - st["s"]) <= EL_PLAT for st in near):
+            prev = None
+            continue
+        ex = int(round(v.cx - 1.45 * v.fx / dist))
+        bx = int(round(v.cx - back * v.fx / dist))
+        for x in range(max(0, bx), min(v.width, ex)):
+            put_cell(ch, co, v, walls, x, y, dist,
+                     "." if _mix(x, y, 1817) % 9 == 0 else " ", CONCRETE)
+        for x in range(ex, (prev if prev is not None else ex) + 1):
+            put_cell(ch, co, v, walls, x, y, dist, "_", GOLD)
+        prev = ex
+    # The people waiting, and the mark.
+    for st in near:
+        boarding = tr.at is st and tr.doors != "shut"
+        for n in range(9):
+            h = _mix(st["seed"], n, 1815)
+            if h % 3 == 0:
+                continue
+            if boarding and now - tr.doors_at > 1.0 + n * 0.7:
+                continue                    # on board
+            u = st["s"] - EL_PLAT + 3.0 + n * 4.0 + (h % 7) * 0.3
+            px = side - tr.d * (1.0 + (h % 5) * 0.4)
+            put_point(ch, co, v, walls, px, EL_H + 2.7, tr.d * u, "o", CURB)
+            put_point(ch, co, v, walls, px, EL_H + 2.0, tr.d * u, "|", CONCRETE)
+            put_point(ch, co, v, walls, px, EL_H + 1.4, tr.d * u, "^", CONCRETE)
+        if st["stop"]:
+            put_point(ch, co, v, walls, tr.tx - tr.d * 1.2, EL_H + 1.3,
+                      tr.d * st["mark"], "|", CONCRETE)
+            pr = v.project(tr.tx - tr.d * 1.2, EL_H + 1.9, tr.d * st["mark"])
+            if pr is not None:
+                sx, sy = int(round(pr[0])), int(round(pr[1]))
+                if pr[2] < 70.0:
+                    put_cell(ch, co, v, walls, sx - 1, sy, pr[2], "[", GOLD)
+                    put_cell(ch, co, v, walls, sx + 1, sy, pr[2], "]", GOLD)
+                put_cell(ch, co, v, walls, sx, sy, pr[2], str(EL_CARS), FLASH)
+    # And the buffers.
+    if tr.end:
+        bz = tr.d * (tr.stations[-1]["mark"] + 8.0)
+        for lat in (-0.6, 0.0, 0.6):
+            put_point(ch, co, v, walls, tr.tx + lat, EL_H + 0.9, bz, "#", ROU_RED)
+        put_point(ch, co, v, walls, tr.tx, EL_H + 1.6, bz, "=", ROU_RED)
+
+
+def draw_motorman(ch, co, tr, now, k=1):
+    """From the driver's seat: the windscreen's frame, and the desk - the
+    speed, the handle's notches, the signal ahead repeated, the doors, the
+    clock, the next stop and how far to its mark, how the last one went, and
+    the card of times on the right. What control and the passengers say
+    along the bottom of it."""
+    height, width = len(ch), len(ch[0])
+    kmh = int(round(tr.v * TRAIN_KMH))
+    words = tr.said if now - tr.said_at < 6.0 else ""
+    if now - tr.horn_at < 0.7:
+        words = "PAAAARP"
+    nxt = tr.next_signal()
+    asp = tr.aspect(nxt[0]) if nxt is not None else "red"
+    sig_attr = ROU_RED if asp == "red" else GOLD if asp == "yellow" else ROU_GREEN
+    st = tr.next_stop()
+    if st is None:
+        stop_line = "END OF THE LINE"
+    else:
+        stop_line = "%s %s  %d m" % ("STOP" if st["stop"] else "PASS", st["name"],
+                                     max(0, int(round(st["mark"] - tr.s))))
+    notch = TRAIN_NOTCH_NAMES[tr.notch + TRAIN_BRAKES + 1]
+    if width < 50 or height < 16:
+        _text(ch, co, 1, 0, (" %d km/h  %s  %s" % (kmh, notch, stop_line))[:width], GOLD)
+        _text(ch, co, height - 1, 0, (" signal %s  doors %s  %s" % (
+            asp, tr.doors, words))[:width], sig_attr)
+        return
+    dash_h = max(9, min(height // 3, 9 + 5 * (k - 1)))
+    dash = height - dash_h
+    for x in range(width):                          # the roof
+        ch[1][x], co[1][x] = "_", CURB
+    for y in range(2, dash):                        # and the frame
+        for x in (0, 1, width - 2, width - 1):
+            ch[y][x], co[y][x] = ("|" if x in (1, width - 2) else " "), CURB
+    for y in range(dash, height):
+        for x in range(width):
+            ch[y][x], co[y][x] = ("_" if y == dash else " "), BARK
+    # The card, on the right, if there is room for it beside the rest.
+    wide = width >= 110
+    card_w = 31 if wide else 21
+    cx = width - card_w - 2
+    rows = [st_ for st_ in tr.stations if st_["done"] is None or st_ is tr.at]
+    rows = [st_ for st_ in rows if st_["arr"] is not None or st_["pass"] is not None]
+    _text(ch, co, dash + 1, cx, "THE CARD    arrive    depart" if wide
+          else "THE CARD    due", GOLD_DIM)
+    for r, st_ in enumerate(rows[:dash_h - 3]):
+        mark = ">" if st_ is st or (st_ is tr.at and st is None) else " "
+        if not st_["stop"]:
+            times = ("pass %s" if wide else "%s p") % tr.wall(st_["pass"])
+        elif wide:
+            times = "%s  %s" % ("        " if st_["done"] == "board" else
+                                tr.wall(st_["arr"]), tr.wall(st_["dep"]))
+        else:
+            times = tr.wall(st_["dep"] if st_ is tr.at else st_["arr"])
+        line = "%s%-*s %s" % (mark, 10 if wide else 9, st_["name"][:10], times)
+        _text(ch, co, dash + 2 + r, cx, line[:card_w],
+              FLASH if mark == ">" else HUD if st_["stop"] else CONCRETE)
+    room = max(10, cx - 4)
+    x0 = 3
+    y = dash + 1
+    if k >= 2:
+        sx = sy = k - 1
+        right = _blocks(ch, co, y, x0, "%d" % kmh, GOLD, sx, sy)
+        _text(ch, co, y + 5 * sy, x0, "KM/H  limit %d" % int(TRAIN_LINE * TRAIN_KMH),
+              GOLD_DIM)
+        x0 = max(right, x0 + blocks_width("888", sx)) + 4
+        room = max(10, cx - x0 - 2)
+    else:
+        _text(ch, co, y, x0, "%3d km/h" % kmh, GOLD)
+        _text(ch, co, y, x0 + 10, "limit %d" % int(TRAIN_LINE * TRAIN_KMH), GOLD_DIM)
+        y += 1
+    # The handle: every notch, the one it is in lit - or only that one, on
+    # a window without the room.
+    x = x0
+    names = TRAIN_NOTCH_NAMES
+    if sum(len(n_) + 2 for n_ in names) > room:
+        _text(ch, co, y, x0, "HANDLE", HUD)
+        names, x = [notch], x0 + 7
+    for name in names:
+        here = name == notch
+        attr = (FLASH if here else ROU_RED if name.startswith(("B", "E"))
+                else ROU_GREEN if name.startswith("P") else HUD)
+        _text(ch, co, y, x, ("[%s]" if here else " %s ") % name, attr)
+        x += len(name) + 2
+    y += 1
+    sig = "SIGNAL  (@)  %s" % ("%d m" % nxt[1] if nxt is not None else "")
+    _text(ch, co, y, x0, sig[:room], HUD)
+    if room > 9:
+        _text(ch, co, y, x0 + 9, "@", sig_attr)
+    door = {"open": "DOORS OPEN", "closing": "DOORS CLOSING",
+            "shut": "DOORS SHUT"}[tr.doors]
+    _text(ch, co, y, x0 + 24, door[:max(0, room - 24)],
+          ROU_GREEN if tr.doors == "shut" else GOLD)
+    y += 1
+    red = tr.danger()
+    _text(ch, co, y, x0, ("RED IN %d m" % red if red is not None
+                          else "LINE CLEAR")[:room], ROU_RED if red is not None
+          else ROU_GREEN)
+    y += 1
+    clock = tr.wall(now)
+    _text(ch, co, y, x0, (stop_line + "   " + clock)[:room], HUD)
+    y += 1
+    if st is not None:
+        due = st["arr"] if st["stop"] else st["pass"]
+        if tr.at is not None and tr.doors != "shut":
+            due_line = "depart %s, in %d s" % (tr.wall(tr.at["dep"]),
+                                              max(0, int(tr.at["dep"] - now)))
+        else:
+            left = due - now
+            due_line = "due %s, %s" % (tr.wall(due), "in %d s" % left if left >= 0
+                                        else "%d s late" % -left)
+        _text(ch, co, y, x0, due_line[:room], GOLD_DIM)
+        y += 1
+    if tr.result and now - tr.result_at < 12.0:
+        _text(ch, co, y, x0, tr.result[:room], ROU_GREEN)
+        y += 1
+    if words and y < height - 1:
+        _text(ch, co, y, x0, words[:room], HUD)
+    keys = TRAIN_KEYS if width >= 110 else TRAIN_KEYS_SHORT
+    _text(ch, co, height - 1, max(0, (width - len(keys)) // 2), keys[:width], CONCRETE)
 
 
 _tower_blocks = {}
@@ -27219,6 +28032,9 @@ def venue_at(x, z):
     at = tackle_near(x, z)
     if at is not None:
         return "tackle", at
+    st = el_stairs_near(x, z)
+    if st is not None:
+        return "elstairs", {"st": st, "seed": _mix(int(st[0]), st[2] * 2 + st[3], 1807)}
     bar = beach_bar_near(x, z)
     if bar is not None:
         return "beachbar", {"seed": bar[3], "u": int(bar[2])}
@@ -29094,6 +29910,7 @@ CHEAT_PLACES = [
     ("t", "the turtles", "lair"),
     ("f", "fly the plane", "pilot"),
     ("i", "fly the rocket", "rocket"),
+    ("]", "drive the el", "eldrive"),
     ("d", "vending machine", "vending"),
     ("m", "corner store", "store"),
     ("*", "dragon dance", "festival"),
@@ -29957,6 +30774,8 @@ def _el_spot(x, z):
             continue
         for back in range(0, 60):
             pz = z + back * CELL
+            if el_stairs_near(px, pz, 6.0) is not None:
+                continue                # not into the train: the panel has ]
             if can_stand(px, pz) and el_runs(px, pz) and road_at(
                     int(px / CELL + BIG) - BIG, int(pz / CELL + BIG) - BIG):
                 return px, pz, 0.0
@@ -30134,6 +30953,8 @@ def find_place(x, z, kind):
         return _hwy_spot(x, z)
     if kind == "el":
         return _el_spot(x, z)
+    if kind == "eldrive":
+        return _el_stairs_spot(x, z)
     if kind == "tower":
         return _tower_spot(x, z)
     if kind == "bar":
@@ -30258,7 +31079,7 @@ def find_place(x, z, kind):
 
 
 # The third column.
-CHEAT_MORE = ["pilot", "rocket", "center", "bar",
+CHEAT_MORE = ["pilot", "rocket", "eldrive", "center", "bar",
               "lowroof", "washing", "bowling", "lair", "vending", "store", "festival"]
 
 
@@ -41379,6 +42200,7 @@ def main(stdscr):
     booth = None                # in the confession booth: {"t0", "text", "said"}
     taxi = None                 # hailed, choosing, or riding: {"phase", ...}
     cab = None                  # at the wheel of one yourself: a Cab
+    train = None                # in the cab of a train on the el: a Train
     metro = None                # on a platform or riding: {"phase", ...}
     flight = None               # at the gate or in the air: {"phase", ...}
     reading = False             # in the library's reading room
@@ -41395,7 +42217,8 @@ def main(stdscr):
                 or flight is not None or reading or poke is not None
                 or vendor is not None or ride is not None or cruise is not None
                 or boat is not None or fishing is not None or shop is not None
-                or trip is not None or sub is not None or rocket is not None)
+                or trip is not None or sub is not None or rocket is not None
+                or train is not None)
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -41571,10 +42394,15 @@ def main(stdscr):
                             booth = None
                             taxi = None
                             cab = None
+                            train = None
                             metro = None
                             flight = None
                             fishing = shop = trip = sub = rocket = None
                             _herring_out[0] = _pen_out[0] = _crewed[0] = None
+                            if kind == "eldrive":
+                                st_ = el_stairs_near(cam_x, cam_z, 6.0)
+                                if st_ is not None:
+                                    train = Train(*st_, now)
                             if kind == "rocket":
                                 site_ = launch_site(int(cam_z / CELL + BIG) - BIG)
                                 if site_ is not None:
@@ -42001,6 +42829,29 @@ def main(stdscr):
                             metro["waiting"] = True
                         else:
                             note, note_at = "the barrier wants $%d" % METRO_FARE, now
+            elif train is not None and key not in (ord("q"), CHEAT_KEY):
+                if key in (27, ord("x"), ord("X")):
+                    off_ = train.off() if train.v == 0.0 else None
+                    if train.v > 0.0:
+                        note, note_at = "stop first - s brakes", now
+                    elif off_ is None:
+                        note, note_at = "nowhere to get down here", now
+                    else:
+                        cam_x, cam_z, yaw = off_
+                        note, note_at = ("off duty: %d stop%s, $%d" % (
+                            train.made, "" if train.made == 1 else "s", train.earned)
+                            if train.made else "you hand the train back"), now
+                        train = None
+                elif key in (ord("z"), ord("Z")):
+                    _big_screens[0] = not _big_screens[0]
+                else:
+                    train.key({curses.KEY_UP: "power", ord("w"): "power",
+                               ord("W"): "power", curses.KEY_DOWN: "brake",
+                               ord("s"): "brake", ord("S"): "brake",
+                               ord("n"): "coast", ord("N"): "coast",
+                               ord("0"): "coast", ord(" "): "emergency",
+                               ord("h"): "horn", ord("H"): "horn",
+                               ord("r"): "ends", ord("R"): "ends"}.get(key, ""), now)
             elif cab is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (27, ord("x"), ord("X")):
                     if cab.cop is not None:
@@ -42673,6 +43524,15 @@ def main(stdscr):
             trip["snags"] = fishing.snags
             if fishing.snags:
                 trip.update(quip=CAP_SNAG[fishing.snags % len(CAP_SNAG)], quip_at=now)
+        if train is not None:
+            train.step(now - train.clock, now)
+            if train.pay:
+                wallet.give(train.pay)      # the line pays you, stop by stop
+                train.pay = 0
+            if train.fine:
+                wallet.take(min(train.fine, wallet.money))
+                train.fine = 0
+        _el_drive[0] = train
         if cab is not None:
             cab.step(now - cab.clock, now)
             if cab.pay:
@@ -42743,6 +43603,13 @@ def main(stdscr):
             fwd = side = spin = 0.0
             autopilot = False
             venue = None
+        if venue is not None and venue[0] == "elstairs":
+            train = Train(*venue[1]["st"], now)
+            _el_drive[0] = train
+            fwd = side = spin = 0.0
+            autopilot = False
+            venue = None
+            note, note_at = "up the stairs and into the cab - w to drive", now
         if venue is not None and venue[0] == "crew":
             rocket = Spacecraft(venue[1]["site"], now)
             _crewed[0] = venue[1]["site"]
@@ -43168,6 +44035,13 @@ def main(stdscr):
             else:
                 ch, co = render_ride(width, height, now, metro)
                 hud = METRO_HUD % "on the train"
+        elif street and train is not None:
+            v = View(train.tx, train.z - train.d * 0.5, 0.0 if train.d > 0 else math.pi,
+                     width, height, eye=EL_H + 2.3)
+            ch, co, wet = render_street(v, now)
+            draw_train_world(ch, co, v, train, now)
+            draw_motorman(ch, co, train, now, big_scale(width, height))
+            hud = TRAIN_HUD % (compass_word(v.yaw), train.status())
         elif street and cab is not None:
             v = View(cab.x, cab.z, cab.heading, width, height, eye=2.4 + cab.h)
             ch, co, wet = render_street(v, now)
@@ -43237,6 +44111,8 @@ def main(stdscr):
                 or rave_hint(v, now)
                 or ("  ~ something over the city ~" if night(now)["alien"]
                     else "")
+                or ("  ~ the el: walk up the stairs to drive a train ~"
+                    if el_stairs_near(cam_x, cam_z, 9.0) else "")
                 or ("  ~ a train overhead ~" if el_overhead(cam_x, cam_z, now)
                     else "")
                 or ("  ~ the hum of the highway ~" if hwy_near(cam_x, cam_z)
