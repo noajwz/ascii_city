@@ -15748,6 +15748,13 @@ LAUNCH_HEARD = 900.0   # how far off the countdown is on the top bar: the front 
                        # other hint in town for more than half of every five minutes
 
 
+def crew_hint(x, z):
+    """At the crew gate: what it is."""
+    if crew_gate_near(x, z, 9.0) is not None and _crewed[0] is None:
+        return "  ~ crew access: walk in to fly the rocket yourself ~"
+    return ""
+
+
 def launch_hint(x, z, now):
     """What the top bar says near a space centre: the countdown, then what the
     rocket is doing, the way the commentary at a launch goes; and between
@@ -16117,6 +16124,11 @@ def _draw_launch_pad(ch, co, v, walls, site, px, pz, t, now, wet, far):
     for z in (z0 + 0.3, z1 - 0.3):
         put_point(ch, co, v, walls, fx, 3.4, z, "*" if int(now * 1.5) % 2 else ".",
                   ROU_RED)
+    if (fx - v.x) ** 2 + (pz - v.z) ** 2 < 80.0 ** 2:
+        # The crew's gate in it: green over it while there is a seat.
+        for k, c in enumerate("CREW"):
+            put_point(ch, co, v, walls, fx - 0.1, 3.6, pz + 0.6 - k * 0.4, c,
+                      ROU_GREEN if _crewed[0] is None else CONCRETE)
 
 
 def draw_launch_site(ch, co, v, walls, site, now, wet):
@@ -16125,6 +16137,12 @@ def draw_launch_site(ch, co, v, walls, site, now, wet):
     px, pz = launch_pad_xz(site)
     d = math.hypot(px - v.x, pz - v.z)
     t = launch_t(site, now)
+    if _crewed[0] == site:
+        # Yours is the rocket now: the pad without its own, which would stand
+        # under you, or go up beside you.
+        if d < LAUNCH_NEAR:
+            _draw_launch_pad(ch, co, v, walls, site, px, pz, 200.0, now, wet, d > 700.0)
+        return
     flying = 0.0 <= t < LAUNCH_DOWN + 30.0
     if d > LAUNCH_NEAR and not flying:
         return
@@ -27058,6 +27076,9 @@ def venue_at(x, z):
     # Walked up to, like a door: the cruise ship's gangway, the fishing boat's
     # gangplank and her captain, a tackle shop's counter (they were p once).
     if COAST and x >= COAST_LAND * CELL:
+        site_ = crew_gate_near(x, z)
+        if site_ is not None and _crewed[0] is None:
+            return "crew", {"seed": site_[0], "site": site_}
         h = gangway_near(x, z)
         if h is not None:
             return "gangway", {"seed": h[0], "h": h}
@@ -28941,6 +28962,7 @@ CHEAT_PLACES = [
     ("k", "bowling", "bowling"),
     ("t", "the turtles", "lair"),
     ("f", "fly the plane", "pilot"),
+    ("i", "fly the rocket", "rocket"),
     ("d", "vending machine", "vending"),
     ("m", "corner store", "store"),
     ("*", "dragon dance", "festival"),
@@ -29954,6 +29976,8 @@ def find_place(x, z, kind):
         return _store_spot(x, z)
     if kind == "subpen":
         return _pen_spot(x, z)
+    if kind == "rocket":
+        return _crew_spot(x, z)
     if kind == "tackle":
         return _tackle_spot(x, z)
     if kind == "herring":
@@ -30103,7 +30127,7 @@ def find_place(x, z, kind):
 
 
 # The third column.
-CHEAT_MORE = ["pilot", "center", "bar",
+CHEAT_MORE = ["pilot", "rocket", "center", "bar",
               "lowroof", "washing", "bowling", "lair", "vending", "store", "festival"]
 
 
@@ -39423,6 +39447,1622 @@ def render_sub(sub, width, height, now):
     return ch, co, v
 
 
+# ===========================================================================
+# FLYING THE ROCKET
+# ===========================================================================
+# Asked for on 2026-11-16: "It's time to make the rocket fly-able. Take your
+# time it's literally rocket science ;) . Also I'd love it if I was able to
+# fly to the moon as an easter egg."
+#
+# Real orbital mechanics, on a small world - the way games about rockets do
+# it, so that getting to orbit is a few minutes of flying and not an hour: an
+# Earth 600 km in radius with the real pull at its surface, an atmosphere that
+# thins out by 70 km and drags and heats whatever goes through it fast, and a
+# Moon 12,000 km out that goes round it and pulls too. Three stages, each with
+# its own fuel, thrust and exhaust speed (Isp), so the rocket equation decides
+# what you can do with what is left. Everything is worked out in a plane: the
+# Earth's centre at the origin, the launch site straight up the y axis, east
+# along +x, the Moon going round the same way you do. In metres and seconds.
+# North (z) only exists for the views.
+RK_G0 = 9.81           # standard gravity, for Isp, and the pull at the Earth's surface
+RK_R = 600000.0        # the Earth's radius
+RK_MU = RK_G0 * RK_R * RK_R
+RK_ATM = 70000.0       # where the atmosphere ends: an orbit has to stay over this
+RK_RHO = 1.2           # air at the surface, kg a cubic metre
+RK_SCALE = 5600.0      # and it halves every four kilometres or so
+RK_HEAT = 1.0e-10      # how a ride through the air at speed heats the shield
+RK_COOL = 0.012        # and how fast it cools again
+RK_MOON_D = 12.0e6     # the Moon's distance
+RK_MOON_R = 200000.0   # its radius
+RK_MOON_MU = 1.63 * RK_MOON_R * RK_MOON_R
+RK_MOON_W = math.sqrt((RK_MU + RK_MOON_MU) / RK_MOON_D ** 3)   # radians a second
+RK_SOI = RK_MOON_D * (RK_MOON_MU / RK_MU) ** 0.4   # where the Moon's pull wins
+RK_MOON_AT = math.pi / 2 - 2.6   # where the Moon is when the clock starts
+RK_ORBIT = 80000.0     # the height mission control asks for
+RK_CAPSULE = 52.0      # how high you sit over the pad: the top of the rocket
+RK_TURN = 0.55         # radians a second the nose turns, held
+RK_TAP = 0.3           # what a tap is worth of that, in seconds
+RK_GRACE = 0.32        # a held key keeps turning this long: the keyboard's repeat delay
+RK_WARPS = [1, 2, 4, 10, 50, 100, 1000, 10000]
+RK_LANDS = 6.0         # metres a second: the most a touch-down can be, on the Moon
+RK_SPLASH = 14.0       # and into the sea under the chutes
+RK_CHUTE = 500.0       # the chutes' drag, square metres
+RK_CHUTE_OPEN = (3000.0, 320.0)   # they open under this height and this speed
+RK_STREET = 900.0      # up to here the window is the city itself
+# Each stage: what it is called, dry and fuel mass (kg), thrust (N), Isp (s),
+# and its drag area (Cd x A, m2) while it is the bottom of what is left.
+RK_STAGES = [
+    ("BOOSTER", 8000.0, 52000.0, 1300000.0, 290.0, 3.0),
+    ("UPPER STAGE", 2000.0, 14000.0, 220000.0, 340.0, 2.0),
+    ("LANDER", 2200.0, 1800.0, 30000.0, 320.0, 1.6),
+]
+RK_NAME = "ASCII-1"
+RK_PAY = (500, 5000)   # home from orbit, and home from the Moon
+RK_HUD = (" %s  -  space stage  w s pitch  W S throttle  c cut  h hold  > < warp"
+          "  m map  v view  p autopilot  -  x abort ")
+RK_HOLDS = [None, "pro", "retro"]
+_crewed = [None]       # the space centre whose rocket you are in
+
+
+def crew_gate(site):
+    """The crew's way in, at the fence across the end of the causeway: (x, z)."""
+    return site[1] * CELL - 2.6, launch_pad_xz(site)[1]
+
+
+def crew_gate_near(x, z, reach=CASINO_REACH):
+    """The space centre whose crew gate you are at, or None."""
+    if not COAST or x < COAST_LAND * CELL:
+        return None
+    site = launch_site(int(z / CELL + BIG) - BIG)
+    if site is None:
+        return None
+    gx, gz = crew_gate(site)
+    return site if (gx - x) ** 2 + (gz - z) ** 2 < reach ** 2 else None
+
+
+def _crew_spot(x, z):
+    """On the causeway a few steps short of the nearest crew gate, facing it."""
+    sp = _launch_spot(x, z)
+    if sp is None:
+        return None
+    site = launch_site(int(sp[1] / CELL + BIG) - BIG)
+    if site is None:
+        return None
+    gx, gz = crew_gate(site)
+    return gx - CASINO_REACH - 2.0, gz, math.pi * 0.5
+
+
+def rk_moon(t):
+    """The Moon at mission time t: (x, y, vx, vy). It goes round the way
+    you do, clockwise, on a circle."""
+    a = RK_MOON_AT - RK_MOON_W * t
+    return (RK_MOON_D * math.cos(a), RK_MOON_D * math.sin(a),
+            RK_MOON_D * RK_MOON_W * math.sin(a), -RK_MOON_D * RK_MOON_W * math.cos(a))
+
+
+def rk_gravity(x, y, t):
+    """The pull on you: the Earth's, the Moon's - and less the Earth's own fall
+    towards the Moon, since the Earth is where everything is measured from."""
+    r2 = x * x + y * y
+    r = math.sqrt(r2)
+    k = -RK_MU / (r2 * r)
+    mx, my, _, _ = rk_moon(t)
+    dx, dy = x - mx, y - my
+    d2 = dx * dx + dy * dy
+    d = math.sqrt(d2)
+    j = -RK_MOON_MU / (d2 * d)
+    i = RK_MOON_MU / RK_MOON_D ** 3
+    return k * x + j * dx - i * mx, k * y + j * dy - i * my
+
+
+def rk_elements(rx, ry, vx, vy, mu, radius):
+    """The orbit through this point at this speed, round a body of this pull
+    and size: (apoapsis and periapsis over its surface, seconds to each, the
+    eccentricity). Apoapsis is None when it does not come back."""
+    r = math.hypot(rx, ry)
+    v2 = vx * vx + vy * vy
+    eps = v2 / 2.0 - mu / r
+    h = rx * vy - ry * vx
+    e = math.sqrt(max(0.0, 1.0 + 2.0 * eps * h * h / (mu * mu)))
+    if eps >= 0.0 or e >= 1.0:
+        p = h * h / mu
+        return None, p / (1.0 + e) - radius, None, None, e
+    a = -mu / (2.0 * eps)
+    apo, peri = a * (1.0 + e) - radius, a * (1.0 - e) - radius
+    n = math.sqrt(mu / a ** 3)
+    if e < 1e-6:
+        return apo, peri, 0.0, 0.0, e
+    cosv = max(-1.0, min(1.0, (h * h / (mu * r) - 1.0) / e))
+    nu = math.acos(cosv)
+    if rx * vx + ry * vy < 0.0:
+        nu = math.tau - nu                  # on the way down
+    E = 2.0 * math.atan(math.sqrt((1.0 - e) / (1.0 + e)) * math.tan(nu / 2.0))
+    M = (E - e * math.sin(E)) % math.tau
+    return apo, peri, ((math.pi - M) % math.tau) / n, ((math.tau - M) % math.tau) / n, e
+
+
+class Spacecraft:
+    """The rocket, with you in the capsule on top. Its state is the physics:
+    where it is and how fast, which stage is firing and what fuel is left in
+    each, the throttle and which way the nose points; and the flight's: on the
+    pad, flying, down on the Moon, or over."""
+
+    def __init__(self, site, now):
+        self.site = site
+        self.pad = launch_pad_xz(site)
+        self.t = 0.0                            # mission time
+        self.clock = now
+        self.x, self.y, self.vx, self.vy = 0.0, RK_R, 0.0, 0.0
+        self.ang = math.pi / 2                  # the nose, in the plane: up, on the pad
+        self.spin, self.spin_until = 0.0, -1e9
+        self.hold = None                        # "pro", "retro", "up", or held by hand
+        self.throttle = 0.0
+        self.stage = 0
+        self.fuel = [s[2] for s in RK_STAGES]
+        self.lit = False
+        self.state = "pad"                      # "pad", "flight", "moon", "over"
+        self.warp = 0
+        self.view = "window"
+        self.heat = 0.0
+        self.chutes = 0                         # 0 stowed, 1 armed, 2 open
+        self.q = 0.0                            # the air pushing on it, pascals
+        self.said, self.said_at = "", -1e9
+        self.calls = set()                      # what has been said once already
+        self.result = None                      # (headline, words, when, pay)
+        self.on_moon = None                     # where she stands on it
+        self.landed_moon = False
+        self.reached_orbit = False
+        self.maxalt = 0.0
+        self.pred, self.pred_at = None, -1e9
+        self.sep = []                           # stages let go: (stage, t, x, y, vx, vy)
+        self.abort_at = -1e9
+        self.auto = False
+        self.ap = {}                            # the guidance computer's own notes
+        self.burned = 0.0                       # metres a second the engines have given
+        self.aim = math.pi / 2                  # where it wants the nose
+        self.zoom = 1.0                         # the map's
+        self.trail = []                         # where it has been, for the map
+
+    # --- what it is ---------------------------------------------------------------
+    def mass(self):
+        return sum(s[1] + f for s, f in zip(RK_STAGES[self.stage:], self.fuel[self.stage:]))
+
+    def thrust(self):
+        """The push this instant, in newtons."""
+        if not self.lit or self.fuel[self.stage] <= 0.0 or self.state == "over":
+            return 0.0
+        return RK_STAGES[self.stage][3] * self.throttle
+
+    def near_moon(self):
+        mx, my, _, _ = rk_moon(self.t)
+        return math.hypot(self.x - mx, self.y - my) < RK_SOI
+
+    def frame(self):
+        """The body you are about and where it is: (name, its x, y, vx, vy,
+        its pull, its radius)."""
+        if self.near_moon():
+            mx, my, mvx, mvy = rk_moon(self.t)
+            return "moon", mx, my, mvx, mvy, RK_MOON_MU, RK_MOON_R
+        return "earth", 0.0, 0.0, 0.0, 0.0, RK_MU, RK_R
+
+    def rel(self):
+        """Where you are and how fast, against the body you are about:
+        (name, rx, ry, vx, vy, altitude)."""
+        name, bx, by, bvx, bvy, mu, rad = self.frame()
+        rx, ry = self.x - bx, self.y - by
+        return name, rx, ry, self.vx - bvx, self.vy - bvy, math.hypot(rx, ry) - rad
+
+    def orbit(self):
+        """(body, apoapsis, periapsis, to apoapsis, to periapsis, e) about
+        whichever body you are about."""
+        name, rx, ry, vx, vy, _ = self.rel()
+        mu, rad = (RK_MOON_MU, RK_MOON_R) if name == "moon" else (RK_MU, RK_R)
+        return (name,) + rk_elements(rx, ry, vx, vy, mu, rad)
+
+    def pitch(self):
+        """The nose against straight up, in degrees: 0 up, 90 level, east
+        positive - what the dash shows and the guidance asks for."""
+        name, rx, ry, _, _, _ = self.rel()
+        up = math.atan2(ry, rx)
+        return math.degrees(-((self.ang - up + math.pi) % math.tau - math.pi))
+
+    def speed(self):
+        _, _, _, vx, vy, _ = self.rel()
+        return math.hypot(vx, vy)
+
+    # --- the controls ---------------------------------------------------------
+    def say(self, words, now):
+        self.said, self.said_at = words, now
+
+    def call(self, key, words, now):
+        """Something mission control says once a flight."""
+        if key not in self.calls:
+            self.calls.add(key)
+            self.say(words, now)
+
+    def key(self, what, now, hand=True):
+        """The plane's keys, as near as a rocket has them: w tips the nose
+        over to the east and s brings it back up (a tap a nudge, held a steady
+        turn), W and S the throttle a tenth at a time, c cuts it, h the holds
+        in turn, space the stages, > and < time, m the map, v the view from
+        outside, p the guidance computer."""
+        if hand and what not in ("map", "view", "warp+", "warp-", "auto", "zoom+",
+                                 "zoom-"):
+            self.auto = False                   # any hand on it takes it back
+        if self.state == "over":
+            return
+        if what == "stage":
+            self.stage_next(now)
+        elif what in ("more", "less"):
+            self.throttle = max(0.0, min(1.0, round(self.throttle + (
+                0.1 if what == "more" else -0.1), 2)))
+        elif what == "full":
+            self.throttle = 1.0
+        elif what == "cut":
+            self.throttle = 0.0
+        elif what in ("over", "back"):
+            self.hold = None
+            fresh = now > self.spin_until
+            self.spin = -1.0 if what == "over" else 1.0
+            self.spin_until = now + (RK_TAP if fresh else RK_GRACE)
+        elif what == "hold":
+            self.hold = RK_HOLDS[(RK_HOLDS.index(self.hold) + 1) % len(RK_HOLDS)] \
+                if self.hold in RK_HOLDS else "pro"
+            self.say({None: "hold off", "pro": "holding prograde",
+                      "retro": "holding retrograde"}[self.hold], now)
+        elif what in ("pro", "retro", "up", "aim"):
+            self.hold = what                    # the guidance computer's
+        elif what == "warp+":
+            if self.warp + 1 < len(RK_WARPS) and RK_WARPS[self.warp + 1] <= self.max_warp():
+                self.warp += 1
+            elif hand:
+                self.say("no faster here", now)
+        elif what == "warp-":
+            self.warp = max(0, self.warp - 1)
+        elif what == "map":
+            self.view = "window" if self.view == "map" else "map"
+        elif what == "view":
+            self.view = "outside" if self.view == "window" else "window"
+        elif what in ("zoom+", "zoom-"):
+            self.zoom = max(0.25, min(8.0, self.zoom * (0.7 if what == "zoom+" else 1.4)))
+        elif what == "auto":
+            self.auto = not self.auto
+            self.ap = {}
+            self.say("the guidance computer has her" if self.auto else "your rocket",
+                     now)
+
+    def max_warp(self):
+        """How fast time may go: not much while the engine burns or in the
+        air, and the whole range out in space."""
+        name, _, _, _, _, alt = self.rel()
+        if self.thrust() > 0.0 or self.state == "pad":
+            return 4
+        if name == "earth" and alt < RK_ATM:
+            return 10                           # gliding down, or under the chutes
+        if alt < 20000.0:
+            return 10
+        return RK_WARPS[-1]
+
+    def stage_next(self, now):
+        """Space: light it on the pad; in the air let go of the stage that is
+        burning and light the next; the last of them arms the chutes; on the
+        Moon, lift off."""
+        if self.state == "pad":
+            self.lit, self.throttle = True, 1.0
+            self.say("IGNITION. And liftoff!", now)
+            return
+        if self.state == "moon":
+            self.lit, self.throttle = True, 1.0
+            self.hold = "up"
+            self.say("Liftoff from the Moon.", now)
+            return
+        if self.stage < len(RK_STAGES) - 1:
+            self.sep.append((self.stage, self.t, self.x, self.y, self.vx, self.vy))
+            self.stage += 1
+            self.lit = True
+            self.say("STAGING - %s away, %s lit" % (
+                RK_STAGES[self.stage - 1][0].lower(), RK_STAGES[self.stage][0].lower()),
+                now)
+            return
+        name, _, _, _, _, alt = self.rel()
+        if name == "earth" and alt < RK_ATM * 1.5:
+            self.chutes = 1 if self.chutes == 0 else self.chutes
+            self.say("chutes armed: they open under 3 km", now)
+        else:
+            self.say("nothing left to let go of", now)
+
+    # --- the physics ------------------------------------------------------------
+    def step(self, dt, now):
+        dt = max(0.0, min(0.1, dt))
+        self.clock = now
+        if self.state == "over":
+            return
+        if self.auto:
+            rk_autopilot(self, now)
+        self._steer(dt, now)
+        if self.state == "pad":
+            if self.lit and self.thrust() > self.mass() * RK_G0:
+                self.state = "flight"
+            else:
+                return
+        if self.state == "moon":
+            self._stand(now)
+            if self.lit and self.thrust() > self.mass() * 1.63:
+                self.state = "flight"
+                self.on_moon = None
+            else:
+                self.t += dt * RK_WARPS[self.warp]
+                self._stand(now)
+                return
+        if RK_WARPS[self.warp] > self.max_warp():
+            self.warp = max(0, min(self.warp, RK_WARPS.index(self.max_warp())))
+        sim = dt * RK_WARPS[self.warp]
+        n = 0
+        while sim > 1e-9 and self.state == "flight" and n < 600:
+            h = min(sim, self._h())
+            self._integrate(h, now)
+            sim -= h
+            n += 1
+        name, _, _, _, _, alt = self.rel()
+        if name == "earth":
+            self.maxalt = max(self.maxalt, alt)
+            if not self.reached_orbit and alt > RK_ATM:
+                _, apo, peri, _, _, _ = self.orbit()
+                if peri is not None and peri > RK_ATM:
+                    self.reached_orbit = True
+        if not self.trail or abs(self.t - self.trail[-1][0]) > 20.0:
+            self.trail.append((self.t, self.x, self.y))
+            del self.trail[:-400]
+
+    def _h(self):
+        """How long a step can be: short while it burns or is in the air,
+        longer the further from anything it is."""
+        name, rx, ry, vx, vy, alt = self.rel()
+        if self.thrust() > 0.0 or (name == "earth" and alt < RK_ATM) or alt < 3000.0:
+            return 0.04
+        return max(0.04, min(60.0, 0.008 * math.hypot(rx, ry) / max(50.0,
+                                                                    math.hypot(vx, vy))))
+
+    def _steer(self, dt, now):
+        """The nose turns towards what is wanted at RK_TURN: a key held, or a
+        hold - prograde, retrograde, straight up."""
+        if self.state == "over":
+            return
+        if self.hold is not None:
+            name, rx, ry, vx, vy, _ = self.rel()
+            if self.hold == "aim":
+                want = self.aim
+            elif self.hold == "up" or math.hypot(vx, vy) < 1.0:
+                want = math.atan2(ry, rx)
+            else:
+                want = math.atan2(vy, vx) + (math.pi if self.hold == "retro" else 0.0)
+            d = (want - self.ang + math.pi) % math.tau - math.pi
+            self.ang += max(-RK_TURN * dt, min(RK_TURN * dt, d))
+        elif now < self.spin_until:
+            self.ang += self.spin * RK_TURN * dt
+        self.ang %= math.tau
+
+    def _accel(self, x, y, vx, vy, t, m, f):
+        """Gravity, the engine and the air, at a point: (ax, ay, q, rho)."""
+        ax, ay = rk_gravity(x, y, t)
+        if f > 0.0:
+            ax += f / m * math.cos(self.ang)
+            ay += f / m * math.sin(self.ang)
+        alt = math.hypot(x, y) - RK_R
+        q = rho = 0.0
+        if alt < RK_ATM:
+            rho = RK_RHO * math.exp(-alt / RK_SCALE)
+            v = math.hypot(vx, vy)
+            area = RK_STAGES[self.stage][5] + (RK_CHUTE if self.chutes == 2 else 0.0)
+            q = 0.5 * rho * v * v
+            if v > 0.0:
+                k = q * area / (m * v)
+                ax -= k * vx
+                ay -= k * vy
+        return ax, ay, q, rho
+
+    def _integrate(self, h, now):
+        """One step, kick-drift-kick: half the pull, all the move, the other
+        half - which keeps an orbit an orbit over thousands of them, where a
+        plain step lets it creep."""
+        m = self.mass()
+        f = self.thrust()
+        ax, ay, _, _ = self._accel(self.x, self.y, self.vx, self.vy, self.t, m, f)
+        vx, vy = self.vx + ax * h * 0.5, self.vy + ay * h * 0.5
+        self.x += vx * h
+        self.y += vy * h
+        self.t += h
+        ax, ay, self.q, rho = self._accel(self.x, self.y, vx, vy, self.t, m, f)
+        self.vx, self.vy = vx + ax * h * 0.5, vy + ay * h * 0.5
+        if f > 0.0:
+            self.burned += f / m * h            # what the engine has given, all told
+            s = RK_STAGES[self.stage]
+            self.fuel[self.stage] = max(0.0, self.fuel[self.stage]
+                                        - f / (s[4] * RK_G0) * h)
+            if self.fuel[self.stage] <= 0.0:
+                self.say("FLAMEOUT - the %s is dry" % s[0].lower(), now)
+        r = math.hypot(self.x, self.y)
+        alt = r - RK_R
+        if alt < RK_ATM:
+            v = math.hypot(self.vx, self.vy)
+            if self.chutes == 1 and alt < RK_CHUTE_OPEN[0] and v < RK_CHUTE_OPEN[1]:
+                self.chutes = 2
+                self.say("CHUTES OPEN", now)
+            # Coming down, the shield only takes it if it faces the way you
+            # go: nose back. Going up, the rocket is built for it.
+            down = self.x * self.vx + self.y * self.vy < 0.0
+            facing = math.cos(self.ang - math.atan2(-self.vy, -self.vx)) if v > 1.0 else 1.0
+            guard = 3.0 if down and facing < 0.85 else 1.0
+            self.heat = max(0.0, self.heat + (rho * v ** 3 * RK_HEAT * guard - RK_COOL) * h)
+        else:
+            self.q = 0.0
+            self.heat = max(0.0, self.heat - RK_COOL * h)
+        if self.heat >= 1.0:
+            self.end("BURNED UP", "Too steep, too fast: the heat shield gave out. "
+                     "Mission control will be very quiet tonight.", now, 0)
+            return
+        if r <= RK_R:
+            self._touch_earth(now)
+            return
+        mx, my, mvx, mvy = rk_moon(self.t)
+        if math.hypot(self.x - mx, self.y - my) <= RK_MOON_R:
+            self._touch_moon(now)
+
+    def _touch_earth(self, now):
+        v = math.hypot(self.vx, self.vy)
+        if v <= RK_SPLASH and self.chutes == 2:
+            pay = RK_PAY[1] if self.landed_moon else RK_PAY[0] if self.reached_orbit else 0
+            words = ("Home from the Moon. The boats are already out." if self.landed_moon
+                     else "Home from orbit. A boat is on its way." if self.reached_orbit
+                     else "Down in one piece. Which is something.")
+            self.end("SPLASHDOWN", words, now, pay)
+        else:
+            self.end("LOST", "Into the ground at %d metres a second." % int(v), now, 0)
+
+    def _touch_moon(self, now):
+        mx, my, mvx, mvy = rk_moon(self.t)
+        rx, ry = self.x - mx, self.y - my
+        up = math.atan2(ry, rx)
+        v = math.hypot(self.vx - mvx, self.vy - mvy)
+        tilt = abs((self.ang - up + math.pi) % math.tau - math.pi)
+        if v <= RK_LANDS and tilt < 0.6:
+            self.state = "moon"
+            self.lit, self.throttle, self.hold = False, 0.0, None
+            self.ang = up
+            self.on_moon = up - (math.atan2(-my, -mx))      # against the way to Earth
+            self.landed_moon = True
+            self.warp = 0
+            self._stand(now)
+            self.say("CONTACT LIGHT. You are on the Moon.", now)
+        else:
+            self.end("LOST", "A new crater on the Moon, %d metres a second deep."
+                     % int(v), now, 0)
+
+    def _stand(self, now):
+        """Down on the Moon: going round with it, on the same spot of it."""
+        mx, my, mvx, mvy = rk_moon(self.t)
+        a = math.atan2(-my, -mx) + self.on_moon if self.on_moon is not None else \
+            math.atan2(self.y - my, self.x - mx)
+        rad = RK_MOON_R + 1.0
+        self.x, self.y = mx + math.cos(a) * rad, my + math.sin(a) * rad
+        spin = -RK_MOON_W
+        self.vx, self.vy = mvx - spin * math.sin(a) * rad, mvy + spin * math.cos(a) * rad
+        if self.hold is None and not self.lit:
+            self.ang = a
+
+    def end(self, headline, words, now, pay):
+        self.state = "over"
+        self.lit, self.throttle, self.warp = False, 0.0, 0
+        self.result = (headline, words, now, pay)
+
+    def abort(self, now):
+        """x: twice to mean it. In the air, the escape motor; in space or on
+        the Moon, mission control brings you home some other way."""
+        if now - self.abort_at > 3.0:
+            self.abort_at = now
+            self.say("x again to abort the flight", now)
+            return False
+        name, _, _, _, _, alt = self.rel()
+        if self.state == "pad":
+            self.end("SCRUBBED", "You climb back out. Another night.", now, 0)
+        elif name == "earth" and alt < RK_ATM:
+            self.end("ABORT", "The escape motor pulls the capsule clear of the rocket. "
+                     "Chutes, the sea, a boat.", now, 0)
+        else:
+            self.end("BROUGHT HOME", "Mission control sends for you. It takes a while. "
+                     "Nobody mentions the cost.", now, 0)
+        return True
+
+
+RK_TURN_ALT = 45000.0  # where the gravity turn is all the way over, level
+RK_MOON_AIM = 40000.0  # how high over the Moon to pass, coming in
+RK_HOME_AIM = 34000.0  # and over the Earth, coming home: in the safe band, 27 to 45 km
+
+
+def rk_pitch_target(alt):
+    """How far over from straight up the nose should be at this height, in
+    degrees: the gravity turn mission control asks for."""
+    if alt < 1000.0:
+        return 0.0
+    return 90.0 * min(1.0, (alt - 1000.0) / RK_TURN_ALT) ** 0.55
+
+
+def rk_predict(x, y, vx, vy, t, horizon, points=240, until=None):
+    """Where she goes from here with the engine off, by the same sums as the
+    flight, coarser: {"pts": [(x, y)], "moon": (closest to the Moon's
+    centre, when), "earth": (closest to the Earth's centre once clear of the
+    Moon, when), "hit": "earth", "moon" or None, "soi": when she enters the
+    Moon's sphere or None}. `until`, if given, stops it at the Moon's
+    closest approach."""
+    pts = []
+    end = t + horizon
+    every = horizon / points
+    next_pt = t
+    moon = (float("inf"), None, 1.0)
+    earth = (float("inf"), None)
+    peri_e = None
+    soi = None
+    hit = None
+    steps = 0
+    left = False
+    while t < end and steps < 5000:
+        r = math.hypot(x, y)
+        mx, my, mvx, mvy = rk_moon(t)
+        d = math.hypot(x - mx, y - my)
+        v = math.hypot(vx, vy)
+        if d < moon[0]:
+            # Which side of it she passes, too: + going round it clockwise.
+            side = (x - mx) * (vy - mvy) - (y - my) * (vx - mvx)
+            moon = (d, t, -1.0 if side > 0.0 else 1.0)
+        elif until and moon[1] is not None and d > moon[0] * 1.05 and moon[0] < RK_SOI:
+            break
+        if d < RK_SOI:
+            if soi is None:
+                soi = t
+        elif soi is not None:
+            left = True
+        if (soi is None or left) and r < earth[0]:
+            earth = (r, t)
+        if peri_e is None and (soi is None or left) and d > RK_SOI * 1.05:
+            # Clear of the Moon: the low point over the Earth, worked out
+            # rather than flown to, so a path into the ground still says how
+            # far into it - the trim has something to steer by.
+            peri_e = rk_elements(x, y, vx, vy, RK_MU, RK_R)[1]
+        if r < RK_R:
+            hit = "earth"
+            break
+        if d < RK_MOON_R:
+            hit = "moon"
+            break
+        if t >= next_pt:
+            pts.append((x, y))
+            next_pt += every
+        h = max(0.5, min(horizon / 120.0, 0.01 * min(r, d) / max(v, 50.0)))
+        ax, ay = rk_gravity(x, y, t)
+        vx += ax * h * 0.5
+        vy += ay * h * 0.5
+        x += vx * h
+        y += vy * h
+        t += h
+        ax, ay = rk_gravity(x, y, t)
+        vx += ax * h * 0.5
+        vy += ay * h * 0.5
+        steps += 1
+    pts.append((x, y))
+    return {"pts": pts, "moon": moon, "earth": earth, "hit": hit, "soi": soi,
+            "peri": peri_e}
+
+
+def rk_forecast(sc, now):
+    """The prediction for the map and the guidance, worked out at most every
+    so often: it is a few thousand steps."""
+    every = 0.4 if sc.thrust() > 0.0 else 1.0
+    if sc.pred is not None and now - sc.pred_at < every and sc.pred[0] == sc.stage:
+        return sc.pred[1]
+    name, apo, peri, tapo, tperi, e = sc.orbit()
+    if name == "moon":
+        horizon = 30000.0
+    elif apo is not None and apo < RK_SOI * 0.6:
+        horizon = 2.0 * math.pi * math.sqrt(((apo + peri) / 2.0 + RK_R) ** 3 / RK_MU) * 1.05
+    else:
+        horizon = 200000.0
+    got = rk_predict(sc.x, sc.y, sc.vx, sc.vy, sc.t, horizon)
+    sc.pred, sc.pred_at = (sc.stage, got), now
+    return got
+
+
+def rk_tli(sc):
+    """For the burn to the Moon from an orbit of the Earth: (seconds till the
+    Moon is where it has to be when you burn, the burn's length). The
+    textbook transfer: burn when the Moon is far enough ahead that it gets
+    to where your new orbit peaks when you do."""
+    r = math.hypot(sc.x, sc.y)
+    at = (r + RK_MOON_D) / 2.0
+    fly = math.pi * math.sqrt(at ** 3 / RK_MU)
+    need = math.pi - RK_MOON_W * fly
+    mx, my, _, _ = rk_moon(sc.t)
+    lead = (math.atan2(sc.y, sc.x) - math.atan2(my, mx)) % math.tau
+    n = math.sqrt(RK_MU / r ** 3) - RK_MOON_W
+    dv = math.sqrt(RK_MU * (2.0 / r - 1.0 / at)) - math.sqrt(RK_MU / r)
+    burn = dv * sc.mass() / max(1.0, RK_STAGES[sc.stage][3])
+    return ((lead - need) % math.tau) / n - burn / 2.0, burn
+
+
+def _ap_aim(sc, ang):
+    sc.aim = ang % math.tau
+    sc.hold = "aim"
+
+
+def _ap_warp(sc, now, room):
+    """Time as fast as it may go and still leave `room` seconds of the real
+    clock before whatever is next - the guidance computer's way with >."""
+    want = 0
+    for k, w in enumerate(RK_WARPS):
+        if w <= sc.max_warp() and room / w > 3.0:
+            want = k
+    while sc.warp < want:
+        sc.key("warp+", now, False)
+        if sc.warp < want and RK_WARPS[sc.warp + 1] > sc.max_warp():
+            break
+    while sc.warp > want:
+        sc.key("warp-", now, False)
+
+
+def _ap_trim(sc, target, measure):
+    """A burn along the way she is going, of what size, to bring `measure` -
+    something the prediction gives - to `target`: tried a metre a second
+    either way and worked out from that. Returns metres a second, + prograde."""
+    def at(dv):
+        v = math.hypot(sc.vx, sc.vy) or 1.0
+        return measure(sc.vx + sc.vx / v * dv, sc.vy + sc.vy / v * dv)
+    a, b = at(0.0), at(2.0)
+    if a is None or b is None or abs(b - a) < 1e-6:
+        return 0.0
+    return max(-150.0, min(150.0, (target - a) / ((b - a) / 2.0)))
+
+
+def rk_autopilot(sc, now):
+    """The guidance computer: everything, from the pad to wherever it was
+    asked to go - "orbit", "home", "moon" - in a state it works out afresh
+    each time from where it is, with a few notes in sc.ap. Its keys are the
+    ones you have, pressed as nobody's hand (hand=False)."""
+    ap = sc.ap
+    goal = ap.get("goal") or ap.setdefault("goal", rk_goal(sc))
+    if sc.state == "pad":
+        sc.key("stage", now, False)
+        return
+    name, rx, ry, vx, vy, alt = sc.rel()
+    r = math.hypot(rx, ry)
+    up = math.atan2(ry, rx)
+    body, apo, peri, tapo, tperi, e = sc.orbit()
+    mu = RK_MOON_MU if name == "moon" else RK_MU
+    g = mu / (r * r)
+    amax = RK_STAGES[sc.stage][3] / sc.mass()
+    if sc.fuel[sc.stage] <= 0.0 and sc.stage < len(RK_STAGES) - 1 and sc.lit:
+        sc.key("stage", now, False)
+        return
+    if sc.state == "moon":
+        ap.setdefault("down_at", sc.t)
+        if goal != "stay" and sc.t - ap["down_at"] > 3.0:
+            ap.update(goal="home", leg="up")
+            sc.key("stage", now, False)
+        return
+    # --- up from the Earth, to orbit --------------------------------------------
+    if name == "earth" and not ap.get("orbit") and not sc.landed_moon and \
+            (peri is None or peri < RK_ATM + 4000.0) and (apo is None or apo < RK_SOI):
+        if not ap.get("coast"):
+            _ap_aim(sc, up - math.radians(rk_pitch_target(alt)))
+            sc.throttle = 0.75 if sc.q > 26000.0 else 1.0
+            if apo is not None and apo > RK_ORBIT - 4000.0:
+                sc.throttle = 0.35
+            if apo is not None and apo >= RK_ORBIT:
+                sc.throttle = 0.0
+                ap["coast"] = True
+            return
+        # Level, along the way she goes - and nosed up a little if she has
+        # started to sink, to hold the height while the speed comes.
+        vr = (rx * vx + ry * vy) / r
+        level = up - math.pi / 2.0
+        _ap_aim(sc, level + max(0.0, min(0.45, -vr / 120.0)))
+        v_at = math.sqrt(max(0.0, RK_MU * (2.0 / (RK_R + apo) - 2.0 / (2 * RK_R + apo + peri))))
+        dv = math.sqrt(RK_MU / (RK_R + apo)) - v_at
+        burn = dv * sc.mass() / RK_STAGES[sc.stage][3]
+        if alt < RK_ATM and apo < RK_ORBIT - 2000.0 and not ap.get("circ"):
+            sc.throttle = 0.3                   # the air took a little: top it up
+            return
+        if not ap.get("circ") and vr > 0.0 and tapo > burn / 2.0 + 2.0:
+            sc.throttle = 0.0
+            _ap_warp(sc, now, tapo - burn / 2.0 - 2.0)
+            return
+        _ap_warp(sc, now, 0.0)
+        ap["circ"] = True
+        sc.throttle = 1.0
+        return
+    if name == "earth" and not ap.get("orbit") and peri is not None and \
+            peri >= RK_ATM + 4000.0 and not sc.landed_moon:
+        sc.throttle = 0.0
+        ap["orbit"] = True
+    # --- in orbit of the Earth -------------------------------------------------
+    if name == "earth" and peri is not None and peri >= RK_ATM and apo is not None \
+            and (apo < RK_MOON_D * 0.3 or ap.get("burning")) and not sc.landed_moon \
+            and goal == "moon" and not ap.get("tli"):
+        wait, burn = rk_tli(sc)
+        _ap_aim(sc, math.atan2(vy, vx))
+        if wait > 3.0 and not ap.get("burning"):
+            sc.throttle = 0.0
+            _ap_warp(sc, now, wait - 3.0)
+            return
+        _ap_warp(sc, now, 0.0)
+        ap["burning"] = True
+        sc.throttle = 1.0
+        if apo + RK_R >= RK_MOON_D * 0.97:
+            sc.throttle = 0.0
+            ap["tli"] = sc.t
+        return
+    if goal == "orbit" and ap.get("orbit") and name == "earth":
+        sc.throttle = 0.0
+        sc.auto = False
+        sc.say("In orbit. The guidance computer hands her back to you.", now)
+        return
+    # --- on the way out: trim it, then wait --------------------------------------
+    if name == "earth" and goal == "moon" and not sc.landed_moon:
+        sc.throttle = 0.0
+        _ap_aim(sc, math.atan2(vy, vx))
+        if ap.get("tli") is not None and ap.get("trims", 0) < 3 and \
+                sc.t - ap.get("trim_at", ap["tli"]) > 1500.0:
+            def miss(nvx, nvy):
+                # Signed, so that passing either side is a straight line to
+                # steer along: the distance alone is a V, and the trim went
+                # the wrong way off the bottom of it.
+                got = rk_predict(sc.x, sc.y, nvx, nvy, sc.t, 120000.0, until=True)
+                if got["moon"][1] is None:
+                    return None
+                return got["moon"][0] * got["moon"][2]
+            dv = _ap_trim(sc, RK_MOON_R + RK_MOON_AIM, miss)
+            ap["trim_at"] = sc.t
+            ap["trims"] = ap.get("trims", 0) + 1
+            if abs(dv) > 0.3:
+                ap["dv"] = dv
+                ap["dv_v"] = sc.burned
+        if ap.get("dv"):
+            _ap_warp(sc, now, 0.0)
+            _ap_aim(sc, math.atan2(vy, vx) + (0.0 if ap["dv"] > 0 else math.pi))
+            if abs(((sc.ang - sc.aim + math.pi) % math.tau) - math.pi) < 0.02:
+                sc.throttle = 0.1
+            if sc.burned - ap["dv_v"] >= abs(ap["dv"]):
+                sc.throttle = 0.0
+                ap["dv"] = 0.0
+            return
+        got = rk_forecast(sc, now)
+        soon = got["soi"] - sc.t if got["soi"] is not None else 20000.0
+        _ap_warp(sc, now, soon)
+        return
+    # --- about the Moon: capture, then down ---------------------------------------
+    if name == "moon" and goal in ("moon", "land"):
+        ap["goal"] = goal = "land"
+        speed = math.hypot(vx, vy)
+        vr = (rx * vx + ry * vy) / r
+        if peri is not None and peri > 8000.0 and (apo is None or apo > 400000.0):
+            # Coming in: brake at the low point into an orbit.
+            _ap_aim(sc, math.atan2(vy, vx) + math.pi)
+            dv = speed - math.sqrt(RK_MOON_MU / r)
+            burn = max(1.0, dv * sc.mass() / RK_STAGES[sc.stage][3])
+            if tperi is not None and tperi > burn / 2.0 + 3.0 and vr < 0.0:
+                sc.throttle = 0.0
+                _ap_warp(sc, now, tperi - burn / 2.0 - 3.0)
+            else:
+                _ap_warp(sc, now, 0.0)
+                sc.throttle = 1.0
+            return
+        if peri is not None and peri > 0.0 and not ap.get("deorbit"):
+            # In orbit: brake till she falls.
+            _ap_warp(sc, now, 0.0)
+            _ap_aim(sc, math.atan2(vy, vx) + math.pi)
+            sc.throttle = 1.0
+            if peri < -RK_MOON_R * 0.2 or (vx * vx + vy * vy) ** 0.5 < 60.0:
+                ap["deorbit"] = True
+            return
+        ap["deorbit"] = True
+        # Falling in: as fast as time may go till the burn is near.
+        stop_ = speed * speed / (2.0 * max(0.5, amax * 0.85 - g))
+        _ap_warp(sc, now, max(0.0, (alt - stop_ * 1.6 - 3000.0) / max(1.0, -vr))
+                 if vr < 0.0 else 30.0)
+        if speed > 40.0:
+            _ap_aim(sc, math.atan2(vy, vx) + math.pi)
+            stop = speed * speed / (2.0 * max(0.5, amax * 0.85 - g))
+            sc.throttle = 1.0 if alt < stop * 1.15 + 300.0 else 0.0
+            return
+        if speed > 1.5:
+            _ap_aim(sc, math.atan2(vy, vx) + math.pi)
+        else:
+            _ap_aim(sc, up)
+        want = -(1.6 + alt * 0.06)
+        sc.throttle = max(0.0, min(1.0, (g + (want - vr) * 1.2) / amax))
+        return
+    # --- up off the Moon, and home ------------------------------------------------
+    if name == "moon":
+        speed = math.hypot(vx, vy)
+        if not ap.get("orbited"):
+            if alt < 2500.0:
+                _ap_aim(sc, up)
+                sc.throttle = 1.0
+                return
+            ahead = up - math.pi / 2.0          # clockwise, the way the Moon spins
+            if apo is None or apo < 30000.0:
+                _ap_aim(sc, ahead + math.radians(max(0.0, 20.0 - alt / 500.0)))
+                sc.throttle = 1.0
+                return
+            _ap_aim(sc, math.atan2(vy, vx))
+            if peri < 12000.0:
+                dv = math.sqrt(RK_MOON_MU / (RK_MOON_R + apo)) - math.sqrt(
+                    max(0.0, RK_MOON_MU * (2.0 / (RK_MOON_R + apo)
+                                           - 2.0 / (2 * RK_MOON_R + apo + peri))))
+                burn = dv * sc.mass() / RK_STAGES[sc.stage][3]
+                if tapo > burn / 2.0 + 2.0 and vr_up(rx, ry, vx, vy):
+                    sc.throttle = 0.0
+                    _ap_warp(sc, now, tapo - burn / 2.0 - 2.0)
+                else:
+                    _ap_warp(sc, now, 0.0)
+                    sc.throttle = 1.0
+                return
+            sc.throttle = 0.0
+            ap["orbited"] = True
+            return
+        if not ap.get("tei"):
+            # Burn for home where it sends you out of the Moon's sphere going
+            # backwards against its way round: then the Earth catches you.
+            _, _, mvx, mvy = rk_moon(sc.t)
+            back = math.atan2(-mvy, -mvx)
+            # Going round clockwise, the way you leave turns clockwise from the
+            # way you burn - about fifty degrees, climbing out - so burn that
+            # much short of it.
+            want = (back + 0.9) % math.tau
+            have = math.atan2(vy, vx)
+            off = (have - want + math.pi) % math.tau - math.pi
+            _ap_aim(sc, have)
+            if abs(off) > 0.08 and not ap.get("burning2"):
+                sc.throttle = 0.0
+                period = 2.0 * math.pi * math.sqrt(r ** 3 / RK_MOON_MU)
+                _ap_warp(sc, now, abs(off) / math.tau * period * 0.8)
+                return
+            _ap_warp(sc, now, 0.0)
+            ap["burning2"] = True
+            sc.throttle = 1.0
+            if e >= 1.0 and speed > math.sqrt(2.0 * RK_MOON_MU / r) * 1.12:
+                sc.throttle = 0.0
+                ap["tei"] = sc.t
+            return
+        sc.throttle = 0.0
+        _ap_aim(sc, math.atan2(vy, vx))
+        _ap_warp(sc, now, 2000.0)              # out of the Moon's sphere
+        return
+    # --- coming home ---------------------------------------------------------------
+    sc.ap["goal"] = goal = "home"
+    if sc.stage < len(RK_STAGES) - 1 and alt < RK_ATM + 60000.0 and sc.throttle == 0.0 \
+            and (peri is None or peri < RK_ATM):
+        sc.key("stage", now, False)            # down to the capsule for the air
+        return
+    if peri is not None and peri > RK_ATM - 10000.0 and (apo is not None
+                                                          and apo < RK_MOON_D * 0.3):
+        # In orbit: brake to come down.
+        _ap_aim(sc, math.atan2(vy, vx) + math.pi)
+        if abs(((sc.ang - sc.aim + math.pi) % math.tau) - math.pi) < 0.05:
+            _ap_warp(sc, now, 0.0)
+            sc.throttle = 1.0 if peri > RK_HOME_AIM else 0.0
+        return
+    if ap.get("trims2", 0) < 4 and alt > 1.5e6 and sc.t - ap.get("trim2_at", -1e9) > 4000.0 \
+            and not ap.get("dv"):
+        def low(nvx, nvy):
+            return rk_predict(sc.x, sc.y, nvx, nvy, sc.t, 200000.0, points=4)["peri"]
+        dv = _ap_trim(sc, RK_HOME_AIM, low)
+        ap["trim2_at"] = sc.t
+        ap["trims2"] = ap.get("trims2", 0) + 1
+        if abs(dv) > 0.3:
+            ap["dv"], ap["dv_v"] = dv, sc.burned
+    if ap.get("dv"):
+        _ap_warp(sc, now, 0.0)
+        _ap_aim(sc, math.atan2(vy, vx) + (0.0 if ap["dv"] > 0 else math.pi))
+        if abs(((sc.ang - sc.aim + math.pi) % math.tau) - math.pi) < 0.02:
+            sc.throttle = 0.1
+        if sc.burned - ap["dv_v"] >= abs(ap["dv"]):
+            sc.throttle = 0.0
+            ap["dv"] = 0.0
+        return
+    sc.throttle = 0.0
+    _ap_aim(sc, math.atan2(vy, vx) + math.pi)  # heat shield first
+    if sc.stage == len(RK_STAGES) - 1 and alt < RK_ATM and sc.chutes == 0:
+        sc.key("stage", now, False)
+    # As fast as it may: max_warp() holds it to a little in the air and under
+    # the chutes, and the whole range over it.
+    fall = -(rx * vx + ry * vy) / r
+    _ap_warp(sc, now, (alt - (RK_ATM + 20000.0 if alt > RK_ATM + 20000.0 else 0.0))
+             / max(1.0, fall) if fall > 0.0 else 3000.0)
+
+
+def vr_up(rx, ry, vx, vy):
+    return rx * vx + ry * vy > 0.0
+
+
+def rk_goal(sc):
+    """What the guidance computer takes it you want, from where you are when
+    you hand her over."""
+    name, apo, peri, tapo, tperi, e = sc.orbit()
+    if sc.state == "moon" or (name == "earth" and sc.landed_moon):
+        return "home"
+    if name == "moon":
+        return "land"
+    if name == "earth" and (apo is None or apo > RK_MOON_D * 0.3):
+        return "moon"
+    if sc.reached_orbit:
+        return "home"
+    return "orbit"
+
+
+# Where the sun is: behind the Earth, seen from the city - which is why it is
+# always night there, and day on the far side of an orbit.
+RK_SUN = tuple(c / math.sqrt(0.37 ** 2 + 0.86 ** 2 + 0.35 ** 2) for c in (0.37, -0.86, 0.35))
+RK_STACK = [(0.0, 30.0), (30.0, 44.0), (44.0, 52.0)]   # each stage, bottom to top, metres
+
+
+def _rk_unit(v):
+    n = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) or 1.0
+    return (v[0] / n, v[1] / n, v[2] / n)
+
+
+def _rk_cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def _rk_earth(px, py, pz, dist, now):
+    """A point of the Earth's surface as it looks from space: (glyph, colour)
+    or None. Night where the sun is not: the coast and the city's lights along
+    it, the dark sea, clouds; day the other side - blue sea, land, white cloud."""
+    lon = math.atan2(py, px)
+    lat = pz / RK_R
+    light = (px * RK_SUN[0] + py * RK_SUN[1] + pz * RK_SUN[2]) / RK_R
+    g = max(400.0, dist * 0.0045)                   # what one cell covers, about
+    west = ((lon - math.pi / 2 + math.pi) % math.tau) - math.pi   # + is inland
+    if abs(west) < 0.7:
+        coast = 0.02 * math.sin(lat * 9.0) + 0.008 * math.sin(lat * 31.0)
+        land = west > coast
+        dc = (west - coast) * RK_R
+    else:
+        land = (math.sin(3.0 * lon + 0.5) * math.cos(2.1 * lat)
+                + 0.6 * math.sin(7.0 * lon + 3.0 * lat + 1.0)) > 0.35
+        dc = 1e9
+    cloud = (math.sin(9.0 * lon + 2.0 * math.sin(5.0 * lat) + now * 0.002)
+             * math.sin(7.0 * lat + 3.0 * math.sin(4.0 * lon))) > 0.45
+    m = _mix(int(lon * RK_R / g), int(lat * RK_R / g), 9101)
+    if light > 0.04:
+        lvl = min(2, int(light * 3.0))
+        if cloud:
+            return ("~" if m & 1 else "-"), (SNOW, ROU_BLACK, FOG_DIM)[2 - lvl]
+        if land:
+            return (":" if m & 1 else "."), _deep_colour(("leaf", 1 + lvl))
+        return ("~" if m % 3 == 0 else "-"), _deep_colour(("far", lvl) if lvl < 2
+                                                         else ("cold", 1))
+    if light > -0.06:
+        return ("." if m & 1 else " "), _deep_colour(("rust", 2))    # dusk
+    if cloud and m % 5:
+        return (".", HAZE) if m % 7 == 0 else None
+    if land:
+        if abs(dc) < g * 1.2:
+            return ("=" if m & 1 else ":"), GOLD           # the front: the hotels
+        near = math.exp(-max(0.0, dc) / 60000.0)
+        if m % 1000 < 1000 * (0.06 + 0.55 * near):
+            return ("." if m % 3 else ":"), (BULB if m & 8 else GOLD_DIM)
+        return None
+    return ("." , STREET) if m % 211 == 0 else None
+
+
+def _rk_moon_surface(px, py, pz, dist, now):
+    """A point of the Moon's surface: grey, darker seas, craters, lit from the
+    sun and dark the other side."""
+    light = (px * RK_SUN[0] + py * RK_SUN[1] + pz * RK_SUN[2]) / RK_MOON_R
+    lon = math.atan2(py, px)
+    lat = pz / RK_MOON_R
+    g = max(0.12, dist * 0.006)
+    m = _mix(int(lon * RK_MOON_R / g), int(lat * RK_MOON_R / g), 9103)
+    near = dist < 300.0                                  # dust, not craters
+    sea = math.sin(3.0 * lon + 1.0) * math.cos(2.0 * lat) + 0.4 * math.sin(5.0 * lat) > 0.6
+    if light < 0.0:
+        # Its night: lit by the Earth, faintly - enough to see the ground
+        # you are coming down on.
+        if m % 37 == 0 and not near:
+            return "o", HAZE
+        return ((":" if m & 2 else ".") , STAR_DIM if m & 4 else HAZE) if m % 3 else None
+    lvl = min(2, int(light * 3.2))
+    if m % 37 == 0 and not near:
+        return ("o" if m & 64 else "O"), MOON_DIM          # a crater
+    if sea:
+        return (":" if m & 1 else "."), (HAZE, MOON_DIM, MOON_DIM)[lvl]
+    return ("#" if lvl == 2 and m & 1 else ":" if lvl else "."), (MOON_DIM, MOON, MOON)[lvl]
+
+
+def rk_scene(ch, co, width, rows, cam, fwd, up, t, now):
+    """The world from wherever the camera is, out to the stars: every cell a
+    ray, tried against the Earth and the Moon as spheres; what it hits drawn
+    by _rk_earth() or _rk_moon_surface(), what it misses the sky - the
+    atmosphere's blue edge round the Earth, the sun, the stars. Worked out
+    row by row with what does not change across a row or down a column
+    taken out, or at 300 columns it is too slow."""
+    right = _rk_cross(up, fwd)
+    cx = (width - 1) / 2.0
+    hz = rows / 2.0
+    fx = cx / PLANE
+    fy = fx * 0.5
+    mx, my, _, _ = rk_moon(t)
+    bodies = []
+    for (bx, by, bz), rad, kind in (((0.0, 0.0, 0.0), RK_R, "earth"),
+                                    ((mx, my, 0.0), RK_MOON_R, "moon")):
+        ox, oy, oz = cam[0] - bx, cam[1] - by, cam[2] - bz
+        c0 = ox * ox + oy * oy + oz * oz - rad * rad
+        bodies.append((kind, (bx, by, bz), rad, c0,
+                       fwd[0] * ox + fwd[1] * oy + fwd[2] * oz,
+                       right[0] * ox + right[1] * oy + right[2] * oz,
+                       up[0] * ox + up[1] * oy + up[2] * oz))
+    sx_ = [(x - cx) / fx for x in range(width)]
+    star_k = fx * 0.9
+    sun_dot = (fwd[0] * RK_SUN[0] + fwd[1] * RK_SUN[1] + fwd[2] * RK_SUN[2],
+               right[0] * RK_SUN[0] + right[1] * RK_SUN[1] + right[2] * RK_SUN[2],
+               up[0] * RK_SUN[0] + up[1] * RK_SUN[1] + up[2] * RK_SUN[2])
+    glow = _deep_colour(("cold", 3))
+    for y in range(rows):
+        vy = (hz - y) / fy
+        chy, coy = ch[y], co[y]
+        for x in range(width):
+            vx = sx_[x]
+            a = 1.0 + vx * vx + vy * vy
+            best = None
+            for kind, cen, rad, c0, f_oc, r_oc, u_oc in bodies:
+                b = 2.0 * (f_oc + vx * r_oc + vy * u_oc)
+                disc = b * b - 4.0 * a * c0
+                if disc >= 0.0:
+                    tt = (-b - math.sqrt(disc)) / (2.0 * a)
+                    if tt > 0.0 and (best is None or tt < best[0]):
+                        best = (tt, kind, cen)
+            dx = fwd[0] + vx * right[0] + vy * up[0]
+            dy = fwd[1] + vx * right[1] + vy * up[1]
+            dz = fwd[2] + vx * right[2] + vy * up[2]
+            if best is not None:
+                tt, kind, cen = best
+                px = cam[0] + dx * tt - cen[0]
+                py = cam[1] + dy * tt - cen[1]
+                pz = cam[2] + dz * tt - cen[2]
+                dist = tt * math.sqrt(a)
+                got = (_rk_earth(px, py, pz, dist, now) if kind == "earth"
+                       else _rk_moon_surface(px, py, pz, dist, now))
+                if got is not None:
+                    chy[x], coy[x] = got
+                continue
+            # The sky. The Earth's air first: a blue edge round it.
+            kind, cen, rad, c0, f_oc, r_oc, u_oc = bodies[0]
+            b = f_oc + vx * r_oc + vy * u_oc
+            close2 = c0 + rad * rad - b * b / a
+            if close2 < (rad + 22000.0) ** 2 and b < 0.0 and c0 > (2.0 * rad * 30000.0):
+                # Only a ray through the thick of it glows: the air halves
+                # every few kilometres, so it is a thin blue line, not a band.
+                h_ = math.sqrt(max(0.0, close2)) - rad
+                chy[x], coy[x] = (":" if h_ < 9000.0 else "."), glow
+                continue
+            n = math.sqrt(a)
+            s = (sun_dot[0] + vx * sun_dot[1] + vy * sun_dot[2]) / n
+            if s > 0.9993:
+                chy[x], coy[x] = "@", FLASH
+                continue
+            if s > 0.9975:
+                chy[x], coy[x] = "*", GOLD
+                continue
+            m = _mix(int(dx / n * star_k), int(dy / n * star_k), int(dz / n * star_k))
+            if m % 89 == 0:
+                chy[x], coy[x] = ("*" if m & 256 else "."), (STAR if m & 512 else STAR_DIM)
+
+
+def rk_world(sc):
+    """Where the capsule is in the city's own units, for the window low down:
+    east of the pad by however far round the Earth she has gone."""
+    a = math.atan2(sc.y, sc.x)
+    alt = math.hypot(sc.x, sc.y) - RK_R
+    return sc.pad[0] + (math.pi / 2 - a) * RK_R, sc.pad[1], alt
+
+
+def rk_camera(sc):
+    """The window's camera, for rk_scene(): (position, forward, up). Round
+    the Earth, back along the way you came, down at it more the higher you
+    are; about the Moon, at the Earth over its horizon; between, at the
+    Moon on the way out and the Earth on the way home."""
+    mx, my, _, _ = rk_moon(sc.t)
+    cam = (sc.x, sc.y, 0.0)
+    name, rx, ry, vx, vy, alt = sc.rel()
+    r = math.hypot(rx, ry)
+    if name == "earth" and alt < RK_MOON_D * 0.15:
+        up = (rx / r, ry / r, 0.0)
+        fwd = (-up[1], up[0], 0.0)                  # west: back at the land
+        dip = (math.pi / 2 - math.asin(min(1.0, RK_R / r))) * 0.8
+    elif name == "moon":
+        # Towards the Earth along the ground: down at the horizon from up
+        # there, the way it is over the Earth; once down, up a little at it.
+        up = (rx / r, ry / r, 0.0)
+        to_e = _rk_unit((-sc.x, -sc.y, 0.0))
+        d = to_e[0] * up[0] + to_e[1] * up[1]
+        fwd = _rk_unit((to_e[0] - d * up[0], to_e[1] - d * up[1], 0.3))
+        if sc.state == "moon" or alt < 3000.0:
+            dip = -max(0.0, min(0.45, math.asin(max(-1.0, min(1.0, d))) - 0.35))
+        else:
+            dip = (math.pi / 2 - math.asin(min(1.0, RK_MOON_R / r))) * 0.8
+    else:
+        out = not sc.landed_moon
+        aim = _rk_unit((mx - sc.x, my - sc.y, 0.0) if out else (-sc.x, -sc.y, 0.0))
+        return cam, aim, (0.0, 0.0, 1.0)
+    f = (math.cos(dip) * fwd[0] - math.sin(dip) * up[0],
+         math.cos(dip) * fwd[1] - math.sin(dip) * up[1],
+         math.cos(dip) * fwd[2] - math.sin(dip) * up[2])
+    u = (math.sin(dip) * fwd[0] + math.cos(dip) * up[0],
+         math.sin(dip) * fwd[1] + math.cos(dip) * up[1],
+         math.sin(dip) * fwd[2] + math.cos(dip) * up[2])
+    return cam, _rk_unit(f), _rk_unit(u)
+
+
+def rk_draw_rocket(ch, co, sx, sy, k, sc, now, rows):
+    """The rocket, side on, whichever way it points: what is left of the stack,
+    white, a dark band where one stage meets the next, ASCII down the booster
+    in gold; the flame out of the bottom, longer and wider the thinner the
+    air; the chutes over the capsule; the glow round its shield coming in.
+    (sx, sy) is the bottom of it on the screen, k rows to the metre."""
+    width = len(ch[0])
+    name, rx, ry, vx, vy, alt = sc.rel()
+    r = math.hypot(rx, ry)
+    ux, uy = rx / r, ry / r
+    ex, ey = uy, -ux
+    nx_, ny_ = math.cos(sc.ang), math.sin(sc.ang)
+    ax_, ay_ = nx_ * ex + ny_ * ey, nx_ * ux + ny_ * uy     # across the screen, up it
+    bottom = RK_STACK[sc.stage][0]
+    top = RK_STACK[-1][1]
+    length = top - bottom
+    white = SNOW | curses.A_REVERSE
+    half = 1.9
+    span = int(length * k) + 4
+    for row in range(max(0, int(sy - span * 1.2)), min(rows, int(sy + span * 0.5) + 2)):
+        for col in range(max(0, int(sx - span * 2.4)), min(width, int(sx + span * 2.4) + 2)):
+            X = (col - sx) / (2.0 * k)
+            Y = (sy - row) / k
+            s = X * ax_ + Y * ay_
+            w = -X * ay_ + Y * ax_
+            if not 0.0 <= s <= length:
+                continue
+            here = s + bottom
+            rad = half if here < 44.0 else half * max(0.0, (52.0 - here) / 8.0) ** 0.7
+            if abs(w) > rad:
+                continue
+            if abs(w) > rad - 0.5 / k:
+                ch[row][col], co[row][col] = ("|" if abs(ay_) > 0.7 else
+                                              "-" if abs(ax_) > 0.7 else
+                                              "/" if ax_ * ay_ > 0 else "\\"), CURB
+            elif any(abs(here - j) < 0.6 for j in (30.0, 44.0)):
+                ch[row][col], co[row][col] = "=", CONCRETE
+            else:
+                ch[row][col], co[row][col] = " ", white
+    if sc.stage == 0 and abs(ax_) < 0.4:
+        for n_, c in enumerate("ASCII"):
+            s = 8.0 + n_ * 3.2
+            col = int(round(sx + s * ax_ * 2.0 * k))
+            row = int(round(sy - s * ay_ * k))
+            if 0 <= row < rows and 0 <= col < width:
+                ch[row][col], co[row][col] = c, GOLD
+    if sc.thrust() > 0.0:
+        rho = RK_RHO * math.exp(-max(0.0, alt) / RK_SCALE) if name == "earth" else 0.0
+        long_ = (10.0 + 22.0 * sc.throttle) * (1.0 + 1.8 * (1.0 - rho / RK_RHO))
+        tick = int(now * 20.0)
+        for n_ in range(int(80 + 60 * sc.throttle)):
+            m = _mix(n_, tick, 9201)
+            d = ((m & 1023) / 1023.0) ** 1.4 * long_
+            spread = (0.6 + d * (0.12 + 0.35 * (1.0 - rho / RK_RHO))) * (
+                ((m >> 10) & 255) / 127.5 - 1.0)
+            X = -ax_ * d - ay_ * spread
+            Y = -ay_ * d + ax_ * spread
+            col = int(round(sx + X * 2.0 * k))
+            row = int(round(sy - Y * k))
+            if 0 <= row < rows and 0 <= col < width:
+                f = d / long_
+                ch[row][col] = "#" if f < 0.15 else "*" if f < 0.4 else ":" if f < 0.7 else "."
+                co[row][col] = (FLASH if f < 0.15 else GOLD if f < 0.4 else
+                                EMBER_HOT if f < 0.7 else EMBER)
+    if sc.chutes == 2:
+        tip_x = sx + ax_ * length * 2.0 * k
+        tip_y = sy - ay_ * length * k
+        for c_ in (-1, 0, 1):
+            cxx = int(tip_x + c_ * 7)
+            cyy = int(tip_y - 9)
+            for n_, line in enumerate((" ___ ", "/   \\", "\\___/")):
+                for j, ch_ in enumerate(line):
+                    if ch_ != " " and 0 <= cyy + n_ < rows and 0 <= cxx - 2 + j < width:
+                        ch[cyy + n_][cxx - 2 + j], co[cyy + n_][cxx - 2 + j] = ch_, (
+                            ROU_RED if c_ == 0 else SNOW)
+            for h_ in range(1, 7):
+                yy = int(cyy + 2 + h_)
+                xx = int(cxx + (tip_x - cxx) * h_ / 7.0)
+                if 0 <= yy < rows and 0 <= xx < width:
+                    ch[yy][xx], co[yy][xx] = "|", CURB
+    if name == "earth" and alt < RK_ATM and sc.speed() > 1200.0 and \
+            (rx * vx + ry * vy) < 0.0:
+        # Coming in: the air on fire round the shield, streaming back.
+        hot = min(1.0, (sc.speed() - 1200.0) / 1500.0)
+        sp = math.hypot(vx, vy)
+        tx, ty = (vx * ex + vy * ey) / sp, (vx * ux + vy * uy) / sp   # the way it goes
+        tick = int(now * 15.0)
+        for n_ in range(int(60 * hot) + 10):
+            m = _mix(n_, tick, 9203)
+            d = ((m & 255) / 255.0) * length * 1.5
+            off = (((m >> 8) & 255) / 127.5 - 1.0) * (half + d * 0.25)
+            X = -tx * d - ty * off
+            Y = -ty * d + tx * off
+            col = int(round(sx + X * 2.0 * k))
+            row = int(round(sy - Y * k))
+            if 0 <= row < rows and 0 <= col < width:
+                ch[row][col] = "~" if m & 1 else "'"
+                co[row][col] = ROU_RED if m & 2 else EMBER_HOT
+
+
+def rk_map(ch, co, width, rows, sc, now):
+    """The map: the body you are about, the air round it, the Moon and its
+    path if they are in it; your orbit, worked out from where you are and how
+    fast, with its high and low points; past that, where the sums say you go
+    - out to the Moon, or home; and you."""
+    name, rx, ry, vx, vy, alt = sc.rel()
+    _, bx, by, _, _, mu, rad = sc.frame()
+    _, apo, peri, tapo, tperi, e = sc.orbit()
+    pred = rk_forecast(sc, now)
+    far = name == "earth" and (apo is None or apo > RK_MOON_D * 0.2 or
+                               (pred["soi"] is not None))
+    if far:
+        span = RK_MOON_D * 1.15
+    elif apo is not None:
+        span = max(rad * 1.25, rad + apo) * 1.1
+    else:
+        span = (RK_SOI if name == "moon" else rad * 4.0)
+    span *= sc.zoom
+    cx, cy = (width - 1) / 2.0, rows / 2.0
+    k = min(cx / 2.0, cy) / span                     # rows a metre; columns twice
+
+    def put(wx, wy, g, a):
+        col = int(round(cx + (wx - bx) * k * 2.0))
+        row = int(round(cy - (wy - by) * k))
+        if 0 <= row < rows and 0 <= col < width:
+            ch[row][col], co[row][col] = g, a
+        return col, row
+
+    for n in range(240):
+        a = n / 240.0 * math.tau
+        put(bx + math.cos(a) * rad, by + math.sin(a) * rad,
+            "o", CROWN_BLUE if name == "earth" else MOON_DIM)
+        if name == "earth":
+            put(bx + math.cos(a) * (rad + RK_ATM), by + math.sin(a) * (rad + RK_ATM),
+                ".", _deep_colour(("cold", 0)))
+    if name == "earth":
+        put(0.0, RK_R, "^", GOLD)                      # home: the space centre
+    mx, my, _, _ = rk_moon(sc.t)
+    if far:
+        for n in range(180):
+            a = n / 180.0 * math.tau
+            put(math.cos(a) * RK_MOON_D, math.sin(a) * RK_MOON_D, ".", HAZE)
+        for n in range(60):
+            a = n / 60.0 * math.tau
+            put(mx + math.cos(a) * RK_MOON_R, my + math.sin(a) * RK_MOON_R, "o", MOON)
+        col, row = put(mx, my, "@", MOON)
+        _text(ch, co, row + 1, col - 2, "MOON", MOON_DIM)
+    # The orbit, from the elements: an ellipse, or the arm of a hyperbola.
+    hh = rx * vy - ry * vx
+    if hh != 0.0:
+        evx = (vy * hh) / mu - rx / math.hypot(rx, ry)
+        evy = (-vx * hh) / mu - ry / math.hypot(rx, ry)
+        w = math.atan2(evy, evx)
+        p = hh * hh / mu
+        lim = math.acos(max(-1.0, -1.0 / e)) * 0.97 if e >= 1.0 else math.pi
+        for n in range(360):
+            nu = -lim + 2.0 * lim * n / 359.0
+            den = 1.0 + e * math.cos(nu)
+            if den <= 1e-6:
+                continue
+            rr = p / den
+            if rr > span * 3.0:
+                continue
+            ang = w + (nu if hh > 0 else -nu)
+            put(bx + rr * math.cos(ang), by + rr * math.sin(ang), ".", GOLD_DIM)
+        if apo is not None and e < 1.0:
+            col, row = put(bx + (rad + apo) * math.cos(w + math.pi),
+                           by + (rad + apo) * math.sin(w + math.pi), "A", GOLD)
+            _text(ch, co, row, col + 2, "%d km" % int(apo / 1000.0), GOLD)
+        if e > 1e-3:
+            col, row = put(bx + (rad + peri) * math.cos(w), by + (rad + peri) * math.sin(w),
+                           "P", ROU_RED if peri < (RK_ATM if name == "earth" else 0.0)
+                           else GOLD)
+            _text(ch, co, row, col + 2, "%d km" % int(peri / 1000.0), GOLD)
+    if far or name == "moon":
+        for qx, qy in pred["pts"]:
+            put(qx, qy, ":", NEON[2 % len(NEON)][0])
+        if pred["moon"][1] is not None and pred["soi"] is not None and name == "earth":
+            _text(ch, co, 2, 2, "MOON ENCOUNTER  -  closest %d km over it" % int(
+                (pred["moon"][0] - RK_MOON_R) / 1000.0), NEON[2 % len(NEON)][0])
+    put(sc.x, sc.y, "@", FLASH)
+    _text(ch, co, 1, 2, "MAP  -  %s  -  + - zoom  -  m back" % (   # under the top bar
+        "ABOUT THE MOON" if name == "moon" else "THE EARTH" if not far
+        else "THE EARTH AND THE MOON"), HUD)
+
+
+def _rk_clock(t):
+    t = int(max(0.0, t))
+    return "%d:%02d:%02d" % (t // 3600, t // 60 % 60, t % 60) if t >= 3600 \
+        else "%d:%02d" % (t // 60, t % 60)
+
+
+def _rk_km(m):
+    if m is None:
+        return "--"
+    return "%.1f km" % (m / 1000.0) if abs(m) < 1.0e6 else "{:,} km".format(int(m / 1000.0))
+
+
+def rk_advice(sc, now):
+    """What mission control is saying now, from where you are and what you
+    are doing - and the things it says once, as they happen."""
+    if sc.result is not None:
+        return sc.result[1] + "  -  x"
+    if sc.auto:
+        return "The guidance computer is flying her. Any key of yours takes her back."
+    if sc.state == "pad":
+        return "Go for launch. SPACE lights the engines."
+    if sc.state == "moon":
+        return ("On the Moon. SPACE lifts off - then home: burn the way the Moon is going"
+                " backwards, till the map shows the Earth at 27 to 45 km.")
+    name, rx, ry, vx, vy, alt = sc.rel()
+    body, apo, peri, tapo, tperi, e = sc.orbit()
+    r = math.hypot(rx, ry)
+    vr = (rx * vx + ry * vy) / r
+    burning = sc.thrust() > 0.0
+    if sc.lit and sc.fuel[sc.stage] <= 0.0 and sc.stage < len(RK_STAGES) - 1:
+        return "Flameout. SPACE to stage."
+    if name == "earth":
+        if not sc.reached_orbit and not sc.landed_moon and (apo is None or apo < RK_MOON_D * 0.3):
+            if peri is not None and peri < RK_ATM and (apo is None or apo < RK_ORBIT) \
+                    and (burning or alt < 5000.0):
+                if alt < 1500.0:
+                    return "Clear of the tower. Hold her straight up."
+                if sc.q > 30000.0 and sc.throttle > 0.7:
+                    sc.call("maxq", "Max Q.", now)
+                    return "Max Q - throttle back a little: S."
+                tgt = rk_pitch_target(alt)
+                have = sc.pitch()
+                if have < tgt - 6.0:
+                    return "Pitch over: w tips her east. Aim for %d degrees - you're at %d." % (
+                        tgt, have)
+                if have > tgt + 6.0:
+                    return "Too flat: s brings her up. Aim for %d degrees." % tgt
+                return "Good. Hold %d degrees. Apoapsis %s of %d km." % (
+                    tgt, _rk_km(apo), RK_ORBIT // 1000)
+            if apo is not None and apo >= RK_ORBIT * 0.95 and burning and peri < RK_ATM:
+                if tapo is not None and tapo > 30.0 and vr > 0.0:
+                    return "Apoapsis %s. Cut the engine - c - and coast up to it." % _rk_km(apo)
+            if apo is not None and peri < RK_ATM and not burning:
+                if vr > 0.0 and tapo is not None and tapo > 25.0:
+                    return ("Coast to apoapsis: %s. > speeds time up. Then burn level, "
+                            "the way you are going: h holds prograde." % _rk_clock(tapo))
+                return "Burn now - h for prograde, W for power - till periapsis clears 70 km."
+            if burning and peri < RK_ATM:
+                return "Keep burning. Periapsis %s - it has to clear 70 km." % _rk_km(peri)
+        if peri is not None and peri >= RK_ATM and apo is not None and apo < RK_MOON_D * 0.3:
+            if not sc.landed_moon:
+                sc.call("orbit", "ORBIT. You are in space - and you are going round.", now)
+                if burning:
+                    return "Periapsis %s, apoapsis %s." % (_rk_km(peri), _rk_km(apo))
+                wait, _ = rk_tli(sc)
+                return ("In orbit. To come home: h for retrograde, burn till periapsis is "
+                        "about 30 km. Or... the Moon is up there. Mission control would "
+                        "never ask you to. Its window opens in %s." % _rk_clock(wait))
+            return "Back in Earth orbit. Retrograde (h), burn till periapsis is about 30 km."
+        if not sc.landed_moon and apo is not None and apo >= RK_MOON_D * 0.3 or (
+                not sc.landed_moon and apo is None and alt > RK_ATM):
+            pred = rk_forecast(sc, now)
+            sc.call("tli", "...where are you going? Mission control has gone very quiet.", now)
+            if pred["soi"] is not None:
+                return "Moon encounter: closest %s over it. %s to its sphere. > to warp." % (
+                    _rk_km(pred["moon"][0] - RK_MOON_R), _rk_clock(pred["soi"] - sc.t))
+            return ("No encounter yet - burn a little prograde or retrograde till the map "
+                    "shows the Moon's.")
+        if alt < RK_ATM and (rx * vx + ry * vy) < 0.0 and sc.speed() > 1000.0:
+            if sc.stage < len(RK_STAGES) - 1:
+                return "Coming in. SPACE to let the stages go - the shield is on the capsule."
+            return "Re-entry. h till RETROGRADE - shield first. Heat %d%%." % (sc.heat * 100)
+        if sc.stage == len(RK_STAGES) - 1 and sc.chutes == 0 and alt < RK_ATM:
+            return "SPACE arms the chutes. Now."
+        if sc.chutes == 1:
+            return "Chutes armed. They open at 3 km."
+        if sc.chutes == 2:
+            return "Under the chutes. Nothing to do but wait for the sea."
+        if peri is not None and peri < RK_ATM:
+            return "Bound for home. Periapsis %s: 27 to 45 km is the way in." % _rk_km(peri)
+        return "Bound for home. Periapsis %s - too high: burn retrograde a little." % (
+            _rk_km(peri))
+    # About the Moon.
+    sc.call("soi", "The Moon's sphere. Welcome. Nobody has ever said that before.", now)
+    if peri is not None and peri < 0.0:
+        g = RK_MOON_MU / (r * r)
+        amax = RK_STAGES[sc.stage][3] / sc.mass()
+        sp = math.hypot(vx, vy)
+        stop = sp * sp / (2.0 * max(0.5, amax - g))
+        if alt > stop * 1.3 + 2000.0:
+            return ("Coming down on the Moon. h for retrograde. Burn at about %s - you're "
+                    "at %s." % (_rk_km(stop * 1.15 + 300.0), _rk_km(alt)))
+        if sp > 8.0:
+            return "BURN. Full - W. Down to a walking pace before the ground."
+        return "Gently. Under %d metres a second, upright. %d now." % (RK_LANDS, sp)
+    if e >= 1.0:
+        return ("Passing the Moon at %s. To stay: h for retrograde, burn at periapsis "
+                "(%s) till it closes." % (_rk_km(peri), _rk_clock(tperi or 0.0)))
+    return ("In orbit round the Moon. To land: retrograde, burn till you fall - "
+            "periapsis under the ground. Or home: prograde, out of its sphere.")
+
+
+def rk_dash(ch, co, sc, width, height, top, k, now):
+    """The panel under the window: how high and how fast, the orbit's high and
+    low points and the time to them, the stage and its fuel, the throttle,
+    the pitch and what the climb wants, the hold, the time warp, the heat
+    when there is any - and mission control on the last line."""
+    for y in range(top, height):
+        for x in range(width):
+            ch[y][x], co[y][x] = ("=" if y == top else " "), (GOLD_DIM if y == top else 0)
+    name, rx, ry, vx, vy, alt = sc.rel()
+    body, apo, peri, tapo, tperi, e = sc.orbit()
+    r = math.hypot(rx, ry)
+    vr = (rx * vx + ry * vy) / r
+    speed = math.hypot(vx, vy)
+    s = RK_STAGES[sc.stage]
+    frac = sc.fuel[sc.stage] / s[2]
+    bar = "[" + "#" * int(round(frac * 10)) + "-" * (10 - int(round(frac * 10))) + "]"
+    left = ["ALT %s" % _rk_km(alt) if alt >= 10000 else "ALT %d m" % int(alt),
+            "SPD %d m/s" % int(speed), "V/S %+d m/s" % int(vr),
+            "MET %s" % _rk_clock(sc.t)]
+    mid = ["APO %s%s" % (_rk_km(apo), "  in %s" % _rk_clock(tapo) if tapo is not None
+                         and apo is not None and tapo < 99999 else ""),
+           "PERI %s" % _rk_km(peri),
+           ("ABOUT THE MOON" if name == "moon" else "ABOUT THE EARTH"),
+           "Q %d kPa" % int(sc.q / 1000) if sc.q > 500 else
+           ("HEAT %d%%" % int(sc.heat * 100) if sc.heat > 0.01 else "")]
+    tgt = rk_pitch_target(alt) if name == "earth" and not sc.reached_orbit else None
+    right = ["%s %s %d%%" % (s[0], bar, int(frac * 100)),
+             "THR %3d%%   PITCH %+d%s" % (int(sc.throttle * 100), int(sc.pitch()),
+                                          " (AIM %d)" % tgt if tgt is not None else ""),
+             "HOLD %s   WARP x%d%s" % ({None: "OFF", "pro": "PROGRADE", "retro": "RETRO",
+                                       "up": "UP", "aim": "GUIDED"}[sc.hold],
+                                      RK_WARPS[sc.warp], "   AUTO" if sc.auto else ""),
+             "CHUTES %s" % ("", "ARMED", "OPEN")[sc.chutes] if sc.chutes else ""]
+    if k > 1:
+        sx = sy = k - 1
+        nxt = _blocks(ch, co, top + 1, 2, ("%d" % int(alt / 1000.0)) if alt >= 10000
+                      else "%d" % int(alt), GOLD, sx, sy)
+        _text(ch, co, top + 2 + 5 * sy, 2, "KM UP" if alt >= 10000 else "M UP", HUD)
+        nxt = max(nxt, 12) + 5
+        nxt2 = _blocks(ch, co, top + 1, nxt, "%d" % int(speed), GOLD, sx, sy)
+        _text(ch, co, top + 2 + 5 * sy, nxt, "M/S", HUD)
+        x1 = max(nxt2 + 5, int(width * 0.38))
+        x2 = max(x1 + 30, int(width * 0.66))
+        for n, t_ in enumerate(mid):
+            _text(ch, co, top + 1 + n, x1, t_, HUD)
+        for n, t_ in enumerate(right):
+            _text(ch, co, top + 1 + n, x2, t_[:max(0, width - x2 - 1)], GOLD if n == 0
+                  else HUD)
+    else:
+        x1, x2 = max(18, int(width * 0.2)), max(44, int(width * 0.5))
+        for n, t_ in enumerate(left):
+            _text(ch, co, top + 1 + n, 2, t_[:x1 - 3], GOLD if n < 2 else HUD)
+        for n, t_ in enumerate(mid):
+            _text(ch, co, top + 1 + n, x1, t_[:max(0, x2 - x1 - 1)], HUD)
+        for n, t_ in enumerate(right):
+            _text(ch, co, top + 1 + n, x2, t_[:max(0, width - x2 - 1)],
+                  GOLD if n == 0 else HUD)
+    words = rk_advice(sc, now)
+    _text(ch, co, height - 1, 2, ("CAPCOM: " + words)[:width - 4], GOLD)
+
+
+def render_spaceflight(sc, width, height, now):
+    """In the capsule. Low down, the window is the city itself, from where the
+    capsule is, looking back west at the land (mission control's onboard
+    camera); over RK_STREET, the world from up there (rk_scene). v: from
+    outside, beside her at her height. m: the map. Under it all the dash, and
+    what mission control just said across the top."""
+    k = big_scale(width, height)
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    small = width < 50 or height < 16
+    top = height - 1 if small else height - (6 + 6 * (k - 1))
+    name, rx, ry, vx, vy, alt = sc.rel()
+    v = None
+    if sc.view == "map":
+        rk_map(ch, co, width, top, sc, now)
+    else:
+        wx, wz, walt = rk_world(sc)
+        low = name == "earth" and walt < RK_STREET and sc.state != "over" and \
+            abs(math.atan2(sc.y, sc.x) - math.pi / 2) < 0.2
+        if low and sc.view == "window":
+            eye = walt + RK_CAPSULE
+            v = View(wx, wz - 3.0, -math.pi * 0.5, width, top, eye=eye,
+                     reach=ROOF_REACH if eye > 12.0 else MAX_VIEW)
+            g, c, _ = render_street(v, now)
+            for y in range(top):
+                ch[y], co[y] = g[y], c[y]
+        elif low:
+            eye = walt + RK_CAPSULE * 0.5
+            v = View(wx, wz - 110.0, 0.0, width, top, eye=eye,
+                     reach=ROOF_REACH if eye > 12.0 else MAX_VIEW)
+            g, c, _ = render_street(v, now)
+            for y in range(top):
+                ch[y], co[y] = g[y], c[y]
+            pr = v.project(wx, walt + 1.2, wz)
+            if pr is not None:
+                rk_draw_rocket(ch, co, pr[0], pr[1], v.fy / pr[2], sc, now, top)
+        elif sc.view == "window":
+            cam, fwd, up = rk_camera(sc)
+            rk_scene(ch, co, width, top, cam, fwd, up, sc.t, now)
+        else:
+            # Beside her, near enough that what is left of her is a good part
+            # of the picture, a little over and looking down past her.
+            r = math.hypot(rx, ry)
+            up = (rx / r, ry / r, 0.0)
+            fx = (width - 1) / 2.0 / PLANE
+            length = RK_STACK[-1][1] - RK_STACK[sc.stage][0]
+            back = max(40.0, length * 2.0 * fx / (width * 0.4))
+            dip = 0.22
+            fwd = (-math.sin(dip) * up[0], -math.sin(dip) * up[1], math.cos(dip))
+            upv = (math.cos(dip) * up[0], math.cos(dip) * up[1], math.sin(dip))
+            cam = (sc.x - fwd[0] * back, sc.y - fwd[1] * back, -fwd[2] * back)
+            rk_scene(ch, co, width, top, cam, fwd, upv, sc.t, now)
+            # She is `back` straight ahead: the middle of the picture, her
+            # middle there - so her foot half her length back along her.
+            kk = fx * 0.5 / back
+            nx_, ny_ = math.cos(sc.ang), math.sin(sc.ang)
+            ax_ = nx_ * up[1] - ny_ * up[0]
+            ay_ = nx_ * up[0] + ny_ * up[1]
+            rk_draw_rocket(ch, co, (width - 1) / 2.0 - ax_ * length * 0.5 * 2.0 * kk,
+                           top / 2.0 + ay_ * length * 0.5 * kk, kk, sc, now, top)
+        if sc.view == "window" and not small:
+            # The window's frame: the capsule's, rounded at the corners.
+            for y in range(top):
+                for x in (0, width - 1):
+                    ch[y][x], co[y][x] = "|", CURB
+            for x in range(width):
+                ch[0][x], co[0][x] = "-", CURB
+            for d in range(3):
+                for (x_, y_) in ((d, 2 - d), (width - 1 - d, 2 - d)):
+                    if 0 <= y_ < top:
+                        ch[y_][x_], co[y_][x_] = ("/" if x_ < width // 2 else "\\"), CURB
+    if v is None:
+        v = View(sc.pad[0], sc.pad[1], 0.0, width, height)
+    if small:
+        _text(ch, co, height - 1, 0, (" alt %s  %d m/s  %s" % (
+            _rk_km(alt), int(sc.speed()), rk_advice(sc, now)))[:width], GOLD)
+        return ch, co, v
+    rk_dash(ch, co, sc, width, height, top, k, now)
+    if now - sc.said_at < 4.0 and sc.said:
+        words = (" " + sc.said + " ")[:width]
+        y = 2
+        x0 = max(0, (width - len(words)) // 2)
+        for n, c in enumerate(words):
+            if 0 <= x0 + n < width:
+                ch[y][x0 + n], co[y][x0 + n] = c, GOLD
+    if sc.result is not None:
+        head = "  %s  " % sc.result[0]
+        y = max(3, top // 3)
+        if k > 1:
+            w_ = blocks_width(sc.result[0], k - 1)
+            _blocks(ch, co, y, max(0, (width - w_) // 2), sc.result[0],
+                    ROU_GREEN if sc.result[3] else ROU_RED, k - 1, k - 1)
+        else:
+            _text(ch, co, y, max(0, (width - len(head)) // 2), head,
+                  ROU_GREEN if sc.result[3] else ROU_RED)
+        line = sc.result[1] + ("  $%d." % sc.result[3] if sc.result[3] else "")
+        _text(ch, co, y + 6 * max(1, k - 1), max(0, (width - len(line)) // 2),
+              line[:width], HUD)
+    return ch, co, v
+
+
 _doors_shut = [False]   # the menu's o: nothing in the street takes you in
 
 
@@ -39479,6 +41119,7 @@ def main(stdscr):
     cruise = None               # aboard the cruise ship: {"h", "look"}
     boat = None                 # at the wheel of a speedboat: a Boat
     sub = None                  # down in the submarine: a Sub
+    rocket = None               # strapped into the rocket: a Spacecraft
     tackle = Tackle()           # your rods, bait, floats, cool box and book
     fishing = None              # with a line in the water: a Fishing
     shop = None                 # at a tackle shop's counter: your visit
@@ -39507,7 +41148,7 @@ def main(stdscr):
                 or flight is not None or reading or poke is not None
                 or vendor is not None or ride is not None or cruise is not None
                 or boat is not None or fishing is not None or shop is not None
-                or trip is not None or sub is not None)
+                or trip is not None or sub is not None or rocket is not None)
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -39615,7 +41256,8 @@ def main(stdscr):
                             if toggle_coast() else
                             "the sea: off - the city is endless that way again")
                     tiki = ride = cruise = boat = fishing = shop = trip = sub = None
-                    _boat_out[0] = _herring_out[0] = _pen_out[0] = None
+                    rocket = None
+                    _boat_out[0] = _herring_out[0] = _pen_out[0] = _crewed[0] = None
                     _liner_trips.clear()
                     if not can_stand(cam_x, cam_z):
                         cam_x, cam_z = start_position()
@@ -39681,8 +41323,13 @@ def main(stdscr):
                             cab = None
                             metro = None
                             flight = None
-                            fishing = shop = trip = sub = None
-                            _herring_out[0] = _pen_out[0] = None
+                            fishing = shop = trip = sub = rocket = None
+                            _herring_out[0] = _pen_out[0] = _crewed[0] = None
+                            if kind == "rocket":
+                                site_ = launch_site(int(cam_z / CELL + BIG) - BIG)
+                                if site_ is not None:
+                                    rocket = Spacecraft(site_, now)
+                                    _crewed[0] = site_
                             if kind == "pilot":
                                 home_ = zone_home("airport", int(cam_x // CELL),
                                                   int(cam_z // CELL))
@@ -39888,6 +41535,35 @@ def main(stdscr):
                               ord("h"): "horn", ord("H"): "horn",
                               ord("e"): "handbrake",
                               ord("E"): "handbrake"}.get(key, ""), now)
+            elif rocket is not None and key not in (ord("q"), CHEAT_KEY):
+                if key in (27, ord("x"), ord("X")):
+                    if rocket.result is None:
+                        rocket.abort(now)           # twice to mean it
+                    else:
+                        # Out, and back to the foot of the causeway: the boats
+                        # bring everyone back here in the end. Paid at once.
+                        pay_ = rocket.result[3]
+                        if pay_:
+                            wallet.give(pay_)
+                        cam_x, cam_z, yaw = _launch_spot(cam_x, cam_z) or (cam_x, cam_z, yaw)
+                        note, note_at = (rocket.result[0].lower()
+                                         + (" - $%d" % pay_ if pay_ else "")), now
+                        rocket = None
+                        _crewed[0] = None
+                elif key in (ord("z"), ord("Z")):
+                    _big_screens[0] = not _big_screens[0]     # big screens, off and on
+                else:
+                    rocket.key({ord(" "): "stage", ord("w"): "over", curses.KEY_UP: "over",
+                                ord("s"): "back", curses.KEY_DOWN: "back",
+                                ord("W"): "more", ord("S"): "less", ord("c"): "cut",
+                                ord("C"): "cut", ord("h"): "hold", ord("H"): "hold",
+                                ord(">"): "warp+", ord("."): "warp+",
+                                ord("<"): "warp-", ord(","): "warp-",
+                                ord("m"): "map", ord("M"): "map",
+                                ord("v"): "view", ord("V"): "view",
+                                ord("p"): "auto", ord("P"): "auto",
+                                ord("+"): "zoom+", ord("="): "zoom+",
+                                ord("-"): "zoom-", ord("_"): "zoom-"}.get(key, ""), now)
             elif sub is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (27, ord("x"), ord("X")):
                     # Back to the pen, however far down: they winch her in.
@@ -40663,6 +42339,8 @@ def main(stdscr):
             boat.step(now - boat.clock, now)
         if sub is not None:
             sub.step(now - sub.clock, now)
+        if rocket is not None:
+            rocket.step(now - rocket.clock, now)
         if fishing is not None:
             fishing.step(now)
         if (trip is not None and trip["phase"] in ("out", "home")
@@ -40815,6 +42493,13 @@ def main(stdscr):
             fwd = side = spin = 0.0
             autopilot = False
             venue = None
+        if venue is not None and venue[0] == "crew":
+            rocket = Spacecraft(venue[1]["site"], now)
+            _crewed[0] = venue[1]["site"]
+            fwd = side = spin = 0.0
+            autopilot = False
+            venue = None
+            note, note_at = "strapped in, on top of it all. SPACE lights the engines", now
         if venue is not None and venue[0] == "gangway":
             h_ = venue[1]["h"]
             if wallet.take(LINER_FEE):
@@ -41173,6 +42858,9 @@ def main(stdscr):
         elif street and shop is not None:
             ch, co = render_tackle(shop, tackle, width, height, now)
             hud = TACKLE_HUD % shop["at"]["name"].lower()
+        elif street and rocket is not None:
+            ch, co, v = render_spaceflight(rocket, width, height, now)
+            hud = RK_HUD % RK_NAME
         elif street and sub is not None:
             ch, co, v = render_sub(sub, width, height, now)
             hud = SUB_HUD % (SUB_NAME.lower(), deep_zone(sub.y))
@@ -41277,6 +42965,7 @@ def main(stdscr):
                     else "")
                 or ("  ~ the big wheel: p rides, $%d ~" % SEA_WHEEL_FEE
                     if sea_wheel_near(cam_x, cam_z) is not None else "")
+                or crew_hint(cam_x, cam_z)
                 or launch_hint(cam_x, cam_z, now)
                 or harbour_hint(cam_x, cam_z, now)
                 or ("  ~ a drone show over the sea ~"
