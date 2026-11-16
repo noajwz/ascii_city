@@ -76,7 +76,7 @@ or change something. Notes cross-reference each other by title ("see The univers
 - `ramen-counter.md` - The ramen counter
 - `corner-store.md` - The corner store
 - `fortune-teller.md` - The fortune teller
-- `walk-round-town.md` - The walk round town (`j`, the set route)
+- `walk-round-town.md` - The walk round town (`j`), and the long walk past everything (`J`)
 - `vending-machines.md` - Vending machines
 - `manholes.md` - Manholes, and the tunnels under the streets
 - `temple.md` - The temple, and the word of God
@@ -209,7 +209,9 @@ that same walk.
 **The walk round town** (`j`, `tour_step()`) is the other autopilot, asked for beside it: a
 route planned at the keypress through all eight parts of town in a ring, a third of it downtown,
 found on the street grid with turns made to cost so it holds a street, and followed smoothly; it
-goes past every door. See The walk round town.
+goes past every door, drifting from side to side down the middle of the road. `J` is the long
+walk, past everything - the coast, the woods, the Strip, the lighthouse - 42 minutes a lap. See
+The walk round town.
 
 **Turning by key** goes through `turn_rate()`: a tap turns at `TURN_TAP` of `TURN`, holding
 ramps to `TURN_HELD` over `TURN_RAMP` s, and `main()` eases `spin` to it (`TURN_EASE`) rather than
