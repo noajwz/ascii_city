@@ -40859,7 +40859,13 @@ def rk_advice(sc, now):
                 sc.call("orbit", "ORBIT. You are in space - and you are going round.", now)
                 if burning:
                     return "Periapsis %s, apoapsis %s." % (_rk_km(peri), _rk_km(apo))
-                wait, _ = rk_tli(sc)
+                wait, burn = rk_tli(sc)
+                syn = math.tau / (math.sqrt(RK_MU / r ** 3) - RK_MOON_W)
+                if wait < 30.0 or wait > syn - burn - 10.0:
+                    # Open now - and for a moment after, or the count would sit
+                    # at nought and then jump to a whole orbit.
+                    return ("The Moon's window is open. Not that anyone is asking - but h "
+                            "for prograde, W, and burn till the map says MOON ENCOUNTER.")
                 return ("In orbit. To come home: h for retrograde, burn till periapsis is "
                         "about 30 km. Or... the Moon is up there. Mission control would "
                         "never ask you to. Its window opens in %s." % _rk_clock(wait))
