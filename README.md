@@ -388,8 +388,8 @@ python3 tests/checks.py && python3 tests/pty_checks.py
 A few hundred assertions, no framework and nothing to install. The first renders frames and counts
 what landed where; the second forks a pty and actually plays the thing, six games at a time.
 
-The four screenshots under the picture are made the same way: real frames from the renderer
-(a Chinatown street, inside the arcade, a lit alley, a casino on the avenue), written out as text
+The two screenshots under the picture are made the same way: real frames from the renderer
+(a Chinatown street, inside the arcade), written out as text
 in an SVG, in the colours the renderer actually picked.
 
 ## Notes
