@@ -9398,6 +9398,69 @@ check("the autopilot walks the town, not in circles: it holds a street, turns no
       # turned 4 to 5 radians every hundred units, wherever it was.
       all(r_ < 3.5 and sq_ > 60 and far_ > 60.0 for r_, sq_, far_ in aw)
       and sum(r_ for r_, _, _ in aw) / len(aw) < 2.5, str(aw))
+
+
+def walk_tour(x, z, secs, pace=1.0):
+    """The walk round town as the main loop runs it, minus the drawing: a lap,
+    or secs, whichever comes first."""
+    ft = 1.0 / ac.FPS
+    yaw = fwd = spin = 0.0
+    tour = ac.new_tour(x, z, 0.0)
+    planned = {ac.DISTRICTS[k_]["name"] for _, k_ in tour["stops"]}
+    hub_ = tour["stops"][0][0]
+    blocked, turned, path, streak, worst, seen = False, 0.0, 0.0, 0, 0, set()
+    x_0, z_0 = (hub_[0] + 0.5) * ac.CELL, (hub_[1] + 0.5) * ac.CELL
+    for n_ in range(int(secs / ft)):
+        t_, w_ = ac.tour_step(tour, x, z, yaw, n_ * ft, blocked, pace)
+        spin += (t_ * ac.TURN * 0.85 - spin) * min(1.0, ft * 5.0)
+        fwd += (ac.WALK * pace * w_ - fwd) * min(1.0, ft * 2.5)
+        yaw += spin * ft
+        turned += abs(spin * ft)
+        steps_ = max(1, int(abs(fwd * ft) / ac.STEP_MAX) + 1)
+        moved = False
+        for _ in range(steps_):
+            dx_ = math.sin(yaw) * fwd * ft / steps_
+            dz_ = math.cos(yaw) * fwd * ft / steps_
+            if ac.can_stand(x + dx_, z):
+                x, moved = x + dx_, True
+            if ac.can_stand(x, z + dz_):
+                z, moved = z + dz_, True
+        blocked = not moved and fwd > 0.5
+        streak = streak + 1 if blocked else 0
+        worst = max(worst, streak)
+        path += abs(fwd * ft) if moved else 0.0
+        seen.add(ac.district(int(x // ac.CELL), int(z // ac.CELL))["name"])
+        if tour["laps"]:
+            break
+    return dict(lap=tour["laps"] > 0, turn=turned / max(1.0, path) * 100.0, worst=worst,
+                missed=planned - seen, back=math.hypot(x - x_0, z - z_0), kinds=len(planned))
+
+
+def street_start(x, z):
+    ci_, cj_ = int(x // ac.CELL), int(z // ac.CELL)
+    for r_ in range(40):
+        for i_ in range(ci_ - r_, ci_ + r_ + 1):
+            for j_ in range(cj_ - r_, cj_ + r_ + 1):
+                if ac.road_at(i_, j_) and ac.can_stand((i_ + 0.5) * ac.CELL,
+                                                       (j_ + 0.5) * ac.CELL):
+                    return (i_ + 0.5) * ac.CELL, (j_ + 0.5) * ac.CELL
+
+
+wt_ = [walk_tour(*street_start(*p_), 900.0, pc_) for p_, pc_ in
+       ((ac.start_position()[:2], 1.0), ((3000.0, -2000.0), 1.0), ((-5000.0, 800.0), 3.5))]
+check("j walks round town: a lap through every part of it that it planned - all eight "
+      "- round to the downtown it set off from, never stuck against a wall, at any pace",
+      all(r_["lap"] and not r_["missed"] and r_["kinds"] == 8 and r_["worst"] < 10
+          and r_["back"] < 4 * ac.CELL for r_ in wt_), str(wt_))
+check("and it is smoother than the wander: it holds a street and turns only at "
+      "the corners", all(r_["turn"] < 2.5 for r_ in wt_)
+      and sum(r_["turn"] for r_ in wt_) / len(wt_) < sum(r_ for r_, _, _ in aw) / len(aw),
+      "%s against %s" % ([round(r_["turn"], 2) for r_ in wt_],
+                         [round(r_, 2) for r_, _, _ in aw]))
+pl_ = ac.tour_plan(*street_start(*ac.start_position()[:2]))
+check("it starts and ends in downtown, and goes back through it on the way",
+      pl_[0][1] == 0 and sum(1 for _, k_ in pl_ if k_ == 0) >= 2
+      and pl_ == ac.tour_plan(*street_start(*ac.start_position()[:2])))
 check("a tap of a turn key turns a little, gently; held, it turns faster; let go, "
       "it stops",
       0 < ac.turn_rate(1, 0.0, 0.32, 0.1) < ac.TURN * 0.6
