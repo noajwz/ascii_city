@@ -9310,6 +9310,101 @@ ta = "\n".join("".join(r) for r in ac.render_turned_away("club", 80, 24, 1.0)[0]
 check("and if you cannot pay, you are turned away", "not tonight" in ta)
 
 
+# --- the convenience store ------------------------------------------------------
+# One to a square of city, on an ordinary front on a proper street: from
+# outside a window lit white, inside a white room, the neon street through the
+# window, the clerk at the till, five things to buy.
+tiles_ = [(a_, b_) for a_ in range(-8, 8) for b_ in range(-8, 8)]
+stores_ = [ac.store_in_tile(a_, b_) for a_, b_ in tiles_]
+have_ = [s_ for s_ in stores_ if s_ is not None]
+bad_ = []
+for s_ in have_:
+    nx_, nz_ = ac.FACES[s_["f"]]
+    dx_, dz_ = ac.store_door(s_)
+    b_ = ac.lot(s_["i"], s_["j"])
+    if not (ac.road_at(s_["i"] + nx_, s_["j"] + nz_) and ac.can_stand(dx_, dz_)
+            and ac.venue_at(dx_, dz_) is not None
+            and ac.venue_at(dx_, dz_)[0] == "store"
+            and b_["casino"] is None and b_["diner"] is None and not b_["tree"]):
+        bad_.append((s_["i"], s_["j"], s_["f"]))
+check("corner stores: most squares of city have one, on a proper street, "
+      "its door one you can stand in", 0.45 < len(have_) / len(tiles_) < 0.75
+      and not bad_, "%d of %d squares; %s" % (len(have_), len(tiles_), bad_[:3]))
+ac._store_tiles.clear()
+ac._lots.clear()
+check("and they are the same stores whatever was cached",
+      [ac.store_in_tile(a_, b_) for a_, b_ in tiles_] == stores_)
+ssp_ = ac.find_place(x0, z0, "store")
+walk_ = None
+for n_ in range(60):
+    wx_ = ssp_[0] + math.sin(ssp_[2]) * n_ * 0.25
+    wz_ = ssp_[1] + math.cos(ssp_[2]) * n_ * 0.25
+    got_ = ac.venue_at(wx_, wz_)
+    if got_ is not None:
+        walk_ = (n_ * 0.25, got_[0])
+        break
+check("the menu's m stands you across from one, and a few steps in is the door",
+      walk_ is not None and walk_[1] == "store" and walk_[0] < 12.0, str(walk_))
+now_s = 1000.0
+while ac.night(now_s)["blackout"] or ac.night(now_s)["fog"]:
+    now_s += ac.NIGHT_LENGTH
+old_s = ac.SNOW, ac.curses.A_REVERSE
+ac.SNOW, ac.curses.A_REVERSE = 991, 1 << 20
+vs_ = ac.View(ssp_[0], ssp_[1], ssp_[2], 120, 36)
+gs_, cs_, _ = ac.render_street(vs_, now_s)
+white_ = sum(1 for r_ in cs_ for c_ in r_ if c_ == 991 | (1 << 20))
+ac.SNOW, ac.curses.A_REVERSE = old_s
+check("from across the street: the window lit white, the sign, OPEN 24 HOURS",
+      white_ > 150 and "OPEN 24 HOURS" in "\n".join("".join(r_) for r_ in gs_),
+      "%d white cells" % white_)
+st_s = have_[0]
+bad_ = []
+for w_, h_ in ((30, 10), (40, 14), (60, 20), (100, 30), (160, 45), (211, 67), (300, 90),
+               (451, 133)):
+    vis_ = {"seed": 1, "since": 99.0, "bag": {"onigiri": 2}, "said": "Bag?",
+            "said_at": 99.5}
+    try:
+        g_, _ = ac.render_store(st_s, vis_, w_, h_, 100.0, ac.big_scale(w_, h_))
+        t_ = "\n".join("".join(r_) for r_ in g_)
+        if len(g_) != h_ or any(len(r_) != w_ for r_ in g_):
+            bad_.append((w_, h_, "size"))
+        elif w_ >= 40 and h_ >= 14 and not ("lotto ticket" in t_[:] or w_ < 110):
+            bad_.append((w_, h_, "menu"))
+        elif w_ >= 40 and h_ >= 14 and ac.big_scale(w_, h_) == 1 and st_s["name"] not in t_:
+            bad_.append((w_, h_, "name"))
+    except Exception as e_:
+        bad_.append((w_, h_, repr(e_)))
+check("inside, at any size: the room, the name, what there is", not bad_, str(bad_[:3]))
+ac.SNOW, ac.curses.A_REVERSE = 991, 1 << 20
+gi_, ci_ = ac.render_store(st_s, vis_, 160, 45, 100.0, 1)
+ac.SNOW, ac.curses.A_REVERSE = old_s
+lit_s = sum(1 for r_ in ci_ for c_ in r_ if c_ & (1 << 20))
+dark_s = sum(1 for r_ in ci_ for c_ in r_ if c_ == 0)
+check("a bright white room, and the window onto the dark street",
+      lit_s > 160 * 45 * 0.55 and dark_s > 160 * 45 * 0.08,
+      "%d lit, %d dark of %d" % (lit_s, dark_s, 160 * 45))
+ac._big_screens[0] = True
+gb_, cb_ = ac.render_store(st_s, vis_, 300, 90, 100.0, 2)
+check("on a big window the name in block letters, and z takes them away",
+      ac.big_scale(300, 90) == 2 and st_s["name"] not in "\n".join("".join(r_) for r_ in
+                                                                     gb_[:3])
+      and st_s["name"] in "\n".join("".join(r_) for r_ in
+                                    ac.render_store(st_s, vis_, 300, 90, 100.0, 1)[0]))
+wl_ = ac.Wallet()
+wl_.money = 3
+vis_ = {"seed": 7, "since": 0.0, "bag": {}, "said": "", "said_at": -1e9}
+s1_ = ac.store_buy(vis_, 1, wl_, 10.0)
+s2_ = ac.store_buy(vis_, 2, wl_, 11.0)
+check("buying: it costs what it says, it goes in the bag, and no money no noodles",
+      "hot coffee" in s1_ and wl_.money == 2 and vis_["bag"] == {"hot coffee": 1}
+      and s2_ == "that's $3" and vis_["said"])
+wins_ = 0
+wl_.money = 10 ** 6
+for n_ in range(3000):
+    vis_ = {"seed": n_, "since": 0.0, "bag": {}, "said": "", "said_at": -1e9}
+    wins_ += "nothing" not in ac.store_buy(vis_, 4, wl_, n_ * 0.37)
+check("the lotto: now and then a ticket wins", 100 < wins_ < 900, "%d in 3000" % wins_)
+
 # --- the coast ----------------------------------------------------------------
 # East of the start the city ends at the sea: a row of hotels, a road along the
 # front, a boardwalk, a beach, water to the horizon, the river running out into

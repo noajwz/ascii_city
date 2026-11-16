@@ -102,6 +102,18 @@ def cases(run, report):
     ok &= report("casino slot: bet up, pull, bet down", *run(
         [(F1, .5), (b"\x01c", 1.0)] + IN + [(b"+", .3), (b"p", 3.0), (b"-", .3),
          (b"p", 3.0), (b"b", .6), (b"k", 3.0)], cols=100, rows=30))
+    # A corner store: m on the panel, a few steps in, a coffee, x out.
+    cs_st, cs_out = run([(F1, .5), (b"m", 1.0)] + IN + [(b"", 1.0), (b"2", 1.0),
+                                                       (b"z", .5), (b"z", .5),
+                                                       (b"x", 1.2), (b"w", .5)],
+                        cols=300, rows=60)
+    cs_plain = ANSI.sub(b"", cs_out).decode("utf-8", "replace")
+    cs_ok = report("a corner store: in, a coffee, out", cs_st, cs_out)
+    if cs_ok and cs_out and not ("open 24 hours" in cs_plain and "hot coffee" in cs_plain
+                                 and "you step back out" in cs_plain):
+        print("    not in, no coffee, or not out")
+        cs_ok = False
+    ok &= cs_ok
     # x leaves: in at the casino's door, and x walks you out. And with the
     # doors shut on the panel, walking at the same door takes you nowhere.
     xl_st, xl_out = run([(F1, .5), (b"\x01c", 1.0)] + IN + [(b"", 1.0), (b"x", 1.5),

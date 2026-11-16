@@ -106,3 +106,6 @@ shut. Somewhere you are already in stays. For walking about without being pulled
 **`y`, a drone show, and `j`, glowing sea** (NIGHTS, 2026-11-16): on to the next such night -
 the drone show starting in a few seconds - then `c` for the coast. Both stand aside for ctrl-a,
 whose `y` is the lit alley and `j` the claw machine.
+
+**`m`, corner store** (AND THE REST, 2026-11-16): across the pavement from the nearest one, facing
+its window - see The corner store.
