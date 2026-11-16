@@ -39611,6 +39611,7 @@ class Spacecraft:
         self.result = None                      # (headline, words, when, pay)
         self.on_moon = None                     # where she stands on it
         self.landed_moon = False
+        self.moon_at = -1e9                     # when, by the clock on the wall
         self.reached_orbit = False
         self.maxalt = 0.0
         self.pred, self.pred_at = None, -1e9
@@ -39931,6 +39932,7 @@ class Spacecraft:
             self.ang = up
             self.on_moon = up - (math.atan2(-my, -mx))      # against the way to Earth
             self.landed_moon = True
+            self.moon_at = now
             self.warp = 0
             self._stand(now)
             self.say("CONTACT LIGHT. You are on the Moon.", now)
@@ -40811,6 +40813,10 @@ def rk_advice(sc, now):
     if sc.state == "pad":
         return "Go for launch. SPACE lights the engines."
     if sc.state == "moon":
+        down = now - sc.moon_at
+        for n, line in enumerate(RK_MOON_CALLS):
+            if down > 4.0 + n * 5.0:
+                sc.call("moon%d" % n, line, now)
         return ("On the Moon. SPACE lifts off - then home: burn the way the Moon is going"
                 " backwards, till the map shows the Earth at 27 to 45 km.")
     name, rx, ry, vx, vy, alt = sc.rel()
@@ -40962,6 +40968,107 @@ def rk_dash(ch, co, sc, width, height, top, k, now):
     _text(ch, co, height - 1, 2, ("CAPCOM: " + words)[:width - 4], GOLD)
 
 
+# --- the easter egg -------------------------------------------------------------
+# Through the old man's telescope (render_telescope()) the Moon does something
+# on a loop: a lander comes down, somebody plants a flag and waves, a cow goes
+# over it, and it winks. Land there yourself and it was all true: his lander,
+# his flag, and the cow, a little way off across the dust, chewing - and now
+# and then it winks. Mission control has nothing to say about it, at length.
+RK_LANDER_ART = [
+    "   _|_   ",
+    "  /___\\  ",
+    " |[ o ]| ",
+    " /|   |\\ ",
+    "/ |___| \\",
+]
+RK_FLAG_ART = [
+    "|>>>>",
+    "|>>>>",
+    "|    ",
+    "|    ",
+    "|    ",
+]
+RK_COW_ART = [
+    " (__)     ",
+    " (oo)____ ",
+    "  \\/    )\\",
+    "   ||--|| ",
+    "   ^^  ^^ ",
+]
+RK_COW_WINK = " (-o)____ "
+RK_MOON_CALLS = [
+    "...mission control? There is a flag here. And a lander.",
+    "And a cow. There is a cow on the Moon. It is looking at me.",
+    "Mission control has nothing to say. Somewhere an old man is laughing.",
+]
+# Where each stands from you: metres ahead, to the right, how wide and tall.
+RK_MOON_PROPS = [("lander", 26.0, -11.0, 4.0, 3.2), ("flag", 16.0, 5.5, 1.2, 2.0),
+                 ("cow", 10.0, -1.0, 2.6, 1.5)]
+
+
+def rk_moon_props(ch, co, rows, cam, fwd, up, sc, now):
+    """The old man's things, on the Moon round you: stood on the ground in
+    front of where you came down, each stretched to the size it is from
+    there, the cow chewing, now and then winking, now and then a moo."""
+    width = len(ch[0])
+    right = _rk_cross(up, fwd)
+    cx, hz = (width - 1) / 2.0, rows / 2.0
+    fx = cx / PLANE
+    fy = fx * 0.5
+    mx, my, _, _ = rk_moon(sc.t)
+    rx, ry = sc.x - mx, sc.y - my
+    r = math.hypot(rx, ry)
+    gu = (rx / r, ry / r, 0.0)                      # the ground's up
+    d = fwd[0] * gu[0] + fwd[1] * gu[1] + fwd[2] * gu[2]
+    gf = _rk_unit((fwd[0] - d * gu[0], fwd[1] - d * gu[1], fwd[2] - d * gu[2]))
+    gr = _rk_cross(gu, gf)
+
+    def project(ahead, side, high):
+        px = sc.x + gf[0] * ahead + gr[0] * side + gu[0] * (high - 1.0)
+        py = sc.y + gf[1] * ahead + gr[1] * side + gu[1] * (high - 1.0)
+        pz = gf[2] * ahead + gr[2] * side + gu[2] * (high - 1.0)
+        rel = (px - cam[0], py - cam[1], pz - cam[2])
+        depth = rel[0] * fwd[0] + rel[1] * fwd[1] + rel[2] * fwd[2]
+        if depth < 1.0:
+            return None
+        return (cx + (rel[0] * right[0] + rel[1] * right[1] + rel[2] * right[2]) / depth * fx,
+                hz - (rel[0] * up[0] + rel[1] * up[1] + rel[2] * up[2]) / depth * fy, depth)
+
+    def put(x, y, g, a):
+        x, y = int(round(x)), int(round(y))
+        if 0 <= y < rows and 0 <= x < width:
+            ch[y][x], co[y][x] = g, a
+
+    def fit(art, cols, rws):
+        # A whole number of times its own size, so every character is a
+        # clean block of itself: stretched by any other amount, some
+        # doubled and some not, and the cow's face came out ((__~~).
+        n = max(1, int(round(min(cols / len(art[0]), rws / len(art)))))
+        return len(art[0]) * n, len(art) * n
+
+    for kind, ahead, side, w, h in sorted(RK_MOON_PROPS, key=lambda p_: -p_[1]):
+        foot = project(ahead, side, 0.0)
+        if foot is None:
+            continue
+        sx, sy, depth = foot
+        art_ = {"lander": RK_LANDER_ART, "flag": RK_FLAG_ART}.get(kind, RK_COW_ART)
+        cols, rws = fit(art_, w * fx / depth, h * fy / depth)
+        if kind == "lander":
+            _deep_blit(put, RK_LANDER_ART, sx, sy, cols, rws, STAR)
+        elif kind == "flag":
+            _deep_blit(put, RK_FLAG_ART, sx, sy, cols, rws, ROU_RED)
+        else:
+            art = list(RK_COW_ART)
+            if int(now / 5.0) % 4 == 3 and now % 5.0 < 0.5:
+                art[1] = RK_COW_WINK                # it winks at you
+            chew = int(now * 2.0) % 2
+            if chew:
+                art[0] = art[0].replace("(__)", "(_~)")
+            _deep_blit(put, art, sx + cols * 0.0, sy, cols, rws, SNOW)
+            if now % 9.0 < 2.0:
+                _text(ch, co, int(sy - rws - 1), int(sx), "moo.", GOLD)
+
+
 def render_spaceflight(sc, width, height, now):
     """In the capsule. Low down, the window is the city itself, from where the
     capsule is, looking back west at the land (mission control's onboard
@@ -41001,6 +41108,8 @@ def render_spaceflight(sc, width, height, now):
         elif sc.view == "window":
             cam, fwd, up = rk_camera(sc)
             rk_scene(ch, co, width, top, cam, fwd, up, sc.t, now)
+            if sc.state == "moon" or (name == "moon" and alt < 400.0):
+                rk_moon_props(ch, co, top, cam, fwd, up, sc, now)
         else:
             # Beside her, near enough that what is left of her is a good part
             # of the picture, a little over and looking down past her.

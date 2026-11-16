@@ -120,5 +120,20 @@ climb and the landing, which are the parts to watch.
 
 **What it costs**, at 300x90: 15 to 23 ms a frame, every view, all the way through.
 
-The Moon is not on the panel and mission control never sends you: it is there to be found by
-flying on.
+## The easter egg
+
+The Moon is not on the panel and mission control never sends you: in orbit it only lets slip
+that the Moon is up there and when its window opens ("Mission control would never ask you
+to"), and when you burn for it, "...where are you going?". Once you are on the way, `p` will
+land you (`rk_goal()` takes it you want the Moon), and once there, take you home.
+
+**On the Moon it was all true.** Through the old man's telescope (see the telescope, in
+`render_telescope()`) the Moon does something on a loop: a lander comes down, somebody plants a
+flag and waves, a cow goes over it, and it winks. Come down on it yourself and in front of you
+across the dust (`rk_moon_props()`, `RK_MOON_PROPS`): his lander (`RK_LANDER_ART`), his flag
+(`RK_FLAG_ART`), and the cow (`RK_COW_ART`), chewing, now and then winking (`RK_COW_WINK`), now
+and then a moo - and the Earth over the horizon behind them. Mission control, a few seconds
+apart (`RK_MOON_CALLS`), has nothing to say about it, at length. Each drawing is a whole number
+of times its own size from where you stand (`fit()`): stretched by any other amount some
+characters doubled and some did not, and the cow's face came out `((__~~)`. They stand
+wherever you come down - the Moon is the old man's, all of it.

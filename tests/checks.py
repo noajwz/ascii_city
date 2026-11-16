@@ -11383,6 +11383,17 @@ for name_, s_ in snaps_:
                 bad_.append((name_, view_, w_, h_, repr(e_)))
 check("in the capsule: every view at every size, from the pad to the sea",
       not bad_ and snaps_[-1][1].result[0] == "SPLASHDOWN", str(bad_[:3]))
+down_ = dict(snaps_)["down"]
+down_.view = "window"
+gw_ = "\n".join("".join(r_) for r_ in ac.render_spaceflight(down_, 120, 36, 1.0)[0])
+check("the easter egg: on the Moon it was all true - his lander, his flag, the cow",
+      down_.state == "moon" and "(oo)" in gw_ and "|>>>>" in gw_ and "|[ o ]|" in gw_)
+down_.moon_at = 0.0
+down_.auto = False
+for t_ in (5.0, 10.0, 15.0, 20.0):
+    ac.rk_advice(down_, t_)
+check("and mission control has nothing to say about it, at length",
+      {"moon0", "moon1", "moon2"} <= down_.calls and "cow" in ac.RK_MOON_CALLS[1])
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
