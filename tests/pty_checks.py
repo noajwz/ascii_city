@@ -453,6 +453,22 @@ def cases(run, report):
         print("    did not get her out, or not back")
         sb_ok = False
     ok &= sb_ok
+    # The submarine: from the pen, out, down, a ping, the lamp, back.
+    su_st, su_out = run([(F1, .5), (b"+", .4), (b"\x01[", 1.5), (b"p", 1.0)]
+                        + [(b"w", .2)] * 3 + [(b"f", .3)] * 4 + [(b"", 4.0),
+                                                                 (b"h", .5), (b"l", .4),
+                                                                 (b"l", .4), (b"a", .3),
+                                                                 (b"z", .5), (b"z", .5),
+                                                                 (b"x", 1.2), (b"w", .5)],
+                        cols=300, rows=60)
+    su_plain = ANSI.sub(b"", su_out).decode("utf-8", "replace")
+    su_ok = report("the submarine: out, down, a ping, back to the pen", su_st, su_out)
+    if su_ok and su_out and not ("the hatch shuts" in su_plain and "DEPTH" in su_plain
+                                 and "the dark comes" in su_plain and "PING" in su_plain
+                                 and "back at the pen" in su_plain):
+        print("    did not get her out, or not down, or not back")
+        su_ok = False
+    ok &= su_ok
     # Fishing: a kiosk on a river pier, a rod, worms and a float, out facing
     # the water, the panel's big one next, a cast, the strike, the fight.
     DOWN, RIGHT = b"\x1bOB", b"\x1bOC"

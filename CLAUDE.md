@@ -40,6 +40,7 @@ or change something. Notes cross-reference each other by title ("see The univers
 - `coast.md` - The coast
 - `space-centre.md` - The space centre, its launch pad out on the sea, and the launches
 - `harbour.md` - The harbour, the cruise ship, and a cruise down the coast
+- `submarine.md` - The submarine, and the sea from inside it
 - `fishing.md` - Fishing, and the tackle shops
 - `fireworks-over-the-bay.md` - Fireworks over the bay
 - `festival-in-chinatown.md` - The festival in Chinatown

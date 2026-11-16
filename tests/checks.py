@@ -27,7 +27,7 @@ ac.COAST = False
 # And the ways to the coast come off the lists till then: with no sea there
 # is no beach for the taxi or the checks' jumps to find.
 COAST_KINDS = ("beach", "seapier", "seawheel", "launchpad", "mission",
-               "harbour", "gangway", "marina", "piertackle", "herring")
+               "harbour", "gangway", "marina", "piertackle", "herring", "subpen")
 coast_jumps_ = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] in COAST_KINDS]
 coast_fares_ = [p_ for p_ in ac.TAXI_DESTS if p_[1] in COAST_KINDS]
 ac.CHEAT_HIDDEN[:] = [p_ for p_ in ac.CHEAT_HIDDEN if p_[2] not in COAST_KINDS]
@@ -10094,6 +10094,207 @@ for w_, h_ in ((40, 14), (60, 20), (100, 30), (211, 67), (300, 90)):
     except Exception as e_:
         bad_.append((w_, h_, repr(e_)))
 check("at the helm, at any size: the bow, the wheel, the knots", not bad_, str(bad_))
+
+# The submarine: from the pen out along the quay past the boat hire, driven
+# like the speedboat, and down - f floods her tanks, r blows them - to the
+# bottom of the trench the Herring fishes over, with her lamp on what lives
+# at each depth.
+ps_ = ac.find_place(x0, z0, "subpen")
+spx_, spz_ = ac.sub_pen(hb_)
+trench_ = next(e_ for e_ in ac.EXPEDITIONS if e_.get("site") == "trench")
+check("the sub pen on the quay past the boat hire: a stand to step up to, p",
+      ps_ is not None and ac.can_stand(ps_[0], ps_[1])
+      and ac.sub_pen_near(ps_[0], ps_[1]) == hb_
+      and "submarine" in ac.harbour_hint(ps_[0], ps_[1], 0.0)
+      and spx_ - mx_ > 40.0 and ac.herring_berth(hb_)[0] - spx_ > 40.0
+      and ac.boat_clear(spx_, spz_ + ac.SUB_MOOR)
+      and len({len(r_) for r_ in ac.SUB_MOORED}) == 1)
+ax_, az_ = ac.exp_anchor(hb_, "trench")
+check("the trench is where the Herring fishes it: off the beach and along",
+      ac.DEEP_OUT == trench_["out"] and ac.DEEP_ALONG == trench_["along"]
+      and abs(ac._trench_mid(az_) - az_) < 1.0
+      and ac.seabed(ax_, az_) > 600.0 and ac.seabed(ax_ - 400.0, az_) < 240.0,
+      "%.0f under her, %.0f short of it" % (ac.seabed(ax_, az_),
+                                            ac.seabed(ax_ - 400.0, az_)))
+shelf_ = [ac.seabed(spx_ + d_, spz_ + 10.0) for d_ in range(0, 1000, 50)]
+check("the bottom goes down from the beach: shallow by the quay, a shelf, then off",
+      shelf_[0] < 12.0 and all(b_ > a_ - 6.0 for a_, b_ in zip(shelf_, shelf_[1:]))
+      and ac.seabed(ac.shore_x(spz_) - 5.0, spz_) == 0.0
+      and 180.0 < ac.seabed(ac.shore_x(spz_) + 1700.0, spz_ + 3000.0) < 260.0,
+      "%.0f by the quay, %.0f a kilometre out" % (shelf_[0], shelf_[-1]))
+b0_ = [ac.seabed(ax_ + i_ * 7.3, az_ + i_ * 13.1) for i_ in range(40)]
+ac._seabed_cache.clear()
+check("and it is the same bottom whatever was cached",
+      b0_ == [ac.seabed(ax_ + i_ * 7.3, az_ + i_ * 13.1) for i_ in range(40)])
+old_x_ = ac.COAST
+ac.COAST = False
+check("with no sea there is no bottom", ac.seabed(ax_, az_) == 0.0)
+ac.COAST = old_x_
+
+
+def dive_(sb_, t_, secs_, keys_=(), every_=0.5):
+    """secs_ of her, pressing keys_ every every_ seconds; (x, depth, z)s."""
+    went_ = []
+    for n_ in range(int(secs_ * 30)):
+        if keys_ and n_ % max(1, int(every_ * 30)) == 0:
+            for k_ in keys_:
+                sb_.key(k_, t_)
+        t_ += 1.0 / 30.0
+        ac._clock[0] = t_
+        sb_.step(1.0 / 30.0, t_)
+        went_.append((sb_.x, sb_.y, sb_.z))
+    return t_, went_
+
+
+sb_ = ac.Sub(spx_, spz_ + ac.SUB_MOOR, math.pi * 0.5, 500.0, 5)
+for _ in range(6):
+    sb_.key("faster", 500.0)
+ts_, out_ = dive_(sb_, 500.0, 12.0)
+check("w takes her out along the top, slower than the speedboat",
+      sb_.x - spx_ > 120.0 and abs(sb_.speed) <= ac.SUB_TOP < ac.BOAT_TOP
+      and all(y_ == 0.0 for _, y_, _ in out_)
+      and all(ac.boat_clear(x_, z_) for x_, _, z_ in out_),
+      "%.0f out at %.0f a second" % (sb_.x - spx_, sb_.speed))
+sb_ = ac.Sub(ac.shore_x(spz_) + 900.0, spz_ + 40.0, math.pi * 0.5, ts_, 5)
+ts_, down_ = dive_(sb_, ts_, 8.0, ["dive"], 1.0)
+check("f floods her tanks: down she goes, a little more each press",
+      sb_.y > 25.0
+      and all(b_[1] >= a_[1] - 1e-9 for a_, b_ in zip(down_, down_[1:])),
+      "%.0f down" % sb_.y)
+ts_, sank_ = dive_(sb_, ts_, 30.0)
+check("and she will not go through the bottom: she settles on her skids",
+      all(ac.seabed(x_, z_) - y_ >= ac.SUB_HULL - 1e-6 for x_, y_, z_ in sank_)
+      and abs(ac.seabed(sb_.x, sb_.z) - ac.SUB_HULL - sb_.y) < 0.5
+      and sb_.want_y <= 0.0, "%.1f off the bottom" % (ac.seabed(sb_.x, sb_.z) - sb_.y))
+ts_, up_ = dive_(sb_, ts_, 25.0, ["rise"], 1.0)
+check("r blows them: up to the top and no further", sb_.y == 0.0
+      and all(y_ >= 0.0 for _, y_, _ in up_) and "SURFACED" == sb_.said)
+sb_.key("dive", ts_)
+sb_.key("brake", ts_)
+check("space stops her both ways", sb_.want_y == 0.0 and sb_.want == 0.0)
+wall_ = ac.Sub(ax_ - 60.0, az_, -math.pi * 0.5, 600.0, 6)
+wall_.y = 450.0
+for _ in range(6):
+    wall_.key("faster", 600.0)
+_, walled_ = dive_(wall_, 600.0, 15.0)
+check("down in the trench she stops at its wall, the bottom coming up in front",
+      all(ac.seabed(x_, z_) - y_ > ac.SUB_HULL for x_, y_, z_ in walled_)
+      and ac.seabed(ax_ - 120.0, az_) < 450.0 and wall_.x > ax_ - 125.0,
+      "%.0f in from her anchorage" % (ax_ - wall_.x))
+tap_s_ = ac.Sub(ax_ - 600.0, az_, math.pi * 0.5, 700.0, 7)
+for _ in range(6):
+    tap_s_.key("faster", 700.0)
+t7_, _ = dive_(tap_s_, 700.0, 3.0)
+h7_ = tap_s_.heading
+tap_s_.key("left", t7_)
+dive_(tap_s_, t7_, 1.5)
+check("the speedboat's gentle wheel: a tap is a nudge",
+      0.01 < abs(tap_s_.heading - h7_) < 0.35, "%.2f rad" % abs(tap_s_.heading - h7_))
+
+# What lives down there: each kind at its own depths, over the bottom - where
+# a group goes round along a trench wall the rock lifts it, so give that room.
+wrong_, kinds_ = [], {}
+for gx_, gz_, gy_ in ((spx_ + 300.0, spz_ + 50.0, 10.0), (ax_ - 700.0, az_, 60.0),
+                      (ax_ - 400.0, az_ + 200.0, 150.0), (ax_, az_, 320.0),
+                      (ax_, az_ - 300.0, 480.0), (ax_ + 10.0, az_ + 500.0, 620.0)):
+    for sp_, m_, mem_, _ in ac.deep_groups(gx_, gz_, gy_, 100.0, 150.0):
+        kinds_.setdefault(sp_["name"], 0)
+        kinds_[sp_["name"]] += 1
+        for x_, y_, z_ in mem_:
+            if not (sp_["lo"] - 90.0 <= y_ <= sp_["hi"] + 12.0) or y_ > ac.seabed(
+                    x_, z_) + 2.0:
+                wrong_.append((sp_["name"], int(y_)))
+check("each kind swims at its own depths, and none in the rock",
+      not wrong_ and len(kinds_) >= 14, "%d kinds; %s" % (len(kinds_), wrong_[:4]))
+check("down in the trench the deep ones: anglerfish, barreleye, the dumbo",
+      all(n_ in kinds_ for n_ in ("anglerfish", "barreleye", "grenadier"))
+      and "mackerel" in kinds_)
+legend_, groups_ = 0, 0
+for i_ in range(-30, 30, 4):
+    for sp_, _, _, _ in ac.deep_groups(ax_, az_ + i_ * 40.0, 500.0, 100.0, 80.0):
+        groups_ += 1
+        legend_ += sp_["name"] == "giant squid"
+check("the giant squid is there to be found, and rare",
+      0 < legend_ < groups_ * 0.06, "%d of %d" % (legend_, groups_))
+check("everything in the log is something down there",
+      len(set(ac.DEEP_LOG)) == len(ac.DEEP_LOG)
+      and all(p_.get("log") or p_["name"] == "rock" or p_["name"] == "starfish"
+              for p_ in ac.DEEP_PROPS)
+      and all(s_["shape"] in ac.DEEP_DRAW for s_ in ac.DEEP_LIFE)
+      and all(len({len(r_) for r_ in p_["draw"]}) == 1 for p_ in ac.DEEP_PROPS
+              if isinstance(p_["draw"], list)))
+
+# In her bubble, at every size and every depth, lamp on and off, pinging.
+ac.FOG, ac.FOG_DIM, ac.STAR_DIM, ac.CROWN_BLUE = 1, 1, 1, 1
+bad_ = []
+looks_ = {}
+for w_, h_ in ((40, 14), (60, 20), (100, 30), (160, 48), (211, 67), (300, 90),
+               (453, 133)):
+    for name_, x_, z_, y_ in (("top", spx_ + 60.0, spz_ + 10.0, 0.0),
+                              ("going under", spx_ + 60.0, spz_ + 10.0, 0.3),
+                              ("shallows", spx_ + 300.0, spz_ + 50.0, 8.0),
+                              ("trench", ax_, az_, 400.0), ("bottom", ax_, az_, 640.0)):
+        for lamp_, ping_ in ((True, False), (False, True)):
+            sv_ = ac.Sub(x_, z_, math.pi * 0.5, 800.0, 8)
+            sv_.y, sv_.lamp = y_, lamp_
+            if ping_:
+                sv_.ping_at = 799.0
+            try:
+                g_, _, _ = ac.render_sub(sv_, w_, h_, 800.0)
+                txt_ = "".join("".join(r_) for r_ in g_)
+                if len(g_) != h_ or any(len(r_) != w_ for r_ in g_) or not (
+                        "M" in txt_ and ("KNOT" in txt_ or w_ < 40)):
+                    bad_.append((w_, h_, name_))
+                looks_[(w_, h_, name_, lamp_)] = g_
+            except Exception as e_:
+                bad_.append((w_, h_, name_, repr(e_)))
+check("in her bubble at any size and depth, lamp on or off, pinging",
+      not bad_, str(bad_[:4]))
+check("one scale for the big screens: the depth in block letters at 300x90",
+      ac.big_scale(300, 90) == 2 and ac.big_scale(299, 90) == 1
+      and "METRES DOWN" in "".join("".join(r_) for r_ in
+                                   looks_[(300, 90, "shallows", True)])
+      and "DEPTH" in "".join("".join(r_) for r_ in looks_[(211, 67, "shallows", True)]))
+ac._big_screens[0] = False
+zt_ = "".join("".join(r_) for r_ in ac.render_sub(sv_, 300, 90, 800.0)[0])
+ac._big_screens[0] = True
+check("and z gives the small dash back on a big window", "DEPTH" in zt_
+      and "METRES DOWN" not in zt_)
+
+
+def lit_(g_):
+    return sum(c_ not in " " for r_ in g_[:int(len(g_) * 0.8)] for c_ in r_)
+
+
+dark_ = ac.Sub(ax_, az_, math.pi * 0.5, 800.0, 8)
+dark_.y = 400.0
+on_ = lit_(ac.render_sub(dark_, 160, 48, 800.0)[0])
+dark_.lamp = False
+off_ = lit_(ac.render_sub(dark_, 160, 48, 800.0)[0])
+check("her lamp lights the bottom; off, the trench is black but for its lights",
+      lit_(looks_[(160, 48, "shallows", True)]) > 1000 and 0 < off_ < on_,
+      "%d cells lit in the shallows; in the trench %d, %d without the lamp"
+      % (lit_(looks_[(160, 48, "shallows", True)]), on_, off_))
+sv_ = ac.Sub(spx_ + 300.0, spz_ + 50.0, 0.3, 900.0, 9)
+sv_.y = 8.0
+g1_ = ac.render_sub(sv_, 160, 48, 900.0)[0]
+ac._seabed_cache.clear()
+g2_ = ac.render_sub(sv_, 160, 48, 900.0)[0]
+check("the sea is the same sea whatever was cached", g1_ == g2_)
+logged_ = ac.Sub(spx_ + 300.0, spz_ + 50.0, 0.3, 1000.0, 10)
+logged_.y = 8.0
+t10_ = 1000.0
+for _ in range(4):
+    logged_.key("faster", t10_)
+for n_ in range(240):
+    t10_ += 1.0 / 30.0
+    ac._clock[0] = t10_
+    logged_.step(1.0 / 30.0, t10_)
+    if n_ % 6 == 0:
+        ac.render_sub(logged_, 120, 36, t10_)
+check("what comes close in her light goes in the log",
+      2 <= len(logged_.seen) and all(n_ in ac.DEEP_LOG for n_ in logged_.seen),
+      ", ".join(sorted(logged_.seen)))
 
 # --- fishing ----------------------------------------------------------------
 # A rod, bait and a float from a tackle shop - one on every ocean pier, a
