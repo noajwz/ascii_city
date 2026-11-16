@@ -41,8 +41,8 @@ nothing saved.
 - **Fishing** — buy a rod, bait and a float at a tackle shop and fish the river, the woods'
   lake, the surf, off the pier, or far out on a fishing boat whose captain is more or less a
   pirate: 44 kinds of fish, each where it lives.
-- **Secrets** — tunnels under every street, somebody living down a manhole, a mystery that starts
-  with a note, and things in the woods you will not like.
+- **Secrets** — tunnels under every street, somebody living down a manhole, and things in the
+  woods you will not like.
 
 
 ## Install
@@ -188,8 +188,8 @@ And two things outside the terminal:
 - **Fishing** — buy a rod, bait and a float at a tackle shop and fish the river, the woods'
   lake, the surf, off the pier, or far out on a fishing boat whose captain is more or less a
   pirate: 44 kinds of fish, each where it lives.
-- **Secrets** — tunnels under every street, somebody living down a manhole, a mystery that starts
-  with a note, and things in the woods you will not like.
+- **Secrets** — tunnels under every street, somebody living down a manhole, and things in the
+  woods you will not like.
 
 You start the night with $1,000, one balance for everything, and nothing tops it up.
 
@@ -372,7 +372,6 @@ the city is infinite, identical every time you walk back to it, and held in no m
 
 - **Manholes** in the streets, some of them steaming, and **tunnels** under every street, with a
   ladder at every manhole — and somebody's door down there, if you can find it.
-- **A mystery** that starts with a note and goes all over the city.
 - **The woods** — one great block of trees, a long walk from anywhere, with trails you can get
   lost on, a lake with the stars in it, things in the dark with eyes, and once in a while a rave in
   the hollow in the middle that nobody asked permission for. Somebody there is not dancing, and
