@@ -28195,22 +28195,21 @@ CHEAT_PLACES = [
     # Only what the taxi does not go to: everywhere it does - the casino, the
     # club, the pictures and the rest of TAXI_DESTS - is a fare away from any
     # street, so the panel was asked to drop them, and the FUN, EAT and
-    # AROUND TOWN groups with them. Letters where they can be the place's own
-    # (b bar, r roof, t turtles, f fly), never a key that is another one's
-    # other case, and never a digit: those are the parts of town.
+    # AROUND TOWN groups with them. The coast and the harbour are the two
+    # exceptions, asked for by name on 2026-11-16. Letters where they can be
+    # the place's own (b bar, r roof, t turtles, f fly, c coast), never a key
+    # that is another one's other case, and never a digit: those are the
+    # parts of town.
     ("v", "woods rave", "rave"),
     ("[", "factory rave", "warehouse"),
     ("9", "the factories", "industrial"),
-    ("]", "building site", "site"),
-    ("}", "empty lot", "plot"),
     ("0", "the suburbs", "suburbs"),
-    (":", "the strip", "strip"),
-    ("'", "the airport", "airport"),
-    ("(", "fountain show", "fountain"),
     ("{", "the university", "university"),
+    ("c", "the coast", "beach"),
+    (":", "the strip", "strip"),
     ("-", "a metro station", "metro"),
-    ('"', "the library", "library"),
-    (".", "a flight", "flight"),
+    ("'", "the airport", "airport"),
+    (".", "the harbour", "harbour"),
     (",", "pokemon center", "center"),
     (";", "lemonade, 3am", "lemonade"),
     ("?", "the stargazer", "telescope"),
@@ -28249,17 +28248,23 @@ CHEAT_HIDDEN = [
     ("8", "boat hire", "marina"), ("9", "the pier's tackle shop", "piertackle"),
     ("0", "a bait kiosk", "kiosk"), ("v", "the fishing boat", "herring"),
     ("[", "the sub pen", "subpen"),
+    # Off the panel on 2026-11-16, for the checks still.
+    ("]", "building site", "site"), ("}", "empty lot", "plot"),
+    ("(", "fountain show", "fountain"), ('"', "the library", "library"),
+    (".", "a flight", "flight"),
 ]
 CHEAT_TEST = 1                          # ctrl-a
 TEST_JUMPS = bool(os.environ.get("ASCII_CITY_TEST"))
 
-# Placed parts of town, listed after the picked ones.
-CHEAT_ZONES = ["industrial", "site", "plot", "suburbs", "strip", "airport"]
+# Placed parts of town, listed after the picked ones: the factories, the
+# suburbs, the university and the coast.
+CHEAT_ZONES = ["industrial", "suburbs", "university", "beach"]
 
 # The panel's groups, by what you would go there for.
 CHEAT_GROUPS = [
-    ("NIGHTLIFE", ["rave", "warehouse"]),
+    ("NIGHTLIFE", ["rave", "warehouse", "strip", "lemonade", "telescope"]),
     ("VIEWS", ["billboard"]),
+    ("TRAVEL", ["metro", "airport", "harbour"]),
 ]
 
 
@@ -29374,7 +29379,7 @@ def find_place(x, z, kind):
 
 
 # The third column.
-CHEAT_MORE = ["university", "library", "metro", "flight", "pilot", "center", "bar",
+CHEAT_MORE = ["pilot", "center", "bar",
               "lowroof", "washing", "bowling", "lair", "vending", "festival"]
 
 
@@ -29390,7 +29395,7 @@ def draw_cheats(ch, co, note):
     test that it opens at 80x24."""
     height, width = len(ch), len(ch[0])
     names = {kind: (k, name) for k, name, kind in CHEAT_PLACES}
-    groups = {g: [("", g)] + [names[kind] for kind in kinds]
+    groups = {g: [("", g)] + [names[kind] for kind in kinds if kind in names]
               for g, kinds in CHEAT_GROUPS}
     gap = [("", "")]
     left = (groups["NIGHTLIFE"] + [("/", "closing time")] + gap
@@ -29399,6 +29404,7 @@ def draw_cheats(ch, co, note):
             + groups["VIEWS"])
     middle = [("", "PARTS OF TOWN")] + [(d["key"], d["name"]) for d in DISTRICTS]
     middle += [names[kind] for kind in CHEAT_ZONES if kind in names]
+    middle += gap + groups["TRAVEL"]
     sky = [("", "WEATHER & SKY"),
            ("w", weather_name()), ("L", "strike now"),
            ("s", "sky " + clouds_name()), ("a", "people " + crowd_name()),
@@ -29407,7 +29413,6 @@ def draw_cheats(ch, co, note):
            ("n", "the next one"), ("u", "a strange night"),
            ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
            ("&", "a blackout"), ("#", "a fog night"),
-           names["lemonade"], names["telescope"], names["fountain"],
            ("F1", " close")]
     more = [("", "AND THE REST")] + [names[k] for k in CHEAT_MORE if k in names]
     more.append(("\\", "storm far ahead"))

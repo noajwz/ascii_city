@@ -34,6 +34,8 @@ party, the carnival, the lighthouse, the big bridge, the bank, the woods and the
 `TAXI_DESTS`), and the claw, the hammer, a manhole, a lit alley, the El, a fire escape, a car
 park, a police car and the highway went. **Do not put a taxi destination back on the panel**, and
 a new place the taxi will go to does not get a key: adding it to `TAXI_DESTS` is its way in.
+The two exceptions are the coast (`c`) and the harbour (`.`), which the owner asked for by name
+on 2026-11-16.
 They are not gone for the checks: `CHEAT_HIDDEN` keeps them, and with `ASCII_CITY_TEST` set
 (`pty_checks.py` sets it) ctrl-a and a key from it jumps there - the pty cases walk into
 casinos and up fire escapes from a jump, and a taxi would cost each a minute. Nobody playing
@@ -58,9 +60,12 @@ night with little enough moon for the glowing sea.
 the festival's night if this is not it, and in front of the dragon - see The
 festival in Chinatown.
 
-**Four columns** (`draw_cheats()`): NIGHTLIFE, MONEY and VIEWS; the PARTS OF TOWN
-(the digits, `1`–`9` and `0`, with the placed zones); AND THE REST; then WEATHER & SKY and
-NIGHTS. A new place goes into a group, not on the end of a list. It was once grouped by where things were — the city, the streets, out of town —
+**Four columns** (`draw_cheats()`): NIGHTLIFE (the raves, the Strip, lemonade, the
+stargazer, closing time), MONEY and VIEWS; the PARTS OF TOWN (the districts `1`–`8`, then `9`
+the factories, `0` the suburbs, `{` the university, `c` the coast) and under it TRAVEL (the
+metro, the airport, the harbour); AND THE REST; then WEATHER & SKY and NIGHTS. Laid out by the
+owner on 2026-11-16, who also took off the library, a flight, the fountain show, the building
+site and the empty lot - in `CHEAT_HIDDEN` now, for the checks. A new place goes into a group, not on the end of a list. It was once grouped by where things were — the city, the streets, out of town —
 every new place went into the first, and it quietly grew past a 24-row terminal and then a 30-row
 one — `draw_cheats()` draws nothing when there is no room, so the symptom is the
 panel simply not opening. There is a test that it opens at 80x24. Letters belong to the panel while
