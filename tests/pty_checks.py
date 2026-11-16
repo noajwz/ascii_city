@@ -456,10 +456,10 @@ def cases(run, report):
     # The submarine: from the pen, out, down, a ping, the lamp, back.
     su_st, su_out = run([(F1, .5), (b"+", .4), (b"\x01[", 1.5), (b"p", 1.0)]
                         + [(b"w", .2)] * 3 + [(b"f", .3)] * 4 + [(b"", 4.0),
-                                                                 (b"h", .5), (b"l", .4),
-                                                                 (b"l", .4), (b"a", .3),
-                                                                 (b"z", .5), (b"z", .5),
-                                                                 (b"x", 1.2), (b"w", .5)],
+                                                                 (b"h", 1.0), (b"l", 1.5),
+                                                                 (b"l", 1.0), (b"a", .5),
+                                                                 (b"z", .8), (b"z", .8),
+                                                                 (b"x", 1.5), (b"w", 1.0)],
                         cols=300, rows=60)
     su_plain = ANSI.sub(b"", su_out).decode("utf-8", "replace")
     su_ok = report("the submarine: out, down, a ping, back to the pen", su_st, su_out)
