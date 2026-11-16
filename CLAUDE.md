@@ -19,9 +19,6 @@ Ruff is the linter, run with defaults (`ruff check . && ruff format .`) — ther
 pyproject/ruff.toml, and ruff is not installed on the machine this was written on. Keep lines under
 89 characters; that is the one rule the code has actually been held to.
 
-**`IDEAS.md`** holds what the owner has asked to have done later, by name - check it when they
-ask for "the rooftops", "the skyline shapes" and the like, and take an idea out once it is built.
-
 ## Notes by area
 
 Each part of the city has its own design notes in **`docs/notes/`** - why it looks and
