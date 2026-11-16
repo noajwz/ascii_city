@@ -17282,6 +17282,7 @@ def draw_harbour(ch, co, v, walls, h, now, wet):
                     put_point(ch, co, v, walls, gx + 0.8, 0.9 + 6.0 * f, zz, "\\", CURB)
                 put_lit(ch, co, v, walls, gx, 8.4, hull + 0.1, "o", BULB, 0.3, now)
             draw_marina(ch, co, v, walls, h, now, wet, _boat_out[0] == h)
+            draw_sub_pen(ch, co, v, walls, h, now, wet, _pen_out[0] == h)
             draw_herring(ch, co, v, walls, h, now, wet)
 
 
@@ -17357,6 +17358,9 @@ def harbour_hint(x, z, now):
         return herring_hint(x, z)
     if marina_near(x, z) is not None:
         return "  ~ boat hire: p takes a speedboat out, $%d ~" % BOAT_FEE
+    if sub_pen_near(x, z) is not None:
+        return ("  ~ the %s: p takes the submarine down, $%d ~"
+                % (SUB_NAME, SUB_FEE))
     return "  ~ the harbour ~"
 
 
@@ -28345,6 +28349,7 @@ CHEAT_HIDDEN = [
     ("6", "the harbour", "harbour"), ("7", "the gangway", "gangway"),
     ("8", "boat hire", "marina"), ("9", "the pier's tackle shop", "piertackle"),
     ("0", "a bait kiosk", "kiosk"), ("v", "the fishing boat", "herring"),
+    ("[", "the sub pen", "subpen"),
 ]
 CHEAT_TEST = 1                          # ctrl-a
 TEST_JUMPS = bool(os.environ.get("ASCII_CITY_TEST"))
@@ -29321,6 +29326,8 @@ def find_place(x, z, kind):
         return _gangway_spot(x, z)
     if kind == "marina":
         return _marina_spot(x, z)
+    if kind == "subpen":
+        return _pen_spot(x, z)
     if kind == "tackle":
         return _tackle_spot(x, z)
     if kind == "herring":
@@ -32436,6 +32443,10 @@ class Boat(Cab):
     its wheel that a tap nudges and a held key turns - and a boat's ways:
     no brakes but the water, a slide in every turn, and the sea under her."""
 
+    TOP, STEP, BACK, ACCEL, DRAG = BOAT_TOP, BOAT_STEP, BOAT_BACK, BOAT_ACCEL, BOAT_DRAG
+    R, R_FAST, GRIP, SLIDE = BOAT_R, BOAT_R_FAST, BOAT_GRIP, BOAT_SLIDE
+    BUMP = "BUMP - that will come out of the deposit"
+
     def __init__(self, x, z, heading, now, seed):
         super().__init__(x, z, heading, now, seed)
         self.call_at = float("inf")     # nobody hails a speedboat
@@ -32448,9 +32459,9 @@ class Boat(Cab):
         was = self.want
         super().key(what, now)
         if what == "faster":
-            self.want = min(BOAT_TOP, was + BOAT_STEP)
+            self.want = min(self.TOP, was + self.STEP)
         elif what == "slower":
-            self.want = max(BOAT_BACK, was - BOAT_STEP)
+            self.want = max(self.BACK, was - self.STEP)
 
     def step(self, dt, now):
         dt = max(0.0, min(0.1, dt))
@@ -32463,39 +32474,42 @@ class Boat(Cab):
                                                        self.steer_in - self.steer))
         else:
             self.steer += max(-CAB_CENTRE * dt, min(CAB_CENTRE * dt, -self.steer))
-        want = 0.0 if now < self.brake_until else max(BOAT_BACK, min(BOAT_TOP,
+        want = 0.0 if now < self.brake_until else max(self.BACK, min(self.TOP,
                                                                     self.want))
         if abs(want) > abs(self.speed) and want * self.speed >= 0.0:
-            rate = BOAT_ACCEL * (1.0 if want >= 0.0 else 0.5)
+            rate = self.ACCEL * (1.0 if want >= 0.0 else 0.5)
         else:
-            rate = BOAT_DRAG * (2.5 if now < self.brake_until else 1.0)
+            rate = self.DRAG * (2.5 if now < self.brake_until else 1.0)
         self.speed += max(-rate * dt, min(rate * dt, want - self.speed))
         yaw = 0.0
         if abs(self.speed) > 0.05:
-            yaw = self.steer * self.speed / (BOAT_R + BOAT_R_FAST * abs(self.speed))
+            yaw = self.steer * self.speed / (self.R + self.R_FAST * abs(self.speed))
             self.heading = _wrap(self.heading + yaw * dt)
         slide = now < self.hb_until
         self.slip -= yaw * dt
-        self.slip *= math.exp(-(BOAT_SLIDE if slide else BOAT_GRIP) * dt)
+        self.slip *= math.exp(-(self.SLIDE if slide else self.GRIP) * dt)
         self.slip = max(-1.0, min(1.0, self.slip))
         go = self.heading + self.slip
         nx = self.x + math.sin(go) * self.speed * dt
         nz = self.z + math.cos(go) * self.speed * dt
-        if boat_clear(nx, nz):
+        if self.clear(nx, nz):
             self.x, self.z = nx, nz
-        elif boat_clear(nx, self.z):
+        elif self.clear(nx, self.z):
             self.x = nx                 # along it, the way a hull glances off
             self.speed *= 0.9
-        elif boat_clear(self.x, nz):
+        elif self.clear(self.x, nz):
             self.z = nz
             self.speed *= 0.9
         else:
             if abs(self.speed) > 6.0 and now - self.bump_at > 1.0:
-                self.said = "BUMP - that will come out of the deposit"
+                self.said = self.BUMP
                 self.said_at = now
             self.bump_at = now
             self.speed *= -0.3
             self.want = 0.0
+
+    def clear(self, x, z):
+        return boat_clear(x, z)
 
     def status(self):
         return ""
@@ -37531,6 +37545,1261 @@ ROOF_HUD = (" on the roof, %d floors up, %s, facing %s  -  ad look round  -  s t
             " lift down  -  q quit ")
 
 
+# --- the submarine -----------------------------------------------------------------
+# Asked for on 2026-11-16: "a submarine as well ... dive in the ocean trench
+# and see ascii fishes" - driven yourself, from a pen at the harbour. The
+# Lantern lies off the quay past the boat hire, and p takes her out. On the
+# top she is the speedboat, the same gentle wheel, only slower; f floods her
+# tanks and down she goes, r blows them. Under the water the street's
+# renderer has nothing to draw - no ground, no fronts - so the sea has its
+# own (draw_deep()): the bottom cast column by column out as far as her lamp
+# reaches, the moon's light coming down in the shallows, the snow drifting
+# past, and what lives at each depth. All of it worked out from where it is
+# and the time, like everything else here: nothing stored.
+SUB_NAME = "Lantern"
+SUB_FEE = 50
+SUB_TOP = 24.0         # flat out, on the top or under: about forty-five knots
+SUB_STEP = 4.0         # what each w or s adds or takes off
+SUB_BACK = -4.0        # and astern
+SUB_ACCEL = 5.0        # getting up to it
+SUB_DRAG = 2.0         # the water slowing her with the screw stopped
+SUB_R = 7.0            # the tightest circle she turns, all but stopped
+SUB_R_FAST = 0.8       # and how much wider that gets a unit of speed
+SUB_GRIP = 4.0         # she slides less than the speedboat: she sits deep
+SUB_SLIDE = 1.2        # and with e held
+SUB_SINK = 12.0        # the fastest she goes down or up, units a second
+SUB_SINK_STEP = 3.0    # what each f or r adds
+SUB_SINK_ACCEL = 3.0   # and how quickly the tanks get her there
+SUB_HULL = 1.8         # how near the bottom she comes: her skids
+SUB_UNDER = 0.6        # deeper than this you are looking at the sea from inside it
+SUB_LAMP = 52.0        # how far her lamp reaches
+SUB_SEES = 30.0        # how near something has to come, in the light, to go in the log
+SUB_PING_SPEED = 70.0  # how fast the sonar's ping goes out, units a second
+SUB_PING_LIFE = 2.6    # and how long what it found stays painted
+SUB_CREAK = 420.0      # deeper than this her hull talks
+SUB_PEN_OUT = 70.0     # the pen: this far out along the quay from the boat hire
+SUB_MOOR = 10.0        # and she lies this far off its edge, clear of the boats' lane
+SUB_HUD = (" the %s, %s  -  w s throttle  -  a d steer  -  f dive  r rise  -  space"
+           " all stop  -  l lamp  -  h ping  -  x back to the pen ")
+SUB_MOORED = [
+    "      _|_       ",
+    "  .--/___\\--.   ",
+    " ( o  o  o  o )>",
+    "  '-----------' ",
+]
+SUB_CREAKS = ["the hull creaks", "something knocks on the hull, once",
+              "a long groan, from somewhere aft", "the hull ticks as it cools"]
+_pen_out = [None]      # the harbour whose submarine you have out
+
+# The bottom: a shelf going down gently from the beach, its edge, the slope,
+# the plain - and the trench, as far off the beach as the Herring goes to fish
+# it and running a long way along the coast either side of where she anchors.
+DEEP_SHELF = 1100.0    # units off the beach the shelf ends
+DEEP_PLAIN = 1500.0    # and the slope down from it
+DEEP_OUT = 1900.0      # the trench's middle, off the beach: her anchorage
+DEEP_ALONG = 150.0     # and along the coast from the quay
+DEEP_WIDE = 170.0      # the trench, half across, rim to rim
+DEEP_FLOOR_W = 55.0    # and its floor, half across
+DEEP_LONG = 1300.0     # how far it runs up and down the coast from her anchorage
+DEEP_BOTTOM = 650.0    # its floor: "four hundred fathom, near enough"
+DEEP_SUNLIT = 70.0     # how far down the light from above gets at all
+DEEP_ZONES = [(1.0, "on the surface"), (60.0, "in the shallows"),
+              (250.0, "in the twilight zone"), (550.0, "in the midnight zone"),
+              (1e9, "in the trench")]
+_seabed_cache = {}
+
+# What lives down there. Each: its name, the depths it swims at, its shape
+# and size in units, its colour (a name, or (palette, index) - the colours
+# are not made till the terminal is), what of it glows, how many swim
+# together, how fast, how common. One in ten thousand is not there to be
+# looked for; the legends are rare, and there is one of each where they are.
+DEEP_LIFE = [
+    {"name": "mackerel", "lo": 2, "hi": 60, "shape": "fish", "L": 0.65, "H": 0.2,
+     "c": "STAR", "fill": "=", "n": (10, 22), "speed": 4.0, "w": 6},
+    {"name": "sea bass", "lo": 3, "hi": 55, "shape": "fish", "L": 1.1, "H": 0.4,
+     "c": "FOG", "fill": ":", "n": (1, 3), "speed": 2.0, "w": 4},
+    {"name": "moon jelly", "lo": 2, "hi": 90, "shape": "jelly", "L": 0.7, "H": 0.35,
+     "c": "MOON_DIM", "n": (1, 6), "speed": 0.3, "w": 3},
+    {"name": "sea turtle", "lo": 2, "hi": 45, "shape": "turtle", "L": 1.3, "H": 0.55,
+     "c": ("leaf", 4), "fill": "#", "n": (1, 1), "speed": 1.2, "w": 1.5},
+    {"name": "eagle ray", "lo": 4, "hi": 80, "shape": "ray", "L": 2.4, "H": 0.35,
+     "c": ("rust", 3), "n": (1, 2), "speed": 1.6, "w": 2},
+    {"name": "lanternfish", "lo": 60, "hi": 420, "shape": "fish", "L": 0.28,
+     "H": 0.09, "c": "STAR_DIM", "glow": "CROWN_BLUE", "lights": True, "n": (14, 30),
+     "speed": 2.5, "w": 6},
+    {"name": "firefly squid", "lo": 50, "hi": 360, "shape": "squid", "L": 0.22,
+     "H": 0.07, "c": ("cold", 2), "glow": "CROWN_BLUE", "blink": True,
+     "n": (10, 24), "speed": 1.5, "w": 4},
+    {"name": "moonfish", "lo": 50, "hi": 320, "shape": "fish", "L": 1.4, "H": 0.95,
+     "c": "ROU_RED", "fill": "o", "n": (1, 1), "speed": 1.8, "w": 2},
+    {"name": "swordfish", "lo": 30, "hi": 420, "shape": "fish", "L": 3.0, "H": 0.6,
+     "c": "RAIN", "fill": "-", "sword": True, "fin": True, "n": (1, 1), "speed": 6.0,
+     "w": 1.5},
+    {"name": "comb jelly", "lo": 80, "hi": 650, "shape": "jelly", "L": 0.35,
+     "H": 0.4, "c": ("cold", 4), "glow": "comb", "n": (2, 6), "speed": 0.4, "w": 3},
+    {"name": "oarfish", "lo": 120, "hi": 460, "shape": "eel", "L": 9.0, "H": 0.5,
+     "c": "SNOW", "crest": "ROU_RED", "n": (1, 1), "speed": 0.8, "w": 0.35,
+     "legend": True},
+    {"name": "anglerfish", "lo": 260, "hi": 700, "shape": "fish", "L": 0.8,
+     "H": 0.6, "c": "STAR_DIM", "fill": ".", "glow": "FIREFLY", "lure": True,
+     "teeth": True, "n": (1, 1), "speed": 0.5, "w": 3},
+    {"name": "barreleye", "lo": 300, "hi": 700, "shape": "fish", "L": 0.5,
+     "H": 0.22, "c": "FOG_DIM", "eye": "ROU_GREEN", "n": (1, 2), "speed": 0.6,
+     "w": 2},
+    {"name": "frilled shark", "lo": 300, "hi": 700, "shape": "eel", "L": 2.0,
+     "H": 0.3, "c": ("rust", 3), "frill": True, "n": (1, 1), "speed": 1.2, "w": 1.5},
+    {"name": "black scabbardfish", "lo": 260, "hi": 650, "shape": "eel", "L": 1.6,
+     "H": 0.14, "c": "STAR", "n": (1, 3), "speed": 1.4, "w": 1.5},
+    {"name": "grenadier", "lo": 260, "hi": 700, "shape": "fish", "L": 1.0,
+     "H": 0.3, "c": "FOG_DIM", "fill": "-", "rattail": True, "n": (1, 4),
+     "speed": 1.0, "w": 3},
+    {"name": "vampire squid", "lo": 420, "hi": 700, "shape": "squid", "L": 0.4,
+     "H": 0.22, "c": ("red", 0), "glow": "CROWN_BLUE", "blink": True, "n": (1, 1),
+     "speed": 0.6, "w": 2},
+    {"name": "dumbo octopus", "lo": 450, "hi": 700, "shape": "dumbo", "L": 0.5,
+     "H": 0.45, "c": ("neon", 0), "n": (1, 1), "speed": 0.5, "w": 1.5},
+    {"name": "giant squid", "lo": 350, "hi": 700, "shape": "squid", "L": 12.0,
+     "H": 1.3, "c": "ROU_RED", "fill": ":", "n": (1, 1), "speed": 1.0, "w": 0.5,
+     "legend": True},
+]
+DEEP_CELL = 16.0       # a group of something to a cell of sea this big
+DEEP_LAYER = 16.0      # and this deep
+DEEP_ODDS = 60         # in a hundred cells there is one
+DEEP_PATCH = 22.0      # and on the bottom, a thing to a patch this big
+
+# On the bottom. Each: what it is, the depths of bottom it lies on, how
+# common, whether it goes in the log, and how it is drawn.
+DEEP_ROCK = [
+    "    __     ",
+    " _-'  '-_  ",
+    "/  .   . \\ ",
+]
+DEEP_STAR = [
+    " \\|/ ",
+    "-(*)-",
+    " /|\\ ",
+]
+DEEP_CRAB = [
+    "(\\/)  (\\/)",
+    " \\(o,,o)/ ",
+]
+DEEP_SPONGE = [
+    " .-. ",
+    " |:| ",
+    " |:| ",
+    " '-' ",
+]
+DEEP_TRIPOD = [
+    " ><==o> ",
+    "  /  \\  ",
+    " /    \\ ",
+]
+DEEP_PIG = [
+    " ,,, ",
+    "(o.o)",
+    " ''' ",
+]
+DEEP_HELMET = [
+    "  .---.  ",
+    " ( (O) ) ",
+    "(o|___|o)",
+    " '-----' ",
+]
+DEEP_WHALE = [
+    "       .--.  .--.  .--.  .--.  .--.             ",
+    "  ___ /    \\/    \\/    \\/    \\/    \\            ",
+    " (___)=o==o==o==o==o==o==o==o==o==o==o==o==o=---",
+    "       \\    /\\    /\\    /\\    /\\    /           ",
+]
+DEEP_WORMS = [
+    " *   *  *   * ",
+    "*|* *|  |* *| ",
+    " ||  | *|  || ",
+    " ||  | ||  || ",
+]
+DEEP_PROPS = [
+    {"name": "kelp forest", "lo": 3, "hi": 34, "w": 5, "log": True, "draw": "kelp"},
+    {"name": "rock", "lo": 2, "hi": 900, "w": 4, "draw": DEEP_ROCK, "W": 3.2,
+     "Hh": 0.9, "c": ("dark", 4), "lit": ("rust", 4)},
+    {"name": "starfish", "lo": 2, "hi": 140, "w": 2, "draw": DEEP_STAR, "W": 0.5,
+     "Hh": 0.3, "c": ("neon", 4)},
+    {"name": "spider crab", "lo": 3, "hi": 90, "w": 1.2, "log": True,
+     "draw": DEEP_CRAB, "W": 1.0, "Hh": 0.35, "c": "ROU_RED"},
+    {"name": "glass sponge", "lo": 70, "hi": 700, "w": 2, "log": True,
+     "draw": DEEP_SPONGE, "W": 0.6, "Hh": 1.0, "c": ("cold", 1)},
+    {"name": "tripod fish", "lo": 220, "hi": 900, "w": 1.5, "log": True,
+     "draw": DEEP_TRIPOD, "W": 0.7, "Hh": 0.5, "c": "FOG"},
+    {"name": "sea pig", "lo": 400, "hi": 900, "w": 2, "log": True, "draw": "herd",
+     "W": 0.35, "Hh": 0.25, "c": ("neon", 0)},
+    {"name": "black smoker", "lo": 500, "hi": 900, "w": 0.7, "log": True,
+     "draw": "vent"},
+    {"name": "whale fall", "lo": 180, "hi": 900, "w": 0.3, "log": True,
+     "draw": DEEP_WHALE, "W": 14.0, "Hh": 1.6, "c": "MOON_DIM"},
+    {"name": "brass diving helmet", "lo": 150, "hi": 900, "w": 0.15, "log": True,
+     "draw": DEEP_HELMET, "W": 0.8, "Hh": 0.6, "c": "GOLD"},
+]
+DEEP_LOG = [s["name"] for s in DEEP_LIFE] + [p["name"] for p in DEEP_PROPS
+                                             if p.get("log")]
+DEEP_SAND = [("dark", 1), ("rust", 3), ("warm", 3), ("warm", 0)]
+DEEP_MUD = [("dark", 1), ("dark", 3), "FOG_DIM", "FOG"]
+DEEP_SNOW = [("dark", 3), ("cold", 0), ("cold", 2)]
+DEEP_MIRROR = str.maketrans("<>()/\\[]{}", "><)(\\/][}{")
+
+
+def _deep_colour(name):
+    """A colour by its name, or (palette, index), or ("neon", n), looked up as
+    it is drawn: none of them exist until the terminal has been asked."""
+    if isinstance(name, tuple):
+        if name[0] == "neon":
+            return NEON[name[1] % len(NEON)][0]
+        pal = PALETTES[name[0]]
+        return pal[min(len(pal) - 1, name[1])]
+    return globals()[name]
+
+
+def sub_pen(h):
+    """The sub pen on the quay's south edge, out past the boat hire: (x, z)."""
+    mx, mz = marina(h)
+    return mx + SUB_PEN_OUT, mz
+
+
+def sub_pen_near(x, z):
+    """The harbour whose sub pen you are standing at, or None."""
+    if not COAST or x < COAST_LAND * CELL:
+        return None
+    h = harbour_site(int(z / CELL + BIG) - BIG)
+    if h is None:
+        return None
+    px, pz = sub_pen(h)
+    return h if (px - x) ** 2 + (pz - z) ** 2 < 4.0 ** 2 else None
+
+
+def _pen_spot(x, z):
+    """At the sub pen of the nearest harbour, facing her."""
+    sp = _harbour_spot(x, z)
+    if sp is None:
+        return None
+    px, pz = sub_pen(harbour_site(int(sp[1] / CELL + BIG) - BIG))
+    return px, pz - 1.0, 0.0
+
+
+def draw_sub_pen(ch, co, v, walls, h, now, wet, out):
+    """The pen on the quay - a booth, DEEP DIVES over it - and the Lantern
+    tied up off it, yellow, her portholes lit; not while you have her out."""
+    px, pz = sub_pen(h)
+    if (px - v.x) ** 2 + (pz - v.z) ** 2 > 260.0 ** 2:
+        return
+    blit_sprite(ch, co, v, walls, PAY_BOOTH, px + 3.0, pz - 1.5, 0.0, 2.6, 2.4, CURB)
+    for k, c in enumerate("DEEP DIVES"):
+        if c != " ":
+            put_lit(ch, co, v, walls, px + 3.0, 3.3, pz - 1.5 + 1.8 - k * 0.4, c,
+                    NEON[5 % len(NEON)][0], max(wet, 0.3), now)
+    if out:
+        return
+    bob = 0.12 * math.sin(now * 1.1)
+    blit_sprite(ch, co, v, walls, SUB_MOORED, px, pz + SUB_MOOR, bob - 0.4, 2.4 + bob,
+                7.0, GOLD)
+    put_lit(ch, co, v, walls, px - 0.4, 2.7 + bob, pz + SUB_MOOR, "o", ROU_RED,
+            max(wet, 0.4), now)
+    for k in range(1, 5):                                   # her line to the quay
+        put_point(ch, co, v, walls, px - 1.5, 0.5, pz + k * SUB_MOOR / 5.0, ":", CURB)
+
+
+def _trench_mid(z):
+    """The z of the middle of the nearest stretch of trench: the Herring's
+    anchorage over it, off whichever harbour is nearest."""
+    base = (HARBOUR_ROW0 + QUAY_BROAD * 0.5) * CELL + DEEP_ALONG
+    gap = HARBOUR_GAP * CELL
+    return base + round((z - base) / gap) * gap
+
+
+def _seabed(x, z):
+    o = x - shore_x(z)
+    if o <= 0.0:
+        return 0.0
+    if o < 400.0:
+        d = 1.0 + o * 0.05
+    elif o < DEEP_SHELF:
+        d = 21.0 + (o - 400.0) * 0.06
+    elif o < DEEP_PLAIN:
+        d = 63.0 + (o - DEEP_SHELF) * 0.35
+    else:
+        d = 203.0 + (o - DEEP_PLAIN) * 0.02
+    # The lie of it: long humps, and the ripples in the sand.
+    lump = (2.5 * math.sin(x * 0.031 + z * 0.017) * math.sin(z * 0.043 - x * 0.012)
+            + 0.5 * math.sin(x * 0.7 + 1.5 * math.sin(z * 0.19)))
+    d += lump * min(1.0, d / 12.0) * (1.0 + d / 150.0)
+    a = abs(o - DEEP_OUT)
+    if a < DEEP_WIDE:
+        e = abs(z - _trench_mid(z))
+        if e < DEEP_LONG:
+            s = min(1.0, (DEEP_WIDE - a) / (DEEP_WIDE - DEEP_FLOOR_W))
+            s = s * s * (3.0 - 2.0 * s)
+            end = min(1.0, (DEEP_LONG - e) / 300.0)
+            s *= end * end * (3.0 - 2.0 * end)
+            bottom = (DEEP_BOTTOM + 25.0 * math.sin(z * 0.013)
+                      + 8.0 * math.sin(x * 0.05 + z * 0.03))
+            d += (bottom - d) * s
+            # Ledges down the walls, where the rock comes out in shelves.
+            d += 9.0 * math.sin(d * 0.07 + z * 0.004) * s * (1.0 - s) * 4.0
+    return d
+
+
+def seabed(x, z):
+    """How deep the bottom is here, in units under the surface: 0 on land.
+    Kept to the nearest unit: the bottom is asked for ten thousand times a
+    frame, and nothing finer shows."""
+    if not COAST:
+        return 0.0
+    ix, iz = int(math.floor(x)), int(math.floor(z))
+    key = ix * 4194304 + iz
+    hit = _seabed_cache.get(key)
+    if hit is None:
+        _evict(_seabed_cache, 90000)
+        hit = _seabed_cache[key] = _seabed(ix + 0.5, iz + 0.5)
+    return hit
+
+
+def deep_zone(y):
+    """Which part of the sea a depth is in, the way the dash says it."""
+    for lo, words in DEEP_ZONES:
+        if y < lo:
+            return words
+    return DEEP_ZONES[-1][1]
+
+
+def trench_pointer(x, z):
+    """Where the trench is from here: "over the trench", or the distance and
+    the way, for the dash - you would never find it otherwise."""
+    zm = _trench_mid(z)
+    o = x - shore_x(z)
+    span = DEEP_LONG - 400.0
+    if abs(o - DEEP_OUT) < DEEP_WIDE * 0.6 and abs(z - zm) < span:
+        return "OVER THE TRENCH"
+    tz = max(zm - span, min(zm + span, z))
+    tx = shore_x(tz) + DEEP_OUT
+    d = math.hypot(tx - x, tz - z)
+    way = compass_word(math.atan2(tx - x, tz - z)).upper()
+    return ("TRENCH %.1f KM %s" % (d / 1000.0, way) if d >= 1000.0
+            else "TRENCH %d M %s" % (int(d), way))
+
+
+class Sub(Boat):
+    """The Lantern, with you in her bubble: the speedboat's wheel and
+    throttle, slower, and her tanks - f floods them and she goes down, r
+    blows them and she comes up, each press a little more either way, and
+    space stops her both ways at once. She will not go through the bottom,
+    nor anywhere the speedboat cannot."""
+
+    TOP, STEP, BACK, ACCEL, DRAG = SUB_TOP, SUB_STEP, SUB_BACK, SUB_ACCEL, SUB_DRAG
+    R, R_FAST, GRIP, SLIDE = SUB_R, SUB_R_FAST, SUB_GRIP, SUB_SLIDE
+    BUMP = "BUMP - mind the paintwork"
+
+    def __init__(self, x, z, heading, now, seed):
+        super().__init__(x, z, heading, now, seed)
+        self.y = 0.0            # how deep she is, down from the surface
+        self.vy = 0.0           # and going, down positive
+        self.want_y = 0.0       # what the tanks are set to
+        self.lamp = True
+        self.ping_at = -1e9
+        self.seen = {}          # what has come into her light: name -> when
+        self.news = ("", -1e9)  # the last new thing, and when
+        self.dived_at = -1e9    # when she last went under, for the bubbles
+        self.creak_at = now
+        self.deepest = 0.0
+
+    def key(self, what, now):
+        if what == "dive":
+            self.want_y = min(SUB_SINK, self.want_y + SUB_SINK_STEP)
+        elif what == "rise":
+            self.want_y = max(-SUB_SINK, self.want_y - SUB_SINK_STEP)
+        elif what == "lamp":
+            self.lamp = not self.lamp
+            self.said = ("the lamp on" if self.lamp else
+                         "the lamp off - and the dark comes right up to the glass")
+            self.said_at = now
+        elif what == "ping":
+            self.ping_at = now
+        else:
+            if what == "brake":
+                self.want_y = 0.0
+            super().key(what, now)
+
+    def clear(self, x, z):
+        return boat_clear(x, z) and seabed(x, z) - self.y > SUB_HULL
+
+    def step(self, dt, now):
+        super().step(dt, now)
+        dt = max(0.0, min(0.1, dt))
+        rate = SUB_SINK_ACCEL * dt
+        self.vy += max(-rate, min(rate, self.want_y - self.vy))
+        floor = seabed(self.x, self.z) - SUB_HULL
+        y = self.y + self.vy * dt
+        if y <= 0.0:
+            if self.y > 0.0 and self.vy < -1.0:
+                self.said, self.said_at = "SURFACED", now
+            y, self.vy = 0.0, max(0.0, self.vy)
+            self.want_y = max(0.0, self.want_y)
+        elif y >= floor:
+            if self.vy > 2.0 and now - self.bump_at > 1.0:
+                self.said, self.said_at = "the skids touch the bottom - silt everywhere", now
+            self.bump_at = now
+            y = max(0.0, floor if self.y <= floor else self.y)
+            self.vy = min(0.0, self.vy)
+            self.want_y = min(0.0, self.want_y)
+        if self.y < SUB_UNDER <= y:
+            self.dived_at = now
+        self.y = y
+        self.deepest = max(self.deepest, y)
+        if y > SUB_CREAK and now - self.creak_at > 14.0:
+            self.creak_at = now
+            self.said = SUB_CREAKS[_mix(int(now), 3, 7421) % len(SUB_CREAKS)]
+            self.said_at = now
+
+    def saw(self, name, now):
+        if name not in self.seen:
+            self.seen[name] = now
+            self.news = (name, now)
+
+    def eye(self, now):
+        """On the top she sits low, the bubble just out of the water."""
+        return 1.1 + 0.18 * math.sin(now * 1.2 + self.x * 0.03) - self.y
+
+
+def _deep_pick(table, depth, m):
+    """One of a table's kinds that lives at this depth, by how common: or
+    None where none does."""
+    cands = [s for s in table if s["lo"] <= depth <= s["hi"]]
+    if not cands:
+        return None
+    pick = ((m >> 8) & 4095) / 4096.0 * sum(s["w"] for s in cands)
+    for s in cands:
+        pick -= s["w"]
+        if pick < 0.0:
+            return s
+    return cands[-1]
+
+
+def deep_groups(x, z, y, now, reach):
+    """What is swimming within reach: (kind, seed, members, heading) - the
+    members as (x, depth, z), all going round the place they live together,
+    facing the way they swim."""
+    out = []
+    n = int(reach // DEEP_CELL) + 1
+    ci, cj = int(math.floor(x / DEEP_CELL)), int(math.floor(z / DEEP_CELL))
+    lk = int(y // DEEP_LAYER)
+    for a in range(ci - n, ci + n + 1):
+        for b in range(cj - n, cj + n + 1):
+            for lay in range(max(0, lk - 1), lk + 2):
+                m = _mix(a, b, lay * 104729 + 7411)
+                if m % 100 >= DEEP_ODDS:
+                    continue
+                hx = (a + ((m >> 7) & 255) / 256.0) * DEEP_CELL
+                hz = (b + ((m >> 15) & 255) / 256.0) * DEEP_CELL
+                floor = seabed(hx, hz)
+                hy = min((lay + ((m >> 23) & 127) / 128.0) * DEEP_LAYER, floor - 2.5)
+                if hy < 1.5 or int(hy // DEEP_LAYER) != lay:
+                    continue
+                sp = _deep_pick(DEEP_LIFE, hy, m)
+                if sp is None:
+                    continue
+                r = 5.0 + ((m >> 3) & 15) * 1.2
+                if (hx - x) ** 2 + (hz - z) ** 2 > (reach + r + 10.0) ** 2:
+                    continue
+                way = 1.0 if m & 4 else -1.0
+                ang = ((m >> 20) & 1023) / 1023.0 * math.tau + way * now * sp["speed"] / r
+                gx, gz = hx + math.cos(ang) * r, hz + math.sin(ang) * r
+                gy = hy + 1.5 * math.sin(now * 0.3 + ang)
+                hdx, hdz = -math.sin(ang) * way, math.cos(ang) * way
+                lo, hi = sp["n"]
+                count = lo + (m >> 11) % (hi - lo + 1)
+                spread = sp["L"] * 1.3 * math.sqrt(count) + (0.4 if count > 1 else 0.0)
+                members = []
+                gy = min(gy, seabed(gx, gz) - 2.0)
+                for k in range(count):
+                    mk = _mix(m, k, 7303)
+                    along = ((mk & 255) / 255.0 - 0.5) * spread * 2.0
+                    across = (((mk >> 8) & 255) / 255.0 - 0.5) * spread * 1.6
+                    up = (((mk >> 16) & 255) / 255.0 - 0.5) * spread * 0.8
+                    wob = 0.15 * math.sin(now * 2.0 + k) * spread
+                    mx = gx + hdx * along + hdz * (across + wob)
+                    mz = gz + hdz * along - hdx * (across + wob)
+                    members.append((mx, max(0.8, min(gy + up, seabed(mx, mz) - 1.0)), mz))
+                out.append((sp, m, members, (hdx, hdz)))
+    return out
+
+
+def deep_props(x, z, y, reach):
+    """What lies on the bottom within reach and near enough under her to
+    see: (kind, seed, x, depth of the bottom there, z)."""
+    out = []
+    n = int(reach // DEEP_PATCH) + 1
+    ci, cj = int(math.floor(x / DEEP_PATCH)), int(math.floor(z / DEEP_PATCH))
+    for a in range(ci - n, ci + n + 1):
+        for b in range(cj - n, cj + n + 1):
+            m = _mix(a, b, 7417)
+            if m % 100 >= 60:
+                continue
+            px = (a + ((m >> 7) & 255) / 256.0) * DEEP_PATCH
+            pz = (b + ((m >> 15) & 255) / 256.0) * DEEP_PATCH
+            if (px - x) ** 2 + (pz - z) ** 2 > (reach + 8.0) ** 2:
+                continue
+            floor = seabed(px, pz)
+            if floor < 2.5 or floor - y > reach or y - floor > 60.0:
+                continue
+            kind = _deep_pick(DEEP_PROPS, floor, m)
+            if kind is not None:
+                out.append((kind, m, px, floor, pz))
+    return out
+
+
+def _fish_line(sp, n, f):
+    """A fish one row tall, n cells: ><((('> facing right, mirrored left."""
+    if n <= 3:
+        s = "><>"
+    else:
+        body = sp.get("line", "(") * max(0, n - 4)
+        s = ("~-" if sp.get("rattail") else "><") + body + "'>"
+        if sp.get("sword"):
+            s += "--"
+        if sp.get("teeth"):
+            s = s[:-1] + "v>"
+    return s if f > 0 else s[::-1].translate(DEEP_MIRROR)
+
+
+def _draw_fish(put, sp, sx, sy, lc, hr, f, attr, glow, glow_only, now, seed):
+    """A fish, from how big it is on the screen: a dash far off, then ><>,
+    then a row of it, then a body - its back and belly worked out along it,
+    a forked tail, an eye, a gill, and whatever this kind has: a sword, a
+    fin, teeth, the lure, lights down its sides."""
+    lit = not glow_only
+    if lc < 1.6:
+        if glow:
+            put(sx, sy, ".", glow)
+        elif lit:
+            put(sx, sy, "-", attr)
+        return
+    if lc < 9.0 or hr < 2.2:
+        s = _fish_line(sp, int(round(min(lc, 14.0))), f)
+        x0 = int(round(sx - len(s) / 2.0))
+        y = int(round(sy))
+        for k, g in enumerate(s):
+            if lit:
+                put(x0 + k, y, g, glow if g == "'" and sp.get("eye") else attr)
+            elif sp.get("lights") and k % 2 == 1 and g != "'":
+                put(x0 + k, y, ".", glow)
+        if glow and sp.get("lure"):
+            put(x0 + (len(s) if f > 0 else -1), y - 1,
+                "*" if math.sin(now * 2.0 + seed) > -0.6 else ".", glow)
+        if sp.get("eye") and lit:
+            put(x0 + (len(s) - 2 if f > 0 else 1), y, "o", _deep_colour(sp["eye"]))
+        return
+    n = int(round(lc))
+    h = max(1.0, hr / 2.0)
+    shell = sp["shape"] == "turtle"
+    tail = 0.42 if sp.get("rattail") else 0.08 if shell else 0.2
+    x0 = int(round(sx - n / 2.0))
+    tops, bots = {}, {}
+    for c in range(n):
+        u = (c + 0.5) / n
+        x = x0 + (c if f > 0 else n - 1 - c)
+        if u < tail:
+            if sp.get("rattail") or shell:
+                tops[x] = bots[x] = sy
+                continue
+            s = 1.0 - u / tail
+            half = s * h * 0.95 + 0.4
+        else:
+            w = (u - tail) / (1.0 - tail)
+            half = h * math.sqrt(max(0.0, 1.0 - ((w - 0.42) / 0.58) ** 2))
+            if shell:
+                # A dome of a shell over a flat underside.
+                half = h * math.sqrt(max(0.0, 1.0 - ((w - 0.5) / 0.5) ** 2))
+                tops[x], bots[x] = sy - half, sy + half * 0.35
+                continue
+        tops[x], bots[x] = sy - half, sy + half
+    xs = sorted(tops)
+    for x in xs:
+        t, b = int(round(tops[x])), int(round(bots[x]))
+        u = (x - x0 + 0.5) / n if f > 0 else (x0 + n - x - 0.5) / n
+        if lit:
+            for y in range(t + 1, b):
+                g = " "
+                if u >= tail and (y + x) % 2 == 0 and sp.get("fill"):
+                    g = sp["fill"]
+                put(x, y, g, attr)
+            if t == b:
+                put(x, t, "-" if u < tail else "=", attr)
+                continue
+            dt = tops.get(x + 1, tops[x]) - tops.get(x - 1, tops[x])
+            db = bots.get(x + 1, bots[x]) - bots.get(x - 1, bots[x])
+            if u < tail:
+                put(x, t, "\\" if f > 0 else "/", attr)
+                put(x, b, "/" if f > 0 else "\\", attr)
+            else:
+                put(x, t, "/" if dt < -0.7 else "\\" if dt > 0.7 else "_", attr)
+                put(x, b, "\\" if db > 0.7 else "/" if db < -0.7 else "-", attr)
+        if glow and sp.get("lights") and tail < u < 0.92 and x % 2 == 0:
+            put(x, int(round(bots[x])) - 1, ".", glow)
+    nose = x0 + n - 1 if f > 0 else x0
+    y = int(round(sy))
+    if lit:
+        if not shell:
+            put(nose + (1 if f > 0 else -1), y, ">" if f > 0 else "<", attr)
+        if not shell:
+            ex = nose - f * max(1, int(n * 0.12))
+            put(ex, int(round(sy - h * 0.35)), "o" if n < 30 else "O",
+                _deep_colour(sp["eye"]) if sp.get("eye") else attr)
+            gx = nose - f * max(2, int(n * 0.25))
+            for gy in range(int(round(sy - h * 0.5)) + 1, int(round(sy + h * 0.5))):
+                put(gx, gy, ")" if f > 0 else "(", attr)
+        if sp.get("sword"):
+            for k in range(int(n * 0.4)):
+                put(nose + f * (2 + k), y, "-", attr)
+        if sp.get("teeth"):
+            for k in range(max(2, int(n * 0.22))):
+                put(nose - f * k, y, "v" if k % 2 else "^", SNOW)
+        if sp.get("fin"):
+            mid = x0 + int(n * 0.5)
+            top = int(round(sy - h)) - 1
+            put(mid, top, "/" if f > 0 else "\\", attr)
+            put(mid - f, top, "_" , attr)
+        if shell:
+            # Its head out in front on its neck, and the flippers rowing.
+            put(nose + f, y, "=", attr)
+            put(nose + 2 * f, y, ")" if f > 0 else "(", attr)
+            put(nose + 2 * f, y - 1, "o", attr)
+            row = math.sin(now * 1.5 + seed)
+            for fu, size in ((0.7, max(2, int(h))), (0.18, max(1, int(h * 0.6)))):
+                fx_ = x0 + int(n * (fu if f > 0 else 1.0 - fu))
+                fy_ = int(round(sy + h * 0.35)) + 1
+                a = 1.0 + 0.4 * row         # from straight down, swept back
+                for k in range(size):
+                    put(fx_ - f * math.sin(a) * k * 2.0, fy_ + math.cos(a) * k,
+                        "/" if f > 0 else "\\", attr)
+    if glow and sp.get("lure"):
+        # The lure: a rod off the top of its head, bent forward over the mouth,
+        # and the light on the end of it.
+        hx = nose - f * max(1, int(n * 0.2))
+        ty = int(round(sy - h))
+        rod = max(2.0, h * 1.1)
+        end = (hx, ty)
+        for k in range(1, 9):
+            a = k / 8.0 * 1.9
+            x = hx + f * math.sin(a) * rod * 1.6
+            y = ty - math.cos(a) * rod
+            if lit and k < 8:
+                put(x, y, ("|" if a < 0.5 else "/" if a < 1.2 else "-" if a < 1.6
+                           else "\\").translate(DEEP_MIRROR) if f < 0 else
+                    "|" if a < 0.5 else "/" if a < 1.2 else "-" if a < 1.6 else "\\",
+                    attr)
+            end = (x, y + 1)
+        on = math.sin(now * 2.0 + seed) > -0.6
+        put(end[0], end[1], "*" if on else "o", glow)
+
+
+def _draw_eel(put, sp, sx, sy, lc, hr, f, attr, glow, glow_only, now, seed):
+    """Something long and thin that swims in waves: the oarfish, its crest
+    red all down its back, the frilled shark, the scabbardfish. Its back and
+    belly are worked out along it, the way a fish's are, so it reads as a
+    ribbon and not a row of dashes."""
+    if glow_only:
+        return
+    n = max(2, int(round(lc)))
+    amp = max(0.5, hr * 0.7)
+    crest = _deep_colour(sp["crest"]) if sp.get("crest") else None
+    x0 = int(round(sx - n / 2.0))
+    tops, bots = {}, {}
+    for c in range(n):
+        u = (c + 0.5) / n
+        x = x0 + (c if f > 0 else n - 1 - c)
+        mid = sy + amp * math.sin(u * 9.0 - now * sp["speed"] * 2.5 + seed) * (
+            1.0 - 0.7 * u)
+        half = 0.5 * hr * min(1.0, 3.0 * u + 0.2, 5.0 * (1.0 - u) + 0.5)
+        tops[x], bots[x] = mid - half, mid + half
+    for x in sorted(tops):
+        t, b = int(round(tops[x])), int(round(bots[x]))
+        dt = tops.get(x + 1, tops[x]) - tops.get(x - 1, tops[x])
+        if t >= b:
+            put(x, t, "/" if dt < -0.8 else "\\" if dt > 0.8 else "-", attr)
+        else:
+            db = bots.get(x + 1, bots[x]) - bots.get(x - 1, bots[x])
+            for y in range(t + 1, b):
+                put(x, y, "=" if (x + y) % 2 else " ", attr)
+            put(x, t, "/" if dt < -0.8 else "\\" if dt > 0.8 else "_", attr)
+            put(x, b, "\\" if db > 0.8 else "/" if db < -0.8 else "-", attr)
+        if crest is not None and x % 2 == 0:
+            put(x, t - 1, "'", crest)
+    nose = x0 + n - 1 if f > 0 else x0
+    y = int(round((tops[nose] + bots[nose]) / 2.0))
+    put(nose + f, y, ">" if f > 0 else "<", attr)
+    put(nose - f, int(round(tops[nose])) + (1 if hr > 2.5 else 0), "o", attr)
+    if sp.get("frill"):
+        for k in range(2, max(3, int(n * 0.12))):
+            put(nose - f * k, int(round(bots[nose - f * k] if nose - f * k in bots
+                                        else bots[nose])) + 1, "{" if f > 0 else "}",
+                attr)
+    if crest is not None:
+        for k in range(1, 4):
+            put(nose - f * k, int(round(tops[nose])) - 1 - (k % 2), "^", crest)
+
+
+def _draw_jelly(put, sp, sx, sy, lc, hr, f, attr, glow, glow_only, now, seed):
+    """A jelly: its bell, pulsing, and its tentacles trailing under it; a comb
+    jelly its rows of light running round it instead."""
+    beat = 0.85 + 0.15 * math.sin(now * 2.2 + seed)
+    comb = glow == "comb"
+    if lc < 2.5:
+        if comb:
+            put(sx, sy, ":", NEON[int(now * 6.0 + seed) % len(NEON)][0])
+        elif not glow_only:
+            put(sx, sy, "@" if lc > 1.2 else "o", attr)
+        return
+    w = max(1.0, lc * beat / 2.0)
+    hb = max(1, int(round(hr * (1.0 if comb else 0.7))))
+    y0 = int(round(sy - hb / 2.0))
+    for r in range(hb):
+        hw = w * math.sqrt((r + 1.0) / hb) if not comb else w * math.sqrt(
+            max(0.15, 1.0 - ((r + 0.5) / hb * 2.0 - 1.0) ** 2))
+        left, right = int(round(sx - hw)), int(round(sx + hw))
+        for x in range(left, right + 1):
+            edge = x in (left, right)
+            if comb:
+                c_ = NEON[(r + int(now * 6.0) + seed) % len(NEON)][0]
+                put(x, y0 + r, ("(" if x == left else ")") if edge else (
+                    ":" if (x - left) % 3 == 1 else " "), c_ if edge else attr)
+            elif not glow_only:
+                g = ("(" if x == left else ")") if edge else ("-" if r == 0 else " ")
+                put(x, y0 + r, g, attr)
+    if comb:
+        return
+    k = max(2, int(w))
+    tl = int(round(hb * 2.0 + 1.5 * beat))
+    for i in range(k):
+        bx = sx - w + 0.5 + i * (2.0 * w - 1.0) / max(1, k - 1)
+        for r in range(1, tl + 1):
+            x = int(round(bx + math.sin(now * 1.5 + r * 0.6 + i) * 0.7))
+            if not glow_only:
+                put(x, y0 + hb - 1 + r, "|" if r % 3 else "'", attr)
+
+
+def _draw_squid(put, sp, sx, sy, lc, hr, f, attr, glow, glow_only, now, seed):
+    """A squid, going mantle first: the pointed mantle with its fins, the
+    eye, the arms trailing - and the giant's two long tentacles."""
+    on = sp.get("blink") and math.sin(now * 3.0 + seed * 1.7) > 0.2
+    if lc < 2.0:
+        if glow and on:
+            put(sx, sy, ".", glow)
+        elif not glow_only:
+            put(sx, sy, ">" if f > 0 else "<", attr)
+        return
+    n = int(round(lc))
+    h = max(1.0, hr / 2.0)
+    x0 = int(round(sx - n / 2.0))
+    arms = 0.42
+    legend = sp.get("legend")
+    for c in range(n):
+        u = (c + 0.5) / n
+        x = x0 + (c if f > 0 else n - 1 - c)
+        if u < arms:
+            continue
+        if u < 0.52:
+            half = h * 0.75
+        else:
+            half = h * ((1.0 - u) / 0.48) ** 0.6
+        t, b = int(round(sy - half)), int(round(sy + half))
+        if not glow_only:
+            for y in range(t + 1, b):
+                put(x, y, sp.get("fill", " ") if (x + y) % 2 else " ", attr)
+            put(x, t, "_" if t != b else "=", attr)
+            if t != b:
+                put(x, b, "-", attr)
+            if 0.8 < u < 0.98:
+                # The fins, a triangle each side, widest a little short of the tip.
+                fin = int(round((1.0 - abs(u - 0.9) / 0.1) * h * 0.7))
+                if fin >= 1:
+                    back = (u < 0.9) == (f > 0)
+                    put(x, t - fin, "/" if back else "\\", attr)
+                    put(x, b + fin, "\\" if back else "/", attr)
+        if on and (x + int(sy)) % 2 == 0:
+            put(x, int(round(sy)), "*" if legend else ".", glow)
+    if glow_only:
+        return
+    head = x0 + int(n * 0.47) if f > 0 else x0 + n - 1 - int(n * 0.47)
+    put(head, int(round(sy - h * 0.3)), "O" if n > 18 else "o", SNOW if legend else attr)
+    k = max(2, min(6, int(h) + 2))
+    span = int(n * arms)
+    for i in range(k):
+        long_ = legend and i in (0, k - 1)
+        span_ = span + (int(n * 0.55) if long_ else 0)
+        prev = None
+        for c in range(span_):
+            u = c / max(1.0, span)
+            x = (x0 + span - c) if f > 0 else (x0 + n - 1 - span + c)
+            spread = (i - (k - 1) / 2.0) * h * 1.1 / max(1, k - 1) * (0.4 + 0.8 * min(u, 1.0))
+            y = int(round(sy + spread + 0.7 * math.sin(u * 7.0 + now * 2.0 + i) * min(u, 1.0)))
+            g = "-" if prev is None or y == prev else ("/" if (y < prev) == (f < 0) else "\\")
+            if long_ and c == span_ - 1:
+                g = "@" if n > 30 else "o"
+            put(x, y, g, attr)
+            prev = y
+
+
+def _draw_ray(put, sp, sx, sy, lc, hr, f, attr, glow, glow_only, now, seed):
+    """A ray, side on, flying: a flat body, its wings beating up and down
+    from it, the whip of a tail behind."""
+    if glow_only:
+        return
+    if lc < 3.0:
+        put(sx, sy, "-", attr)
+        return
+    n = int(round(lc))
+    flap = math.sin(now * 1.6 + seed)
+    x0 = int(round(sx - n / 2.0))
+    y = int(round(sy))
+    for c in range(n):
+        u = (c + 0.5) / n
+        x = x0 + (c if f > 0 else n - 1 - c)
+        if u < 0.35:
+            put(x, y, "-" if c else ".", attr)
+            continue
+        w = (u - 0.35) / 0.65
+        put(x, y, "=", attr)
+        lift = flap * (1.0 - abs(w * 2.0 - 1.0)) * max(1.0, hr) * 1.4
+        if abs(lift) >= 0.6:
+            # The wing's edge, out from the body: rising to its tip and back.
+            up = (w < 0.5) == (f > 0)
+            g = ("/" if up else "\\") if lift > 0 else ("\\" if up else "/")
+            put(x, int(round(sy - lift)), g, attr)
+    nose = x0 + n if f > 0 else x0 - 1
+    put(nose, y, ">" if f > 0 else "<", attr)
+
+
+def _draw_dumbo(put, sp, sx, sy, lc, hr, f, attr, glow, glow_only, now, seed):
+    """The dumbo octopus: a round head, its ear-fins flapping, the skirt of
+    its arms under it."""
+    if glow_only:
+        return
+    if lc < 2.5:
+        put(sx, sy, "@", attr)
+        return
+    w = max(1.0, lc / 2.0)
+    hb = max(2, int(round(hr)))
+    y0 = int(round(sy - hb / 2.0))
+    flap = int(round(math.sin(now * 2.5 + seed)))
+    for r in range(hb):
+        hw = w * math.sqrt(max(0.2, 1.0 - ((r + 0.5) / hb - 0.5) ** 2 * 2.0))
+        left, right = int(round(sx - hw)), int(round(sx + hw))
+        for x in range(left, right + 1):
+            put(x, y0 + r, ("(" if x == left else ")") if x in (left, right) else
+                (" " if r != hb // 2 or abs(x - sx) > w * 0.6 else
+                 ("o" if abs(abs(x - sx) - w * 0.4) < 0.6 else " ")), attr)
+        if r == 0:
+            put(left - 1, y0 + flap, "o", attr)
+            put(right + 1, y0 - flap, "o", attr)
+    for x in range(int(round(sx - w)), int(round(sx + w)) + 1):
+        put(x, y0 + hb, "/" if x % 2 else "\\", attr)
+
+
+DEEP_DRAW = {"fish": _draw_fish, "turtle": _draw_fish, "eel": _draw_eel,
+             "jelly": _draw_jelly, "squid": _draw_squid, "ray": _draw_ray,
+             "dumbo": _draw_dumbo}
+
+
+def _deep_blit(put, art, sx, sy, w, h, attr):
+    """A drawing stood on the bottom, sx its middle and sy its foot, w by h
+    cells: stretched to the size it is from here, the way the city's are."""
+    rows, cols = len(art), len(art[0])
+    top, left = sy - h, sx - w / 2.0
+    for y in range(int(math.floor(top)), int(math.ceil(sy)) + 1):
+        sr = int((y + 0.5 - top) / max(1e-6, h) * rows)
+        if not 0 <= sr < rows:
+            continue
+        line = art[sr]
+        for x in range(int(math.floor(left)), int(math.ceil(left + w)) + 1):
+            sc = int((x + 0.5 - left) / max(1e-6, w) * cols)
+            if 0 <= sc < cols and line[sc] != " ":
+                put(x, y, line[sc], attr)
+
+
+def draw_deep(ch, co, sub, width, rows, now):
+    """The sea from inside it, into the top `rows` of the grid: the bottom
+    as far as her lamp or the moon or a ping reaches, the light on the
+    underside of the surface in the shallows, the snow, what lives down here
+    and what lies on the bottom; what comes close in the light goes in her
+    log."""
+    cx = (width - 1) / 2.0
+    fx = cx / PLANE
+    fy = fx * 0.5
+    tilt = max(-1.0, min(1.0, sub.vy / SUB_SINK))
+    hz = rows * 0.46 - tilt * 0.22 * fy
+    dx, dz = math.sin(sub.heading), math.cos(sub.heading)
+    plx, plz = dz * PLANE, -dx * PLANE
+    px, pz, py = sub.x, sub.z, sub.y
+    amb = min(1.0, max(0.0, 1.0 - py / DEEP_SUNLIT)
+              * (0.3 + 0.5 * moon_light(now) + 1.5 * dawn(now)))
+    amb_reach = 32.0 * amb
+    ping = now - sub.ping_at
+    ping_r = min(130.0, ping * SUB_PING_SPEED) if ping < SUB_PING_LIFE else 0.0
+    ping_fade = 1.0 - ping / SUB_PING_LIFE if ping_r else 0.0
+    lamp = sub.lamp
+    reach = max(SUB_LAMP if lamp else 0.0, amb_reach, ping_r)
+    green = NEON[5 % len(NEON)][0]
+    zb = [[1e9] * width for _ in range(rows)]
+
+    def light(d, sx):
+        b = 0.0
+        if lamp and d < SUB_LAMP:
+            off = (sx - cx) / cx
+            b = max(0.0, 1.0 - off * off * 0.85) * (1.0 - d / SUB_LAMP) ** 0.7
+        if amb_reach > 0.0 and d < amb_reach:
+            b = max(b, amb * 0.55 * (1.0 - d / amb_reach))
+        return b
+
+    sand = [_deep_colour(c) for c in DEEP_SAND]
+    mud = [_deep_colour(c) for c in DEEP_MUD]
+    rays = [(dx + plx * (2.0 * sx / max(1, width - 1) - 1.0),
+             dz + plz * (2.0 * sx / max(1, width - 1) - 1.0)) for sx in range(width)]
+
+    # The bottom, cast out along each column, nearest first: each step that
+    # comes up over what is drawn so far fills down to it.
+    for sx in range(width):
+        rdx, rdz = rays[sx]
+        ybuf = rows
+        t = 0.6
+        prev = None
+        while t < reach and ybuf > 0:
+            step = 0.35 + t * 0.045
+            wx, wz = px + rdx * t, pz + rdz * t
+            d = seabed(wx, wz)
+            r = int(hz + (d - py) * fy / t)
+            if r < ybuf:
+                b = light(t, sx)
+                ramp = mud if d > 250.0 else sand
+                steep = prev is not None and prev - d > step * 1.2
+                top = max(0, r)
+                for y in range(top, ybuf):
+                    zb[y][sx] = t
+                    if b >= 0.06:
+                        lvl = min(3, int(b * 4.2))
+                        g = "."
+                        if lvl >= 1:
+                            # Textured by where in the world each cell is, so
+                            # it holds still: a wall by its depth too, the
+                            # bottom by how far off that row of it is.
+                            if steep:
+                                dr = py + (y - hz) * t / fy
+                                m = _mix(int(wx * 4.0), int(wz * 4.0),
+                                         int(dr * 2.0) + 7401)
+                                g = "#%|:#%"[m % 6]
+                            else:
+                                tr = t if y + 0.5 <= hz else min(t, (d - py) * fy / (
+                                    y + 0.5 - hz))
+                                m = _mix(int((px + rdx * tr) * 2.0),
+                                         int((pz + rdz * tr) * 2.0), 7401)
+                                g = (".,..'...,._...o."[m % 16] if d < 250.0
+                                     else ".:.~.'"[m % 6])
+                        ch[y][sx], co[y][sx] = g, ramp[lvl]
+                    elif ping_r > t and y == top:
+                        ch[y][sx], co[y][sx] = "_" if not steep else "|", green
+                    else:
+                        ch[y][sx], co[y][sx] = " ", 0
+                ybuf = r
+            prev = d
+            t += step
+
+    # The underside of the surface, from the shallows: a ripple of moonlight.
+    if amb > 0.05 and py > SUB_UNDER:
+        for y in range(min(rows, int(hz))):
+            rise = (hz - y) / fy
+            if rise <= 0.0:
+                continue
+            t = py / rise
+            fade = amb * (1.0 - t / 90.0)
+            if fade < 0.05:
+                continue
+            attr = _deep_colour(("cold", 4) if fade > 0.5 else ("cold", 0) if fade > 0.2
+                                else ("far", 0))
+            k0 = int(now * 1.3)
+            for sx in range(width):
+                if zb[y][sx] < t:
+                    continue
+                rdx, rdz = rays[sx]
+                m = _mix(int((px + rdx * t) * 0.3) + k0, int((pz + rdz * t) * 0.6),
+                         7403) % 23
+                if m < 3:
+                    ch[y][sx], co[y][sx] = "~" if m else "-", attr
+
+    def proj(wx, wy, wz):
+        rx, rz = wx - px, wz - pz
+        perp = rx * dx + rz * dz
+        if perp < 0.7:
+            return None
+        lat = rx * dz - rz * dx
+        return cx + lat * fx / perp, hz + (wy - py) * fy / perp, perp
+
+    # The snow: what is always falling down here, drifting past the bubble.
+    snow = [_deep_colour(c) for c in DEEP_SNOW]
+    ci, cj, ck = int(px // 4.0), int(pz // 4.0), int(py // 4.0)
+    for a in range(ci - 7, ci + 8):
+        for c in range(cj - 7, cj + 8):
+            if ((a + 0.5) * 4.0 - px) * dx + ((c + 0.5) * 4.0 - pz) * dz < -4.0:
+                continue
+            for k in range(max(0, ck - 4), ck + 5):
+                m = _mix(a, c, k * 7919 + 7405)
+                if m & 1:
+                    continue
+                wy = k * 4.0 + ((((m >> 20) & 255) / 64.0 + now * 0.25) % 4.0)
+                p = proj(a * 4.0 + ((m >> 4) & 255) / 64.0, wy,
+                         c * 4.0 + ((m >> 12) & 255) / 64.0)
+                if p is None or p[2] > 30.0:
+                    continue
+                x, y = int(p[0]), int(p[1])
+                if not (0 <= x < width and 0 <= y < rows) or p[2] > zb[y][x]:
+                    continue
+                b = light(p[2], x)
+                if b > 0.08:
+                    ch[y][x] = "*" if p[2] < 3.0 else "'" if m & 4 else "."
+                    co[y][x] = snow[min(2, int(b * 3.0))]
+
+    # What lives here and what lies on the bottom, furthest first.
+    things = []
+    look = max(reach, 60.0)
+    for sp, m, members, (hdx, hdz) in deep_groups(px, pz, py, now, look):
+        side = hdx * dz - hdz * dx
+        f = 1 if side >= 0.0 else -1
+        for k, (wx, wy, wz) in enumerate(members):
+            p = proj(wx, wy, wz)
+            if p is not None and p[2] < look:
+                things.append((p[2], 0, sp, m + k, p, f, abs(side), k == 0))
+    for kind, m, wx, floor, wz in deep_props(px, pz, py, look):
+        p = proj(wx, floor, wz)
+        if p is not None and p[2] < look:
+            things.append((p[2], 1, kind, m, p, wx, wz, floor))
+    things.sort(key=lambda t_: -t_[0])
+    for th in things:
+        d, sx, sy = th[0], th[4][0], th[4][1]
+        if not (-60 < sx < width + 60 and -40 < sy < rows + 40):
+            continue
+        b = light(d, max(0, min(width - 1, int(sx))))
+        pinged = ping_r > d
+
+        def put(x, y, g, a, d=d):
+            x, y = int(round(x)), int(round(y))
+            if 0 <= y < rows and 0 <= x < width and d < zb[y][x]:
+                ch[y][x], co[y][x] = g, a
+        if b < 0.07 and pinged:
+            attr = green
+        elif b >= 0.45:
+            attr = None
+        elif b >= 0.2:
+            attr = FOG_DIM
+        else:
+            attr = _deep_colour(("dark", 4))
+        dark = b < 0.07 and not pinged
+        if th[1] == 0:
+            sp, seed, f, side, lead = th[2], th[3], th[5], th[6], th[7]
+            glow = sp.get("glow")
+            if dark and not glow:
+                continue
+            gattr = None if glow is None else glow if glow == "comb" else _deep_colour(
+                glow)
+            lc = sp["L"] * fx / d * max(0.3, side)
+            hr = sp["H"] * fy / d
+            DEEP_DRAW[sp["shape"]](put, sp, sx, sy, lc, hr, f,
+                                   attr or _deep_colour(sp["c"]), gattr, dark,
+                                   now, seed & 1023)
+            if lead and d < SUB_SEES and (b > 0.25 or (glow and d < SUB_SEES * 0.7)):
+                sub.saw(sp["name"], now)
+            continue
+        kind, seed = th[2], th[3]
+        if dark:
+            continue
+        sc = fx / d
+        draw = kind["draw"]
+        if draw == "kelp":
+            k_attr = attr or _deep_colour(("leaf", 2))
+            for s in range(3 + seed % 4):
+                ms = _mix(seed, s, 7431)
+                ox = ((ms & 255) / 255.0 - 0.5) * 6.0
+                oz = (((ms >> 8) & 255) / 255.0 - 0.5) * 6.0
+                p = proj(th[5] + ox, th[7], th[6] + oz)
+                if p is None:
+                    continue
+                tall = th[7] * (0.5 + ((ms >> 16) & 127) / 254.0)
+                top_y = p[1] - tall * fy / p[2]
+                for y in range(int(top_y), int(p[1]) + 1):
+                    up = (p[1] - y) / max(1.0, p[1] - top_y)
+                    sway = math.sin(now * 0.8 + up * 3.0 + s) * 0.8 * up * fx / p[2]
+                    g = ")" if math.cos(now * 0.8 + up * 3.0 + s) > 0 else "("
+                    put(p[0] + sway, y, "~" if (y + s) % 5 == 0 else g, k_attr)
+        elif draw == "vent":
+            tall = 9.0 + seed % 6
+            w = max(1.0, 1.6 * sc)
+            top_y = sy - tall * fy / d
+            for y in range(int(top_y), int(sy) + 1):
+                for x in range(int(sx - w / 2.0), int(sx + w / 2.0) + 1):
+                    put(x, y, "#" if (x + y) % 3 else "%", attr or _deep_colour(("rust", 1)))
+            for k in range(14):
+                mk = _mix(seed, k, int(now * 4.0))
+                y = top_y - 1 - (k * 0.8 + now * 3.0) % (8.0 * fy / d + 6)
+                put(sx + ((mk & 7) - 3.5) * (k / 14.0 + 0.2), y,
+                    "~" if mk & 8 else ":", CONCRETE if b < 0.45 else FOG_DIM)
+            _deep_blit(put, DEEP_WORMS, sx + 2.4 * sc, sy, 2.4 * sc, 1.3 * fy / d,
+                       attr or SNOW)
+            for k in range(6):
+                mk = _mix(seed, k, 7433)
+                put(sx + 1.2 * sc + (mk % 10) * 0.25 * sc, sy - 1.0 * fy / d - (mk >> 4) % 2,
+                    "*", attr or ROU_RED)
+        elif draw == "herd":
+            for k in range(3 + seed % 4):
+                mk = _mix(seed, k, 7435)
+                walk = now * 0.05 + k
+                p = proj(th[5] + ((mk & 255) / 255.0 - 0.5) * 5.0 + math.sin(walk),
+                         th[7], th[6] + (((mk >> 8) & 255) / 255.0 - 0.5) * 5.0)
+                if p is not None:
+                    _deep_blit(put, DEEP_PIG, p[0], p[1], kind["W"] * fx / p[2],
+                               kind["Hh"] * fy / p[2], attr or _deep_colour(kind["c"]))
+        else:
+            a = attr or _deep_colour(kind.get("lit", kind["c"]))
+            _deep_blit(put, draw, sx, sy, kind["W"] * sc, kind["Hh"] * fy / d, a)
+        if kind.get("log") and d < SUB_SEES and b > 0.25:
+            sub.saw(kind["name"], now)
+
+    # The tanks working: bubbles going up past the bubble.
+    churn = min(1.0, abs(sub.want_y - sub.vy) / 4.0 + max(0.0, 1.5 - (
+        now - sub.dived_at)))
+    if churn > 0.05 and py > SUB_UNDER:
+        for k in range(int(churn * width / 3.0)):
+            m = _mix(k, 9, 7437)
+            x = m % width
+            speed = 6.0 + (m >> 8) % 14
+            y = rows - 1 - int((now * speed + (m >> 12) % 97) % (rows + 4))
+            if 0 <= y < rows:
+                ch[y][x] = "oO.o"[(m >> 4) & 3]
+                co[y][x] = _deep_colour(("cold", 3))
+
+
+def render_sub(sub, width, height, now):
+    """In her bubble: on the top, the sea and the coast from just over the
+    water; under it, the sea from inside (draw_deep()). Round it the rim of
+    the bubble, her yellow lip along the foot of it, and the dash: how deep,
+    how fast, which way, the tanks, the lamp, the bottom, the way to the
+    trench, and how much of what lives down here you have seen."""
+    k = big_scale(width, height)
+    small = width < 40 or height < 14
+    deck = height - 1 if small else height - (5 + 6 * (k - 1))
+    if sub.y < SUB_UNDER:
+        v = View(sub.x, sub.z, sub.heading, width, height, eye=max(0.3, sub.eye(now)))
+        ch, co, wet = render_street(v, now)
+        if sub.y > 0.05:
+            # Going under: the water coming up the bubble.
+            line = int(deck - (deck - v.horizon) * sub.y / SUB_UNDER) if deck > v.horizon \
+                else deck
+            for y in range(max(0, line), deck):
+                for x in range(width):
+                    ch[y][x] = "~" if y == line else " "
+                    co[y][x] = _deep_colour(("cold", 2))
+    else:
+        v = View(sub.x, sub.z, sub.heading, width, height, eye=EYE_Y)
+        ch = [[" "] * width for _ in range(height)]
+        co = [[0] * width for _ in range(height)]
+        draw_deep(ch, co, sub, width, deck, now)
+    depth = int(round(sub.y))
+    if small:
+        _text(ch, co, height - 1, 0, (" %d m  %d knots" % (
+            depth, int(abs(sub.speed) * BOAT_KNOTS)))[:width], GOLD)
+        return ch, co, v
+    # The bubble's rim: an ellipse, the hull outside it.
+    rx, ry = width / 2.0 - 0.5, deck * 0.62
+    my = deck * 0.5
+    for y in range(deck):
+        dy = (y + 0.5 - my) / ry
+        if abs(dy) >= 1.0:
+            span = -1.0
+        else:
+            span = rx * math.sqrt(1.0 - dy * dy)
+        left, right = int(round(width / 2.0 - span)), int(round(width / 2.0 + span)) - 1
+        for x in range(width):
+            if x < left or x > right:
+                ch[y][x], co[y][x] = " ", 0
+        if span > 0:
+            lip = GOLD if dy > 0.55 else CURB
+            g = "/" if dy < -0.6 else "\\" if dy > 0.6 else "|"
+            if 0 <= left < width:
+                ch[y][left], co[y][left] = g, lip
+            if 0 <= right < width:
+                ch[y][right], co[y][right] = g.translate(DEEP_MIRROR), lip
+    for x in range(width):                      # the top and foot of the rim
+        dxr = (x + 0.5 - width / 2.0) / rx
+        if abs(dxr) < 1.0:
+            off = ry * math.sqrt(1.0 - dxr * dxr)
+            for y, attr in ((int(round(my - off)), CURB), (int(round(my + off)) - 1, GOLD)):
+                if 0 <= y < deck:
+                    ch[y][x], co[y][x] = ("-" if attr == CURB else "_"), attr
+    # The dash.
+    for x in range(width):
+        ch[deck][x], co[deck][x] = "=", GOLD_DIM
+        for y in range(deck + 1, height):
+            ch[y][x], co[y][x] = " ", 0
+    knots = int(round(abs(sub.speed) * BOAT_KNOTS))
+    tanks = ("DIVE " + "v" * max(1, int(round(sub.want_y / SUB_SINK_STEP)))
+             if sub.want_y > 0.0 else
+             "RISE " + "^" * max(1, int(round(-sub.want_y / SUB_SINK_STEP)))
+             if sub.want_y < 0.0 else "LEVEL")
+    under = max(0, int(seabed(sub.x, sub.z) - sub.y))
+    zone = deep_zone(sub.y).upper().replace("IN THE ", "").replace("ON THE ", "")
+    lines = [compass_word(sub.heading).upper() + "  " + tanks,
+             "LAMP " + ("ON" if sub.lamp else "OFF") + "  BOTTOM %d M UNDER" % under,
+             trench_pointer(sub.x, sub.z),
+             "SEEN %d OF %d" % (len(sub.seen), len(DEEP_LOG))]
+    if k > 1:
+        sx = sy = k - 1
+        right = _blocks(ch, co, deck + 1, 3, "%d" % depth, GOLD, sx, sy)
+        _text(ch, co, deck + 2 + 5 * sy, 3, "METRES DOWN", HUD)
+        right = max(right, 3 + 12)
+        kx = right + 6
+        right2 = _blocks(ch, co, deck + 1, kx, "%d" % knots, GOLD, sx, sy)
+        _text(ch, co, deck + 2 + 5 * sy, kx, "KNOTS", HUD)
+        tx = max(right2 + 6, int(width * 0.55))
+        lines.insert(0, zone)
+        for n, s in enumerate(lines):
+            _text(ch, co, deck + 1 + n * 2, tx, s[:max(0, width - tx - 1)],
+                  GOLD if n == 2 else HUD)
+    else:
+        tx = max(16, int(width * 0.36))
+        _text(ch, co, deck + 1, 2, "DEPTH %4d M" % depth, GOLD)
+        _text(ch, co, deck + 2, 2, zone[:tx - 3], HUD)
+        _text(ch, co, deck + 3, 2, "%3d KNOTS" % knots, GOLD)
+        for n, s in enumerate(lines):
+            _text(ch, co, deck + 1 + n, tx, s[:max(0, width - tx - 1)],
+                  GOLD if n == 2 else HUD)
+    if now - sub.ping_at < 0.7:
+        _text(ch, co, deck + 1, width - 7, "PING", ROU_GREEN)
+    # What she says, and anything new, across the top of the bubble.
+    name, when = sub.news
+    words = ""
+    if now - when < 4.5 and name:
+        legend = any(s["name"] == name and s.get("legend") for s in DEEP_LIFE)
+        words = ("!! THE %s !!" % name.upper() if legend else "NEW: " + name) + (
+            "  -  %d of %d seen" % (len(sub.seen), len(DEEP_LOG)))
+    elif now - sub.said_at < 3.0 and sub.said:
+        words = sub.said
+    elif now - sub.horn_at < 0.6:
+        words = "PAAARP"
+    if words:
+        # On a clear strip of its own, or the rim and the sea show between
+        # the words.
+        words = (" " + words + " ")[:width]
+        y = max(2, int(my - ry * 0.7))
+        x0 = max(0, (width - len(words)) // 2)
+        attr = GOLD if words.startswith((" NEW", " !!")) else HUD
+        for k, c in enumerate(words):
+            if 0 <= x0 + k < width:
+                ch[y][x0 + k], co[y][x0 + k] = c, attr
+    return ch, co, v
+
+
 def main(stdscr):
     global WIDE_OK
     init_colors()
@@ -37570,6 +38839,7 @@ def main(stdscr):
     ride = None                 # up on the pier's wheel: {"pier", "t0"}
     cruise = None               # aboard the cruise ship: {"h", "look"}
     boat = None                 # at the wheel of a speedboat: a Boat
+    sub = None                  # down in the submarine: a Sub
     tackle = Tackle()           # your rods, bait, floats, cool box and book
     fishing = None              # with a line in the water: a Fishing
     shop = None                 # at a tackle shop's counter: your visit
@@ -37598,7 +38868,7 @@ def main(stdscr):
                 or flight is not None or reading or poke is not None
                 or vendor is not None or ride is not None or cruise is not None
                 or boat is not None or fishing is not None or shop is not None
-                or trip is not None)
+                or trip is not None or sub is not None)
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -37702,8 +38972,8 @@ def main(stdscr):
                     note = ("the sea: on - a taxi goes to the beach"
                             if toggle_coast() else
                             "the sea: off - the city is endless that way again")
-                    tiki = ride = cruise = boat = fishing = shop = trip = None
-                    _boat_out[0] = _herring_out[0] = None
+                    tiki = ride = cruise = boat = fishing = shop = trip = sub = None
+                    _boat_out[0] = _herring_out[0] = _pen_out[0] = None
                     _liner_trips.clear()
                     if not can_stand(cam_x, cam_z):
                         cam_x, cam_z = start_position()
@@ -37773,8 +39043,8 @@ def main(stdscr):
                             cab = None
                             metro = None
                             flight = None
-                            fishing = shop = trip = None
-                            _herring_out[0] = None
+                            fishing = shop = trip = sub = None
+                            _herring_out[0] = _pen_out[0] = None
                             if kind == "pilot":
                                 home_ = zone_home("airport", int(cam_x // CELL),
                                                   int(cam_z // CELL))
@@ -37980,6 +39250,36 @@ def main(stdscr):
                               ord("h"): "horn", ord("H"): "horn",
                               ord("e"): "handbrake",
                               ord("E"): "handbrake"}.get(key, ""), now)
+            elif sub is not None and key not in (ord("q"), CHEAT_KEY):
+                if key in (27, ord("x"), ord("X")):
+                    # Back to the pen, however far down: they winch her in.
+                    h_ = _pen_out[0]
+                    if h_ is not None:
+                        px_, pz_ = sub_pen(h_)
+                        cam_x, cam_z, yaw = px_, pz_ - 1.0, 0.0
+                    sub = None
+                    _pen_out[0] = None
+                    note, note_at = "back at the pen - they winch her in", now
+                elif key in (ord("z"), ord("Z")):
+                    _big_screens[0] = not _big_screens[0]     # big screens, off and on
+                else:
+                    sub.key({curses.KEY_UP: "faster", ord("w"): "faster",
+                             ord("W"): "faster", curses.KEY_DOWN: "slower",
+                             ord("s"): "slower", ord("S"): "slower",
+                             curses.KEY_LEFT: "left", ord("a"): "left",
+                             ord("A"): "drift left", curses.KEY_SLEFT: "drift left",
+                             curses.KEY_RIGHT: "right", ord("d"): "right",
+                             ord("D"): "drift right",
+                             curses.KEY_SRIGHT: "drift right",
+                             ord(" "): "brake", ord("b"): "brake",
+                             ord("f"): "dive", ord("F"): "dive",
+                             curses.KEY_NPAGE: "dive",
+                             ord("r"): "rise", ord("R"): "rise",
+                             curses.KEY_PPAGE: "rise",
+                             ord("l"): "lamp", ord("L"): "lamp",
+                             ord("h"): "ping", ord("H"): "ping",
+                             ord("e"): "handbrake",
+                             ord("E"): "handbrake"}.get(key, ""), now)
             elif cruise is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (curses.KEY_LEFT, ord("a"), ord("A")):
                     cruise["look"] -= 0.14
@@ -38463,6 +39763,20 @@ def main(stdscr):
                     autopilot = False
             elif (street and on_roof is None and sewer is None and venue is None
                   and key in (ord("p"), ord("P"))
+                  and sub_pen_near(cam_x, cam_z) is not None):
+                if wallet.take(SUB_FEE):
+                    h_ = sub_pen_near(cam_x, cam_z)
+                    px_, pz_ = sub_pen(h_)
+                    sub = Sub(px_, pz_ + SUB_MOOR, math.pi * 0.5, now, int(now * 1000.0))
+                    _pen_out[0] = h_
+                    fwd = side = spin = 0.0
+                    autopilot = False
+                    note, note_at = ("the hatch shuts over you - f takes her down, "
+                                     "w takes her out"), now
+                else:
+                    note, note_at = "a dive in the %s is $%d" % (SUB_NAME, SUB_FEE), now
+            elif (street and on_roof is None and sewer is None and venue is None
+                  and key in (ord("p"), ord("P"))
                   and marina_near(cam_x, cam_z) is not None):
                 if wallet.take(BOAT_FEE):
                     h_ = marina_near(cam_x, cam_z)
@@ -38696,6 +40010,8 @@ def main(stdscr):
                 note, note_at = "back alongside - down the gangway", now
         if boat is not None:
             boat.step(now - boat.clock, now)
+        if sub is not None:
+            sub.step(now - sub.clock, now)
         if fishing is not None:
             fishing.step(now)
         if (trip is not None and trip["phase"] in ("out", "home")
@@ -39194,6 +40510,9 @@ def main(stdscr):
         elif street and shop is not None:
             ch, co = render_tackle(shop, tackle, width, height, now)
             hud = TACKLE_HUD % shop["at"]["name"].lower()
+        elif street and sub is not None:
+            ch, co, v = render_sub(sub, width, height, now)
+            hud = SUB_HUD % (SUB_NAME.lower(), deep_zone(sub.y))
         elif street and boat is not None:
             ch, co, v = render_boat(boat, width, height, now)
             hud = BOAT_HUD % (compass_word(boat.heading),
