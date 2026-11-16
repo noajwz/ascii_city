@@ -43,6 +43,7 @@ or change something. Notes cross-reference each other by title ("see The univers
 - `submarine.md` - The submarine, and the sea from inside it
 - `fishing.md` - Fishing, and the tackle shops
 - `fireworks-over-the-bay.md` - Fireworks over the bay
+- `drone-show-and-glowing-sea.md` - The drone show over the sea, and glowing-sea nights
 - `festival-in-chinatown.md` - The festival in Chinatown
 - `carnival-on-the-bank.md` - The carnival on the bank
 - `big-bridge.md` - The big bridge

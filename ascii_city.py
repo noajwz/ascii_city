@@ -4062,6 +4062,8 @@ class View:
         self.tackle_signs = []  # tackle shops' names, to go up last
         self.bio = None         # the coves glowing tonight, as (x, z), if any
         self.still = None       # the trench and the floes: (x, z, reach) of black water
+        self.glowsea = False    # is tonight a night the surf glows
+        self.wading = False     # and are you standing in it
 
     def ray(self, sx):
         cam = 2.0 * sx / (self.width - 1) - 1.0
@@ -12467,6 +12469,8 @@ def coast_ground(v, kind, x, z, y, sx, glow, now):
                             + 0.6 * math.sin(now * 1.7 + zz * 0.13))
     e = x - w
     if e < 0.0:
+        if e > -0.9 and v.glowsea:
+            return glowsea_surf(v, x, z, e, sx, y, now)
         if e > -0.9:
             # The edge of the water, where it has run up to: foam.
             return ("~" if _mix(int(x * 2.0), key, int(now * 3.0)) % 3 else "-"), SNOW
@@ -12485,6 +12489,10 @@ def coast_ground(v, kind, x, z, y, sx, glow, now):
             return ".", (g if g is not None else GOLD_DIM)
         return (",", BARK) if h % 43 == 1 else None
     v.water.add((y, sx))
+    if v.glowsea and e < GLOWSEA_REACH:
+        lit_ = glowsea_surf(v, x, z, e, sx, y, now)
+        if lit_ is not False:
+            return lit_
     if v.bio is not None:
         for cx, cz in v.bio:
             if (x - cx) ** 2 + (z - cz) ** 2 < BIO_REACH * BIO_REACH:
@@ -18342,6 +18350,266 @@ def fireworks_near(x, z, now):
             return True
     return False
 
+# --- the drone show over the sea ---------------------------------------------
+# One night in DRONE_ODDS there is a drone show off every ocean pier, up the
+# coast from it, so that from the beach it stands beside the big wheel and not
+# behind it. All night, a show every DRONE_CYCLE: hundreds of lights come up
+# off the water, make a rocket that climbs on its flame, a heart that beats,
+# the big wheel turning, then a word, and go back down onto the sea. Each
+# drone is a world point, so buildings hide them, and the sea shows them.
+DRONE_ODDS = 13
+DRONE_N = 300          # how many
+DRONE_OUT = 260.0      # off the beach
+DRONE_UP_COAST = 230.0  # and along it from the pier, beside the wheel
+DRONE_BASE = 12.0      # the foot of the shapes over the water
+DRONE_CYCLE = 130.0    # seconds from the start of one show to the next
+DRONE_RISE = 10.0      # up off the water
+DRONE_HOLD = 11.0      # each shape, held
+DRONE_MORPH = 4.0      # and getting from one to the next
+DRONE_FALL = 8.0       # back down onto the sea
+DRONE_REACH = 1100.0   # how far off it can be seen
+DRONE_WORDS = ["HELLO", "GOODNIGHT", "LOVE YOU", "SEE YOU"]
+_drone_shift = [0.0]   # the menu's y: a show starting in a moment
+
+
+def drone_sites(x, z, reach):
+    """Where tonight's shows are within reach: (x, z) of each one's middle,
+    over the sea up the coast from its pier."""
+    if not COAST or x + reach < COAST_LAND * CELL:
+        return []
+    out = []
+    j0 = int((z - reach - DRONE_UP_COAST) / CELL)
+    k = (j0 - PIER_ROW) // PIER_GAP
+    while k * PIER_GAP + PIER_ROW <= (z + reach) / CELL:
+        pier = sea_pier(k * PIER_GAP + PIER_ROW)
+        k += 1
+        if pier is None:
+            continue
+        sz = (pier[0] + PIER_BROAD * 0.5) * CELL + DRONE_UP_COAST
+        sx = shore_x(sz) + DRONE_OUT
+        if (sx - x) ** 2 + (sz - z) ** 2 < reach * reach:
+            out.append((sx, sz))
+    return out
+
+
+def _drone_fit(pts):
+    """A shape's points, as many as there are drones: spread evenly over
+    them, or doubled up where there are too few."""
+    n = len(pts)
+    return [pts[(i * n) // DRONE_N] for i in range(DRONE_N)]
+
+
+def _drone_rocket(t):
+    """A rocket, its nose to the sky, climbing on a flickering flame."""
+    pts = []
+    lift = 14.0 + t * 1.4
+    for k in range(40):                         # the body: two sides
+        y = 10.0 + k * 1.0
+        pts += [(-10.0, y + lift, "SNOW"), (10.0, y + lift, "SNOW")]
+    for k in range(18):                         # the nose cone
+        f = k / 17.0
+        pts += [(-10.0 * (1.0 - f), 50.0 + f * 24.0 + lift, "ROU_RED"),
+                (10.0 * (1.0 - f), 50.0 + f * 24.0 + lift, "ROU_RED")]
+    for k in range(14):                         # a band and a porthole
+        pts.append((-10.0 + k * 1.5, 50.0 + lift, "SNOW"))
+        a = k / 14.0 * math.tau
+        pts.append((math.cos(a) * 4.0, 38.0 + math.sin(a) * 4.0 + lift, ("neon", 2)))
+    for k in range(12):                         # the fins
+        f = k / 11.0
+        pts += [(-10.0 - f * 11.0, 24.0 - f * 14.0 + lift, "ROU_RED"),
+                (10.0 + f * 11.0, 24.0 - f * 14.0 + lift, "ROU_RED")]
+    for k in range(70):                         # the flame, flickering
+        m = _mix(k, int(t * 12.0), 7501)
+        u = ((m & 255) / 255.0 - 0.5) * 14.0 * (1.0 - (k / 70.0))
+        pts.append((u, 9.0 - k * 0.32 * (0.8 + ((m >> 8) & 7) / 20.0) + lift,
+                    "GOLD" if m & 3 else ("neon", 4)))
+    return pts
+
+
+def _drone_heart(t):
+    """A heart, beating."""
+    beat = 1.0 + 0.08 * max(0.0, math.sin(t * 6.0)) ** 8
+    pts = []
+    for k in range(160):
+        a = k / 160.0 * math.tau
+        hx = 16.0 * math.sin(a) ** 3
+        hy = 13.0 * math.cos(a) - 5.0 * math.cos(2 * a) - 2.0 * math.cos(3 * a) - math.cos(4 * a)
+        pts.append((hx * 3.2 * beat, 55.0 + hy * 3.0 * beat, ("neon", 0)))
+    for k in range(140):                        # and filled, a deeper red
+        m = _mix(k, 3, 7503)
+        a = (m & 1023) / 1023.0 * math.tau
+        r = math.sqrt(((m >> 10) & 1023) / 1023.0) * 0.85
+        hx = 16.0 * math.sin(a) ** 3 * r
+        hy = (13.0 * math.cos(a) - 5.0 * math.cos(2 * a) - 2.0 * math.cos(3 * a)
+              - math.cos(4 * a)) * r
+        pts.append((hx * 3.2 * beat, 55.0 + hy * 3.0 * beat, "ROU_RED"))
+    return pts
+
+
+def _drone_wheel(t):
+    """The big wheel, turning, its rim chasing in colours like the pier's."""
+    pts = []
+    turn = t * 0.35
+    hub = 50.0
+    r = 34.0
+    for k in range(150):
+        a = turn + k / 150.0 * math.tau
+        pts.append((math.cos(a) * r, hub + math.sin(a) * r,
+                    ("neon", (k * 8 // 150 + int(t * 5.0)) % 8)))
+    for s in range(8):
+        a = turn + s / 8.0 * math.tau
+        for k in range(1, 6):
+            pts.append((math.cos(a) * r * k / 6.0, hub + math.sin(a) * r * k / 6.0,
+                        "STAR_DIM"))
+        pts.append((math.cos(a) * r, hub + math.sin(a) * r - 4.0, "GOLD"))
+    for k in range(24):                         # the A-frame under the hub
+        f = k / 23.0
+        pts += [(-f * 22.0, hub - f * hub, "STAR_DIM"), (f * 22.0, hub - f * hub,
+                                                         "STAR_DIM")]
+    return pts
+
+
+def _drone_word(t, word):
+    """A word, in the city's block letters, each lit dot four drones."""
+    pts = []
+    sp = 6.5
+    wide = len(word) * 4 - 1
+    for n, c in enumerate(word):
+        rows = BIG_FONT.get(c, BIG_FONT["?"]) if c != " " else ("   ",) * 5
+        for r, line in enumerate(rows):
+            for d, px in enumerate(line):
+                if px == " ":
+                    continue
+                for dx, dy in ((0.0, 0.0), (0.5, 0.0), (0.0, 0.5), (0.5, 0.5)):
+                    col = (n * 4 + d + dx - wide / 2.0) * sp
+                    pts.append((col, 22.0 + (4 - r + dy) * sp * 1.3,
+                                ("neon", (n + int(t * 4.0)) % 8)))
+    return pts
+
+
+def drone_pose(now, show):
+    """Every drone this instant: [(along, up, colour)] in the show's own
+    frame - along the coast and up from the water - or None between shows."""
+    t = (now + _drone_shift[0]) % DRONE_CYCLE
+    word = DRONE_WORDS[show % len(DRONE_WORDS)]
+    shapes = [_drone_rocket, _drone_heart, _drone_wheel,
+              lambda t_: _drone_word(t_, word)]
+    span = DRONE_HOLD + DRONE_MORPH
+    end = DRONE_RISE + len(shapes) * span - DRONE_MORPH
+
+    def at(i, s, tt):
+        return _drone_fit(shapes[i](tt))
+
+    def ease(f):
+        f = max(0.0, min(1.0, f))
+        return f * f * (3.0 - 2.0 * f)
+    pad = [(((i % 30) - 14.5) * 4.0, 0.4 - DRONE_BASE, "SNOW") for i in range(DRONE_N)]
+    if t < DRONE_RISE:
+        a, b, f = pad, at(0, 0, 0.0), ease(t / DRONE_RISE)
+    elif t < end:
+        u = t - DRONE_RISE
+        i = int(u // span)
+        w = u - i * span
+        if w < DRONE_HOLD or i == len(shapes) - 1:
+            return at(i, i, w)
+        a, b, f = at(i, i, DRONE_HOLD), at(i + 1, i + 1, 0.0), ease(
+            (w - DRONE_HOLD) / DRONE_MORPH)
+    elif t < end + DRONE_FALL:
+        a, b, f = at(len(shapes) - 1, 0, DRONE_HOLD), pad, ease((t - end) / DRONE_FALL)
+    else:
+        return None
+    return [(p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f, (q if f > 0.5 else p)[2])
+            for p, q in zip(a, b)]
+
+
+def draw_drones(ch, co, v, walls, now):
+    """Tonight's shows in reach: each drone a light, its colour by what it is
+    part of, smaller further off; the shows face the shore."""
+    if not night(now)["drones"]:
+        return
+    show = int((now + _drone_shift[0]) // DRONE_CYCLE)
+    for sx, sz in drone_sites(v.x, v.z, DRONE_REACH):
+        pose = drone_pose(now, show + int(sz))
+        if pose is None:
+            continue
+        far = (sx - v.x) ** 2 + (sz - v.z) ** 2 > 600.0 ** 2
+        for along, up, c in pose:
+            put_point(ch, co, v, walls, sx, DRONE_BASE + up, sz - along,
+                      "." if far else "o", _deep_colour(c))
+
+
+def drones_near(x, z, now):
+    """For the HUD: a show on tonight, near enough to see."""
+    return night(now)["drones"] and bool(drone_sites(x, z, DRONE_REACH))
+
+
+def skip_to_drones(now):
+    """The menu's y: on to the next night with a drone show, and the next
+    show starting in a few seconds."""
+    global _night_skip
+    for _ in range(DRONE_ODDS * 8):
+        if night(now)["drones"]:
+            _drone_shift[0] = (DRONE_CYCLE - 4.0 - now) % DRONE_CYCLE
+            return True
+        _night_skip += NIGHT_LENGTH
+    return False
+
+
+# --- glowing-sea nights ------------------------------------------------------
+# One night in GLOWSEA_ODDS the surf glows: every wave lights up blue as it
+# breaks, the foam sparkles along the water's edge, and where you wade the
+# water lights round your feet. Only the surf: the sea further out is as it
+# always is.
+GLOWSEA_ODDS = 7
+GLOWSEA_REACH = 26.0   # the waves glow inside this far off the water's edge
+
+
+def glowsea_surf(v, x, z, e, sx, y, now):
+    """A point of the surf on a glowing night, (glyph, colour), or None for
+    nothing; outside the surf, False - draw it the usual way. The surf is
+    wholly this, so nothing in it is worked out twice: from the beach that
+    is most of the bottom of the screen."""
+    lit, dim = NEON[2][0], NEON[2][1]
+    if e < -0.9 or e > GLOWSEA_REACH:
+        return False
+    if e < 0.0:
+        # The foam at the edge, sparkling. By the cell on the screen, not the
+        # point: close up one half-unit of foam is a block of cells, and one
+        # sparkle lit the lot.
+        m = _mix(sx, y, int(now * 6.0) + 7601)
+        return ("*" if m % 5 == 0 else "~" if m % 3 else "."), (
+            SNOW if m % 7 == 0 else lit)
+    if v.wading and (x - v.x) ** 2 + (z - v.z) ** 2 < 9.0:
+        # Round your feet, where you wade.
+        m = _mix(sx, y, int(now * 8.0) + 7603)
+        if m % 5 == 0:
+            return ("*" if m & 8 else "'"), (SNOW if m & 16 else lit)
+    n, f = divmod(e * 0.15 + now * 0.5 + 0.3 * math.sin(z * 0.08), 1.0)
+    m = _mix(int(n), int(z * 0.3), 5207)
+    if f < 0.2 and m % 4:
+        # The crest, lit as it breaks: brightest at the beach.
+        if e < 10.0:
+            k = _mix(sx, y, int(now * 6.0) + 7607) % 9
+            return ("*" if k == 0 else "~"), (SNOW if k < 2 else lit)
+        return "~", (lit if m % 2 else dim)
+    h = _mix(int(x * 2.0), int(z * 2.0) + int(now * 3.0), 7605)
+    if f < 0.32 and h % 5 == 0:
+        return ".", dim                     # what the wave leaves behind it
+    if v.moon_sx is not None and abs(sx - v.moon_sx) <= 1 + (y - v.horizon) * 0.1:
+        if h % 2:
+            return (":" if h % 3 else "."), v.moon_attr or MOON
+    return None
+
+
+def skip_to_glowsea(now):
+    """The menu's j: on to the next night the surf glows."""
+    global _night_skip
+    for _ in range(GLOWSEA_ODDS * 8):
+        if night(now)["glowsea"]:
+            return True
+        _night_skip += NIGHT_LENGTH
+    return False
+
 
 def near_lighthouses(v, reach):
     ci = int(v.x / CELL + BIG) - BIG
@@ -23665,6 +23933,12 @@ def night(now):
         # nor in the fog, which would hide the dragon from a dozen steps off.
         got["festival"] = (_mix(k, 9, 613) % FESTIVAL_ODDS == 0 and not got["alien"]
                            and not got["blackout"] and not got["fog"])
+        # A drone show over the sea: not on the strange night, which has the
+        # sky, nor in the fog, nor on the fireworks' night - one show a night.
+        got["drones"] = (_mix(k, 11, 613) % DRONE_ODDS == 0 and not got["alien"]
+                         and not got["fog"] and not got["fireworks"])
+        # The surf glowing: on its own, whatever else the night is.
+        got["glowsea"] = _mix(k, 13, 613) % GLOWSEA_ODDS == 0 and not got["alien"]
         if got["alien"]:
             # Whatever the weather was going to be up there, the sky is lit by
             # what is in it tonight.
@@ -24196,6 +24470,10 @@ def render_street(v, now):
     v.tunnels = near_tunnels(v, 90.0)
     if COAST and v.x + 1500.0 > COAST_LAND * CELL and dark_night(now):
         v.bio = list(near_bio(v.x, v.z, 1500.0)) or None
+    if COAST and v.x + 400.0 > COAST_LAND * CELL:
+        v.glowsea = night(now)["glowsea"] and dawn(now) < 0.5
+        v.wading = v.glowsea and coast_kind(int(v.x / CELL + BIG) - BIG,
+                                            int(v.z / CELL + BIG) - BIG) == "surf"
     if COAST and v.x + 3000.0 > COAST_LAND * CELL:
         v.still = ([(x_, z_, TRENCH_REACH) for x_, z_ in
                     near_anchors(v.x, v.z, 2500.0, "trench")]
@@ -24349,6 +24627,7 @@ def render_street(v, now):
         if fs is not None and (fs[0] - v.x) ** 2 + (fs[1] - v.z) ** 2 < 220.0 ** 2:
             draw_ferry(ch, co, v, walls, fs[0], fs[1], fs[2], now, wet)
     draw_fireworks(ch, co, v, walls, now, wet)
+    draw_drones(ch, co, v, walls, now)
     reflect_river(ch, co, v, walls, now, wet)
     if night(now)["lanterns"] and v.water:
         # After the reflection, or the far bank's windows lying on the water
@@ -29411,7 +29690,8 @@ def draw_cheats(ch, co, note):
            (">", "traffic " + traffic_name()),
            ("", ""), ("", "NIGHTS"),
            ("n", "the next one"), ("u", "a strange night"),
-           ("z", "a lantern night"), ("!", "fireworks night"), ("@", "dawn"),
+           ("z", "a lantern night"), ("!", "fireworks night"),
+           ("y", "a drone show"), ("j", "glowing sea"), ("@", "dawn"),
            ("&", "a blackout"), ("#", "a fog night"),
            ("F1", " close")]
     more = [("", "AND THE REST")] + [names[k] for k in CHEAT_MORE if k in names]
@@ -38873,6 +39153,12 @@ def main(stdscr):
                 elif key == ord("@"):
                     note = ("the night is nearly over"
                             if skip_to_dawn(now) else "no such night near")
+                elif key == ord("y") and not hidden_next:
+                    note = ("a drone show over the sea, starting now - c for the coast"
+                            if skip_to_drones(now) else "no such night near")
+                elif key == ord("j") and not hidden_next:
+                    note = ("the surf glows tonight - c for the coast"
+                            if skip_to_glowsea(now) else "no such night near")
                 elif key == ord("!"):
                     note = ("fireworks over the bay tonight"
                             if skip_to_fireworks(now) else "no such night near")
@@ -40534,6 +40820,12 @@ def main(stdscr):
                     if sea_wheel_near(cam_x, cam_z) is not None else "")
                 or launch_hint(cam_x, cam_z, now)
                 or harbour_hint(cam_x, cam_z, now)
+                or ("  ~ a drone show over the sea ~"
+                    if drones_near(cam_x, cam_z, now) else "")
+                or ("  ~ the surf is glowing tonight ~"
+                    if night(now)["glowsea"] and coast_kind(
+                        int(cam_x / CELL + BIG) - BIG, int(cam_z / CELL + BIG) - BIG)
+                    in ("surf", "sand", "walk") else "")
                 or coast_hint(cam_x, cam_z)
                 or ("  ~ the fog is in ~" if night(now)["fog"] else "")
                 or blackout_word(cam_x, cam_z, now)
