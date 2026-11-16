@@ -470,6 +470,17 @@ def cases(run, report):
         print("    did not get her out, or not back")
         sb_ok = False
     ok &= sb_ok
+    # The beach's two rare nights: y on the panel for a drone show, c to the
+    # coast; then j for a night the surf glows.
+    dr_st, dr_out = run([(F1, .5), (b"y", .6), (b"c", 1.5), (b"", 6.0), (F1, .5),
+                         (b"j", .6), (b"c", 1.5), (b"", 2.0)], cols=300, rows=60)
+    dr_plain = ANSI.sub(b"", dr_out).decode("utf-8", "replace")
+    dr_ok = report("a drone show night, and a glowing one, at the beach", dr_st, dr_out)
+    if dr_ok and dr_out and not ("a drone show over the sea" in dr_plain
+                                 and "the surf glows" in dr_plain):
+        print("    no show, or the surf not glowing")
+        dr_ok = False
+    ok &= dr_ok
     # The submarine: from the pen, out, down, a ping, the lamp, back.
     su_st, su_out = run([(F1, .5), (b"+", .4), (b"\x01[", 1.5), (b"p", 1.0)]
                         + [(b"w", .2)] * 3 + [(b"f", .3)] * 4 + [(b"", 4.0),

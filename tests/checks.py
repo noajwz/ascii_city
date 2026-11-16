@@ -1902,7 +1902,7 @@ check("nowhere a taxi goes is on the panel but the coast and the harbour, "
       and not {"FUN", "EAT", "AROUND TOWN", "OUT OF TOWN"}
       & {g_ for g_, _ in ac.CHEAT_GROUPS} and "AROUND TOWN" not in text)
 panel_keys_ = ([k_ for k_, _, _ in ac.CHEAT_PLACES] + [d_["key"] for d_ in ac.DISTRICTS]
-               + list("wLsa>nuz!@&#/+%\\`~o"))
+               + list("wLsa>nuz!@&#/+%\\`~oyj"))
 check("every key on the panel does one thing: no place hides a part of town",
       len(panel_keys_) == len(set(panel_keys_)),
       " ".join(sorted({k_ for k_ in panel_keys_ if panel_keys_.count(k_) > 1})))
@@ -11050,6 +11050,87 @@ check("the cabin draws all the way round, at any size, words still words",
 check("at anchor out there: the open sea's fish, off her side",
       bf_.water == "offshore" and "offshore" in ac.FISH[bf_.who]["where"]
       and ac.render_fishing(bf_, 160, 45, 302.0) is not None, str(bf_.water))
+
+# --- the drone show over the sea, and glowing-sea nights -----------------------
+# Two rare nights at the beach: hundreds of lights over the sea up the coast
+# from each pier, making a rocket, a heart, the big wheel and a word; and the
+# surf glowing blue, the foam sparkling, the water lit round you where you wade.
+nights_ = [ac.night(k_ * ac.NIGHT_LENGTH + 1.0 - ac._night_skip) for k_ in range(3000)]
+dr_ = [n_ for n_ in nights_ if n_["drones"]]
+gs_ = [n_ for n_ in nights_ if n_["glowsea"]]
+check("a drone show is rare, and never with the strange night, fog or fireworks",
+      0.02 < len(dr_) / 3000.0 < 0.1
+      and not any(n_["alien"] or n_["fog"] or n_["fireworks"] for n_ in dr_),
+      "%d nights in 3000" % len(dr_))
+check("the surf glows some nights, more often than a show",
+      len(dr_) < len(gs_) and 0.08 < len(gs_) / 3000.0 < 0.2,
+      "%d nights in 3000" % len(gs_))
+sp_d = ac.find_place(x0, z0, "seapier")
+sites_ = ac.drone_sites(sp_d[0], sp_d[1], 2000.0)
+pier_d = ac.sea_pier(int(sp_d[1] / ac.CELL + ac.BIG) - ac.BIG)
+dsx_, dsz_ = min(sites_, key=lambda s_: abs(s_[1] - sp_d[1]))
+check("each show is over the sea, up the coast from its pier, clear of the wheel",
+      sites_ and pier_d is not None
+      and ac.coast_kind(int(dsx_ / ac.CELL), int(dsz_ / ac.CELL)) == "sea"
+      and abs(dsz_ - (pier_d[0] + ac.PIER_BROAD * 0.5) * ac.CELL) > 150.0
+      and all(ac.coast_kind(int(dsx_ / ac.CELL), int((dsz_ + d_) / ac.CELL)) == "sea"
+              for d_ in (-90.0, 0.0, 90.0)))
+poses_ = {t_: ac.drone_pose(t_ - ac._drone_shift[0], 0) for t_ in
+          (1.0, 5.0, 15.0, 30.0, 45.0, 60.0, 70.0, 100.0, 125.0)}
+on_ = [p_ for p_ in poses_.values() if p_ is not None]
+check("a show: up off the water, four shapes, back down, then dark till the next",
+      poses_[100.0] is None and poses_[125.0] is None and len(on_) == 7
+      and all(len(p_) == ac.DRONE_N for p_ in on_)
+      and all(-ac.DRONE_BASE - 0.1 <= u_ < 120.0 for p_ in on_ for _, u_, _ in p_)
+      and min(u_ for _, u_, _ in poses_[1.0]) < -ac.DRONE_BASE + 2.0,
+      str([None if p_ is None else len(p_) for p_ in poses_.values()]))
+check("and the shapes are different shapes",
+      len({tuple(round(a_) for a_, _, _ in poses_[t_][:40]) for t_ in
+           (15.0, 30.0, 45.0, 60.0)}) == 4)
+check("every colour a drone can be is one there is",
+      all(ac._deep_colour(c_) is not None for p_ in on_ for _, _, c_ in p_))
+
+
+def drone_cells_(night_on_, phase_):
+    sv_ = dict(ac._night_cache)
+    try:
+        k_ = int((500.0 + ac._night_skip) / ac.NIGHT_LENGTH)
+        ac._night_cache[k_] = dict(ac.night(500.0), drones=night_on_)
+        old_ = ac._drone_shift[0]
+        ac._drone_shift[0] = (phase_ - 500.0) % ac.DRONE_CYCLE
+        vd_ = ac.View(ac.shore_x(dsz_) - 20.0, dsz_, math.pi / 2, 160, 48)
+        g_ = ac.render_street(vd_, 500.0)[0]
+        ac._drone_shift[0] = old_
+        return sum(r_.count("o") for r_ in g_[:vd_.horizon])
+    finally:
+        ac._night_cache.clear()
+        ac._night_cache.update(sv_)
+
+
+check("from the boardwalk in front of it: the show in the sky, then gone",
+      drone_cells_(True, 30.0) > drone_cells_(True, 110.0) + 40
+      and drone_cells_(False, 30.0) == drone_cells_(True, 110.0),
+      "%d cells of it" % (drone_cells_(True, 30.0) - drone_cells_(True, 110.0)))
+sk_ = ac._night_skip
+check("y on the panel: the next show night, a show starting in a moment",
+      ac.skip_to_drones(800.0) and ac.night(800.0)["drones"]
+      and ac.drone_pose(800.0, 0) is None and ac.drone_pose(806.0, 0) is not None
+      and ac.drones_near(dsx_ - 300.0, dsz_, 800.0))
+ac._night_skip, ac._drone_shift[0] = sk_, 0.0
+check("j on the panel: the next night the surf glows",
+      ac.skip_to_glowsea(800.0) and ac.night(800.0)["glowsea"])
+ac._night_skip = sk_
+gv_ = ac.View(ac.shore_x(dsz_) - 3.0, dsz_ - 100.0, math.pi / 2 - 0.3, 120, 36)
+gv_.glowsea = True
+far_ = [ac.glowsea_surf(gv_, ac.shore_x(dsz_) + d_, dsz_, d_, 10, 20, 9.0)
+        for d_ in (40.0, 80.0, 200.0)]
+lit_g = [ac.glowsea_surf(gv_, ac.shore_x(dsz_) + d_, dsz_ + d_ * 0.37, d_, 10 + n_, 20,
+                         t_)
+         for n_, d_ in enumerate((-0.5, 0.5, 3.0, 8.0)) for t_ in
+         [k_ * 0.07 for k_ in range(40)]]
+check("on a glowing night only the surf changes: the sea further out does not",
+      far_ == [False, False, False]
+      and sum(1 for g_ in lit_g if g_ is not None and g_[1] == ac.NEON[2][0]) > 20)
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
