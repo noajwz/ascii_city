@@ -864,6 +864,7 @@ STAR_DIM = STAR_WARM = STAR_COLD = MOON = MOON_DIM = BAND = 0
 BEAM = BEAM_DIM = CROWN_BLUE = CROWN_RED = 0
 FOG = FOG_DIM = 0
 WOOD = WOOD_LIT = 0
+AURORA = AURORA_DIM = AURORA_V = AURORA_V_DIM = 0
 
 
 def init_colors():
@@ -873,7 +874,7 @@ def init_colors():
     global FIREFLY, EYES, SNOW
     global ROOF, STAR_DIM, STAR_WARM, STAR_COLD, MOON, MOON_DIM, BAND
     global BEAM, BEAM_DIM, CROWN_BLUE, CROWN_RED, FOG, FOG_DIM
-    global WOOD, WOOD_LIT
+    global WOOD, WOOD_LIT, AURORA, AURORA_DIM, AURORA_V, AURORA_V_DIM
 
     curses.start_color()
     try:
@@ -909,7 +910,8 @@ def init_colors():
                   "star_cold": 153, "moon": 231, "moon_dim": 250,
                   "band": 60, "firefly": 118, "eyes": 190, "snow": 255,
                   "crown_blue": 33, "fog": 248, "fog_dim": 243,
-                  "wood": 94, "wood_lit": 94}
+                  "wood": 94, "wood_lit": 94,
+                  "aurora": 48, "aurora_dim": 29, "aurora_v": 135, "aurora_v_dim": 97}
         attrs = {}
     else:
         # 8-colour fallback: bold = the "bright" version of a colour.
@@ -1030,6 +1032,17 @@ def init_colors():
     # cannot dim, the boards are simply that brown.
     WOOD = made["wood"] | curses.A_DIM
     WOOD_LIT = made["wood_lit"]
+    # The aurora's green and violet. In 8 colours there are no pairs to spare
+    # (xterm gives 64 and the rest use 62): the fireflies' green and the
+    # purple neon.
+    if "aurora" in made:
+        AURORA = made["aurora"] | curses.A_BOLD
+        AURORA_DIM = made["aurora_dim"]
+        AURORA_V = made["aurora_v"] | curses.A_BOLD
+        AURORA_V_DIM = made["aurora_v_dim"]
+    else:
+        AURORA, AURORA_DIM = FIREFLY, made["grass"]
+        AURORA_V, AURORA_V_DIM = NEON[0]
 
 
 def wide_chars_work(stdscr):
@@ -1501,6 +1514,7 @@ def render_skyline(cam_x, width, height, now):
                         tops[x] = roof
 
     draw_stars(ch, co, cam_x, ground, max(wet, snowfall(now) * 0.8), now, tops)
+    draw_skyline_aurora(ch, co, cam_x, ground, tops, now)
     draw_skyline_el(ch, co, cam_x, ground, tops, now)
 
     draw_flash_sky(ch, co, water, flash)
@@ -1515,6 +1529,7 @@ def render_skyline(cam_x, width, height, now):
     draw_skyline_fireworks(ch, co, cam_x, water, tops, now)
     reflect(ch, co, water, now, wet, flash)
     draw_water(ch, co, water, now, wet)
+    draw_skyline_aurora_water(ch, co, cam_x, water, now)
     draw_skyline_rain(ch, co, cam_x, water, now, wet, flash)
     draw_skyline_snow(ch, co, cam_x, water, tops, now)
     return ch, co
@@ -11767,6 +11782,7 @@ def draw_sky(ch, co, v, walls, wet, now):
                     ch[y][sx] = "." if v.flash < 0.5 else ":"
                     co[y][sx] = FLASH
 
+    draw_aurora(ch, co, v, walls, now)
     if v.dawn > 0.0:
         for sx in range(v.width):
             cam = 2.0 * sx / (v.width - 1) - 1.0
@@ -18686,6 +18702,215 @@ def draw_blimp(ch, co, v, walls, bx, bz, head, says, now):
                      tone if c != " " else 0)
 
 
+# --- the aurora --------------------------------------------------------------------
+# Asked for on 2026-11-16: "the very rare Aurora: green and violet curtains moving over
+# the sea and the skyline, very rare, with people on the beach looking up." One night in
+# AURORA_ODDS, and a clear one. It hangs over the sea - east - and reaches round the sky
+# AURORA_ARC either way, thinning; by compass bearing, like the stars, so it holds still
+# as you turn under it and only its folds move. Green at its foot, violet at the top.
+AURORA_ODDS = 45       # one night in this many; about one in sixty with the rest off it
+AURORA_EAST = math.pi * 0.5     # the bearing it hangs over: the sea
+AURORA_ARC = 2.0       # radians either side of that it reaches, thinning out
+AURORA_SKY = 0.75      # radians of sky the waterfront's window shows, foot to top
+AURORA_SLOT = 6.0      # units along the beach between places for people looking up
+AURORA_GAZE = [" .-. ", "(   )", " /|\\ ", " |#| ", " | | ", "_| |_"]
+AURORA_GAZE_FACE = [" .-. ", "(' ')", " /|\\ ", " |#| ", " | | ", "_| |_"]
+AURORA_POINT = [" .-./", "(   /", " /|  ", " |#| ", " | | ", "_| |_"]
+AURORA_POINT_FACE = [" .-./", "(' '/", " /|  ", " |#| ", " | | ", "_| |_"]
+AURORA_SIT = [" .-. ", "(   )", "/|#|\\", "====="]
+AURORA_SIT_FACE = [" .-. ", "(' ')", "/|#|\\", "====="]
+
+
+def aurora_out(now):
+    """How much of tonight's aurora can be seen this instant, 0..1: none on
+    another night, less through cloud, going as it gets light."""
+    n = night(now)
+    if not n["aurora"]:
+        return 0.0
+    cloud = 1.0 if overcast_held() else cloud_cover(now)
+    return max(0.0, 1.0 - cloud * 1.1) * max(0.0, 1.0 - dawn(now) * 1.6)
+
+
+def aurora_curtain(bearing, now):
+    """At this compass bearing: how bright the aurora is, 0..1, and its foot
+    and its height, in radians up the sky. Three folds drifting along it at
+    different speeds, the rays in them shimmering, its foot wavering, and the
+    whole of it waxing and waning over a few minutes."""
+    off = (bearing - AURORA_EAST + math.pi) % math.tau - math.pi
+    fade = 1.0 - (abs(off) / AURORA_ARC) ** 2
+    if fade <= 0.0:
+        return 0.0, 0.0, 0.0
+    fold = 0.5 + 0.5 * math.sin(off * 3.4 + now * 0.11
+                                + 1.7 * math.sin(off * 0.9 - now * 0.05))
+    ripple = 0.5 + 0.5 * math.sin(off * 9.0 - now * 0.45
+                                  + 2.0 * math.sin(off * 3.1 + now * 0.17))
+    # The rays: whole columns lit or not, so it reads as streaks hanging
+    # down and not as more stars.
+    rays = math.sin(off * 61.0 + now * 0.9 + 3.0 * math.sin(off * 13.0 - now * 0.3))
+    rays = 0.3 + 0.7 * rays * rays
+    surge = 0.8 + 0.2 * math.sin(now * 0.07)
+    bright = fade * (0.15 + 0.85 * fold * fold) * (0.55 + 0.45 * ripple) * rays * 1.25
+    foot = 0.05 + 0.06 * (0.5 + 0.5 * math.sin(off * 3.7 + now * 0.2))
+    return bright * surge, foot, 0.28 + 0.4 * fold
+
+
+def aurora_cell(bright, foot, tall, elev, key):
+    """The glyph and colour of the aurora at this elevation, or None: a
+    curtain hanging from a bright green foot up into violet, in streaks."""
+    u = (elev - foot) / tall
+    if not 0.0 <= u <= 1.0 or bright <= 0.08:
+        return None
+    lit = bright * (1.0 - u) ** 0.5 * (1.5 if u < 0.1 else 1.0)
+    if key % 100 >= min(95.0, lit * 180.0):
+        return None
+    violet = u > 0.55 or (u > 0.42 and key & 1024)
+    if lit > 0.5:
+        glyph = "|"
+    elif lit > 0.3:
+        glyph = "!" if key & 256 else "|"
+    elif lit > 0.15:
+        glyph = ":"
+    else:
+        glyph = "'"
+    if violet:
+        return glyph, AURORA_V if lit > 0.3 else AURORA_V_DIM
+    return glyph, AURORA if lit > 0.3 else AURORA_DIM
+
+
+def draw_aurora(ch, co, v, walls, now):
+    """The street's strip of sky, and over the sea from the beach all of it:
+    into cells nothing is in, under every roof's top, so the city stands
+    black against it and the stars stay. A glimmer of it on the sea below."""
+    seen = aurora_out(now)
+    if seen <= 0.02 or v.fog:
+        return
+    tops = walls[3]
+    coastal = COAST and v.x + 320.0 > (COAST_I - COAST_WOB) * CELL
+    step = int(now * 3.0)
+    elevs = [math.atan((v.horizon - y) / v.fy) for y in range(v.horizon)]
+    for sx in range(v.width):
+        cam = 2.0 * sx / (v.width - 1) - 1.0
+        rad = v.yaw + math.atan(cam * PLANE)
+        bright, foot, tall = aurora_curtain(rad, now)
+        bright *= seen
+        if bright <= 0.05:
+            continue
+        col = int(rad * 240.0)
+        for y in range(min(tops[sx], v.horizon)):
+            if ch[y][sx] != " ":
+                continue
+            got = aurora_cell(bright, foot, tall, elevs[y],
+                              _mix(col, y, 6601 + (step + col) % 3))
+            if got is not None:
+                ch[y][sx], co[y][sx] = got
+        if coastal and v.x + math.sin(rad) * 320.0 > shore_x(v.z + math.cos(rad) * 320.0):
+            for y in range(v.horizon + 1, min(v.height, v.horizon + 7)):
+                if (ch[y][sx] in "~-=_.'`" and not hidden(walls, sx, y, 300.0)
+                        and _mix(col, y, 6607 + step) % 100 < bright * 45.0):
+                    co[y][sx] = AURORA_DIM if (col + y) % 5 else AURORA_V_DIM
+
+
+def draw_skyline_aurora(ch, co, cam_x, ground, tops, now):
+    """Over the waterfront, behind the skyline, before the water takes its
+    reflection: the folds slide by a little as you pan, the stars' way."""
+    seen = aurora_out(now)
+    if seen <= 0.02:
+        return
+    width = len(ch[0])
+    off = cam_x * 0.05
+    step = int(now * 3.0)
+    # Measured up from the roofline, not the water: the sky here is all above
+    # the town, and from the water up it would hang behind the buildings.
+    base = max(4, sorted(tops)[width // 3]) + 2
+    for sx in range(width):
+        bearing = AURORA_EAST + 1.5 * math.sin((sx + off) * 0.011)
+        bright, foot, tall = aurora_curtain(bearing, now)
+        bright *= seen
+        if bright <= 0.05:
+            continue
+        col = int(sx + off)
+        for y in range(min(ground, tops[sx])):
+            if ch[y][sx] != " ":
+                continue
+            elev = (base - y) / float(base) * AURORA_SKY
+            got = aurora_cell(bright, foot, tall, elev,
+                              _mix(col, y, 6601 + (step + col) % 3))
+            if got is not None:
+                ch[y][sx], co[y][sx] = got
+
+
+def draw_skyline_aurora_water(ch, co, cam_x, water, now):
+    """And on the water in front of it, a glimmer: the reflection only
+    reaches the town, the sky is too far up for it."""
+    seen = aurora_out(now)
+    if seen <= 0.02:
+        return
+    off = cam_x * 0.05
+    step = int(now * 3.0)
+    for sx in range(len(ch[0])):
+        bright = aurora_curtain(AURORA_EAST + 1.5 * math.sin((sx + off) * 0.011),
+                                now)[0] * seen
+        if bright <= 0.08:
+            continue
+        col = int(sx + off)
+        for y in range(water + 1, len(ch)):
+            if ch[y][sx] in "~-" and _mix(col, y, 6609 + step) % 100 < bright * 40.0:
+                co[y][sx] = AURORA_DIM if (col + y) % 5 else AURORA_V_DIM
+
+
+def near_gazers(v, now):
+    """People out on the sand on an aurora night, looking up at it, as
+    (distance squared, x, z, hash): in ones and twos and threes along the
+    beach, standing, sitting, pointing. Where they are is a hash; they stay
+    out all night, cloud or no cloud, waiting for it."""
+    if not COAST or not night(now)["aurora"] or v.x + BEACH_SEEN < COAST_LAND * CELL:
+        return []
+    out = []
+    n0 = int((v.z - BEACH_SEEN) // AURORA_SLOT)
+    for n in range(n0, n0 + int(2 * BEACH_SEEN / AURORA_SLOT) + 2):
+        g = _mix(n, 0, 6603)
+        if g % 5 < 2:
+            continue
+        for m in range(1 + (g >> 4) % 3):
+            h = _mix(n, m + 1, 6605)
+            z = n * AURORA_SLOT + m * 1.1 + (h >> 3 & 7) * 0.2
+            x = shore_x(z) - 4.0 - (g >> 8) % 12 - (h >> 6 & 3) * 0.4
+            if coast_kind(int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG) != "sand":
+                continue
+            rx, rz = x - v.x, z - v.z
+            d2 = rx * rx + rz * rz
+            if rx * v.dx + rz * v.dz < SPRITE_NEAR or d2 > BEACH_SEEN * BEACH_SEEN:
+                continue
+            out.append((d2, x, z, h))
+    return out
+
+
+def draw_gazers(ch, co, v, walls, now):
+    for _, x, z, h in sorted(near_gazers(v, now), reverse=True):
+        coat = (CURB, BARK, tone_colour("warm", (h >> 8 & 15) / 15.0),
+                tone_colour("cold", (h >> 12 & 15) / 15.0))[h >> 16 & 3]
+        face = v.x > x                  # from the sea side you see their faces
+        kind = h >> 18 & 7
+        if kind < 2:
+            art = AURORA_SIT_FACE if face else AURORA_SIT
+            blit_sprite(ch, co, v, walls, art, x, z, 0.0, SMOKER_H * 0.6, SMOKER_W, coat)
+        else:
+            point = kind == 2 and int(now / 4.0 + (h >> 21 & 7)) % 3 == 0
+            art = ((AURORA_POINT_FACE if face else AURORA_POINT) if point else
+                   (AURORA_GAZE_FACE if face else AURORA_GAZE))
+            blit_sprite(ch, co, v, walls, art, x, z, 0.0, SMOKER_H, SMOKER_W, coat)
+
+
+def skip_to_aurora(now):
+    """The panel's: on to the next night the aurora is out."""
+    global _night_skip
+    for _ in range(AURORA_ODDS * 10):
+        if night(now)["aurora"]:
+            return True
+        _night_skip += NIGHT_LENGTH
+    return False
+
+
 def skip_to_blimp(now):
     """The panel's: on to the next night with a blimp out."""
     global _night_skip
@@ -24912,6 +25137,15 @@ def night(now):
         # A blimp over the city: not the strange night, nor in fog.
         got["blimp"] = (_mix(k, 17, 613) % BLIMP_ODDS == 0 and not got["alien"]
                         and not got["fog"])
+        # The aurora: very rare, and a clear night when it comes. Not with
+        # anything else in the sky - the strange night, fireworks, drones,
+        # the lanterns or the blimp - nor in fog.
+        got["aurora"] = (_mix(k, 19, 613) % AURORA_ODDS == 0 and not got["alien"]
+                         and not got["fog"] and not got["fireworks"]
+                         and not got["drones"] and not got["lanterns"]
+                         and not got["blimp"])
+        if got["aurora"]:
+            got["clarity"] = max(got["clarity"], 0.85)
         # The surf glowing: on its own, whatever else the night is.
         got["glowsea"] = _mix(k, 13, 613) % GLOWSEA_ODDS == 0 and not got["alien"]
         if got["alien"]:
@@ -25558,6 +25792,7 @@ def render_street(v, now):
             draw_sea_pier(ch, co, v, walls, pier_, now, wet)
         draw_beach(ch, co, v, walls, now, wet)
         draw_mouth_lights(ch, co, v, walls, now, wet)
+        draw_gazers(ch, co, v, walls, now)
         if not night(now)["alien"]:
             for _, x_, z_, phase_, g_ in sorted(near_strollers(v, now), reverse=True):
                 coat_ = (CURB, BARK, tone_colour("warm", (g_ >> 8 & 15) / 15.0),
@@ -31120,6 +31355,7 @@ def draw_cheats(ch, co, note):
     more.append(("\\", "storm far ahead"))
     more.append(("^", "launch a rocket"))
     more.append(("e", "a dark night"))      # the glowing sea; NIGHTS is full
+    more.append(("(", "the aurora"))        # and so is it still
     more.append(("~", "the sea: " + ("on" if COAST else "off")))
     more.append(("o", "doors: " + ("shut" if _doors_shut[0] else "open")))
     col = 18
@@ -42313,6 +42549,9 @@ def main(stdscr):
                 elif key == ord("p") and not hidden_next:
                     note = ("a blimp out over the city tonight - look over the roofs"
                             if skip_to_blimp(now) else "no such night near")
+                elif key == ord("(") and not hidden_next:
+                    note = ("the aurora is out tonight - c for the coast, look east"
+                            if skip_to_aurora(now) else "no such night near")
                 elif key == ord("y") and not hidden_next:
                     note = ("a drone show over the sea, starting now - c for the coast"
                             if skip_to_drones(now) else "no such night near")
@@ -44092,6 +44331,8 @@ def main(stdscr):
                 or crew_hint(cam_x, cam_z)
                 or launch_hint(cam_x, cam_z, now)
                 or harbour_hint(cam_x, cam_z, now)
+                or ("  ~ the aurora is out - look east, over the sea ~"
+                    if aurora_out(now) > 0.3 else "")
                 or ("  ~ a drone show over the sea ~"
                     if drones_near(cam_x, cam_z, now) else "")
                 or ("  ~ the surf is glowing tonight ~"

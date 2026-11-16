@@ -11652,5 +11652,64 @@ for t_ in (5.0, 10.0, 15.0, 20.0):
 check("and mission control has nothing to say about it, at length",
       {"moon0", "moon1", "moon2"} <= down_.calls and "cow" in ac.RK_MOON_CALLS[1])
 
+# --- the aurora -------------------------------------------------------------
+ks_ = [k_ for k_ in range(20000) if ac.night(k_ * ac.NIGHT_LENGTH + 1.0)["aurora"]]
+check("the aurora: very rare - about one night in sixty",
+      20000 / 90 < len(ks_) < 20000 / 35, "%d of 20000" % len(ks_))
+check("and never with anything else in the sky, nor in fog", not any(
+    ac.night(k_ * ac.NIGHT_LENGTH + 1.0)[w_] for k_ in ks_
+    for w_ in ("alien", "fog", "fireworks", "drones", "lanterns", "blimp")))
+sky0_, skip0_ = ac._sky_mode, ac._night_skip
+ac.AURORA, ac.AURORA_DIM, ac.AURORA_V, ac.AURORA_V_DIM = 901, 902, 903, 904
+LIT_ = (901, 902, 903, 904)
+ac._sky_mode = 1                                # a clear sky, to see it by
+t_ = 4000.0
+ac.skip_to_aurora(t_)
+# From the start of its night: a few minutes in, it is the next night.
+t_ = (int((t_ + ac._night_skip) / ac.NIGHT_LENGTH) * ac.NIGHT_LENGTH
+      - ac._night_skip + 5.0)
+zb_ = 300.0
+xb_ = ac.shore_x(zb_) - 28.0
+counts_, greens_, violets_, below_ = [], 0, 0, 0
+for dt_ in range(0, 400, 40):
+    v_ = ac.View(xb_, zb_, math.pi * 0.5, 120, 36)
+    g_, c_, _ = ac.render_street(v_, t_ + dt_)
+    counts_.append(sum(1 for r_ in c_ for a_ in r_ if a_ in LIT_))
+    greens_ += sum(1 for r_ in c_[:v_.horizon] for a_ in r_ if a_ in (901, 902))
+    violets_ += sum(1 for r_ in c_[:v_.horizon] for a_ in r_ if a_ in (903, 904))
+    below_ += sum(1 for y_ in range(v_.horizon, 36) for x_ in range(120)
+                  if c_[y_][x_] in LIT_ and g_[y_][x_] not in "~-=_.'`")
+check("from the beach, curtains over the sea all night, green and violet",
+      min(counts_) > 150 and greens_ > violets_ > 0, "%s, %d green %d violet"
+      % (counts_, greens_, violets_))
+check("and under the horizon only a glimmer of it on the water",
+      below_ * 10 < sum(counts_), "%d cells" % below_)
+a_ = ac.render_street(ac.View(xb_, zb_, math.pi * 0.5, 120, 36), t_)[0]
+b_ = ac.render_street(ac.View(xb_, zb_, math.pi * 0.5, 120, 36), t_ + 3.0)[0]
+check("and it moves", a_ != b_)
+sg_, sc_ = ac.render_skyline(100.0, 120, 34, t_ + 80.0)
+water_ = max(5, min(34 - 4, int(34 * 0.58)))
+check("over the skyline too, and a glimmer of it on the water",
+      sum(1 for r_ in sc_[:water_] for a_ in r_ if a_ in LIT_) > 40
+      and any(a_ in LIT_ for r_ in sc_[water_:] for a_ in r_))
+gz_ = ac.near_gazers(ac.View(xb_, zb_, math.pi * 0.5 - 0.7, 120, 36), t_)
+check("people out on the sand looking up at it",
+      len(gz_) > 5 and all(ac.coast_kind(int(x_ // ac.CELL), int(z_ // ac.CELL))
+                           == "sand" for _, x_, z_, _ in gz_))
+ac._sky_mode = 3
+check("and through overcast, nothing", sum(
+    1 for r_ in ac.render_street(ac.View(xb_, zb_, math.pi * 0.5, 120, 36), t_)[1]
+    for a_ in r_ if a_ in LIT_) == 0)
+ac._sky_mode = 1
+ac._night_skip += ac.NIGHT_LENGTH
+while ac.night(t_)["aurora"]:
+    ac._night_skip += ac.NIGHT_LENGTH
+check("nor on any other night, nor anyone out to see it", sum(
+    1 for r_ in ac.render_street(ac.View(xb_, zb_, math.pi * 0.5, 120, 36), t_)[1]
+    for a_ in r_ if a_ in LIT_) == 0 and not ac.near_gazers(
+        ac.View(xb_, zb_, math.pi * 0.5 - 0.7, 120, 36), t_))
+ac._sky_mode, ac._night_skip = sky0_, skip0_
+ac.AURORA = ac.AURORA_DIM = ac.AURORA_V = ac.AURORA_V_DIM = 0
+
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

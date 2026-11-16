@@ -524,6 +524,17 @@ def cases(run, report):
         print("    not in the cab, no interlock, or not off and back up")
         el_ok = False
     ok &= el_ok
+    # The aurora: ( on the panel goes to its night, s clears the sky, c to
+    # the coast, and the top bar says where to look.
+    au_st, au_out = run([(F1, .5), (b"(", .5), (b"s", .3), (b"c", 2.0)],
+                        cols=160, rows=48)
+    au_plain = ANSI.sub(b"", au_out).decode("utf-8", "replace")
+    au_ok = report("the aurora: its night, at the coast", au_st, au_out)
+    if au_ok and au_out and not ("the aurora is out tonight" in au_plain
+                                 and "look east, over the sea" in au_plain):
+        print("    not its night, or nothing said")
+        au_ok = False
+    ok &= au_ok
     # The submarine: from the pen, out, down, a ping, the lamp, back.
     su_st, su_out = run([(F1, .5), (b"+", .4), (b"\x01[", 1.5), (b"p", 1.0)]
                         + [(b"w", .2)] * 3 + [(b"f", .3)] * 4 + [(b"", 4.0),
