@@ -18569,6 +18569,132 @@ def drones_near(x, z, now):
     """For the HUD: a show on tonight, near enough to see."""
     return night(now)["drones"] and bool(drone_sites(x, z, DRONE_REACH))
 
+# --- the blimp --------------------------------------------------------------------
+# One night in BLIMP_ODDS a blimp is out over the city - one to a square of it
+# BLIMP_TILE across, so wherever you are there is one about - going slowly round
+# a wide loop, low enough to be seen over the roofs from a few blocks off: the
+# camera cannot look up, so a blimp overhead is a blimp nobody sees. Dark, its
+# fins and its gondola, its lights, and down its side a band of light with a
+# message going along it.
+BLIMP_ODDS = 10
+BLIMP_TILE = 3000.0    # one to a square of the city this big
+BLIMP_LOOP = 650.0     # the loop it goes round, across
+BLIMP_Y = 70.0         # how high
+BLIMP_L = 90.0         # how long
+BLIMP_D = 24.0         # and how fat
+BLIMP_SPEED = 7.0      # units a second
+BLIMP_SEEN = 1600.0    # how far off it can be seen
+BLIMP_SAYS = ["GOODNIGHT, CITY", "NITE OWL - OPEN 24 HOURS", "LOOK UP",
+              "ASCII-1 - FLY IT YOURSELF AT THE SPACE CENTRE", "THE DINER NEVER CLOSES",
+              "HAVE YOU SEEN THE MOON TONIGHT?", "CALL YOUR MOTHER",
+              "THIS SPACE FOR RENT", "DRIVE SAFE - IT'S RAINING SOMEWHERE"]
+
+
+def blimps_near(x, z, now, reach=BLIMP_SEEN):
+    """Tonight's blimps within reach: (x, z, heading, its message), each going
+    round its own loop over its own square of the city."""
+    if not night(now)["blimp"]:
+        return []
+    out = []
+    ti, tj = int(math.floor(x / BLIMP_TILE)), int(math.floor(z / BLIMP_TILE))
+    for a in range(ti - 1, ti + 2):
+        for b in range(tj - 1, tj + 2):
+            m = _mix(a, b, 9301)
+            cx = (a + 0.25 + (m & 255) / 512.0) * BLIMP_TILE
+            cz = (b + 0.25 + ((m >> 8) & 255) / 512.0) * BLIMP_TILE
+            r = BLIMP_LOOP * 0.5
+            way = 1.0 if m & 65536 else -1.0
+            ang = ((m >> 17) & 1023) / 1023.0 * math.tau + way * now * BLIMP_SPEED / r
+            bx, bz = cx + math.cos(ang) * r, cz + math.sin(ang) * r
+            if (bx - x) ** 2 + (bz - z) ** 2 > reach * reach:
+                continue
+            head = math.atan2(-math.sin(ang) * way, math.cos(ang) * way)
+            out.append((bx, bz, head, BLIMP_SAYS[(m >> 3) % len(BLIMP_SAYS)]))
+    return out
+
+
+def blimp_near(x, z, now):
+    """For the HUD: one in sight, about."""
+    return bool(blimps_near(x, z, now, BLIMP_SEEN * 0.7))
+
+
+def draw_blimp(ch, co, v, walls, bx, bz, head, says, now):
+    """One blimp: the envelope worked out on the screen from where its nose,
+    its tail and its middle land - long side on, round end on - filled dark
+    so the stars and the far towers go behind it; its fins, its gondola and
+    its lights; and the band of light down its side with the message going
+    along it, while you see enough of its side to read it."""
+    hx, hz = math.sin(head), math.cos(head)
+    mid = v.project(bx, BLIMP_Y, bz)
+    nose = v.project(bx + hx * BLIMP_L / 2, BLIMP_Y, bz + hz * BLIMP_L / 2)
+    tail = v.project(bx - hx * BLIMP_L / 2, BLIMP_Y, bz - hz * BLIMP_L / 2)
+    if mid is None or nose is None or tail is None:
+        return
+    cx, cy, dist = mid
+    hd = BLIMP_D * 0.5 * v.fx / dist                # half its fatness, in columns
+    hr = BLIMP_D * 0.5 * v.fy / dist                # and in rows
+    span = abs(nose[0] - tail[0]) / 2.0
+    a = math.sqrt(span * span + hd * hd)            # half its length on the screen
+    if a < 1.0:
+        put_cell(ch, co, v, walls, int(cx), int(cy), dist, ".", ROU_RED)
+        return
+    hr = max(1.0, hr)
+    side = span / a                                 # 1 broadside, 0 end on
+    left = nose[0] < tail[0]                        # which way its nose is
+    for row in range(int(math.floor(cy - hr)), int(math.ceil(cy + hr)) + 1):
+        f = (row - cy) / hr
+        if abs(f) > 1.0:
+            continue
+        w = a * math.sqrt(1.0 - f * f)
+        x0, x1 = int(round(cx - w)), int(round(cx + w))
+        for x in range(x0, x1 + 1):
+            if x in (x0, x1):
+                g = "(" if x == x0 else ")"
+                if abs(f) > 0.6:
+                    g = ("/" if (x == x0) == (f < 0) else "\\")
+            elif row == int(math.floor(cy - hr)) + (1 if hr > 2 else 0) and abs(f) > 0.5:
+                g = "_"
+            else:
+                g = " "
+            put_cell(ch, co, v, walls, x, row, dist, g, CONCRETE if g != " " else 0)
+    # Its fins, at the tail; its gondola underneath, lit.
+    tx = cx + (a - 1.0) * (1 if not left else -1) * side
+    for d in (-1, 1):
+        put_cell(ch, co, v, walls, int(round(tx)), int(round(cy + d * (hr + 1))), dist,
+                 "/" if (d < 0) != left else "\\", CONCRETE)
+    gw = max(1, int(a * 0.25))
+    for x in range(int(cx - gw), int(cx + gw) + 1):
+        put_cell(ch, co, v, walls, x, int(round(cy + hr)) + 1, dist,
+                 "o" if x % 2 else "=", BULB if x % 2 else CONCRETE)
+    # Its lights: red one end, green the other, a white strobe on the tail.
+    put_cell(ch, co, v, walls, int(round(cx - a)), int(round(cy)), dist, "*",
+             ROU_RED if left else ROU_GREEN)
+    put_cell(ch, co, v, walls, int(round(cx + a)), int(round(cy)), dist, "*",
+             ROU_GREEN if left else ROU_RED)
+    if (now * 1.3) % 1.0 < 0.12:
+        put_cell(ch, co, v, walls, int(round(tx)), int(round(cy - hr)), dist, "*", FLASH)
+    # The message, along the band of light, while there is side enough to read.
+    room = int(2 * a * side) - 4
+    if side > 0.45 and room >= 4:
+        text = "   " + says + "   "
+        start = int(now * 6.0) % len(text)
+        shown = (text * 3)[start:start + room]
+        x0 = int(round(cx - room / 2.0))
+        tone = NEON[(int(now / 4.0)) % len(NEON)][0]
+        for k, c in enumerate(shown):
+            put_cell(ch, co, v, walls, x0 + k, int(round(cy)), dist, c,
+                     tone if c != " " else 0)
+
+
+def skip_to_blimp(now):
+    """The panel's: on to the next night with a blimp out."""
+    global _night_skip
+    for _ in range(BLIMP_ODDS * 8):
+        if night(now)["blimp"]:
+            return True
+        _night_skip += NIGHT_LENGTH
+    return False
+
 
 def skip_to_drones(now):
     """The menu's y: on to the next night with a drone show, and the next
@@ -23970,6 +24096,9 @@ def night(now):
         # sky, nor in the fog, nor on the fireworks' night - one show a night.
         got["drones"] = (_mix(k, 11, 613) % DRONE_ODDS == 0 and not got["alien"]
                          and not got["fog"] and not got["fireworks"])
+        # A blimp over the city: not the strange night, nor in fog.
+        got["blimp"] = (_mix(k, 17, 613) % BLIMP_ODDS == 0 and not got["alien"]
+                        and not got["fog"])
         # The surf glowing: on its own, whatever else the night is.
         got["glowsea"] = _mix(k, 13, 613) % GLOWSEA_ODDS == 0 and not got["alien"]
         if got["alien"]:
@@ -24661,6 +24790,8 @@ def render_street(v, now):
             draw_ferry(ch, co, v, walls, fs[0], fs[1], fs[2], now, wet)
     draw_fireworks(ch, co, v, walls, now, wet)
     draw_drones(ch, co, v, walls, now)
+    for bx_, bz_, bh_, bs_ in blimps_near(v.x, v.z, now):
+        draw_blimp(ch, co, v, walls, bx_, bz_, bh_, bs_, now)
     reflect_river(ch, co, v, walls, now, wet)
     if night(now)["lanterns"] and v.water:
         # After the reflection, or the far bank's windows lying on the water
@@ -30160,7 +30291,8 @@ def draw_cheats(ch, co, note):
            ("", ""), ("", "NIGHTS"),
            ("n", "the next one"), ("u", "a strange night"),
            ("z", "a lantern night"), ("!", "fireworks night"),
-           ("y", "a drone show"), ("j", "glowing sea"), ("@", "dawn"),
+           ("y", "a drone show"), ("j", "glowing sea"), ("p", "a blimp"),
+           ("@", "dawn"),
            ("&", "a blackout"), ("#", "a fog night"),
            ("F1", " close")]
     more = [("", "AND THE REST")] + [names[k] for k in CHEAT_MORE if k in names]
@@ -39421,7 +39553,7 @@ def render_sub(sub, width, height, now):
         for n, s in enumerate(lines):
             _text(ch, co, deck + 1 + n, tx, s[:max(0, width - tx - 1)],
                   GOLD if n == 2 else HUD)
-    if now - sub.ping_at < 0.7:
+    if now - sub.ping_at < 1.5:
         _text(ch, co, deck + 1, width - 7, "PING", ROU_GREEN)
     # What she says, and anything new, across the top of the bubble.
     name, when = sub.news
@@ -41355,6 +41487,9 @@ def main(stdscr):
                 elif key == ord("@"):
                     note = ("the night is nearly over"
                             if skip_to_dawn(now) else "no such night near")
+                elif key == ord("p") and not hidden_next:
+                    note = ("a blimp out over the city tonight - look over the roofs"
+                            if skip_to_blimp(now) else "no such night near")
                 elif key == ord("y") and not hidden_next:
                     note = ("a drone show over the sea, starting now - c for the coast"
                             if skip_to_drones(now) else "no such night near")
@@ -43120,6 +43255,7 @@ def main(stdscr):
                     if escape_near(cam_x, cam_z) else "")
                 or ("  ~ a claw machine: walk up to it to play ~"
                     if claw_near(cam_x, cam_z) else "")
+                or ("  ~ a blimp over the city ~" if blimp_near(cam_x, cam_z, now) else "")
                 or ("  ~ fireworks over the bay ~"
                     if fireworks_near(cam_x, cam_z, now) else "")
                 or ("  ~ dawn ~" if dawn(now) > 0.0 else "")
