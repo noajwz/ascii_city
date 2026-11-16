@@ -512,7 +512,7 @@ def cases(run, report):
     # The submarine: from the pen, out, down, a ping, the lamp, back.
     su_st, su_out = run([(F1, .5), (b"+", .4), (b"\x01[", 1.5), (b"p", 1.0)]
                         + [(b"w", .2)] * 3 + [(b"f", .3)] * 4 + [(b"", 4.0),
-                                                                 (b"h", 1.0), (b"l", 1.5),
+                                                                 (b"h", 1.5), (b"l", 1.5),
                                                                  (b"l", 1.0), (b"a", .5),
                                                                  (b"z", .8), (b"z", .8),
                                                                  (b"x", 1.5), (b"w", 1.0)],

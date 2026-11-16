@@ -1903,7 +1903,7 @@ check("nowhere a taxi goes is on the panel but the coast and the harbour, "
       and not {"FUN", "EAT", "AROUND TOWN", "OUT OF TOWN"}
       & {g_ for g_, _ in ac.CHEAT_GROUPS} and "AROUND TOWN" not in text)
 panel_keys_ = ([k_ for k_, _, _ in ac.CHEAT_PLACES] + [d_["key"] for d_ in ac.DISTRICTS]
-               + list("wLsa>nuz!@&#/+%\\`~oyj"))
+               + list("wLsa>nuz!@&#/+%\\`~oyjp"))
 check("every key on the panel does one thing: no place hides a part of town",
       len(panel_keys_) == len(set(panel_keys_)),
       " ".join(sorted({k_ for k_ in panel_keys_ if panel_keys_.count(k_) > 1})))
@@ -9405,6 +9405,46 @@ for n_ in range(3000):
     vis_ = {"seed": n_, "since": 0.0, "bag": {}, "said": "", "said_at": -1e9}
     wins_ += "nothing" not in ac.store_buy(vis_, 4, wl_, n_ * 0.37)
 check("the lotto: now and then a ticket wins", 100 < wins_ < 900, "%d in 3000" % wins_)
+
+# --- the blimp -----------------------------------------------------------------------
+# One night in BLIMP_ODDS, a blimp over every square of the city, going round,
+# a message along its side. Rare: asked for "I don't wanna see that blimp all
+# the time".
+bn_ = [ac.night(k_ * ac.NIGHT_LENGTH + 1.0 - ac._night_skip)["blimp"] for k_ in range(3000)]
+check("the blimp is out one night in ten or so, no more",
+      0.05 < sum(bn_) / 3000.0 < 0.12, "%d nights in 3000" % sum(bn_))
+bnow_ = 1000.0
+while not ac.night(bnow_)["blimp"]:
+    bnow_ += ac.NIGHT_LENGTH
+bnot_ = bnow_ + ac.NIGHT_LENGTH
+while ac.night(bnot_)["blimp"]:
+    bnot_ += ac.NIGHT_LENGTH
+bl_ = ac.blimps_near(x0, z0, bnow_, 3000.0)
+check("on its night there is one about wherever you are, and none on the others",
+      len(bl_) >= 1 and not ac.blimps_near(x0, z0, bnot_, 3000.0)
+      and all(b_[3] in ac.BLIMP_SAYS for b_ in bl_))
+bx_, bz_, bh_, bs_ = bl_[0]
+sides_ = []
+for a_ in range(0, 360, 5):
+    for d_ in (250.0, 350.0, 450.0):
+        sx_ = bx_ + math.cos(math.radians(a_)) * d_
+        sz_ = bz_ + math.sin(math.radians(a_)) * d_
+        if ac.can_stand(sx_, sz_):
+            sides_.append((abs(math.sin(bh_ - math.atan2(bx_ - sx_, bz_ - sz_))), sx_, sz_))
+seen_b = []
+for _, sx_, sz_ in sorted(sides_, reverse=True)[:12]:
+    vb_ = ac.View(sx_, sz_, math.atan2(bx_ - sx_, bz_ - sz_), 300, 90)
+    gb_ = "\n".join("".join(r_) for r_ in ac.render_street(vb_, bnow_)[0])
+    gb2_ = "\n".join("".join(r_) for r_ in ac.render_street(vb_, bnow_ + 1.0)[0])
+    if bs_[:4] in gb_ or bs_[:4] in gb2_:
+        seen_b.append(gb_ != gb2_)
+check("from a street a few blocks off: over the roofs, its message going along it",
+      len(seen_b) >= 2 and any(seen_b), "readable from %d of 12 spots" % len(seen_b))
+near_b = ac.blimp_near(bx_ + 300.0, bz_, bnow_) and not ac.blimp_near(bx_, bz_, bnot_)
+sk_b = ac._night_skip
+check("the panel's p: the next night it is out; and the top bar says so near one",
+      near_b and ac.skip_to_blimp(500.0) and ac.night(500.0)["blimp"])
+ac._night_skip = sk_b
 
 # --- the coast ----------------------------------------------------------------
 # East of the start the city ends at the sea: a row of hotels, a road along the
