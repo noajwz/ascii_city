@@ -63,7 +63,7 @@ or change something. Notes cross-reference each other by title ("see The univers
 - `arcade-big.md` - The arcade, big
 - `casino-big.md` - The casino, big
 - `people-walking.md` - People walking
-- `elevated-line.md` - The elevated line
+- `elevated-line.md` - The elevated line, and driving it
 - `tunnels.md` - Tunnels
 - `car-parks.md` - Car parks
 - `traffic.md` - Traffic

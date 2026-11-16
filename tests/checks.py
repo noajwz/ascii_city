@@ -999,6 +999,223 @@ sky2, _ = ac.render_skyline(100.0, 110, 30, 300.0 + 12)
 check("and from the waterfront a train crosses the town",
       any("oo|oo" in "".join(r) for r in sky) and sky != sky2)
 
+# --- driving the el --------------------------------------------------------
+def train_robot(tr_, now_):
+    """Drives on the handle alone, one notch a frame as a key would: brakes
+    for the next stop's mark and for the first red ahead the desk shows,
+    and otherwise runs at a good speed."""
+    want_ = 0
+    if tr_.doors != "shut":
+        want_ = -3
+    else:
+        nx_ = tr_.next_stop()
+        aim_ = nx_["mark"] - tr_.s if nx_ is not None and nx_["stop"] else None
+        red_ = tr_.danger()
+        if red_ is not None and (aim_ is None or red_ - 3.0 < aim_):
+            aim_ = red_ - 3.0
+        if aim_ is not None and aim_ < 400.0:
+            need_ = tr_.v * tr_.v / (2 * max(aim_, 0.05))
+            if need_ > 0.55 or aim_ < 0.4:
+                want_ = -min(7, max(1, math.ceil(need_ / ac.TRAIN_BRAKE)))
+                if tr_.v < 1.2 and aim_ > 0.4:
+                    want_ = -1
+                if tr_.v < 0.8 and aim_ > 1.0:
+                    want_ = 1
+            elif tr_.v < 16.0:
+                want_ = 4
+        elif tr_.v < 18.0:
+            want_ = 4
+    if tr_.notch < want_:
+        tr_.key("power", now_)
+    elif tr_.notch > want_:
+        tr_.key("brake", now_)
+
+
+def train_run(tr_, now_, secs_, drive_=train_robot):
+    """Steps a train at 30 frames a second; what it said and how stops went."""
+    said_, results_ = [], []
+    for _ in range(int(secs_ * 30)):
+        now_ += 1.0 / 30.0
+        if drive_ is not None:
+            drive_(tr_, now_)
+        tr_.step(1.0 / 30.0, now_)
+        if not said_ or said_[-1] != tr_.said:
+            said_.append(tr_.said)
+        if tr_.result_at == now_:
+            results_.append(tr_.result)
+    return now_, said_, results_
+
+
+els_spot = ac.find_place(x0, z0, "eldrive")
+els_st = ac.el_stairs_near(els_spot[0], els_spot[1], 6.0)
+fz_ = ac.el_stairs(els_st[0], els_st[1], ac.el_station_z(els_st[0], els_st[2]))
+foot_ = [f_ for f_ in fz_ if f_[2] == els_st[3]][0]
+check("the panel's ] stands you a step short of an el station's stairs",
+      els_spot is not None and ac.can_stand(els_spot[0], els_spot[1])
+      and ac.venue_at(els_spot[0], els_spot[1]) is None and els_st is not None)
+check("and walking up to their foot takes you up them, into a train's cab",
+      (ac.venue_at(foot_[0], foot_[1]) or ("",))[0] == "elstairs")
+check("\"under the el\" in the checks' menu is not on a stair",
+      ac.venue_at(*under[:2]) is None)
+ac.GOLD, ac.BULB = 1003, 1002
+sv_ = ac.View(els_spot[0], els_spot[1], els_spot[2], 110, 30)
+sg_, sc_, _ = ac.render_street(sv_, 300.0)
+ac.GOLD = ac.BULB = 1
+check("the stairs have their sign, with the station's name on it",
+      any("EL " + ac.el_station_name(ac.el_station_z(els_st[0], els_st[2])) in "".join(r_)
+          for r_ in sg_) and any(1003 in r_ for r_ in sc_))
+tr_ = ac.Train(*els_st, 1000.0)
+stops_ = [s_ for s_ in tr_.stations if s_["stop"]]
+passes_ = [s_ for s_ in tr_.stations if not s_["stop"] and s_["pass"] is not None]
+check("the card: stops ahead, each due after the last, and one it runs through",
+      len(stops_) >= ac.TRAIN_CARD and passes_
+      and all(a_["dep"] < b_["arr"] < b_["dep"] for a_, b_ in zip(stops_, stops_[1:])))
+check("and the train ahead has left your platform before you get the card",
+      tr_.lead_at(1000.0) is not None and tr_.lead_at(1000.0) > tr_.s + 100.0)
+check("the doors are open and the power cut till they shut",
+      tr_.doors == "open" and all(tr_.key("power", 1000.0) is None for _ in range(12))
+      and train_run(tr_, 1000.0, 5.0, None)[0] and tr_.v == 0.0)
+ac._el_drive[0] = tr_
+tr_.step(0.0, 1000.0)
+ex0_, ex1_ = els_st[0], els_st[1]
+own_ = [h_ for h_, d_, _ in ac.el_trains(ex0_, ex1_, tr_.z, 5000.0, 1000.0) if d_ == tr_.d]
+check("on your track the only other train is the one ahead, where it is",
+      own_ == [tr_.lead_z])
+ac._el_drive[0] = None
+# The robot: six trains, five minutes each, from stations up and down the line.
+fines_ = made_ = waited_ = 0
+marks_ = []
+for n_ in range(6):
+    sp_ = ac.find_place(els_spot[0], els_spot[1] + 700.0 * n_, "eldrive")
+    st_ = ac.el_stairs_near(sp_[0], sp_[1], 6.0)
+    trn_ = ac.Train(*st_, 5000.0 + n_ * 777.0)
+    ac._el_drive[0] = trn_
+    _, said_, res_ = train_run(trn_, 5000.0 + n_ * 777.0, 300.0)
+    fines_ += trn_.fine
+    made_ += trn_.made
+    waited_ += any(w_ == ac.TRAIN_SAYS["held"] for w_ in said_)
+    marks_ += [r_ for r_ in res_ if "through" not in r_]
+ac._el_drive[0] = None
+check("a robot on the handle keeps to six cards: every stop on the mark, no fines",
+      fines_ == 0 and made_ >= 24 and all("on the mark" in r_ for r_ in marks_),
+      "fines %d, %d stops, %s" % (fines_, made_, [r_ for r_ in marks_
+                                                    if "on the mark" not in r_][:2]))
+check("and the train ahead held it at a red now and then", waited_ >= 1,
+      "%d of 6" % waited_)
+# Full power and never a brake: through the first stop and its red.
+tr_ = ac.Train(*els_st, 0.0)
+_, said_, res_ = train_run(tr_, 0.0, 45.0, lambda t_, n_: t_.key("power", n_)
+                          if not t_.trip and t_.notch < 4 else None)
+check("run a red and the train trips, and you are fined for it",
+      any("DANGER" in w_ for w_ in said_) and any("ran through" in r_ for r_ in res_)
+      and tr_.fine >= ac.TRAIN_SPAD_FINE + ac.TRAIN_RUN_FINE, "fine %d" % tr_.fine)
+tr_ = ac.Train(*els_st, 0.0)
+tr_.doors, tr_.notch, tr_.v = "shut", 4, ac.TRAIN_LINE + 1.5
+tr_.stations[0]["left"] = True                  # let go, and away flat out
+_, said_, _ = train_run(tr_, 0.0, 0.3, None)
+check("and over the line's limit the brakes come on by themselves",
+      tr_.over and ac.TRAIN_SAYS["over"] in said_ and tr_.v < ac.TRAIN_LINE + 1.5)
+tr_ = ac.Train(*els_st, 0.0)
+nx_ = tr_.next_stop()
+
+
+def stop_at(tr_, now_, where_):
+    """Runs up to a point along the line and stops dead there."""
+    tr_.notch = 2
+    while tr_.s < where_ - tr_.v * tr_.v / 2.1:
+        now_ += 1.0 / 30.0
+        tr_.step(1.0 / 30.0, now_)
+    tr_.notch = -7
+    while tr_.v > 0.0:
+        now_ += 1.0 / 30.0
+        tr_.step(1.0 / 30.0, now_)
+    return now_
+
+
+t_ = stop_at(tr_, 25.0, nx_["mark"] - 8.0)
+check("stopped short of the mark, the doors stay shut: draw up",
+      "short" in tr_.said and tr_.doors == "shut" and nx_["done"] is None)
+t_ = stop_at(tr_, t_ + 1.0, nx_["mark"] + 0.2)
+check("and drawn up to it, they open", nx_["done"] == "stopped" and tr_.doors == "open",
+      "%.1f %s" % (tr_.s - nx_["mark"], tr_.said))
+off_ = tr_.off()
+check("x, stopped at a platform, is down its stairs and a step short of them",
+      off_ is not None and ac.can_stand(off_[0], off_[1])
+      and ac.venue_at(off_[0], off_[1]) is None)
+# The end of the line: a station two stops from it, up and down the avenues.
+endst_ = None
+for ka_ in range(-60, 60):
+    sp_ = ac.el_span(ka_)
+    if sp_ is None:
+        continue
+    ax0_, ax1_ = sp_[0] * ac.CELL, (sp_[0] + sp_[1]) * ac.CELL
+    for k_ in range(-60, 60):
+        if not ac.el_runs((ax0_ + ax1_) * 0.5, ac.el_station_z(ax0_, k_)):
+            continue
+        t2_ = ac.Train(ax0_, ax1_, k_, 1, 0.0)
+        if t2_.end and 2 <= sum(1 for s_ in t2_.stations if s_["stop"]) <= 3:
+            endst_ = (ax0_, ax1_, k_, 1)
+            break
+    if endst_:
+        break
+tr_ = ac.Train(*endst_, 0.0)
+ac._el_drive[0] = tr_
+t_, said_, _ = train_run(tr_, 0.0, 200.0)
+check("at the end of the line the doors stay open and it says so",
+      tr_.at is tr_.stations[-1] and tr_.doors == "open"
+      and ac.TRAIN_SAYS["end"] in said_)
+d0_ = tr_.d
+tr_.key("ends", t_)
+t_, said_, res_ = train_run(tr_, t_, 90.0)
+check("r: the other cab, a new card, and back the way you came",
+      tr_.d == -d0_ and tr_.made >= 1 and res_ and tr_.fine == 0)
+tr_ = ac.Train(*endst_, 0.0)
+tr_.stations[-1]["done"] = "stopped"            # pretend: run on into the buffers
+tr_.doors, tr_.notch = "shut", 4
+t_, said_, _ = train_run(tr_, 30.0, 120.0, None)
+check("and run on at the end, the buffers stop you", tr_.v == 0.0
+      and tr_.s <= tr_.stations[-1]["mark"] + 8.0 and tr_.fine > 0)
+ac._el_drive[0] = None
+# Every phase of the desk at every size, and the big window.
+tr_ = ac.Train(*els_st, 0.0)
+ac._el_drive[0] = tr_
+snaps_ = [("doors open", copy.deepcopy(tr_))]
+t_ = train_run(tr_, 0.0, 30.0)[0]
+snaps_.append(("running", copy.deepcopy(tr_)))
+t_ = train_run(tr_, t_, 20.0)[0]
+snaps_.append(("arriving", copy.deepcopy(tr_)))
+bad_ = []
+for name_, s_ in snaps_:
+    ac._el_drive[0] = s_
+    for w_, h_ in ((40, 14), (60, 20), (80, 24), (120, 36), (211, 67), (300, 90),
+                   (451, 133)):
+        try:
+            v_ = ac.View(s_.tx, s_.z - s_.d * 0.5, 0.0 if s_.d > 0 else math.pi,
+                         w_, h_, eye=ac.EL_H + 2.3)
+            g_, c_, _ = ac.render_street(v_, t_)
+            ac.draw_train_world(g_, c_, v_, s_, t_)
+            ac.draw_motorman(g_, c_, s_, t_, ac.big_scale(w_, h_))
+            txt_ = "\n".join("".join(r_) for r_ in g_)
+            if len(g_) != h_ or any(len(r_) != w_ for r_ in g_) or (
+                    w_ >= 80 and not ("THE CARD" in txt_ and "SIGNAL" in txt_
+                                      and "B1" in txt_)):
+                bad_.append((name_, w_, h_))
+            if w_ >= 300 and "km/h" in txt_:
+                bad_.append((name_, w_, h_, "small speed on a big window"))
+        except Exception as e_:
+            bad_.append((name_, w_, h_, repr(e_)))
+check("in the cab: every phase at every size, the speed big on a big window",
+      not bad_, str(bad_[:3]))
+ac._big_screens[0] = False
+g_ = [[" "] * 300 for _ in range(90)]
+ac.draw_motorman(g_, [[0] * 300 for _ in range(90)], tr_, t_, ac.big_scale(300, 90))
+ac._big_screens[0] = True
+check("and z gives the small desk back on a big window",
+      "km/h" in "\n".join("".join(r_) for r_ in g_))
+ac._el_drive[0] = None
+check("the panel has it: ] drives the el",
+      ("]", "drive the el", "eldrive") in ac.CHEAT_PLACES and "eldrive" in ac.CHEAT_MORE)
+
 # --- one sign per frontage ------------------------------------------------
 # Reported as "too many lights to make the buildings out": a shopfront with a
 # flat neon, a hanging sign and lanterns at once buries its own outline.
