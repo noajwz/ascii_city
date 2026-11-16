@@ -1215,6 +1215,26 @@ check("and z gives the small desk back on a big window",
 ac._el_drive[0] = None
 check("the panel has it: ] drives the el",
       ("]", "drive the el", "eldrive") in ac.CHEAT_PLACES and "eldrive" in ac.CHEAT_MORE)
+est_ = []
+sx_e, sz_e = x0, z0
+for _ in range(3):
+    sp_ = ac.find_place(sx_e, sz_e, "elstation")
+    walk_ = None
+    for n_ in range(80):
+        wx_ = sp_[0] + math.sin(sp_[2]) * n_ * 0.25
+        wz_ = sp_[1] + math.cos(sp_[2]) * n_ * 0.25
+        if not ac.can_stand(wx_, wz_):
+            break
+        got_ = ac.venue_at(wx_, wz_)
+        if got_ is not None:
+            walk_ = (n_ * 0.25, got_[0])
+            break
+    est_.append(walk_)
+    sx_e, sz_e = sp_[0], sp_[1]
+check("and = under TRAVEL stands you down the pavement from a station, a short walk "
+      "up its stairs; again, another",
+      all(w_ is not None and w_[1] == "elstairs" and 5.0 < w_[0] < 12.0 for w_ in est_)
+      and "elstation" in dict(ac.CHEAT_GROUPS)["TRAVEL"], str(est_))
 
 # --- one sign per frontage ------------------------------------------------
 # Reported as "too many lights to make the buildings out": a shopfront with a
