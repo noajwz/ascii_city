@@ -970,6 +970,14 @@ def init_colors():
         off = curses.color_pair(pair)
         pair += 1
         NEON.append((on, off))
+    if len(NEON) < 8:
+        # Eight, as there are in 256 colours: plenty of the city asks for a
+        # neon by its place in the list (the harbour's orange, the festival's
+        # gold), and with four an 8-colour terminal crashed the first time one
+        # was in sight. The pairs it has already, not new ones: xterm gives
+        # it 64, and the rest of the colours use 62. Orange as yellow, green as
+        # cyan, purple as magenta, yellow as yellow.
+        NEON += [NEON[3], NEON[1], NEON[0], NEON[3]]
 
     made = {}
     for name, c in extras.items():
