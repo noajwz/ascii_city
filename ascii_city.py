@@ -33956,7 +33956,8 @@ def draw_cab(ch, co, now, wet, top_line, meter, says):
     height, width = len(ch), len(ch[0])
     if width < 30 or height < 12:
         _text(ch, co, 0, 0, (" " + top_line)[:width], GOLD)
-        _text(ch, co, height - 1, 0, (" fare $%.2f " % meter)[:width], ROU_RED)
+        if meter is not None:
+            _text(ch, co, height - 1, 0, (" fare $%.2f " % meter)[:width], ROU_RED)
         return
     for x in range(width):
         ch[0][x], co[0][x] = "=", BARK
@@ -33986,8 +33987,9 @@ def draw_cab(ch, co, now, wet, top_line, meter, says):
     _text(ch, co, dash - 3, 4, " ___ ", CONCRETE)       # the driver's headrest
     _text(ch, co, dash - 2, 4, "(   )", CONCRETE)
     _text(ch, co, dash - 1, 3, "/     \\", CONCRETE)
-    box = " FARE $%6.2f " % meter
-    _text(ch, co, dash + 1, width - len(box) - 4, box, ROU_RED)
+    box = " FARE $%6.2f " % (meter or 0.0)
+    if meter is not None:               # the AFK show's ride has no meter
+        _text(ch, co, dash + 1, width - len(box) - 4, box, ROU_RED)
     _text(ch, co, dash + 2, width - len(box) - 4, "  [ TAXI ]  ", GOLD_DIM)
     _text(ch, co, dash + 1, 4, top_line[:width - len(box) - 10], GOLD)
     if says:
@@ -36033,7 +36035,7 @@ def draw_station_entrances(ch, co, v, walls, now, wet):
                          ROU_RED if k < 3 else BULB)
 
 
-def render_platform(width, height, now, metro):
+def render_platform(width, height, now, metro, afk=False):
     """On the platform: the tiles, the station's name on the wall in white on
     a blue band, the board with the next train and where you can go from
     here, people waiting at the yellow line, the tracks - and the train,
@@ -36048,9 +36050,9 @@ def render_platform(width, height, now, metro):
         _text(ch, co, 3, 1, "next train " + ("now" if phase == "dwell" else "soon"),
               STAR)
         for r, d in enumerate(metro["dests"][:height - 6]):
-            mark = ">" if r == metro["sel"] else " "
-            _text(ch, co, 5 + r, 1, mark + d["name"][:width - 3],
-                  FLASH if r == metro["sel"] else HUD)
+            lit = r == metro["sel"] and not afk
+            _text(ch, co, 5 + r, 1, (">" if lit else " ") + d["name"][:width - 3],
+                  FLASH if lit else HUD)
         return ch, co
     edge = height - 7
     # The tiled wall.
@@ -36080,9 +36082,9 @@ def render_platform(width, height, now, metro):
             else "DEPARTING" if phase == "out" else "%d s" % int(q + 1))
     _text(ch, co, by + 4, bx, "NEXT TRAIN  " + wait, GOLD)
     for r, d in enumerate(metro["dests"][:edge - by - 7]):
-        line = "%s %-14s %s" % (">" if r == metro["sel"] else " ", d["name"][:14],
-                                d["district"])
-        _text(ch, co, by + 6 + r, bx, line, FLASH if r == metro["sel"] else HUD)
+        lit = r == metro["sel"] and not afk     # the show chooses nothing
+        line = "%s %-14s %s" % (">" if lit else " ", d["name"][:14], d["district"])
+        _text(ch, co, by + 6 + r, bx, line, FLASH if lit else HUD)
     if metro.get("waiting"):
         _text(ch, co, by + 5, bx + 48,
               "ticket to " + metro["dests"][metro["sel"]]["name"], GOLD)
@@ -36126,10 +36128,11 @@ def render_platform(width, height, now, metro):
                     ch[r][x], co[r][x] = "=", CURB
         if phase == "in" and 0 <= x0 < width:
             _text(ch, co, edge + 2, x0, "@", FLASH)
-    _text(ch, co, height - 1, max(1, width // 2 - 30),
-          "-- ws choose  -  enter: $%d, the next train  -  x up the stairs --"
-          % METRO_FARE,
-          GOLD_DIM)
+    if not afk:
+        _text(ch, co, height - 1, max(1, width // 2 - 30),
+              "-- ws choose  -  enter: $%d, the next train  -  x up the stairs --"
+              % METRO_FARE,
+              GOLD_DIM)
     return ch, co
 
 
@@ -43439,6 +43442,302 @@ def step_out(x, z, yaw):
     return x, z
 
 
+# --- away from the keyboard: the show ----------------------------------------
+# Asked for on 2026-11-23: "an AFK option and when on idle it does things" -
+# the city showing itself off while nobody is at the keys. Only the idle timer
+# starts it, no key (their choice); no walking in it, not the walks round town
+# and not the wander - the skyline, and the rides: the cruise, the plane, the
+# el, the metro and a taxi, each made part of the show, with no menu, fare or
+# board to choose from. Any key and you are back exactly where you were: the
+# show keeps its own cameras and touches nothing of yours.
+AFK_IDLE = float(os.environ.get("ASCII_CITY_AFK") or 120.0)  # seconds of no keys
+AFK_SCENE = 180.0      # how long each scene runs, at most
+AFK_FADE = 1.2         # the dissolve into each one
+AFK_HINT = 10.0        # how long "any key" shows, at the start of the show
+AFK_SCENES = ("skyline", "cruise", "flight", "el", "metro", "taxi")
+AFK_SKY_PAN = 8.0      # the skyline going by, its units a second
+AFK_CAB_PACE = 1.6     # the cab, in walking paces: brisk through town
+AFK_SAY_EVERY = 45.0   # the driver has something to say, now and then
+AFK_EL_DECEL = 0.5     # the show's motorman brakes for a stop at this
+
+
+def el_autodrive(tr, now):
+    """The show's motorman: the handle set every frame for a stop on the mark,
+    held at a red, and back the other way at the end of the line. The card,
+    the pay and the fines go on being worked out, and nobody sees them."""
+    if (tr.end and tr.at is not None and tr.at is tr.stations[-1]
+            and tr.v == 0.0 and now - tr.doors_at > TRAIN_DOORS):
+        tr.key("ends", now)
+        tr.close_at = now + 6.0         # not the twenty a driver settles in for
+    if tr.doors != "shut":
+        tr.notch = -3
+        return
+    room = 1e9
+    st = tr.next_stop()
+    if st is not None and st["stop"]:
+        room = st["mark"] - tr.s
+    nxt = tr.next_signal()
+    if nxt is not None and tr.red(nxt[0]):
+        room = min(room, nxt[1] - 3.0)
+    danger = tr.danger()
+    if danger is not None:
+        room = min(room, danger - 6.0)
+    v = tr.v
+    want = min(TRAIN_LINE - 3.0, math.sqrt(2.0 * AFK_EL_DECEL * max(0.0, room - 0.3)))
+    if room < 0.6 and v < 1.0:
+        tr.notch = -TRAIN_BRAKES
+    elif v > want + 0.3:
+        need = v * v / (2.0 * max(room, 0.5))
+        tr.notch = -max(1, min(TRAIN_BRAKES, int(math.ceil(need / TRAIN_BRAKE))))
+    elif v < want - 1.0:
+        tr.notch = TRAIN_POWER
+    else:
+        tr.notch = 0
+
+
+def _afk_train(x, z, now):
+    """A train standing at the el station nearest here, the way it has more
+    line ahead of it, its doors about to close."""
+    gap = EL_STATION * CELL
+    k0 = int(x / (XP * CELL) + BIG) - BIG
+    for step in range(400):
+        k = k0 + (step + 1) // 2 * (1 if step % 2 else -1)
+        span = el_span(k)
+        if span is None:
+            continue
+        x0, x1 = span[0] * CELL, (span[0] + span[1]) * CELL
+        k1 = int(z / gap + BIG) - BIG
+        for n in range(40):
+            ks = k1 + (n + 1) // 2 * (1 if n % 2 else -1)
+            if not el_runs((x0 + x1) * 0.5, el_station_z(x0, ks)):
+                continue
+            best = None
+            for d in (1, -1):
+                tr = Train(x0, x1, ks, d, now)
+                if best is None or len(tr.stations) > len(best.stations):
+                    best = tr
+            if len(best.stations) < 2:
+                break                   # a line one station long: the next
+            best.close_at = now + 5.0
+            return best
+    return None
+
+
+def _afk_harbour(x, z):
+    """The harbour nearest along the coast whose ship is in."""
+    if not COAST:
+        return None
+    k0 = int((z / CELL - HARBOUR_ROW0) // HARBOUR_GAP)
+    best = None
+    for k in range(k0 - 2, k0 + 3):
+        h = _harbour_at(k * HARBOUR_GAP + HARBOUR_ROW0)
+        if h is None or h in _liner_trips:
+            continue
+        d = abs(liner_berth(h)[1] - z)
+        if best is None or d < best[0]:
+            best = (d, h)
+    return None if best is None else best[1]
+
+
+class Afk:
+    """The show: one scene after another, each with cameras of its own."""
+
+    def __init__(self, x, z, sky_x, now):
+        self.x, self.z, self.sky_x = x, z, sky_x
+        self.t0 = self.clock = now
+        self.order = list(AFK_SCENES)
+        random.Random(int(now * 1000.0)).shuffle(self.order)
+        self.n = -1
+        self.sc = None
+        self.next(now)
+
+    def close(self):
+        """Put back what a scene borrowed from the city: the ship, the el."""
+        sc = self.sc
+        if sc is not None and sc["kind"] == "cruise":
+            liner_home(sc["h"])
+        _el_drive[0] = None
+        self.sc = None
+
+    def next(self, now):
+        self.close()
+        for _ in range(len(self.order)):
+            self.n = (self.n + 1) % len(self.order)
+            sc = self.start(self.order[self.n], now)
+            if sc is not None:
+                sc.setdefault("until", now + AFK_SCENE)
+                sc.update(kind=self.order[self.n], t0=now)
+                self.sc = sc
+                return
+        self.sc = {"kind": "skyline", "x": self.sky_x, "t0": now,
+                   "until": now + AFK_SCENE}
+
+    def start(self, kind, now):
+        """A new scene of this kind near where you were, or None."""
+        x, z = self.x, self.z
+        if kind == "skyline":
+            return {"x": self.sky_x}
+        if kind == "cruise":
+            h = _afk_harbour(x, z)
+            if h is None:
+                return None
+            route = liner_sail(h, now)
+            return {"h": h, "until": now + min(AFK_SCENE, liner_trip_time(route))}
+        if kind == "flight":
+            sp = find_place(x, z, "airport")
+            if sp is None:
+                return None
+            home = zone_home("airport", int(sp[0] // CELL), int(sp[1] // CELL))
+            return {"f": {"home": home, "t0": now, "look": 0.0},
+                    "until": now + min(AFK_SCENE, flight_length(home) + 1.0)}
+        if kind == "el":
+            tr = _afk_train(x, z, now)
+            return None if tr is None else {"tr": tr}
+        if kind == "metro":
+            near = sorted(near_stations(x, z, 900.0),
+                          key=lambda s_: (s_["x"] - x) ** 2 + (s_["z"] - z) ** 2)
+            for st in near[:4]:
+                m = self.platform(st, now)
+                if m is not None:
+                    return {"m": m}
+            return None
+        if kind == "taxi":
+            sx, sz = x, z
+            if not (can_stand(x, z) and road_at(int(x / CELL + BIG) - BIG,
+                                                int(z / CELL + BIG) - BIG)):
+                sp = find_place(x, z, "street")
+                if sp is None:
+                    return None
+                sx, sz = sp[0], sp[1]
+            tour = new_tour(sx, sz, now)
+            if tour is None:
+                return None
+            return {"tour": tour, "x": sx, "z": sz, "yaw": best_yaw(sx, sz),
+                    "fwd": 0.0, "spin": 0.0, "blocked": False}
+        return None
+
+    def platform(self, st, now):
+        """On the platform at st, for a train to somewhere the show picks."""
+        dests = metro_dests(st)
+        if not dests:
+            return None
+        sel = _mix(int(now), st["block"][0], 1933) % min(4, len(dests))
+        return {"phase": "platform", "here": st, "sel": sel, "waiting": False,
+                "dests": dests}
+
+    def step(self, now):
+        """Everything that moves in the scene, one frame on."""
+        dt = max(0.0, min(0.1, now - self.clock))
+        self.clock = now
+        sc = self.sc
+        if now >= sc["until"]:
+            self.next(now)
+            return
+        kind = sc["kind"]
+        if kind == "skyline":
+            sc["x"] += AFK_SKY_PAN * dt
+        elif kind == "el":
+            el_autodrive(sc["tr"], now)
+            sc["tr"].step(dt, now)
+        elif kind == "metro":
+            m = sc["m"]
+            if m["phase"] == "platform":
+                st = m["here"]
+                ph, q = train_phase(now, st["block"][0] * 31 + st["block"][1])
+                if ph == "dwell" and q < METRO_DWELL - 1.0:
+                    d = m["dests"][m["sel"]]
+                    far = math.hypot(d["x"] - st["x"], d["z"] - st["z"])
+                    sc["m"] = dict(m, phase="ride", t0=now,
+                                   dur=min(14.0, max(6.0, 4.0 + far / 200.0)))
+            elif now - m["t0"] >= m["dur"]:
+                sc["m"] = self.platform(m["dests"][m["sel"]], now) or m
+                if sc["m"] is m:
+                    self.next(now)
+        elif kind == "taxi":
+            t_, w_ = tour_step(sc["tour"], sc["x"], sc["z"], sc["yaw"], now,
+                               sc["blocked"], AFK_CAB_PACE)
+            sc["spin"] += (t_ * TURN * 0.85 - sc["spin"]) * min(1.0, dt * 5.0)
+            sc["fwd"] += (WALK * AFK_CAB_PACE * w_ - sc["fwd"]) * min(1.0, dt * 2.5)
+            sc["yaw"] += sc["spin"] * dt
+            n = max(1, int(abs(sc["fwd"] * dt) / STEP_MAX) + 1)
+            moved = False
+            for _ in range(n):
+                dx = math.sin(sc["yaw"]) * sc["fwd"] * dt / n
+                dz = math.cos(sc["yaw"]) * sc["fwd"] * dt / n
+                if can_stand(sc["x"] + dx, sc["z"]):
+                    sc["x"], moved = sc["x"] + dx, True
+                if can_stand(sc["x"], sc["z"] + dz):
+                    sc["z"], moved = sc["z"] + dz, True
+            sc["blocked"] = not moved and sc["fwd"] > 0.5
+
+    def frame(self, width, height, now):
+        """(ch, co, wide, hud) for this frame of the show."""
+        self.step(now)
+        sc = self.sc
+        kind = sc["kind"]
+        wide = ()
+        if kind == "skyline":
+            ch, co = render_skyline(sc["x"], width, height, now)
+            say = "the city from the water"
+        elif kind == "cruise":
+            ch, co, v = render_cruise(sc["h"], 0.35 * math.sin((now - sc["t0"]) / 23.0),
+                                      width, height, now)
+            wide = v.wide
+            say = "aboard the %s, down the coast" % LINER_NAME.title()
+        elif kind == "flight":
+            f = sc["f"]
+            f["look"] = 0.25 * math.sin((now - sc["t0"]) / 19.0)
+            ch, co, v, alt, s = render_flight(width, height, now, f)
+            wide = v.wide
+            fx, fz, _, _ = flight_pose(f["home"], s)
+            say = "%s, %s over %s" % (FLIGHT_NO, flight_stage(f["home"], s),
+                                      place_below(fx, fz))
+        elif kind == "el":
+            tr = sc["tr"]
+            v = View(tr.tx, tr.z - tr.d * 0.5, 0.0 if tr.d > 0 else math.pi,
+                     width, height, eye=EL_H + 2.3)
+            _el_drive[0] = tr
+            try:
+                ch, co, wet = render_street(v, now)
+                draw_train_world(ch, co, v, tr, now)
+            finally:
+                _el_drive[0] = None
+            wide = v.wide
+            st = tr.next_stop()
+            say = "the el" + (", %s next" % st["name"] if st is not None else "")
+        elif kind == "metro":
+            m = sc["m"]
+            if m["phase"] == "platform":
+                ch, co = render_platform(width, height, now, m, afk=True)
+                say = "the metro, at " + m["here"]["name"]
+            else:
+                ch, co = render_ride(width, height, now, m)
+                say = "the metro, to " + m["dests"][m["sel"]]["name"]
+        else:
+            v = View(sc["x"], sc["z"], sc["yaw"], width, height, eye=2.4)
+            ch, co, wet = render_street(v, now)
+            t = now - sc["t0"]
+            says = ""
+            if t > 8.0 and t % AFK_SAY_EVERY < 6.0:
+                says = DRIVER_SAYS[_mix(int(t // AFK_SAY_EVERY), 7, 1935)
+                                   % len(DRIVER_SAYS)]
+            draw_cab(ch, co, now, wet, "", None, says)
+            wide = v.wide
+            say = "a taxi through " + district(int(sc["x"] / CELL + BIG) - BIG,
+                                               int(sc["z"] / CELL + BIG) - BIG)["name"]
+        u = (now - sc["t0"]) / AFK_FADE
+        if u < 1.0:                     # the dissolve in: the cells come one by one
+            cut = int((1.0 - u) * 1000)
+            for y in range(height):
+                for x in range(width):
+                    if _mix(x, y, 1937) % 1000 < cut:
+                        ch[y][x], co[y][x] = " ", 0
+        hud = " ~ %s ~ " % say
+        if now - self.t0 < AFK_HINT:
+            hud += "   any key comes back "
+        return ch, co, wide, hud
+
+
 def main(stdscr):
     global WIDE_OK
     init_colors()
@@ -43553,14 +43852,76 @@ def main(stdscr):
     pace = PACES[0][1]          # how fast you walk: + and - in the street
     venue = None                # the doorway you are standing in, if any
     frame_time = 1.0 / FPS
+    afk = None                  # the show, while nobody is at the keys: an Afk
+    idle_at = time.monotonic()  # the last key pressed
+
+    def blit(ch, co, hud, wide):
+        stdscr.erase()
+        for y in range(height):
+            row_ch, row_co = ch[y], co[y]
+            x = 0
+            while x < width:
+                c = row_ch[x]
+                # The very last cell of the screen can't be written to, and
+                # a wide glyph needs the one after it as well.
+                corner = y == height - 1 and x >= width - 2
+                # Trust but verify: a later pass - rain, usually - can paint
+                # over the glyph after its column was claimed, and stepping
+                # over two cells for a leftover reservation would swallow a
+                # column of the picture.
+                if (y, x) in wide and not corner and is_wide(c):
+                    # A double-width glyph owns the column after it as well, so
+                    # step over that one rather than painting into its far half.
+                    try:
+                        stdscr.addstr(y, x, c, row_co[x])
+                    except curses.error:
+                        pass
+                    x += 2
+                    continue
+                if c != " " and not (y == height - 1 and x == width - 1):
+                    try:
+                        stdscr.addch(y, x, c, row_co[x])
+                    except curses.error:
+                        pass
+                x += 1
+
+        try:
+            stdscr.addstr(0, 0, hud[:width - 1], HUD)
+        except curses.error:
+            pass
+
+        stdscr.refresh()
 
     while True:
         now = time.monotonic()
         _clock[0] = now
 
+        if afk is not None:
+            # The show: any key and you are back where you were, the key
+            # spent on coming back. Nothing of yours moved meanwhile.
+            back_ = False
+            key = read_key(stdscr)
+            while key != -1:
+                if key == curses.KEY_RESIZE:
+                    _cache.clear()
+                else:
+                    back_ = True
+                key = read_key(stdscr)
+            if back_:
+                afk.close()
+                afk, idle_at = None, now
+            else:
+                height, width = stdscr.getmaxyx()
+                ch, co, wide, hud = afk.frame(width, height, now)
+                blit(ch, co, hud, wide)
+                time.sleep(max(0.0, frame_time - (time.monotonic() - now)))
+                continue
+
         # --- input -----------------------------------------------------
         key = read_key(stdscr)
         while key != -1:
+            if key != curses.KEY_RESIZE:
+                idle_at = now
             if key == curses.KEY_RESIZE:
                 _cache.clear()
             elif cheats and key not in ARROWS:
@@ -45079,6 +45440,13 @@ def main(stdscr):
         if _show is not None:
             _show.update(now)
 
+        # Nobody at the keys for a while, and nothing of yours running on the
+        # clock - a ride, a game, a walk, a door - and the show starts.
+        if (now - idle_at >= AFK_IDLE and not elsewhere() and venue is None
+                and wheel is None and lift is None and booth is None
+                and taxi is None and not autopilot):
+            afk = Afk(cam_x, cam_z, sky_x, now)
+
         # --- draw ------------------------------------------------------
         height, width = stdscr.getmaxyx()
         if on_roof is None or on_roof.get("kind") != "bar":
@@ -45495,41 +45863,7 @@ def main(stdscr):
 
         wide = v.wide if (street and wheel is None and venue is None
                           and lift is None) else ()
-        stdscr.erase()
-        for y in range(height):
-            row_ch, row_co = ch[y], co[y]
-            x = 0
-            while x < width:
-                c = row_ch[x]
-                # The very last cell of the screen can't be written to, and
-                # a wide glyph needs the one after it as well.
-                corner = y == height - 1 and x >= width - 2
-                # Trust but verify: a later pass - rain, usually - can paint
-                # over the glyph after its column was claimed, and stepping
-                # over two cells for a leftover reservation would swallow a
-                # column of the picture.
-                if (y, x) in wide and not corner and is_wide(c):
-                    # A double-width glyph owns the column after it as well, so
-                    # step over that one rather than painting into its far half.
-                    try:
-                        stdscr.addstr(y, x, c, row_co[x])
-                    except curses.error:
-                        pass
-                    x += 2
-                    continue
-                if c != " " and not (y == height - 1 and x == width - 1):
-                    try:
-                        stdscr.addch(y, x, c, row_co[x])
-                    except curses.error:
-                        pass
-                x += 1
-
-        try:
-            stdscr.addstr(0, 0, hud[:width - 1], HUD)
-        except curses.error:
-            pass
-
-        stdscr.refresh()
+        blit(ch, co, hud, wide)
         time.sleep(max(0.0, frame_time - (time.monotonic() - now)))
 
 

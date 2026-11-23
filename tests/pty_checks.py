@@ -18,11 +18,13 @@ ANSI = re.compile(rb"\x1b\[[0-9;?]*[a-zA-Z]|\x1b[()][B0]|\x1b[=>]|\x1b\][^\x07]*
 APP = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "ascii_city.py")
 
-def run(keys, cols=110, rows=34, term="xterm-256color", settle=0.9):
+def run(keys, cols=110, rows=34, term="xterm-256color", settle=0.9, afk=None):
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["TERM"] = term
         os.environ["ASCII_CITY_TEST"] = "1"     # ctrl-a jumps, off the panel
+        if afk is not None:
+            os.environ["ASCII_CITY_AFK"] = str(afk)     # the show, sooner
         os.execv(sys.executable, [sys.executable, APP])
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
     out = bytearray()
@@ -132,6 +134,19 @@ def cases(run, report):
         print("    not started, no hint, or not stopped")
         lw_ok = False
     ok &= lw_ok
+    # Away from the keys: the show starts by itself after the idle time (3 s
+    # here, two minutes for real), says what it is showing, and any key puts
+    # you back where you stood - the same place on the HUD as before it.
+    af_st, af_out = run([(b"w", .5), (b"", 7.0), (b"x", 1.5)], cols=160, rows=45,
+                        afk=3)
+    af_ok = report("away from the keys: the show, and back", af_st, af_out)
+    af_cut = af_out.rfind(b"comes back")
+    af_after = ANSI.sub(b"", af_out[af_cut:]).decode("utf-8", "replace")
+    if af_ok and af_out and not (af_cut > 0 and "facing" in af_after
+                                 and "ws walk" in af_after):
+        print("    no show, or the street not back after it")
+        af_ok = False
+    ok &= af_ok
     # The fortune teller: " on the panel, a few steps up to her table, her
     # fortune, another for $5, x up and away.
     ft_st, ft_out = run([(F1, .5), (b'"', 1.0)] + IN + [(b"", 6.0), (b"p", 1.0),

@@ -11915,5 +11915,62 @@ check("and walks it: a lap, at every stop, never stuck against a wall",
       gl_["lap"] and not gl_["skips"] and not gl_["missed"] and gl_["worst"] < 15
       and gl_["back"] < 4 * ac.CELL, str(gl_))
 
+# --- away from the keys -----------------------------------------------------------
+# The show after two minutes of no keys: the skyline and the rides, each its
+# own camera. Every scene starts from the start, draws, and moves on its own -
+# the el stops at its stations, the metro rides, the taxi goes through town -
+# and putting the show away puts back what it borrowed: the ship, the el.
+ax_, az_ = ac.start_position()[:2]
+afk_ = {}
+for kind_ in ac.AFK_SCENES:
+    a_ = ac.Afk(ax_, az_, 0.0, 5000.0)
+    a_.order, a_.n = [kind_], -1
+    a_.next(5000.0)
+    sc_ = a_.sc
+    got_ = {"kind": sc_["kind"], "drawn": 0, "stops": set(), "rides": 0, "huds": set()}
+    path_, px_, pz_ = 0.0, sc_.get("x"), sc_.get("z")
+    for n_ in range(int(150.0 * ac.FPS)):
+        t_ = 5000.0 + n_ / ac.FPS
+        if n_ % 150 == 0:
+            ch_, co_, wd_, hud_ = a_.frame(80, 24, t_)
+            got_["drawn"] += sum(1 for r_ in ch_ for c_ in r_ if c_ != " ") > 200
+            got_["huds"].add(hud_)
+        else:
+            a_.step(t_)
+        if a_.sc["kind"] != kind_:
+            break
+        tr_ = a_.sc.get("tr")
+        if tr_ is not None and tr_.at is not None and tr_.doors == "open":
+            got_["stops"].add(tr_.at["name"])
+        if kind_ == "metro" and a_.sc["m"]["phase"] == "ride":
+            got_["rides"] = 1
+        if kind_ == "taxi":
+            path_ += math.hypot(a_.sc["x"] - px_, a_.sc["z"] - pz_)
+            px_, pz_ = a_.sc["x"], a_.sc["z"]
+    got_["path"] = int(path_)
+    h_ = sc_.get("h")
+    a_.close()
+    got_["home"] = h_ is None or h_ not in ac._liner_trips
+    got_["el"] = ac._el_drive[0] is None
+    afk_[kind_] = got_
+afk_say_ = str({k_: (g_["drawn"], len(g_["stops"]), g_["rides"], g_["path"])
+                for k_, g_ in afk_.items()})
+check("the show: every scene starts near the start, draws and says what it is",
+      all(g_["kind"] == k_ and g_["drawn"] >= 3 and all("~" in h_ for h_ in g_["huds"])
+          for k_, g_ in afk_.items()), afk_say_)
+check("and moves by itself: the el stops at stations, the metro rides, the cab drives",
+      len(afk_["el"]["stops"]) >= 2 and afk_["metro"]["rides"]
+      and afk_["taxi"]["path"] > 600, afk_say_)
+check("and putting it away brings the ship home and lets go of the el",
+      all(g_["home"] and g_["el"] for g_ in afk_.values()), afk_say_)
+check("the show's ride has no meter, its platform no board to choose from",
+      all(("FARE" in "".join("".join(r_) for r_ in g_[0])) == (m_ is not None)
+          for m_ in (None, 3.0) for g_ in [([[" "] * 80 for _ in range(24)],
+                                            [[0] * 80 for _ in range(24)])]
+          if ac.draw_cab(g_[0], g_[1], 0.0, 0.0, "", m_, "") is None)
+      and "ws choose" not in "".join("".join(r_) for r_ in ac.render_platform(
+          110, 34, 5000.0, {"phase": "platform", "here": next(ac.near_stations(
+              ax_, az_, 900.0)), "sel": 0, "waiting": False, "dests": []}, afk=True)[0]))
+
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)
