@@ -11916,61 +11916,97 @@ check("and walks it: a lap, at every stop, never stuck against a wall",
       and gl_["back"] < 4 * ac.CELL, str(gl_))
 
 # --- away from the keys -----------------------------------------------------------
-# The show after two minutes of no keys: the skyline and the rides, each its
-# own camera. Every scene starts from the start, draws, and moves on its own -
-# the el stops at its stations, the metro rides, the taxi goes through town -
-# and putting the show away puts back what it borrowed: the ship, the el.
+# The show after two minutes of no keys, one journey: a taxi to the airport, the
+# flight, a taxi to the harbour, the cruise, a taxi to the el, a train, a taxi.
+# Played from the start until the second flight, drawn now and then.
 ax_, az_ = ac.start_position()[:2]
-afk_ = {}
-for kind_ in ac.AFK_SCENES:
-    a_ = ac.Afk(ax_, az_, 0.0, 5000.0)
-    a_.order, a_.n = [kind_], -1
-    a_.next(5000.0)
+shift_ = ac._launch_shift[0]
+a_ = ac.Afk(ax_, az_, 5000.001)
+wait_ = 0
+while not a_.prepare() and wait_ < 400:
+    wait_ += 1
+check("the show's first cab ride is worked out in a few frames' slices",
+      a_.nxt is not None and a_.nxt[1] and wait_ < 400, str(wait_))
+acts_, huds_, stops_, away_ = [], set(), set(), False
+cur_, n_ = None, 0
+while n_ < 1100 * ac.FPS and [k_["kind"] for k_ in acts_].count("flight") < 2:
+    t_ = 5000.001 + n_ / ac.FPS
+    if n_ % 300 == 0:
+        ch_, co_, wd_, hud_ = a_.frame(80, 24, t_)
+        huds_.add(hud_)
+        if sum(1 for r_ in ch_ for c_ in r_ if c_ != " ") < 200:
+            huds_.add("blank")
+    else:
+        a_.step(t_)
     sc_ = a_.sc
-    got_ = {"kind": sc_["kind"], "drawn": 0, "stops": set(), "rides": 0, "huds": set()}
-    path_, px_, pz_ = 0.0, sc_.get("x"), sc_.get("z")
-    for n_ in range(int(150.0 * ac.FPS)):
-        t_ = 5000.0 + n_ / ac.FPS
-        if n_ % 150 == 0:
-            ch_, co_, wd_, hud_ = a_.frame(80, 24, t_)
-            got_["drawn"] += sum(1 for r_ in ch_ for c_ in r_ if c_ != " ") > 200
-            got_["huds"].add(hud_)
-        else:
-            a_.step(t_)
-        if a_.sc["kind"] != kind_:
-            break
-        tr_ = a_.sc.get("tr")
-        if tr_ is not None and tr_.at is not None and tr_.doors == "open":
-            got_["stops"].add(tr_.at["name"])
-        if kind_ == "metro" and a_.sc["m"]["phase"] == "ride":
-            got_["rides"] = 1
-        if kind_ == "taxi":
-            path_ += math.hypot(a_.sc["x"] - px_, a_.sc["z"] - pz_)
-            px_, pz_ = a_.sc["x"], a_.sc["z"]
-    got_["path"] = int(path_)
-    h_ = sc_.get("h")
-    a_.close()
-    got_["home"] = h_ is None or h_ not in ac._liner_trips
-    got_["el"] = ac._el_drive[0] is None
-    afk_[kind_] = got_
-afk_say_ = str({k_: (g_["drawn"], len(g_["stops"]), g_["rides"], g_["path"])
-                for k_, g_ in afk_.items()})
-check("the show: every scene starts near the start, draws and says what it is",
-      all(g_["kind"] == k_ and g_["drawn"] >= 3 and all("~" in h_ for h_ in g_["huds"])
-          for k_, g_ in afk_.items()), afk_say_)
-check("and moves by itself: the el stops at stations, the metro rides, the cab drives",
-      len(afk_["el"]["stops"]) >= 2 and afk_["metro"]["rides"]
-      and afk_["taxi"]["path"] > 600, afk_say_)
-check("and putting it away brings the ship home and lets go of the el",
-      all(g_["home"] and g_["el"] for g_ in afk_.values()), afk_say_)
-check("the show's ride has no meter, its platform no board to choose from",
+    if sc_ is not cur_:
+        acts_.append({"kind": sc_["kind"], "t": t_, "blocked": 0, "road": 0, "n": 0,
+                      "late": 0, "to": sc_.get("stop", {}).get("kind"), "end": 0.0,
+                      "from": (sc_.get("x"), sc_.get("z")), "jump": 0.0})
+        cur_, was_ = sc_, (sc_.get("x"), sc_.get("z"))
+    act_ = acts_[-1]
+    act_["n"] += 1
+    act_["late"] = t_ - act_["t"]
+    if sc_["kind"] == "taxi":
+        act_["blocked"] += sc_["blocked"]
+        act_["road"] += ac.road_at(int(sc_["x"] // ac.CELL),
+                                   int(sc_["z"] // ac.CELL))
+        act_["jump"] = max(act_["jump"], math.hypot(sc_["x"] - was_[0],
+                                                    sc_["z"] - was_[1]))
+        was_ = sc_["x"], sc_["z"]
+        c_ = sc_["stop"]["cell"]
+        act_["end"] = math.hypot((c_[0] + 0.5) * ac.CELL - sc_["x"],
+                                 (c_[1] + 0.5) * ac.CELL - sc_["z"])
+        act_["at"] = was_
+    if sc_["kind"] == "el" and sc_["tr"].at is not None and sc_["tr"].doors == "open":
+        stops_.add(sc_["tr"].at["name"])
+    away_ = away_ or bool(ac._liner_trips)
+    n_ += 1
+kinds_ = [k_["kind"] for k_ in acts_]
+said_ = str([(k_["kind"], k_["to"], int(k_["late"]), k_["blocked"],
+              "%.1f" % k_["end"], "%.2f" % (k_["road"] / k_["n"])) for k_ in acts_])
+check("the show is one journey: a cab to each ride, the flight, the cruise, the el",
+      kinds_[:8] == ["taxi", "flight", "taxi", "cruise", "taxi", "el", "taxi", "flight"]
+      and [k_["to"] for k_ in acts_[:7:2]] == ["flight", "cruise", "el", "flight"], said_)
+cabs_ = [k_ for k_ in acts_ if k_["kind"] == "taxi"]
+check("each cab gets there, in time, hitting nothing, keeping mostly to the streets",
+      all(k_["end"] < 3.0 and k_["late"] < 200.0 and k_["blocked"] < 5
+          and k_["jump"] < 2.0 and k_["road"] > 0.5 * k_["n"] for k_ in cabs_), said_)
+check("and sets off from where the ride before it ended",
+      all(math.hypot(acts_[k_]["from"][0] - acts_[k_ - 2]["at"][0],
+                     acts_[k_]["from"][1] - acts_[k_ - 2]["at"][1]) < 8.0
+          for k_ in (2, 4)), said_)
+check("the train stops at stations, the ship sails, every scene says what it is",
+      len(stops_) >= 2 and away_ and all(h_.startswith(" ~ ") for h_ in huds_)
+      and not any("metro" in h_ or "from the water" in h_ for h_ in huds_),
+      str(sorted(huds_))[:300])
+# The dissolve: half way, cells of the one and cells of the other, and at the
+# ends all of one; and a double-width glyph that comes through keeps its column.
+pch_ = [["a"] * 80 for _ in range(24)]
+pch_[5][10], pch_[5][11] = "酒", " "
+mix_ = []
+for u_ in (0.0, 0.5, 1.0):
+    ch_ = [["b"] * 80 for _ in range(24)]
+    a_.prev = (pch_, [[1] * 80 for _ in range(24)], {(5, 10)})
+    wide_ = a_.fade(ch_, [[2] * 80 for _ in range(24)], set(), u_)
+    mix_.append((sum(r_.count("b") for r_ in ch_), ch_[5][10], ch_[5][11], wide_))
+check("a dissolve goes from all of the last scene to all of the next",
+      mix_[0][0] == 0 and 700 < mix_[1][0] < 1220 and mix_[2][0] == 24 * 80
+      and mix_[0][1:] == ("酒", " ", {(5, 10)}) and not mix_[2][3],
+      str([m_[0] for m_ in mix_]))
+# Put away in the middle of a cruise, everything borrowed is back.
+h_ = ac._afk_harbour(ax_, az_)
+a_.ride({"kind": "cruise", "cell": ac._afk_cell(*ac.gangway(h_)), "of": h_}, 9000.0)
+out_ = h_ in ac._liner_trips
+a_.close()
+check("and putting it away brings the ship home, the launches back, lets go of the el",
+      out_ and not ac._liner_trips and ac._launch_shift[0] == shift_
+      and ac._el_drive[0] is None)
+check("the show's cab has no meter",
       all(("FARE" in "".join("".join(r_) for r_ in g_[0])) == (m_ is not None)
           for m_ in (None, 3.0) for g_ in [([[" "] * 80 for _ in range(24)],
                                             [[0] * 80 for _ in range(24)])]
-          if ac.draw_cab(g_[0], g_[1], 0.0, 0.0, "", m_, "") is None)
-      and "ws choose" not in "".join("".join(r_) for r_ in ac.render_platform(
-          110, 34, 5000.0, {"phase": "platform", "here": next(ac.near_stations(
-              ax_, az_, 900.0)), "sel": 0, "waiting": False, "dests": []}, afk=True)[0]))
+          if ac.draw_cab(g_[0], g_[1], 0.0, 0.0, "", m_, "") is None))
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

@@ -26212,13 +26212,14 @@ def _walkable(i, j):
     return dry_at((i + 0.5) * CELL, (j + 0.5) * CELL) and not tunnel_at(i, j)
 
 
-def tour_search(a, b, back=None, limit=None):
+def tour_search(a, b, back=None, limit=None, roads=False):
     """The way on foot from cell a to cell b, as a list of cells: a search over
     the street grid that likes proper streets - downtown's best - takes an
     alley only for a good reason, never a tunnel, and on a street turns only
     when it is worth it, so it holds a street the way the old screensaver
     did. A generator: it yields None every TOUR_STEPS steps so it can be done
-    a slice a frame, and the path (or [] for none) at the end."""
+    a slice a frame, and the path (or [] for none) at the end. With `roads`,
+    a cab's way: off the streets only where there is hardly another."""
     ti, tj = b
     far = abs(a[0] - ti) + abs(a[1] - tj)
     # A long leg - the long walk's - is searched greedier, which finds a
@@ -26263,6 +26264,8 @@ def tour_search(a, b, back=None, limit=None):
                 step, turn = 8, TOUR_TURN   # an alley, for a good reason only
             else:
                 step, turn = 4, 1           # open ground
+            if roads and step > 3:
+                step, turn = 12, TOUR_TURN
             ng = g + step + (turn if d >= 0 and nd != d else 0)
             if c == a and nc == back:
                 ng += 80                    # not straight back the way it came
@@ -36035,7 +36038,7 @@ def draw_station_entrances(ch, co, v, walls, now, wet):
                          ROU_RED if k < 3 else BULB)
 
 
-def render_platform(width, height, now, metro, afk=False):
+def render_platform(width, height, now, metro):
     """On the platform: the tiles, the station's name on the wall in white on
     a blue band, the board with the next train and where you can go from
     here, people waiting at the yellow line, the tracks - and the train,
@@ -36050,9 +36053,9 @@ def render_platform(width, height, now, metro, afk=False):
         _text(ch, co, 3, 1, "next train " + ("now" if phase == "dwell" else "soon"),
               STAR)
         for r, d in enumerate(metro["dests"][:height - 6]):
-            lit = r == metro["sel"] and not afk
-            _text(ch, co, 5 + r, 1, (">" if lit else " ") + d["name"][:width - 3],
-                  FLASH if lit else HUD)
+            mark = ">" if r == metro["sel"] else " "
+            _text(ch, co, 5 + r, 1, mark + d["name"][:width - 3],
+                  FLASH if r == metro["sel"] else HUD)
         return ch, co
     edge = height - 7
     # The tiled wall.
@@ -36082,9 +36085,9 @@ def render_platform(width, height, now, metro, afk=False):
             else "DEPARTING" if phase == "out" else "%d s" % int(q + 1))
     _text(ch, co, by + 4, bx, "NEXT TRAIN  " + wait, GOLD)
     for r, d in enumerate(metro["dests"][:edge - by - 7]):
-        lit = r == metro["sel"] and not afk     # the show chooses nothing
-        line = "%s %-14s %s" % (">" if lit else " ", d["name"][:14], d["district"])
-        _text(ch, co, by + 6 + r, bx, line, FLASH if lit else HUD)
+        line = "%s %-14s %s" % (">" if r == metro["sel"] else " ", d["name"][:14],
+                                d["district"])
+        _text(ch, co, by + 6 + r, bx, line, FLASH if r == metro["sel"] else HUD)
     if metro.get("waiting"):
         _text(ch, co, by + 5, bx + 48,
               "ticket to " + metro["dests"][metro["sel"]]["name"], GOLD)
@@ -36128,11 +36131,10 @@ def render_platform(width, height, now, metro, afk=False):
                     ch[r][x], co[r][x] = "=", CURB
         if phase == "in" and 0 <= x0 < width:
             _text(ch, co, edge + 2, x0, "@", FLASH)
-    if not afk:
-        _text(ch, co, height - 1, max(1, width // 2 - 30),
-              "-- ws choose  -  enter: $%d, the next train  -  x up the stairs --"
-              % METRO_FARE,
-              GOLD_DIM)
+    _text(ch, co, height - 1, max(1, width // 2 - 30),
+          "-- ws choose  -  enter: $%d, the next train  -  x up the stairs --"
+          % METRO_FARE,
+          GOLD_DIM)
     return ch, co
 
 
@@ -43446,19 +43448,30 @@ def step_out(x, z, yaw):
 # Asked for on 2026-11-23: "an AFK option and when on idle it does things" -
 # the city showing itself off while nobody is at the keys. Only the idle timer
 # starts it, no key (their choice); no walking in it, not the walks round town
-# and not the wander - the skyline, and the rides: the cruise, the plane, the
-# el, the metro and a taxi, each made part of the show, with no menu, fare or
-# board to choose from. Any key and you are back exactly where you were: the
-# show keeps its own cameras and touches nothing of yours.
+# and not the wander. A day later the skyline and the metro were taken out and
+# the rest joined up, both asked for: "fade into eachother better like the taxi
+# driving to the airport". So it is one journey: a taxi from where you are to
+# the airport, the flight, a taxi from there to the harbour, the cruise, a taxi
+# to the el, a train down the line, a taxi from the station it stops at - each
+# starting where the last one ended, and dissolving in over it. Any key and you
+# are back exactly where you were: it keeps its own cameras.
 AFK_IDLE = float(os.environ.get("ASCII_CITY_AFK") or 120.0)  # seconds of no keys
-AFK_SCENE = 180.0      # how long each scene runs, at most
-AFK_FADE = 1.2         # the dissolve into each one
+AFK_FADE = 2.5         # the dissolve from one into the next
 AFK_HINT = 10.0        # how long "any key" shows, at the start of the show
-AFK_SCENES = ("skyline", "cruise", "flight", "el", "metro", "taxi")
-AFK_SKY_PAN = 8.0      # the skyline going by, its units a second
-AFK_CAB_PACE = 1.6     # the cab, in walking paces: brisk through town
+AFK_RIDES = ("flight", "cruise", "el")      # in this order round, from any of them
+AFK_FAR = 4000.0       # a drive longer than this is not made: another ride first
+AFK_NEAR = 250.0       # and an el station nearer than this is not worth a cab
+AFK_DRIVE = 100.0      # seconds a drive is meant to take: the cab's pace is picked
+AFK_PACES = (1.6, 3.2)  # for it, in walking paces, between these
+AFK_LATE = 240.0       # a drive (or a train) longer than this is cut short
+AFK_EL = 100.0         # the train's next stop after this is where you get off
+AFK_REST = 1.5         # stood still at the end of each, before the next
+AFK_WORK = 0.005       # seconds a frame on the way to the next place
 AFK_SAY_EVERY = 45.0   # the driver has something to say, now and then
 AFK_EL_DECEL = 0.5     # the show's motorman brakes for a stop at this
+AFK_TO = {"flight": "the airport", "cruise": "the harbour", "el": "the el"}
+AFK_OFF = {"flight": "The airport? You got it.", "cruise": "Down to the harbour, then.",
+           "el": "The el? I'll drop you at the stairs."}
 
 
 def el_autodrive(tr, now):
@@ -43495,31 +43508,38 @@ def el_autodrive(tr, now):
         tr.notch = 0
 
 
-def _afk_train(x, z, now):
-    """A train standing at the el station nearest here, the way it has more
-    line ahead of it, its doors about to close."""
+def _afk_train(x0, x1, k, now):
+    """A train standing at this el station, the way it has more line ahead of
+    it, its doors about to close - or None on a line one station long."""
+    best = None
+    for d in (1, -1):
+        tr = Train(x0, x1, k, d, now)
+        if best is None or len(tr.stations) > len(best.stations):
+            best = tr
+    if len(best.stations) < 2:
+        return None
+    best.close_at = now + AFK_FADE + 4.0
+    return best
+
+
+def _afk_station(x, z, now):
+    """The el station nearest here that is worth a cab ride: (x0, x1, k)."""
     gap = EL_STATION * CELL
-    k0 = int(x / (XP * CELL) + BIG) - BIG
-    for step in range(400):
-        k = k0 + (step + 1) // 2 * (1 if step % 2 else -1)
+    k0, k1 = int(x / (XP * CELL) + BIG) - BIG, int(z / gap + BIG) - BIG
+    near = []
+    for k in range(k0 - 3 * EL_EVERY, k0 + 3 * EL_EVERY + 1):
         span = el_span(k)
         if span is None:
             continue
         x0, x1 = span[0] * CELL, (span[0] + span[1]) * CELL
-        k1 = int(z / gap + BIG) - BIG
-        for n in range(40):
-            ks = k1 + (n + 1) // 2 * (1 if n % 2 else -1)
-            if not el_runs((x0 + x1) * 0.5, el_station_z(x0, ks)):
-                continue
-            best = None
-            for d in (1, -1):
-                tr = Train(x0, x1, ks, d, now)
-                if best is None or len(tr.stations) > len(best.stations):
-                    best = tr
-            if len(best.stations) < 2:
-                break                   # a line one station long: the next
-            best.close_at = now + 5.0
-            return best
+        for ks in range(k1 - 4, k1 + 5):
+            sz = el_station_z(x0, ks)
+            d = math.hypot((x0 + x1) * 0.5 - x, sz - z)
+            if d >= AFK_NEAR and el_runs((x0 + x1) * 0.5, sz):
+                near.append((d, x0, x1, ks))
+    for d, x0, x1, ks in sorted(near):
+        if _afk_train(x0, x1, ks, now) is not None:
+            return x0, x1, ks
     return None
 
 
@@ -43539,156 +43559,317 @@ def _afk_harbour(x, z):
     return None if best is None else best[1]
 
 
-class Afk:
-    """The show: one scene after another, each with cameras of its own."""
+def _afk_cell(x, z):
+    """The cell nearest here a cab can be in, or None for none close by."""
+    ci, cj = int(x / CELL + BIG) - BIG, int(z / CELL + BIG) - BIG
+    near = [(a * a + b * b, ci + a, cj + b) for a in range(-12, 13)
+            for b in range(-12, 13)]
+    for _, i, j in sorted(near):
+        if _walkable(i, j):
+            return i, j
+    return None
 
-    def __init__(self, x, z, sky_x, now):
-        self.x, self.z, self.sky_x = x, z, sky_x
-        self.t0 = self.clock = now
-        self.order = list(AFK_SCENES)
-        random.Random(int(now * 1000.0)).shuffle(self.order)
-        self.n = -1
-        self.sc = None
-        self.next(now)
+
+def _afk_road(c):
+    """The nearest cell of a street to this one, or None within forty."""
+    best = None
+    for a in range(-40, 41):
+        for b in range(-40, 41):
+            d = a * a + b * b
+            if ((best is None or d < best[0]) and road_at(c[0] + a, c[1] + b)
+                    and _walkable(c[0] + a, c[1] + b)):
+                best = (d, c[0] + a, c[1] + b)
+    return None if best is None else best[1:]
+
+
+def afk_way(a, b):
+    """The cab's way from cell a to cell b, pulled straight: out to a street,
+    along the streets, and from the nearest one in to the door. A generator
+    like tour_way(): None while it works, then the points, or [] for no way.
+    In one search keeping to the streets, the open ground round an airport or
+    a quay cost so much that it looked at the whole city first."""
+    ra, rb = _afk_road(a), _afk_road(b)
+    yield None
+    cells = []
+    for c, d, roads in ((a, ra, False), (ra, rb, True), (rb, b, False)):
+        if c is None or d is None:
+            yield []
+            return
+        if c == d:
+            continue
+        for got in tour_search(c, d, None, None, roads):
+            if got is not None:
+                break
+            yield None
+        if not got:
+            yield []
+            return
+        cells += got[1:] if cells else got
+    for got in _pulled(cells):
+        yield got
+        if got is not None:
+            return
+
+
+def afk_stop(kind, x, z, now):
+    """Where the cab from here goes for this ride: its cell and what the ride
+    is of, or None for none near."""
+    if kind == "flight":
+        sp = find_place(x, z, "airport")
+        if sp is None:
+            return None
+        home = zone_home("airport", int(sp[0] // CELL), int(sp[1] // CELL))
+        gx, gz = gate_door(*home)           # where the planes are, and the sign
+        at, of = (gx + 5.0, gz), home
+    elif kind == "cruise":
+        of = _afk_harbour(x, z)
+        if of is None:
+            return None
+        gx, gz = gangway(of)
+        at = (gx, gz + 5.5)
+    else:
+        of = _afk_station(x, z, now)
+        if of is None:
+            return None
+        at = ((of[0] + of[1]) * 0.5, el_station_z(of[0], of[2]) - EL_STAIR)
+    cell = _afk_cell(*at)
+    return None if cell is None else {"kind": kind, "cell": cell, "of": of}
+
+
+class Afk:
+    """The show: one ride after another and the cab between them, with cameras
+    of its own. `nxt` is the cab ride after this one, worked out a little a
+    frame (`prepare()`) so that setting off is never a pause."""
+
+    def __init__(self, x, z, now):
+        self.x, self.z = x, z           # where the next cab sets off from
+        self.turn = int(now * 1000.0) % len(AFK_RIDES)      # and what it is to
+        self.t0 = self.clock = None     # not begun
+        self.sc = self.nxt = None
+        self.dead = False               # nowhere to go: no show
+        self.last = self.prev = None    # the last frame drawn, and one fading out
+        self.fade_at = -1e9
+        self.shift = None
+        self.plan = self._plan(now)
+
+    def _plan(self, now):
+        """The next cab ride: to the next ride round that there is a way to.
+        A generator, to be done a slice a frame; self.nxt at the end of it."""
+        a = _afk_cell(self.x, self.z)
+        if a is None:
+            sp = find_place(self.x, self.z, "street")
+            a = None if sp is None else _afk_cell(sp[0], sp[1])
+        cut = None
+        for n in range(len(AFK_RIDES)):
+            kind = AFK_RIDES[(self.turn + n) % len(AFK_RIDES)]
+            stop = afk_stop(kind, self.x, self.z, now)
+            yield
+            if stop is None:
+                continue
+            far = math.hypot((stop["cell"][0] + 0.5) * CELL - self.x,
+                             (stop["cell"][1] + 0.5) * CELL - self.z)
+            if far > AFK_FAR:
+                continue
+            cut = cut or (stop, None)
+            pts = []
+            for got in (afk_way(a, stop["cell"]) if a else ()):
+                if got is not None:
+                    pts = got
+                    break
+                yield
+            if len(pts) < 2:
+                continue
+            self.turn = AFK_RIDES.index(kind) + 1
+            self.nxt = (stop, pts)
+            return
+        # No way to any of them: straight there, with only the dissolve.
+        self.nxt = cut
+        if cut is None:
+            self.dead = True
+        else:
+            self.turn = AFK_RIDES.index(cut[0]["kind"]) + 1
+
+    def prepare(self):
+        """A little more of the next cab ride worked out. True once it is."""
+        t = time.perf_counter()
+        while self.nxt is None and not self.dead:
+            if next(self.plan, 1) == 1 or time.perf_counter() - t > AFK_WORK:
+                break
+        return self.nxt is not None
 
     def close(self):
-        """Put back what a scene borrowed from the city: the ship, the el."""
+        """Put back what a ride borrowed from the city: the ship, the launches
+        she was given one of, the el."""
         sc = self.sc
         if sc is not None and sc["kind"] == "cruise":
-            liner_home(sc["h"])
+            liner_home(sc["of"])
+        if self.shift is not None:
+            _launch_shift[0], self.shift = self.shift, None
         _el_drive[0] = None
         self.sc = None
 
-    def next(self, now):
+    def begin(self, sc, now):
+        """On to this scene, the last one's last frame dissolving into it."""
         self.close()
-        for _ in range(len(self.order)):
-            self.n = (self.n + 1) % len(self.order)
-            sc = self.start(self.order[self.n], now)
-            if sc is not None:
-                sc.setdefault("until", now + AFK_SCENE)
-                sc.update(kind=self.order[self.n], t0=now)
-                self.sc = sc
-                return
-        self.sc = {"kind": "skyline", "x": self.sky_x, "t0": now,
-                   "until": now + AFK_SCENE}
+        sc.update(t0=now, rest=None)
+        self.sc = sc
+        self.prev, self.fade_at = self.last, now
 
-    def start(self, kind, now):
-        """A new scene of this kind near where you were, or None."""
-        x, z = self.x, self.z
-        if kind == "skyline":
-            return {"x": self.sky_x}
-        if kind == "cruise":
-            h = _afk_harbour(x, z)
-            if h is None:
-                return None
-            route = liner_sail(h, now)
-            return {"h": h, "until": now + min(AFK_SCENE, liner_trip_time(route))}
+    def cab(self, now):
+        """Into the cab that has been worked out - or with no way for one to
+        go, straight to the ride."""
+        stop, pts = self.nxt
+        self.nxt = None
+        if pts is None:
+            self.ride(stop, now)
+            return
+        (x, z), (bx, bz) = pts[0], pts[1]
+        n = sum(math.hypot(q[0] - p[0], q[1] - p[1]) for p, q in zip(pts, pts[1:]))
+        # tour_step()'s walk on a straight is two thirds of the pace.
+        pace = n / (AFK_DRIVE * WALK * 0.66)
+        tour = {"stops": [(stop["cell"], stop["kind"])], "next": 0, "laps": 0,
+                "legs": 0, "ways": {}, "work": False, "grand": False, "path": pts,
+                "at": 0, "best": 0.0, "moved": now + AFK_FADE}
+        self.begin({"kind": "taxi", "stop": stop, "tour": tour, "x": x, "z": z,
+                    "yaw": math.atan2(bx - x, bz - z), "fwd": 0.0, "spin": 0.0,
+                    "pace": max(AFK_PACES[0], min(AFK_PACES[1], pace)),
+                    "blocked": False}, now)
+
+    def ride(self, stop, now):
+        """On board: the ride the cab came to. Where it leaves you is known
+        for all but the train, so the cab on from there is begun on."""
+        kind, of = stop["kind"], stop["of"]
+        self.x, self.z = ((stop["cell"][0] + 0.5) * CELL,
+                          (stop["cell"][1] + 0.5) * CELL)
+        sc = {"kind": kind, "of": of}
         if kind == "flight":
-            sp = find_place(x, z, "airport")
-            if sp is None:
-                return None
-            home = zone_home("airport", int(sp[0] // CELL), int(sp[1] // CELL))
-            return {"f": {"home": home, "t0": now, "look": 0.0},
-                    "until": now + min(AFK_SCENE, flight_length(home) + 1.0)}
-        if kind == "el":
-            tr = _afk_train(x, z, now)
-            return None if tr is None else {"tr": tr}
-        if kind == "metro":
-            near = sorted(near_stations(x, z, 900.0),
-                          key=lambda s_: (s_["x"] - x) ** 2 + (s_["z"] - z) ** 2)
-            for st in near[:4]:
-                m = self.platform(st, now)
-                if m is not None:
-                    return {"m": m}
-            return None
-        if kind == "taxi":
-            sx, sz = x, z
-            if not (can_stand(x, z) and road_at(int(x / CELL + BIG) - BIG,
-                                                int(z / CELL + BIG) - BIG)):
-                sp = find_place(x, z, "street")
-                if sp is None:
-                    return None
-                sx, sz = sp[0], sp[1]
-            tour = new_tour(sx, sz, now)
-            if tour is None:
-                return None
-            return {"tour": tour, "x": sx, "z": sz, "yaw": best_yaw(sx, sz),
-                    "fwd": 0.0, "spin": 0.0, "blocked": False}
-        return None
+            sc["f"] = {"home": of, "t0": now + AFK_FADE, "look": 0.0}
+            sc["until"] = now + AFK_FADE + flight_length(of) + 0.5
+        elif kind == "el":
+            sc["tr"] = _afk_train(*of, now)
+        self.begin(sc, now)
+        if kind == "cruise":
+            self.shift = _launch_shift[0]
+            # Her way ends a ship's length or more off the quay, where she is
+            # next: the cab dissolves in while she is still coming in.
+            sc["until"] = (now + liner_trip_time(liner_sail(of, now))
+                           - AFK_REST - 2.0)
+        if kind != "el":
+            self.plan = self._plan(now)
 
-    def platform(self, st, now):
-        """On the platform at st, for a train to somewhere the show picks."""
-        dests = metro_dests(st)
-        if not dests:
-            return None
-        sel = _mix(int(now), st["block"][0], 1933) % min(4, len(dests))
-        return {"phase": "platform", "here": st, "sel": sel, "waiting": False,
-                "dests": dests}
+    def over(self, now):
+        """Has this scene come to its end, and stood a moment at it."""
+        sc = self.sc
+        if sc["kind"] == "taxi":
+            done = sc["tour"]["legs"] > 0 and sc["fwd"] < 0.5
+        elif sc["kind"] == "el":
+            tr = sc["tr"]
+            done = (now - sc["t0"] > AFK_EL and tr.v == 0.0 and tr.at is not None
+                    and tr.doors == "open")
+            if done and sc["rest"] is None:         # off here: a cab at the stairs
+                self.x, self.z = tr.xm, tr.at["z"] - tr.d * EL_STAIR
+                self.plan = self._plan(now)
+        else:
+            done = now >= sc["until"]
+        if done and sc["rest"] is None:
+            sc["rest"] = now
+        return sc["rest"] is not None and now - sc["rest"] > AFK_REST
 
     def step(self, now):
         """Everything that moves in the scene, one frame on."""
+        if self.sc is None:
+            self.t0 = self.clock = now
+            self.cab(now)
         dt = max(0.0, min(0.1, now - self.clock))
         self.clock = now
         sc = self.sc
-        if now >= sc["until"]:
-            self.next(now)
+        late = now - sc["t0"] > AFK_LATE
+        if sc["kind"] == "taxi":
+            if late or self.over(now):
+                self.ride(sc["stop"], now)
+                return
+            self.drive(sc, now, dt)
             return
-        kind = sc["kind"]
-        if kind == "skyline":
-            sc["x"] += AFK_SKY_PAN * dt
-        elif kind == "el":
+        if sc["kind"] == "el":
+            if late and sc["rest"] is None:
+                sc["rest"] = now - AFK_REST         # held somewhere: off here
+                self.x, self.z = sc["tr"].xm, sc["tr"].z
+                self.plan = self._plan(now)
             el_autodrive(sc["tr"], now)
+            if sc["rest"] is not None:
+                sc["tr"].close_at = now + 5.0       # its doors held for you
             sc["tr"].step(dt, now)
-        elif kind == "metro":
-            m = sc["m"]
-            if m["phase"] == "platform":
-                st = m["here"]
-                ph, q = train_phase(now, st["block"][0] * 31 + st["block"][1])
-                if ph == "dwell" and q < METRO_DWELL - 1.0:
-                    d = m["dests"][m["sel"]]
-                    far = math.hypot(d["x"] - st["x"], d["z"] - st["z"])
-                    sc["m"] = dict(m, phase="ride", t0=now,
-                                   dur=min(14.0, max(6.0, 4.0 + far / 200.0)))
-            elif now - m["t0"] >= m["dur"]:
-                sc["m"] = self.platform(m["dests"][m["sel"]], now) or m
-                if sc["m"] is m:
-                    self.next(now)
-        elif kind == "taxi":
-            t_, w_ = tour_step(sc["tour"], sc["x"], sc["z"], sc["yaw"], now,
-                               sc["blocked"], AFK_CAB_PACE)
-            sc["spin"] += (t_ * TURN * 0.85 - sc["spin"]) * min(1.0, dt * 5.0)
-            sc["fwd"] += (WALK * AFK_CAB_PACE * w_ - sc["fwd"]) * min(1.0, dt * 2.5)
-            sc["yaw"] += sc["spin"] * dt
-            n = max(1, int(abs(sc["fwd"] * dt) / STEP_MAX) + 1)
-            moved = False
-            for _ in range(n):
-                dx = math.sin(sc["yaw"]) * sc["fwd"] * dt / n
-                dz = math.cos(sc["yaw"]) * sc["fwd"] * dt / n
-                if can_stand(sc["x"] + dx, sc["z"]):
-                    sc["x"], moved = sc["x"] + dx, True
-                if can_stand(sc["x"], sc["z"] + dz):
-                    sc["z"], moved = sc["z"] + dz, True
-            sc["blocked"] = not moved and sc["fwd"] > 0.5
+        over = self.over(now)
+        if sc["kind"] == "el" and sc["rest"] is None:
+            return                      # where you get off is not known yet
+        if self.prepare() and over:
+            self.cab(now)
+        elif over and self.dead:        # nothing to go on to: round again
+            self.dead, self.plan = False, self._plan(now)
+
+    def drive(self, sc, now, dt):
+        """The cab, a frame along its way: round the corners as the walk round
+        town goes, easing away once the dissolve is nearly done and easing up
+        to the place it is going."""
+        tour = sc["tour"]
+        turn, walk = 0.0, 0.0
+        if tour["legs"] == 0 and now - sc["t0"] > AFK_FADE * 0.6:
+            ex, ez = tour["path"][-1]
+            turn, walk = tour_step(tour, sc["x"], sc["z"], sc["yaw"], now,
+                                   sc["blocked"], sc["pace"])
+            left = math.hypot(ex - sc["x"], ez - sc["z"])
+            walk *= max(0.25, min(1.0, left / (10.0 * sc["pace"])))
+        if tour["legs"]:
+            turn = walk = 0.0
+        sc["spin"] += (turn * TURN * 0.85 - sc["spin"]) * min(1.0, dt * 5.0)
+        sc["fwd"] += (WALK * sc["pace"] * walk - sc["fwd"]) * min(1.0, dt * 2.5)
+        sc["yaw"] += sc["spin"] * dt
+        n = max(1, int(abs(sc["fwd"] * dt) / STEP_MAX) + 1)
+        moved = False
+        for _ in range(n):
+            dx = math.sin(sc["yaw"]) * sc["fwd"] * dt / n
+            dz = math.cos(sc["yaw"]) * sc["fwd"] * dt / n
+            if can_stand(sc["x"] + dx, sc["z"]):
+                sc["x"], moved = sc["x"] + dx, True
+            if can_stand(sc["x"], sc["z"] + dz):
+                sc["z"], moved = sc["z"] + dz, True
+        sc["blocked"] = not moved and sc["fwd"] > 0.5
+
+    def fade(self, ch, co, wide, u):
+        """The frame before dissolving into this one, u of the way: cell by
+        cell, in the same order whatever is in them."""
+        pch, pco, pwide = self.prev
+        height, width = len(ch), len(ch[0])
+        if len(pch) != height or len(pch[0]) != width:
+            return wide                 # the window changed size: a cut
+        cut = int(u * u * (3.0 - 2.0 * u) * 1000)
+        for y in range(height):
+            a, ac_, b, bc_ = ch[y], co[y], pch[y], pco[y]
+            for x in range(width):
+                if _mix(x, y, 1937) % 1000 >= cut:
+                    a[x], ac_[x] = b[x], bc_[x]
+        out = set()
+        for y, x in sorted(set(wide) | set(pwide)):
+            # A double-width glyph that came through has the next column too.
+            if y < height and x < width - 1 and is_wide(ch[y][x]):
+                ch[y][x + 1] = " "
+                out.add((y, x))
+        return out
 
     def frame(self, width, height, now):
         """(ch, co, wide, hud) for this frame of the show."""
         self.step(now)
         sc = self.sc
         kind = sc["kind"]
-        wide = ()
-        if kind == "skyline":
-            ch, co = render_skyline(sc["x"], width, height, now)
-            say = "the city from the water"
-        elif kind == "cruise":
-            ch, co, v = render_cruise(sc["h"], 0.35 * math.sin((now - sc["t0"]) / 23.0),
-                                      width, height, now)
-            wide = v.wide
+        if kind == "cruise":
+            look = 0.35 * math.sin((now - sc["t0"]) / 23.0)
+            ch, co, v = render_cruise(sc["of"], look, width, height, now)
             say = "aboard the %s, down the coast" % LINER_NAME.title()
         elif kind == "flight":
-            f = sc["f"]
-            f["look"] = 0.25 * math.sin((now - sc["t0"]) / 19.0)
+            # Standing at the threshold, and at the end stopped on the runway.
+            f = dict(sc["f"], t0=min(now, sc["f"]["t0"]),
+                     look=0.25 * math.sin((now - sc["t0"]) / 19.0))
             ch, co, v, alt, s = render_flight(width, height, now, f)
-            wide = v.wide
             fx, fz, _, _ = flight_pose(f["home"], s)
             say = "%s, %s over %s" % (FLIGHT_NO, flight_stage(f["home"], s),
                                       place_below(fx, fz))
@@ -43702,36 +43883,33 @@ class Afk:
                 draw_train_world(ch, co, v, tr, now)
             finally:
                 _el_drive[0] = None
-            wide = v.wide
             st = tr.next_stop()
-            say = "the el" + (", %s next" % st["name"] if st is not None else "")
-        elif kind == "metro":
-            m = sc["m"]
-            if m["phase"] == "platform":
-                ch, co = render_platform(width, height, now, m, afk=True)
-                say = "the metro, at " + m["here"]["name"]
+            if sc["rest"] is not None and tr.at is not None:
+                say = "the el, off at " + tr.at["name"]
             else:
-                ch, co = render_ride(width, height, now, m)
-                say = "the metro, to " + m["dests"][m["sel"]]["name"]
+                say = "the el" + (", %s next" % st["name"] if st is not None else "")
         else:
             v = View(sc["x"], sc["z"], sc["yaw"], width, height, eye=2.4)
             ch, co, wet = render_street(v, now)
             t = now - sc["t0"]
             says = ""
-            if t > 8.0 and t % AFK_SAY_EVERY < 6.0:
-                says = DRIVER_SAYS[_mix(int(t // AFK_SAY_EVERY), 7, 1935)
+            if AFK_FADE < t < AFK_FADE + 6.0:
+                says = AFK_OFF[sc["stop"]["kind"]]
+            elif t > AFK_SAY_EVERY and t % AFK_SAY_EVERY < 6.0:
+                says = DRIVER_SAYS[_mix(int(now // AFK_SAY_EVERY), 7, 1935)
                                    % len(DRIVER_SAYS)]
             draw_cab(ch, co, now, wet, "", None, says)
-            wide = v.wide
-            say = "a taxi through " + district(int(sc["x"] / CELL + BIG) - BIG,
-                                               int(sc["z"] / CELL + BIG) - BIG)["name"]
-        u = (now - sc["t0"]) / AFK_FADE
-        if u < 1.0:                     # the dissolve in: the cells come one by one
-            cut = int((1.0 - u) * 1000)
-            for y in range(height):
-                for x in range(width):
-                    if _mix(x, y, 1937) % 1000 < cut:
-                        ch[y][x], co[y][x] = " ", 0
+            say = "a taxi to %s, through %s" % (
+                AFK_TO[sc["stop"]["kind"]],
+                district(int(sc["x"] / CELL + BIG) - BIG,
+                         int(sc["z"] / CELL + BIG) - BIG)["name"])
+        wide = v.wide
+        u = (now - self.fade_at) / AFK_FADE
+        if u < 1.0 and self.prev is not None:
+            wide = self.fade(ch, co, wide, u)
+        else:
+            self.prev = None
+        self.last = ch, co, wide
         hud = " ~ %s ~ " % say
         if now - self.t0 < AFK_HINT:
             hud += "   any key comes back "
@@ -43852,7 +44030,7 @@ def main(stdscr):
     pace = PACES[0][1]          # how fast you walk: + and - in the street
     venue = None                # the doorway you are standing in, if any
     frame_time = 1.0 / FPS
-    afk = None                  # the show, while nobody is at the keys: an Afk
+    afk = afk_next = None       # the show, while nobody is at the keys: an Afk
     idle_at = time.monotonic()  # the last key pressed
 
     def blit(ch, co, hud, wide):
@@ -45442,10 +45620,20 @@ def main(stdscr):
 
         # Nobody at the keys for a while, and nothing of yours running on the
         # clock - a ride, a game, a walk, a door - and the show starts.
-        if (now - idle_at >= AFK_IDLE and not elsewhere() and venue is None
-                and wheel is None and lift is None and booth is None
-                and taxi is None and not autopilot):
-            afk = Afk(cam_x, cam_z, sky_x, now)
+        # The idle time is counted from the end of those, too: stepping off a
+        # cruise is not having been away. The show's first cab ride is worked
+        # out over a few frames of ordinary play, and then it is on.
+        if (elsewhere() or venue is not None or wheel is not None or autopilot
+                or lift is not None or booth is not None):
+            idle_at = now
+        if now - idle_at < AFK_IDLE:
+            afk_next = None
+        else:
+            afk_next = afk_next or Afk(cam_x, cam_z, now)
+            if afk_next.prepare():
+                afk, afk_next = afk_next, None
+            elif afk_next.dead:
+                afk_next, idle_at = None, now
 
         # --- draw ------------------------------------------------------
         height, width = stdscr.getmaxyx()
@@ -45864,6 +46052,8 @@ def main(stdscr):
         wide = v.wide if (street and wheel is None and venue is None
                           and lift is None) else ()
         blit(ch, co, hud, wide)
+        if afk is not None:
+            afk.last = ch, co, wide         # and the show dissolves in over it
         time.sleep(max(0.0, frame_time - (time.monotonic() - now)))
 
 
