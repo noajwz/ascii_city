@@ -218,7 +218,7 @@ The walk round town.
 one journey, a taxi to the airport, the flight, a taxi to the harbour, the cruise, a taxi to the
 el, a train - with cameras of its own, so any key puts you back exactly where you were. No
 walking, skyline or metro in it, by request. See Away from the keyboard. **Still scenes**
-(`Stills`, `)` on the panel) is a second screensaver on trial: fixed views that stand still.
+(`Stills`, `)` on the panel) is a second screensaver, started only by its key: fixed views that stand still.
 
 **Turning by key** goes through `turn_rate()`: a tap turns at `TURN_TAP` of `TURN`, holding
 ramps to `TURN_HELD` over `TURN_RAMP` s, and `main()` eases `spin` to it (`TURN_EASE`) rather than

@@ -65,9 +65,9 @@ setting off where the ride before ended; the dissolve; and `close()` in the midd
 
 Asked for on 2026-11-24, to try: "put it in the cheat menu behind a button cause I'm not sure
 wether I want it or not but I want to try [a] screensaver with fixed scenes that stand still with
-cool fixed angles of the city". **On trial**: `)` on the panel, under VIEWS, and nothing else
-starts it - the idle timer still starts the journey. If it is dropped, `STILLS`, `still_view()`,
-`Stills`, the key, the panel row and their checks go; `dissolve()` is the journey's too.
+cool fixed angles of the city". Tried and kept: "I like it we can push it but keep the AFK
+as the public transport". So `)` on the panel, under VIEWS, and **nothing else starts it: the idle
+timer starts the journey, and that is settled**.
 
 `STILLS` is 22 views, a place, a way to face, a height and a horizon, as plain numbers. The city is a
 function of its coordinates and the same for everyone, so there is nothing to search for, and
@@ -84,7 +84,7 @@ the weather, the night there is. `STILL_TIME` (40 s) each, in an order shuffled 
 them before any comes round; `dissolve()` between, and the name on the HUD. The views of the sea are left out with
 the sea off. It is run by `main()` as `afk`, the way the journey is, so any key comes back to
 exactly where you were; only from the street or the skyline, for the same reason the journey does
-not start in a cab. At 300x90 a frame is 11-30 ms; the first of a view up to 0.4 s (the landmark),
+not start in a cab. At 300x90 drawing a frame is 10-32 ms, before the terminal's part; the first of a view up to 0.4 s (the landmark),
 which is a still of the last one.
 
 A change to the generator can move what a view was of; the check that each is full, and not in a
