@@ -43921,11 +43921,12 @@ class Afk:
 # Asked for on 2026-11-24 to try out, "behind a button cause I'm not sure wether I
 # want it or not": "a screensaver with fixed scenes that stand still with cool
 # fixed angles of the city". Liked and kept, and "keep the AFK as the public
-# transport": ) on the panel, and the idle timer does not start it. The camera never moves; the city in front of it does.
-# Every view is a place, a way to face, a height, and how far down the screen
-# the horizon is (lower than the street's .44 and you are looking up), found
-# by looking at them in colour. The city is the same for everyone, so they are
-# numbers, and there is nothing to search for.
+# transport": ) on the panel, and the idle timer does not start it. The camera
+# never moves; the city in front of it does. Every view is a place, a way to
+# face, a height, and how far down the screen the horizon is (lower than the
+# street's .44 and you are looking up), found by looking at them in colour. The
+# city is the same for everyone, so they are numbers, and there is nothing to
+# search for.
 STILL_TIME = 40.0      # how long each stands
 STILLS = [
     # name, x, z, yaw, eye, horizon
