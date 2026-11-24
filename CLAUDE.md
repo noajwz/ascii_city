@@ -78,6 +78,7 @@ or change something. Notes cross-reference each other by title ("see The univers
 - `fortune-teller.md` - The fortune teller
 - `walk-round-town.md` - The walk round town (`j`), and the long walk past everything (`J`)
 - `afk-show.md` - Away from the keyboard: the show (after two idle minutes), and the still scenes
+- `game-museum.md` - The game museum
 - `vending-machines.md` - Vending machines
 - `manholes.md` - Manholes, and the tunnels under the streets
 - `temple.md` - The temple, and the word of God

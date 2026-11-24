@@ -989,6 +989,18 @@ def init_colors():
         made[name] = curses.color_pair(pair)
         pair += 1
 
+    # The museum's, on a terminal with the pairs for them; mus() finds the
+    # nearest of the city's on one without.
+    if curses.COLORS >= 256:
+        for name, c in MUS_256.items():
+            if pair >= getattr(curses, "COLOR_PAIRS", 256):
+                break
+            curses.init_pair(pair, c, bg)
+            MUS[name] = curses.color_pair(pair) | (
+                curses.A_BOLD if name in ("white", "red", "gold", "yellow", "cyan",
+                                          "lime", "hot", "cream") else 0)
+            pair += 1
+
     STAR = made["star"]
     STREET = made["street"]
     HUD = made["hud"] | curses.A_BOLD
@@ -3763,7 +3775,7 @@ def lot(i, j):
         b["club"] = b["casino"] = b["tower"] = b["cinema"] = None
         b["diner"] = b["billboard"] = b["arcade"] = b["exchange"] = None
         b["bowling"] = b["karaoke"] = b["minigolf"] = None
-        b["temple"] = b["warehouse"] = None
+        b["temple"] = b["warehouse"] = b["museum"] = None
         if d is INDUSTRIAL:
             wh = zone_warehouse(*zone_home("industrial", i, j))
             if wh is not None and (i, j) == wh[:2]:
@@ -3985,6 +3997,23 @@ def lot(i, j):
                 b["tower"] = {"door": 3, "u": CELL * 0.5, "i": i, "j": j,
                               "height": LANDMARK_H, "kind": "party", "landmark": lm}
         b["landmark"] = lm
+        # The game museum, last of all and only where there is nothing else:
+        # it takes an ordinary building and moves nothing.
+        if (_mix(i, j, 5901) % MUSEUM_ODDS == 0 and not b["tree"] and not d["park"]
+                and d not in (INDUSTRIAL, STRIP, AIRPORT, UNIVERSITY, SUBURBS)
+                and d["name"] != "financial"
+                and approach_cap(i, j) is None and seafront_cap(i, j) is None
+                and all(b[k_] is None for k_ in (
+                    "casino", "club", "tower", "cinema", "diner", "arcade", "bowling",
+                    "karaoke", "minigolf", "temple", "exchange", "warehouse",
+                    "billboard", "center", "landmark"))):
+            face = _road_face(i, j, (_mix(i, j, 5903) >> 9) % 4)
+            if face is not None:
+                b["height"] = MUSEUM_H
+                b["museum"] = {"door": face, "u": CELL * 0.5, "i": i, "j": j,
+                               "name": MUSEUM_NAMES[(_mix(i, j, 5905) >> 9)
+                                                    % len(MUSEUM_NAMES)],
+                               "seed": _mix(i, j, 5907) % 9973, "height": MUSEUM_H}
         _lots[key] = b
     return b
 
@@ -11047,6 +11076,9 @@ def draw_wall_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi,
     if b["minigolf"] is not None:
         return draw_minigolf_column(ch, co, v, sx, dist, b, face, u,
                                     r_lo, r_hi, edge, cont, now)
+    if b["museum"] is not None:
+        return draw_museum_column(ch, co, v, sx, dist, b, face, u,
+                                  r_lo, r_hi, edge, cont, now)
     if b["temple"] is not None:
         return draw_temple_column(ch, co, v, sx, dist, b, face, u,
                                   r_lo, r_hi, edge, cont, now)
@@ -11911,6 +11943,11 @@ def collect_glow(v, now, wet):
                 p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
                 _spill(glow, p[0], p[2], 6.5 if f == b["exchange"]["door"] else 4.5,
                        ROU_GREEN if up_ else ROU_RED)
+                continue
+            if b["museum"] is not None:
+                if f == b["museum"]["door"]:
+                    p = face_point(i, j, f, CELL * 0.5, 1.0, 0.0)
+                    _spill(glow, p[0], p[2], 6.0, BULB_DIM)
                 continue
             if b["temple"] is not None:
                 if f == b["temple"]["door"]:
@@ -21568,7 +21605,8 @@ def climbable(i, j, f):
             and b["arcade"] is None and b["exchange"] is None
             and b["bowling"] is None and b["karaoke"] is None
             and b["minigolf"] is None
-            and b["temple"] is None and b["warehouse"] is None):
+            and b["temple"] is None and b["warehouse"] is None
+            and b["museum"] is None):
         return False
     # And only off a roof that is the high point of its corner: climbed from
     # an alley, the first ones put you face to face with the wall of a taller
@@ -24473,8 +24511,8 @@ def fire_near(x, z):
 
 
 # What goes out in a blackout: anything on a facade that is lit by the mains.
-LIGHT_PROPS = {"arcade", "bowling", "karaoke", "minigolf", "blade", "bulb", "cinema",
-               "diner", "exchange", "store",
+LIGHT_PROPS = {"arcade", "museum", "bowling", "karaoke", "minigolf", "blade", "bulb",
+               "cinema", "diner", "exchange", "store",
                "hung",
                "lanterns", "lobby", "marquee", "overdoor", "ramenfront", "clubdoor",
                "bass"}
@@ -24518,6 +24556,11 @@ def draw_props(ch, co, v, walls, now, wet):
                 if f == b["exchange"]["door"]:
                     w = face_point(i, j, f, CELL * 0.5, 0.5, TICKER_HIGH + 0.3)
                     props.append((_d2(v, w), "exchange", b["exchange"], w, (nx, nz)))
+                continue
+            if b["museum"] is not None:
+                if f == b["museum"]["door"]:
+                    w = face_point(i, j, f, CELL * 0.5, 0.5, FLOOR_H + 1.6)
+                    props.append((_d2(v, w), "museum", b["museum"], w, (nx, nz)))
                 continue
             if b["temple"] is not None:
                 if f == b["temple"]["door"]:
@@ -24638,6 +24681,8 @@ def draw_props(ch, co, v, walls, now, wet):
             draw_lobby(ch, co, v, walls, s, now)
         elif kind == "cinema":
             draw_cinema_front(ch, co, v, walls, s, world, now)
+        elif kind == "museum":
+            draw_museum_front(ch, co, v, walls, s, world, now)
         elif kind == "temple":
             draw_temple_front(ch, co, v, walls, s, world, now)
         elif kind == "arcade":
@@ -27869,7 +27914,8 @@ def plain_front(b):
     return not (b["tree"] or b["club"] is not None or b["casino"] is not None
                 or b["arcade"] is not None or b["bowling"] is not None
                 or b["karaoke"] is not None or b["minigolf"] is not None
-                or b["temple"] is not None or b["exchange"] is not None)
+                or b["temple"] is not None or b["exchange"] is not None
+                or b["museum"] is not None)
 
 
 RAMEN_APART = 60.0     # no two ramen shops nearer each other than this
@@ -28448,7 +28494,7 @@ def _store_fits(i, j, f):
         return False
     return not any(b[k] is not None for k in (
         "casino", "club", "tower", "cinema", "diner", "arcade", "bowling", "karaoke",
-        "minigolf", "temple", "exchange", "warehouse", "center", "landmark"))
+        "minigolf", "temple", "exchange", "warehouse", "center", "landmark", "museum"))
 
 
 def store_in_tile(ti, tj):
@@ -29365,7 +29411,7 @@ def venue_at(x, z):
             b = lot(i, j)
             for kind in ("casino", "club", "tower", "cinema", "diner", "arcade",
                          "bowling", "karaoke", "minigolf", "temple", "exchange",
-                         "warehouse"):
+                         "warehouse", "museum"):
                 v = b[kind]
                 if v is None:
                     continue
@@ -31232,7 +31278,7 @@ CHEAT_HIDDEN = [
     # Off the panel on 2026-11-16, for the checks still.
     ("]", "building site", "site"), ("}", "empty lot", "plot"),
     ("(", "fountain show", "fountain"), ('"', "the library", "library"),
-    (".", "a flight", "flight"),
+    (".", "a flight", "flight"), ("z", "the game museum", "museum"),
 ]
 CHEAT_TEST = 1                          # ctrl-a
 TEST_JUMPS = bool(os.environ.get("ASCII_CITY_TEST"))
@@ -31726,6 +31772,28 @@ def _factory_spot(x, z, kind):
                                < 0.45 * ((c["x"] - px) * dx + (c["z"] - pz) * dz)
                                and probe(px, pz, yaw, 30.0) > 20.0)
                 return px, pz, max((k * math.pi / 2 for k in range(4)), key=ahead)
+    return None
+
+
+def _museum_spot(x, z):
+    """Across the street from the nearest game museum, as far back as there is
+    to see its front from. The next press, or cab, the next."""
+    ci = int(x / CELL + BIG) - BIG
+    cj = int(z / CELL + BIG) - BIG
+    for i, j in _rings(ci, cj, cheat_rings(ci)):
+        if _mix(i, j, 5901) % MUSEUM_ODDS or is_open(i, j):
+            continue
+        mu = lot(i, j)["museum"]
+        if mu is None:
+            continue
+        nx, nz = FACES[mu["door"]]
+        for back in (11.0, 10.0, 9.0, 8.0, 7.0, 6.0, 5.0):
+            p = face_point(i, j, mu["door"], mu["u"], back, 0.0)
+            if (p[0] - x) ** 2 + (p[2] - z) ** 2 < CHEAT_SKIP ** 2:
+                break
+            if can_stand(p[0], p[2]) and probe(
+                    p[0], p[2], math.atan2(-nx, -nz), back) >= back - 1.5:
+                return p[0], p[2], math.atan2(-nx, -nz)
     return None
 
 
@@ -32273,6 +32341,8 @@ def find_place(x, z, kind):
         return _doorway(x, z, 2901, "karaoke", KARAOKE_ODDS)
     if kind == "minigolf":
         return _doorway(x, z, 3001, "minigolf", GOLF_ODDS)
+    if kind == "museum":
+        return _museum_spot(x, z)
     if kind == "temple":
         return _temple_spot(x, z)
     if kind in ("industrial", "site", "warehouse", "plot"):
@@ -33859,7 +33929,8 @@ TAXI_DESTS = [("the casino", "casino"), ("the club", "club"),
               ("the karaoke bar", "karaoke"), ("the mini golf", "minigolf"),
               ("the beach", "beach"), ("the pier", "seapier"),
               ("the launch pad", "launchpad"), ("the harbour", "harbour"),
-              ("the tackle shop", "tackle"), ("the fishing boat", "herring")]
+              ("the tackle shop", "tackle"), ("the fishing boat", "herring"),
+              ("the game museum", "museum")]
 DRIVER_SAYS = ["Busy night.", "Where you headed, friend?", "Meter's running.",
                "You see the fireworks over the bay? I saw them once.",
                "I don't go into the woods after dark. Nobody does.",
@@ -43444,6 +43515,1505 @@ def step_out(x, z, yaw):
     return x, z
 
 
+# --- the game museum: what hangs in it ------------------------------------------
+# Asked for on 2026-11-24: "a videogame-museum you can walk in to and have ascii
+# art of videogames I love". The pieces are the city's own: for each game a scene
+# in the spirit of it - a lamp down in a cavern, a farm at first light - with a
+# plaque, and not its characters or its art. A piece is a function that draws on
+# a Canvas in a space 160 wide and 100 high, square, y downwards: worked out at
+# the size it is seen at and never stretched, so it is a smudge of colour across
+# the room and all there up close. To hang another: a function, a row in a wing.
+MUS = {}                # the museum's colours, by name: init_colors() fills it in
+MUS_256 = {
+    "white": 231, "light": 251, "grey": 245, "dim": 240, "dark": 236, "ink": 234,
+    "navy": 18, "royal": 27, "blue": 33, "sky": 117, "ice": 159, "teal": 30,
+    "sea": 37, "cyan": 51, "pine": 22, "green": 34, "leaf": 70, "lime": 119,
+    "yellow": 227, "gold": 220, "amber": 214, "orange": 208, "rust": 166,
+    "brown": 94, "tan": 180, "cream": 230, "red": 196, "wine": 88, "rose": 161,
+    "pink": 218, "hot": 206, "violet": 135, "plum": 54, "lilac": 183,
+    "lcd0": 22, "lcd1": 64, "lcd2": 106, "lcd3": 149,
+}
+MUS_RAMP = " .:-=+*#%@"
+
+
+def mus(name):
+    """A museum colour. Where the terminal has not the pairs for them, the
+    nearest of the city's."""
+    if name in MUS:
+        return MUS[name]
+    near = {"white": FLASH, "light": STAR, "grey": CURB, "cream": STAR_WARM,
+            "ice": STAR_COLD, "sky": RAIN, "yellow": GOLD, "gold": GOLD, "amber": BULB,
+            "orange": EMBER_HOT, "rust": EMBER, "brown": BARK, "tan": GOLD_DIM,
+            "red": ROU_RED, "wine": EMBER, "rose": ROU_RED, "green": ROU_GREEN,
+            "lime": FIREFLY, "leaf": GRASS, "pine": GRASS, "blue": CROWN_BLUE,
+            "royal": CROWN_BLUE, "cyan": NEON[1 % len(NEON)][0], "sea": RAIN,
+            "teal": RAIN_FAR, "navy": RAIN_FAR, "lcd0": GRASS, "lcd1": GRASS,
+            "lcd2": FIREFLY, "lcd3": FIREFLY, "dim": HAZE, "dark": HAZE, "ink": HAZE}
+    return near.get(name, NEON[0][0] if name in ("hot", "pink") else NEON[0][1])
+
+
+class Canvas:
+    """A piece being drawn, w by h characters of its 160 by 100."""
+
+    def __init__(self, w, h):
+        self.w, self.h = w, h
+        self.ch = [[" "] * w for _ in range(h)]
+        self.co = [[None] * w for _ in range(h)]
+        self.kx, self.ky = 160.0 / w, 100.0 / h
+
+    def put(self, x, y, glyph, colour):
+        """One character at a point of the piece."""
+        cx, cy = int(x / self.kx), int(y / self.ky)
+        if 0 <= cx < self.w and 0 <= cy < self.h and x >= 0 and y >= 0:
+            self.ch[cy][cx], self.co[cy][cx] = glyph, colour
+
+    def words(self, x, y, text, colour):
+        cx, cy = int(x / self.kx) - len(text) // 2, int(y / self.ky)
+        for n, c in enumerate(text):
+            if 0 <= cy < self.h and 0 <= cx + n < self.w:
+                self.ch[cy][cx + n], self.co[cy][cx + n] = c, colour
+
+    def area(self, x0, y0, x1, y1, f):
+        """Every character in a box, by what f(x, y) says of the middle of it:
+        (how bright, 0 to 1, or a glyph; the colour), or None to leave it."""
+        for cy in range(max(0, int(y0 / self.ky)), min(self.h, int(y1 / self.ky) + 1)):
+            y = (cy + 0.5) * self.ky
+            for cx in range(max(0, int(x0 / self.kx)),
+                            min(self.w, int(x1 / self.kx) + 1)):
+                x = (cx + 0.5) * self.kx
+                got = f(x, y)
+                if got is not None:
+                    lit, colour = got
+                    if not isinstance(lit, str):
+                        lit = MUS_RAMP[max(0, min(9, int(lit * 10.0)))]
+                    self.ch[cy][cx], self.co[cy][cx] = lit, colour
+
+    def ell(self, cx, cy, rx, ry, f):
+        """An ellipse: f(u, v), from -1 to 1 across and down it."""
+        def g(x, y):
+            u, v = (x - cx) / rx, (y - cy) / ry
+            return f(u, v) if u * u + v * v <= 1.0 else None
+        self.area(cx - rx, cy - ry, cx + rx, cy + ry, g)
+
+    def poly(self, pts, f):
+        """A polygon: f(x, y) inside it."""
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        n = len(pts)
+
+        def g(x, y):
+            inside = False
+            for k in range(n):
+                (ax, ay), (bx, by) = pts[k], pts[k - 1]
+                if (ay > y) != (by > y) and x < (bx - ax) * (y - ay) / (by - ay) + ax:
+                    inside = not inside
+            return f(x, y) if inside else None
+        self.area(min(xs), min(ys), max(xs), max(ys), g)
+
+    def line(self, x0, y0, x1, y1, colour, glyph=None):
+        """A line, in the character that slopes its way."""
+        dx, dy = (x1 - x0) / self.kx, (y1 - y0) / self.ky
+        if glyph is None:
+            a = abs(dy) / max(1e-6, abs(dx))
+            glyph = ("_" if a < 0.12 else "-" if a < 0.35 else "|" if a > 2.2 else
+                     "\\" if (dx > 0) == (dy > 0) else "/")
+        n = max(1, int(max(abs(dx), abs(dy)) * 1.2))
+        for k in range(n + 1):
+            self.put(x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n, glyph, colour)
+
+    def flat(self, lit, colour):
+        return lambda *_: (lit, colour)
+
+    def stars(self, n, seed, y0, y1, t, colours=("grey", "light", "ice")):
+        for k in range(n):
+            m = _mix(k, seed, 7001)
+            x, y = m % 1600 / 10.0, y0 + (m >> 11) % 1000 / 1000.0 * (y1 - y0)
+            tw = math.sin(t * (0.8 + (m >> 5 & 7) * 0.2) + m % 63)
+            self.put(x, y, "+" if tw > 0.9 else "." if m & 64 else "'",
+                     colours[(m >> 21) % len(colours)])
+
+
+_rough_cache = {}
+
+
+def _rough(x, seed, big=7.0):
+    """A ragged line, for rock: 0 to 1 along x."""
+    a = math.floor(x / big)
+    f = x / big - a
+    hit = _rough_cache.get((a, seed))
+    if hit is None:
+        _evict(_rough_cache, 20000)
+        hit = _rough_cache[a, seed] = (_mix(int(a) + 500, seed, 7003) % 997 / 997.0,
+                                       _mix(int(a) + 501, seed, 7003) % 997 / 997.0)
+    return hit[0] + (hit[1] - hit[0]) * (f * f * (3.0 - 2.0 * f))
+
+
+def art_cavern(c, t):
+    """A lamp, a long way down."""
+    lx, ly = 104.0, 45.0
+    glow = 1.0 + 0.06 * math.sin(t * 2.1) + 0.03 * math.sin(t * 5.3)
+
+    def air(x, y):
+        d = math.hypot(x - lx, (y - ly) * 1.1) / glow
+        if d < 15.0:
+            return 0.62 - d * 0.02, "ice"
+        if d < 30.0:
+            return 0.36 - (d - 15.0) * 0.012, "sky"
+        if d < 62.0 and _mix(int(x * 2), int(y * 2), 7011) % 100 < 62 - d:
+            return 0.15, "sea"
+        return (0.14, "navy") if _mix(int(x), int(y), 7013) % 9 == 0 else None
+    c.area(0, 0, 160, 100, air)
+    for layer, (deep, colour, lit) in enumerate(
+            ((34.0, "royal", 0.22), (24.0, "teal", 0.28), (15.0, "dim", 0.75))):
+        def rock(x, y, deep=deep, colour=colour, lit=lit, layer=layer):
+            fang = _rough(x, 10 + layer, 6.0 + layer * 3) ** 2
+            edge = deep * 0.35 + deep * 1.1 * fang
+            if y < edge:
+                return lit - 0.25 * (edge - y < 3.0), colour
+            low = 100.0 - deep * (0.2 + 0.9 * _rough(x + 40, 20 + layer, 9.0) ** 2)
+            if y > low:
+                return lit + (0.2 if y - low < 2.5 else 0.0), colour
+            return None
+        c.area(0, 0, 160, 100, rock)
+    # A broken arch with the dark in it, and the stones it stood on.
+    for x0, w, top in ((16, 7, 42), (47, 7, 50)):
+        c.area(x0, top, x0 + w, 88, lambda x, y, x0=x0, w=w: (
+            "|" if x - x0 < 2.2 else "[" if int(y / 5) % 2 and x - x0 > w - 3
+            else ":", "grey" if x - x0 > w - 3 else "dim"))
+
+    def arch(x, y):
+        r = math.hypot((x - 35.0) / 1.0, y - 45.0)
+        return ("#" if r > 19.5 else "=", "dim") if 15.5 < r < 22.0 and (
+            y < 45.0 and x < 48.0) else None
+    c.area(12, 22, 58, 46, arch)
+    # The way out to the lamp, the lamp, and what drips.
+    c.area(58, 82, 160, 85, lambda x, y: ("=" if int(x / 3) % 4 else "#", "grey"))
+    c.area(96, 85, 112, 100, lambda x, y: (
+        "#" if abs(x - 104) < 6 - (y - 85) * 0.1 else " ", "dark"))
+    c.line(104, 56, 104, 82, "light", "|")
+    c.line(99, 82, 109, 82, "light", "=")
+    c.line(104, 34, 104, 37, "light", "|")
+    c.poly([(98, 38), (110, 38), (107, 34), (101, 34)], c.flat("=", "light"))
+    c.ell(lx, ly + 1, 6.0, 7.5, lambda u, v: (
+        ("@" if u * u + v * v < 0.45 else "O"), "white"))
+    c.poly([(99, 53), (109, 53), (107, 56), (101, 56)], c.flat("=", "light"))
+    for k in range(7):
+        m = _mix(k, 3, 7015)
+        x = 8 + m % 148
+        y = (t * (30 + (m >> 8) % 20) + (m >> 13) % 100) % 100
+        c.put(x, y, "'", "sky" if y > 24 else "teal")
+    for k in range(9):                          # what drifts in the light
+        m = _mix(k, 5, 7017)
+        a = t * (0.2 + (m & 7) * 0.03) + m % 63
+        c.put(lx + math.cos(a) * (12 + m % 26), ly + math.sin(a * 1.3) * (8 + m % 17),
+              ".", "white")
+
+
+def art_bells(c, t):
+    """Bells, hung on red thread."""
+    c.area(0, 0, 160, 100, lambda x, y: (
+        (0.10 + 0.22 * (y / 100.0) ** 2 + 0.12 * (_rough(x + y * 0.6, 31, 14) > 0.62),
+         "wine") if (int(x) * 3 + int(y) * 5) % 7 < 4 else None))
+    # The web of it, from one corner out, and across.
+    ends = [(160, 4), (160, 26), (160, 52), (150, 100), (118, 100), (82, 100),
+            (46, 100), (12, 100)]
+    for x, y in ends:
+        c.line(4, 2, x, y, "rose")
+    for ring in range(1, 8):
+        r = 0.13 * ring
+        pts = [(4 + (x - 4) * r, 2 + (y - 2) * r + 3.0 * math.sin(ring))
+               for x, y in ends]
+        for p, q in zip(pts, pts[1:]):
+            c.line(p[0], p[1], q[0], q[1], "wine")
+    for k, (bx, by, s) in enumerate(((36, 40, 9), (64, 62, 13), (93, 34, 11),
+                                     (122, 58, 17), (146, 30, 7))):
+        sway = math.sin(t * (1.3 - s * 0.03) + k * 1.7) * 1.8
+        x0 = bx + sway
+        c.line(bx - sway * 0.2, 0, x0, by - s * 1.25, "red", "|")
+
+        def bell(x, y, x0=x0, by=by, s=s):
+            v = (y - (by - s * 1.2)) / (s * 2.2)        # 0 at the crown, 1 at the lip
+            if not 0.0 <= v <= 1.0:
+                return None
+            half = s * (0.36 + 0.5 * math.sqrt(v) + 0.9 * max(0.0, v - 0.72))
+            u = (x - x0) / half
+            if abs(u) > 1.0:
+                return None
+            lit = 0.85 - 0.75 * abs(u + 0.38)
+            if v > 0.9 or 0.16 < v < 0.22:
+                return 0.95 if u < 0.2 else 0.6, "cream" if u < 0.0 else "gold"
+            if 0.60 < v < 0.68:
+                return "o" if int((u + 1) * 5) % 2 else "-", "brown"
+            return max(0.45, lit + 0.15), (
+                "gold" if lit > 0.45 else "amber" if lit > 0.15 else "rust")
+        c.area(x0 - s * 1.4, by - s * 1.4, x0 + s * 1.4, by + s * 1.1, bell)
+        c.put(x0 + sway * 0.9, by + s * 1.12, "@", "amber")
+        c.put(x0, by - s * 1.28, "8", "cream")
+    for k in range(14):
+        m = _mix(k, 8, 7021)
+        y = 100.0 - (t * (3 + m % 4) + (m >> 9) % 100) % 100
+        c.put((m >> 3) % 160 + math.sin(t + k) * 2, y, ".", "pink")
+
+
+def art_spiral(c, t):
+    """A vault door, and everything coming out of it."""
+    c.area(0, 0, 160, 100, lambda x, y: (
+        ("_" if int(y) % 12 < 2 else "|" if int(x + (int(y) // 12 % 2) * 9) % 18 < 1.2
+         else None) or " ", "dark") if y < 74 else None)
+    c.area(0, 74, 160, 100, lambda x, y: (
+        ("/" if int((x - 80) / (y - 60) * 9) % 4 == 0 else "-"
+         if int(220 / (y - 66)) % 3 == 0 else "."),
+        "dim"))
+    cx, cy = 80.0, 48.0
+
+    def wall(x, y):
+        r = math.hypot(x - cx, y - cy)
+        if r > 45.0 or r < 35.5:
+            return None
+        a = int((math.atan2(y - cy, x - cx) + math.pi) * 12 / math.tau * 2)
+        return ("#" if a % 2 else "%", "grey" if a % 2 else "dim")
+    c.area(30, 2, 130, 96, wall)
+
+    def door(u, v):
+        r = math.hypot(u, v)
+        lit = 0.45 + 0.28 * (-u - v) / 1.4
+        return (0.9, "tan") if r > 0.93 else (lit, "brown" if lit < 0.4 else "tan")
+    c.ell(cx, cy, 35.0, 35.0, door)
+    spin = t * 0.5
+    for k in range(6):                          # the chambers, going round
+        a = spin + k * math.tau / 6
+        hx, hy = cx + math.cos(a) * 21.0, cy + math.sin(a) * 21.0
+        full = (k + int(t * 0.8)) % 6 < 4
+        c.ell(hx, hy, 8.2, 8.2, lambda u, v, full=full: (
+            ("O", "brown") if u * u + v * v > 0.72 else
+            (("@", "gold") if u * u + v * v < 0.14 else ("%", "amber")) if full else
+            (" ", "dark")))
+    c.ell(cx, cy, 6.5, 6.5, lambda u, v: ("#" if u * u + v * v > 0.5 else "+", "cream"))
+    for arm in range(5):                        # and out it all comes
+        for n in range(17):
+            f = (n + (t * 1.7) % 1.0) / 17.0
+            a = arm * math.tau / 5 + f * 3.4 - t * 0.35
+            r = 10.0 + f * 92.0
+            x, y = cx + math.cos(a) * r, cy + math.sin(a) * r * 0.8
+            colour = ("white", "yellow", "orange", "red")[min(3, int(f * 4.6))]
+            c.put(x, y, "@" if f < 0.75 else "O", colour)
+            if f > 0.3:
+                c.put(x - math.cos(a) * 2.2, y - math.sin(a) * 1.8, "o", "rust")
+
+
+def art_throne(c, t):
+    """An empty throne, with the fires lit."""
+    def room(x, y):
+        if y > 78:
+            return "+" if (int(x / 8) + int(y / 5)) % 2 else ".", "plum"
+        if int(x) % 20 < 2:
+            return "|", "plum"
+        return ":" if (int(x) * 7 + int(y) * 3) % 23 == 0 else " ", "plum"
+    c.area(0, 0, 160, 100, room)
+    for k in range(4):                          # the steps
+        c.area(38 - k * 8, 78 + k * 5.2, 122 + k * 8, 83 + k * 5.2,
+               lambda x, y, k=k: ("=" if (y - 78 - k * 5.2) < 2.2 else "#",
+                                  "light" if (y - 78 - k * 5.2) < 2.2 else "dim"))
+    c.poly([(71, 78), (89, 78), (97, 99), (63, 99)], lambda x, y: (
+        "#" if abs(x - 80) < 8 + (y - 78) * 0.3 else "|", "wine"))
+    # The seat: square, tall, and gold, and nobody in it.
+    c.poly([(58, 78), (58, 24), (64, 12), (72, 22), (80, 6), (88, 22), (96, 12),
+            (102, 24), (102, 78)], lambda x, y: (
+                0.75 - 0.35 * (x > 92) + 0.15 * (x < 64), "amber" if x > 92 else "gold"))
+    c.area(65, 28, 95, 60, lambda x, y: (
+        0.5 + 0.2 * math.sin(x * 0.9) * math.sin(y * 0.7), "wine" if x > 88 else "rose"))
+    c.area(62, 58, 98, 66, lambda x, y: (0.85 if y < 60.5 else 0.6, "red"))
+    for x0 in (52, 99):
+        c.area(x0, 52, x0 + 9, 78, lambda x, y: (0.8 if y < 55.5 else 0.45,
+                                                 "gold" if y < 55.5 else "brown"))
+    for gx, gy, col in ((64, 19, "cyan"), (80, 15, "hot"), (96, 19, "cyan")):
+        c.put(gx, gy, "@" if math.sin(t * 2 + gx) > 0 else "O", col)
+    for bx in (20, 140):                        # the fires, in squares
+        c.poly([(bx - 10, 62), (bx + 10, 62), (bx + 5, 72), (bx - 5, 72)],
+               c.flat("#", "dim"))
+        c.area(bx - 2, 72, bx + 2, 94, c.flat("|", "grey"))
+
+        def fire(x, y, bx=bx):
+            qx, qy = math.floor(x / 4) * 4 + 2 - bx, math.floor(y / 4) * 4 + 2
+            n = _mix(int(qx) + 99, int(qy) + int(t * 9), 7031) % 100 / 100.0
+            top = 60 - (1 - abs(qx) / 11.0) * (26 + 8 * n)
+            if qy < top or abs(qx) > 9:
+                return None
+            f = (60 - qy) / 34.0
+            return "#", "cream" if f < 0.2 else "yellow" if f < 0.4 else (
+                "orange" if f < 0.7 else "red")
+        c.area(bx - 12, 22, bx + 12, 62, fire)
+    for ring in range(3):                       # shots, in rings
+        f = ((t * 0.32 + ring / 3.0) % 1.0)
+        for k in range(14):
+            a = k * math.tau / 14 + ring * 0.3
+            c.put(80 + math.cos(a) * (14 + 75 * f), 44 + math.sin(a) * (10 + 48 * f),
+                  "*" if f < 0.5 else "o",
+                  ("white", "lilac", "violet")[min(2, int(f * 3))])
+
+
+def art_farm(c, t):
+    """A farm, the minute the sun is up."""
+    def sky(x, y):
+        d = math.hypot(x - 46, (y - 46) * 1.2)
+        if d < 13:
+            return "@", "cream"
+        bands = ((20, "yellow", .75), (32, "gold", .6), (46, "amber", .5),
+                 (64, "orange", .4), (84, "rose", .33), (112, "violet", .27),
+                 (999, "royal", .2))
+        for r, colour, lit in bands:
+            if d + 3 * math.sin(math.atan2(y - 46, x - 46) * 16 + t * 0.2) < r:
+                return lit, colour
+    c.area(0, 0, 160, 52, sky)
+    c.area(0, 34, 160, 60, lambda x, y: ("^" if y - (47 - 9 * _rough(x, 41, 26)) < 3 else
+                                         "%", "pine") if y > 47 - 9 * _rough(x, 41, 26)
+           else None)
+    c.area(0, 52, 160, 100, lambda x, y: ((0.35 + 0.2 * _rough(x + y * 3, 43, 3)),
+                                          "leaf" if y > 58 else "green"))
+    spots = []                                  # rows of crops, running away
+    for row in range(9):
+        for n in range(22):
+            f = n / 21.0
+            x, y = 6 + (row * 17.5 - 4) * (1 - f * 0.72) + f * 34, 97 - f * 36
+            if x < 112 - f * 4:
+                spots.append((f, x, y, row % 3, n))
+                w = 5.5 * (1 - f * 0.7)
+                c.area(x - w, y - 1, x + w, y + 0.6, c.flat(":", "brown"))
+    for f, x, y, kind, n in spots:
+        for o in (-2.0, 0.0, 2.0):
+            c.put(x + o * (1 - f), y - 1.2, "\\|/"[int(o / 2) + 1], "lime")
+        if n % 2 == 0 and f < 0.8:
+            for o in (-1.5, 0.0, 1.5):
+                c.put(x + o * (1 - f), y - 3.4 * (1 - f * 0.6), "o@*"[kind],
+                      ("red", "gold", "hot")[kind])
+    # The barn, its silo, and the mill going round.
+    c.poly([(112, 78), (112, 50), (118, 42), (130, 36), (142, 42), (148, 50), (148, 78)],
+           lambda x, y: ("|" if int(x) % 4 < 2 else "#", "red" if x < 138 else "wine"))
+    for p, q in (((111, 50), (118, 41)), ((118, 41), (130, 35)), ((130, 35), (142, 41)),
+                 ((142, 41), (149, 50))):
+        c.line(p[0], p[1], q[0], q[1], "white")
+    c.area(122, 60, 138, 78, lambda x, y: (
+        "#" if abs(x - 122) < 1.6 or abs(x - 137.5) < 1.6 or y < 62 or
+        abs(abs(x - 130) / 8 - abs(y - 70) / 9) < 0.16 else "=", "cream" if
+        abs(x - 122) < 1.6 or abs(x - 137.5) < 1.6 or y < 62 or
+        abs(abs(x - 130) / 8 - abs(y - 70) / 9) < 0.16 else "wine"))
+    c.area(126, 45, 134, 53, c.flat("@", "amber"))
+    c.area(150, 38, 160, 78, lambda x, y: ("=" if int(y) % 7 < 1.5 else "|",
+                                           "light" if x < 155 else "grey"))
+    c.ell(155, 39, 6, 7, c.flat("%", "rust"))
+    c.poly([(79, 66), (83, 34), (89, 34), (93, 66)], lambda x, y: (
+        "#" if int(y) % 9 < 2 else "=", "tan"))
+    for k in range(4):
+        a = t * 0.7 + k * math.pi / 2
+        for s in range(2, 17):
+            c.put(86 + math.cos(a) * s, 33 + math.sin(a) * s,
+                  "#" if s > 4 else "+", "white")
+            if s > 5:
+                c.put(86 + math.cos(a) * s - math.sin(a) * 2.4,
+                      33 + math.sin(a) * s + math.cos(a) * 2.4, "=", "cream")
+    for k in range(27):
+        c.put(2 + k * 6, 58, "+", "tan")
+        c.put(5 + k * 6, 58, "-", "tan")
+    for k in range(4):
+        x = (t * 3 + k * 47) % 180 - 10
+        y = 12 + k * 5 + math.sin(t * 2 + k) * 1.5
+        c.put(x, y, "v" if math.sin(t * 6 + k * 2) > 0 else "^", "ink")
+
+
+def art_dream(c, t):
+    """The night sky over somewhere soft, in eight bits."""
+    def q(x, y):
+        return math.floor(x / 4) * 4 + 2, math.floor(y / 4) * 4 + 2
+
+    def sky(x, y):
+        x, y = q(x, y)
+        band = int(y / 13 + ((int(x / 4) + int(y / 4)) % 2) * 0.5)
+        return ".:-=+*#"[min(6, 1 + band // 2)], ("navy", "royal", "plum", "violet",
+                                                 "violet", "hot", "pink")[min(6, band)]
+    c.area(0, 0, 160, 100, sky)
+    for k in range(26):
+        m = _mix(k, 51, 7041)
+        x, y = q(m % 160, (m >> 9) % 46)
+        on = math.sin(t * 1.6 + m % 63)
+        c.area(x - 1.9, y - 1.9, x + 1.9, y + 1.9, c.flat("#" if on > .3 else "+",
+               "cream" if on > 0.3 else "lilac"))
+
+    def moon(x, y):
+        x, y = q(x, y)
+        if math.hypot(x - 118, y - 28) < 22 and math.hypot(x - 109, y - 23) > 19:
+            return "#", "yellow" if x + y < 152 else "gold"
+        return None
+    c.area(90, 2, 146, 56, moon)
+    for cx, cy, s in ((30, 34, 1.0), (84, 52, 0.8), (146, 60, 1.1)):
+        drift = math.floor(math.sin(t * 0.3 + cx) * 2) * 2
+
+        def cloud(x, y, cx=cx + drift, cy=cy, s=s):
+            x, y = q(x, y)
+            for dx, dy, r in ((-12, 2, 8), (0, -3, 11), (12, 1, 9), (0, 4, 9)):
+                if math.hypot(x - cx - dx * s, (y - cy - dy * s) * 1.2) < r * s:
+                    return "#", "white" if y < cy + 1 else "pink"
+            return None
+        c.area(cx - 30, cy - 18, cx + 30, cy + 18, cloud)
+    for n, (base, amp, colours) in enumerate(((70, 9, ("violet", "lilac")),
+                                              (82, 8, ("hot", "pink")),
+                                              (92, 5, ("green", "lime")))):
+        def hill(x, y, base=base, amp=amp, colours=colours, n=n):
+            x, y = q(x, y)
+            top = base - amp * math.sin(x / 24.0 + n * 2.1)
+            if y < top:
+                return None
+            if y < top + 4:
+                return "#", "cream" if n < 2 else "yellow"
+            return "#", colours[int((x + (y - top) * 0.7) / 12) % 2]
+        c.area(0, 55, 160, 100, hill)
+    for k in range(3):                          # asleep, whoever it is
+        f = (t * 0.25 + k / 3.0) % 1.0
+        c.words(56 + f * 16 + k, 62 - f * 22, "Z" if f > 0.4 else "z", "white")
+
+
+def art_mirror(c, t):
+    """A mirror that shows you four skies and not your face."""
+    c.area(0, 0, 160, 100, lambda x, y: (
+        ("#" if (int(x / 10) + int(y / 8)) % 2 else " "), "ink") if y < 84 else (
+        "=" if int(y) % 5 < 2 else "-", "brown"))
+
+    def frame(u, v):
+        r = math.hypot(u, v)
+        if r < 0.82:
+            return None
+        a = math.atan2(v, u)
+        curl = math.sin(a * 22) * 0.5 + 0.5
+        return 0.5 + 0.45 * curl, "cream" if curl > 0.85 and u < 0 else (
+            "gold" if u + v < 0.5 else "amber")
+    c.ell(80, 46, 50, 43, frame)
+    for a in range(12):                         # the gems round it
+        g = a * math.tau / 12
+        c.put(80 + math.cos(g) * 46, 46 + math.sin(g) * 39, "O",
+              ("red", "cyan", "lime", "hot")[(a + int(t * 2)) % 4])
+
+    def glass(u, v):
+        x, y = u + 0.07 * math.sin(v * 9), v + 0.06 * math.sin(u * 8 + 1)
+        quarter = (0 if y < 0 else 2) + (0 if x < 0 else 1)
+        if abs(x) < 0.025 or abs(y) < 0.04:
+            return "/" if x * y > 0 else "\\", "white"
+        wave = 0.5 + 0.5 * math.sin(u * 7 + v * 5 * (1 if quarter % 2 else -1) + t * 0.8
+                                    + quarter)
+        colours = (("hot", "pink"), ("amber", "yellow"), ("red", "orange"),
+                   ("green", "lime"))[quarter]
+        glint = (u * 0.8 + v + 4 - t * 0.35) % 3.2
+        if glint < 0.1:
+            return "/", "white"
+        return 0.22 + 0.4 * wave, colours[wave > 0.6]
+    c.ell(80, 46, 41, 35.3, glass)
+    for k, (sx, sy) in enumerate(((60, 30), (100, 31), (61, 63), (99, 62))):
+        s = 6.0 + math.sin(t * 1.3 + k)         # a star in each
+
+        def star(x, y, sx=sx, sy=sy, s=s):
+            a = math.atan2(y - sy, x - sx) + math.pi / 2
+            r = math.hypot(x - sx, y - sy)
+            edge = s * (0.62 + 0.38 * math.cos(a * 5))
+            return ("@" if r < edge * 0.7 else "*", "white") if r < edge + 1 else None
+        c.area(sx - 9, sy - 9, sx + 9, sy + 9, star)
+    for p in (((52, 52), (44, 34)), ((44, 34), (54, 24)), ((108, 50), (116, 66))):
+        c.line(*p[0], *p[1], "light")
+    c.poly([(62, 87), (98, 87), (106, 96), (54, 96)], lambda x, y: (
+        "=" if y < 89.5 else "#", "gold" if y < 89.5 else "brown"))
+    for k in range(10):
+        m = _mix(k, 61, 7051)
+        f = (t * 0.3 + (m >> 8) % 100 / 100.0) % 1.0
+        a = m % 628 / 100.0
+        c.put(80 + math.cos(a) * (40 + 36 * f), 46 + math.sin(a) * (34 + 22 * f),
+              "+" if f < 0.5 else ".", "cream")
+
+
+def _lcd(level):
+    """A grey of an old four-green screen: 0 the darkest."""
+    return "#%+."[level], ("lcd0", "lcd1", "lcd2", "lcd3")[level]
+
+
+def art_grass(c, t):
+    """A path out of town, in four greens. Something is in the grass."""
+    def q(x, y):
+        return math.floor(x / 2.5) * 2.5 + 1.2, math.floor(y / 2.5) * 2.5 + 1.2
+
+    def ground(x, y):
+        x, y = q(x, y)
+        if y < 34:
+            return _lcd(3)[0] if (int(x) + int(y)) % 9 else " ", "lcd3"
+        path = abs(x - 78 - 16 * math.sin(y / 17.0)) < 5 + (y - 34) * 0.16
+        if path:
+            return ("." if (int(x * 3) + int(y * 5)) % 11 else ",", "lcd3")
+        return (":" if (int(x) * 3 + int(y) * 7) % 5 else "-", "lcd1")
+    c.area(0, 0, 160, 100, ground)
+    for k in range(13):                         # trees along the back
+        tx, r = 4 + k * 13.0, 7 + _mix(k, 2, 7061) % 3
+
+        def tree(x, y, tx=tx, r=r):
+            x, y = q(x, y)
+            d = math.hypot(x - tx, (y - 27) * 1.05)
+            if d < r:
+                return _lcd(0 if x > tx + r * 0.35 or y > 31 else 1)
+            return ("#", "lcd0") if abs(x - tx) < 2.2 and 30 < y < 41 else None
+        c.area(tx - 14, 12, tx + 14, 42, tree)
+    c.poly([(112, 44), (132, 30), (152, 44)], lambda x, y: (
+        "=" if int(y) % 4 < 2 else "#", "lcd1"))   # a house
+    c.area(115, 44, 149, 60, lambda x, y: (
+        " ", "lcd3") if 128 < x < 136 and y > 50 else (
+        ("#", "lcd0") if abs(x - 121) < 3.2 and 47 < y < 53 or abs(x - 143) < 3.2 and
+        47 < y < 53 else ("H" if int(y) % 5 else "=", "lcd3")))
+    c.area(40, 60, 44, 70, c.flat("|", "lcd0"))         # a sign
+    c.area(30, 52, 54, 61, lambda x, y: ("=" if 53.5 < y < 59 and 33 < x < 51
+                                         and int(y) % 3 else "#", "lcd0" if not (
+                                         53.5 < y < 59 and 33 < x < 51 and int(y) % 3)
+                                         else "lcd2"))
+    for gx0, gy0, w, h in ((4, 70, 60, 30), (104, 66, 54, 34)):
+        for gy in range(h // 5):
+            for gx in range(w // 6):
+                x, y = gx0 + gx * 6 + (gy % 2) * 3, gy0 + gy * 5
+                stir = (abs(x - 124) < 9 and abs(y - 83) < 7
+                        and math.sin(t * 9) > 0.2 and (t % 5.0) < 1.6)
+                for k, (dx, dy, g) in enumerate(((-2, 2, "\\"), (0, 0, "|"), (2, 2, "/"),
+                                                 (-1, 4, "\\"), (1, 4, "/"))):
+                    c.put(x + dx + (1.5 if stir else 0), y + dy, g,
+                          "lcd2" if (k + gx - gy - int(t * 1.5)) % 5 else "lcd3")
+    if t % 5.0 < 1.6:                           # two lights, and then not
+        c.put(122, 82, "o", "lcd3")
+        c.put(127, 82, "o", "lcd3")
+        c.words(125, 62, "!", "lcd0")
+
+
+def art_goldsilver(c, t):
+    """The same shore at noon and at midnight."""
+    def sky(x, y):
+        day = x + 6 * math.sin(y / 9.0) < 80
+        if day:
+            d = math.hypot(x - 34, y - 26)
+            ray = math.sin(math.atan2(y - 26, x - 34) * 12 + t * 0.4) > 0.2
+            return ("@", "cream") if d < 12 else (
+                0.62 - d * 0.004 - (0 if ray else 0.22), "gold" if ray else "amber")
+        d = math.hypot(x - 126, y - 25)
+        if d < 11:
+            return ("@" if math.hypot(x - 122, y - 22) > 3 else "o"), "white"
+        return (0.34 - d * 0.004, "light") if d < 30 else (
+            ("." if (int(x * 2) * 5 + int(y) * 3) % 13 == 0 else " "), "grey")
+    c.area(0, 0, 160, 70, sky)
+    c.stars(30, 71, 2, 50, t, ("light", "ice"))
+    for k in range(30):                         # no stars by day
+        m = _mix(k, 71, 7001)
+        x, y = m % 1600 / 10.0, 2 + (m >> 11) % 1000 / 1000.0 * 48
+        if x < 76:
+            got = sky(x, y)
+            c.put(x, y, got[0] if isinstance(got[0], str)
+                  else MUS_RAMP[int(got[0] * 10)], got[1])
+
+    def sea(x, y):
+        day = x + 6 * math.sin(y / 9.0) < 80
+        s = math.sin(x * 0.5 + y * 1.3 + t * 1.4) + math.sin(x * 0.21 - y * 2 + t)
+        gx = 34 if day else 126
+        path = abs(x - gx) < 4 + (y - 70) * 0.45
+        if path and s > -0.4:
+            return ("=" if s > 0.5 else "~"), "cream" if day else "white"
+        return ("~" if s > 0.6 else "-" if s > -0.2 else " "), (
+            "gold" if s > 1 else "rust") if day else ("grey" if s > 1 else "dim")
+    c.area(0, 70, 160, 100, sea)
+    # A tower of five roofs, on the line between them.
+    for k in range(5):
+        w, y = 25 - k * 3.6, 64 - k * 11.5
+        c.area(80 - w * 0.62, y - 6, 80 + w * 0.62, y + 6, lambda x, y_, w=w: (
+            ("H" if int(x) % 7 < 2 else ":"), ("tan" if x < 80 else "grey")))
+        c.poly([(80 - w, y - 4.5), (80 - w * 0.55, y - 10), (80 + w * 0.55, y - 10),
+                (80 + w, y - 4.5)], lambda x, y_: ("=" if int(y_) % 3 else "#",
+                                                   "gold" if x < 80 else "light"))
+        c.put(80 - w, y - 6.5, "\\", "cream")
+        c.put(80 + w, y - 6.5, "/", "white")
+    c.line(80, 2, 80, 9, "cream", "|")
+    c.put(80, 1, "@", "white" if math.sin(t * 3) > 0 else "gold")
+    c.poly([(46, 70), (54, 64), (106, 64), (114, 70)], c.flat("%", "pine"))
+    for k in range(2):                          # two feathers, coming down
+        f = (t * 0.07 + k * 0.5) % 1.0
+        fx = (28 if k == 0 else 132) + math.sin(t * 1.1 + k * 2) * 12
+        fy, a = 4 + f * 62, math.sin(t * 1.1 + k * 2 + 1.2) * 0.7
+        for s in range(-6, 7):
+            x, y = fx + math.cos(a) * s, fy + math.sin(a) * s * 0.8
+            wd = 2.4 * (1 - abs(s) / 7.0)
+            for o in (-wd, 0, wd):
+                c.put(x - math.sin(a) * o, y + math.cos(a) * o, "/" if o else "=",
+                      ("orange", "white")[k] if o else ("red", "sky")[k])
+
+
+def art_landsea(c, t):
+    """A mountain on fire, the sea stood up, and where they meet."""
+    def sky(x, y):
+        m = 80 + 10 * math.sin(y / 11.0 + 1)
+        if x < m:
+            n = _rough(x * 0.8 + y * 0.5 - t * 2, 81, 9)
+            return 0.12 + 0.35 * n, "wine" if n < 0.6 else "rust"
+        n = _rough(x - y * 0.7 + t * 5, 83, 7)
+        return 0.1 + 0.3 * n, "navy" if n < 0.55 else "royal"
+    c.area(0, 0, 160, 100, sky)
+
+    def peak(x, y):
+        half = 5 + (y - 34) * 0.78 + 3 * _rough(y, 85, 6)
+        if y < 34 or abs(x - 34) > half:
+            return None
+        crack = abs(x - 34 - 7 * math.sin(y / 7.0)) < 2.0 + 0.02 * (y - 34)
+        if crack:
+            f = math.sin(y * 0.5 - t * 3)
+            return "@" if f > 0 else "#", "yellow" if f > 0.4 else "orange"
+        s = (x - 34) / half
+        return 0.62 - 0.3 * s + 0.12 * _rough(x * 2 + y, 87, 3), (
+            "rust" if s < -0.5 else "brown" if s < 0.3 else "dark")
+    c.area(0, 34, 82, 100, peak)
+    for k in range(34):                         # what it throws
+        m = _mix(k, 89, 7071)
+        f = (t * (0.25 + (m & 7) * 0.02) + (m >> 5) % 100 / 100.0) % 1.0
+        vx = ((m >> 12) % 100 - 50) * 0.9
+        x, y = 34 + vx * f, 34 - 62 * f + 74 * f * f
+        c.put(x, y, "@" if f < 0.3 else "*" if f < 0.6 else "'",
+              ("cream", "yellow", "orange", "orange", "red")[min(4, int(f * 5))])
+
+    def wave(x, y):
+        # A great wave coming over from the right.
+        crest = (82 - 62 * math.exp(-((x - 126) / 22.0) ** 2)
+                 - 3 * math.sin(x * 0.3 + t * 2))
+        hollow = math.hypot((x - 104) / 1.15, y - 49) < 20
+        if y < crest or (hollow and x < 124):
+            return None
+        s = math.sin(x * 0.28 + y * 0.45 - t * 2.2)
+        if y - crest < 4:
+            return "@" if s > 0 else "O", "white"
+        return 0.5 + 0.28 * s, "ice" if s > 0.75 else "cyan" if s > 0.35 else (
+            "blue" if s > -0.4 else "royal")
+    c.area(70, 10, 160, 100, wave)
+    for k in range(26):
+        a = -2.6 + k * 0.13                     # the curl of it, in foam
+        r = 19.5 + 1.5 * math.sin(k * 2 + t * 3)
+        c.put(104 + math.cos(a) * r * 1.15, 49 + math.sin(a) * r, "@", "white")
+    for k in range(26):
+        m = _mix(k, 93, 7073)
+        y = (t * 60 + (m >> 8) % 100) % 100
+        c.put(88 + m % 72 - y * 0.25, y, "/", "sky")
+
+    def light(x, y):                            # and a green one between, high up
+        a = abs(x - 82 - 9 * math.sin(y / 8.0 + t * 0.8))
+        w = 5.5 * (1 - abs(y - 26) / 30.0)
+        return (0.9 - a / max(0.1, w) * 0.6, "lime" if a < w * 0.5 else "green") \
+            if a < w else None
+    c.area(60, 0, 104, 56, light)
+
+
+def art_peak(c, t):
+    """Snow on a mountain, and in a lake the mountain again."""
+    def sky(x, y):
+        f = y / 62.0
+        return (0.08 + 0.2 * f if (int(x * 2) + int(y * 3)) % 3 else 0.1), (
+            "navy" if f < 0.35 else "royal" if f < 0.65 else
+            "violet" if f < 0.85 else "pink")
+    c.area(0, 0, 160, 62, sky)
+    c.stars(34, 97, 0, 34, t, ("white", "ice", "light"))
+
+    def mount(x, y):
+        # nearest drawn last, so it is the one that shows
+        hit = None
+        for px, top, slope, back in ((36, 33, 1.15, 1), (132, 28, 1.0, 1),
+                                     (80, 6, 0.92, 0)):
+            e = top + abs(x - px) * slope + 5 * _rough(x, px, 5)
+            if y > e:
+                left = x < px + 5 * math.sin(y / 5.0)
+                snow = y < top + (14 if back else 30) + 12 * _rough(x * 1.4, 99 + px, 4)
+                if snow:
+                    hit = (0.92 if left else 0.5), "white" if left else "sky"
+                else:
+                    hit = (0.55 if left else 0.35), (
+                        ("sea" if left else "teal") if not back else
+                        ("violet" if left else "plum"))
+        return hit
+    c.area(0, 0, 160, 62, mount)
+
+    def lake(x, y):
+        wob = math.sin(y * 1.7 + t * 1.6) * (0.6 + (y - 62) * 0.06)
+        my = 62 - (y - 62) * 1.45
+        got = mount(x + wob, my) if my > 0 else None
+        if math.sin(y * 2.3 + x * 0.15 + t) > 0.86:
+            return "-", "ice"
+        if got is None:
+            return (0.12, "royal")
+        return min(0.6, got[0] * 0.6), {"white": "light", "sky": "blue", "sea": "teal",
+                                        "teal": "navy", "violet": "plum",
+                                        "plum": "navy"}[got[1]]
+    c.area(0, 62, 160, 100, lake)
+    for k in range(38):
+        x = 2 + k * 4.2
+        h = 3 + _mix(k, 5, 7081) % 6 + (6 if x < 30 or x > 132 else 0)
+        c.poly([(x - 2.6, 63), (x, 63 - h), (x + 2.6, 63)], c.flat("^", "pine"))
+    # High in it, a cut stone and a round one.
+    gx, gy = 28, 17
+
+    def stone(x, y):
+        u, v = (x - gx) / 11.0, (y - gy) / 11.0
+        if v < -0.55 or v > 1.0 or abs(u) > (1.0 if v < -0.1 else 1.0 - (v + 0.1) / 1.1):
+            return None
+        facet = int((u + 1) * 2.5) + (0 if v < -0.1 else 3)
+        glint = (facet + int(t * 2)) % 6
+        return ("#", "white") if glint == 0 else (0.5 + 0.08 * (facet % 4), (
+            "cyan" if facet % 2 else "sky"))
+    c.area(gx - 12, gy - 8, gx + 12, gy + 12, stone)
+    c.ell(132, 17, 8.5, 8.5, lambda u, v: (
+        0.95 - 0.45 * math.hypot(u + 0.35, v + 0.35), "white" if u + v < -0.5 else (
+            "pink" if u + v < 0.5 else "lilac")))
+    for k in range(30):
+        m = _mix(k, 7, 7083)
+        y = (t * (4 + m % 5) + (m >> 8) % 62) % 62
+        c.put((m >> 4) % 160 + math.sin(t + k) * 3, y, "*" if m & 1 else ".", "white")
+
+
+def art_tune(c, t):
+    """A clay flute in a field, and the tune it remembers."""
+    def sky(x, y):
+        f = y / 66.0
+        n = (_rough(x + t * 0.8 + 9 * math.sin(y / 6.0), 101, 17)
+             + _rough(y * 2.2 + 5 * math.sin(x / 13.0), 103, 8)) * 0.5
+        if n > 0.66 and f < 0.75:
+            return 0.45 + n * 0.4, "white" if n > 0.74 else "ice"
+        return 0.16 + 0.16 * f, "royal" if f < 0.3 else "blue" if f < 0.6 else "sky"
+    c.area(0, 0, 160, 66, sky)
+    c.area(0, 50, 160, 70, lambda x, y: (0.4, "teal")
+           if y > 64 - 11 * _rough(x, 105, 19) else None)
+    c.area(0, 64, 160, 100, lambda x, y: (
+        ("|" if (int(x * 3) * 7 + int(y * 2) * 5) % 4 == 0 else "," if int(x * 2 + y) % 3
+         else "'"),
+        ("lime" if math.sin(x * 0.12 + y * .3 - t * 1.5) > 0.55 else "leaf"
+         if (int(x) + int(y)) % 3 else "green")))
+    # An old tree on the hill, and its shade.
+    c.poly([(134, 70), (138, 46), (143, 46), (148, 70)], c.flat("|", "brown"))
+    for dx, dy, r in ((0, 0, 15), (-13, 6, 10), (12, 5, 11), (3, -9, 10)):
+        c.ell(140 + dx, 34 + dy, r, r * 0.8, lambda u, v: (
+            0.5 + 0.3 * _rough((u + v) * 9 + 20, 107, 2) - 0.2 * (u + v > 0.4),
+            "lime" if u + v < -0.7 else "green" if u + v < 0.4 else "pine"))
+
+    def flute(x, y):                            # the body of it: an egg on its side
+        ca, sa = math.cos(-0.16), math.sin(-0.16)
+        u = ((x - 72) * ca - (y - 62) * sa) / 43.0
+        v = ((x - 72) * sa + (y - 62) * ca)
+        half = 19.5 * math.sqrt(max(0.0, 1.0 - u * u)) * (1.0 - 0.28 * u)
+        if abs(u) > 1 or abs(v) > half:
+            return None
+        s = v / max(0.1, half)
+        lit = 0.80 - 0.5 * math.hypot(u + 0.25, s + 0.5)
+        if abs(abs(v) - 5) < 1.2 and u < -0.62 or abs(u + 0.62) < 0.028:
+            return "=", "cream"                 # a band painted round the end
+        return lit + 0.15, "tan" if lit > 0.52 else "amber" if lit > 0.36 else (
+            "rust" if lit > 0.12 else "brown")
+    c.area(24, 34, 122, 92, flute)
+    c.poly([(78, 46), (84, 28), (95, 30), (93, 49)], lambda x, y: (
+        0.75 - (x - 78) * 0.02, "tan" if x < 88 else "rust"))
+    c.ell(89.5, 30, 5.5, 2.4, c.flat("=", "cream"))
+    c.ell(84, 41, 3.4, 2.0, c.flat(" ", "ink"))
+    for k, (hx, hy, r) in enumerate(((48, 57, 2.9), (59, 54, 3.2), (52, 67, 2.6),
+                                     (64, 65, 3.3), (80, 61, 3.4), (93, 60, 2.8),
+                                     (86, 70, 2.6), (99, 68, 2.2))):
+        down = (int(t * 2.0) + k * 3) % 8 < 3   # as it is played
+        c.ell(hx, hy, r, r * 0.9, c.flat("o" if down else " ", "brown"))
+    for k in range(6):                          # and up it goes
+        f = (t * 0.16 + k / 6.0) % 1.0
+        x = 92 + f * 52 + math.sin(f * 9 + k) * 5
+        y = 26 - 22 * f + math.sin(t * 1.5 + k * 2) * 3
+        colour = ("yellow", "white", "lime", "cyan", "hot", "gold")[k]
+        c.put(x, y, "@", colour)
+        for s in range(1, 4):
+            c.put(x + 1.6, y - s * 2.3, "|", colour)
+        c.put(x + 3.2, y - 6.5, "\\", colour)
+
+
+# What is in each wing: (the piece, the game, who made it, the year and what it
+# came out on, and a line or two). Another piece is another row, and the wing is
+# longer by it.
+MUSEUM_WINGS = [
+    ("THE INDEPENDENTS", "amber", [
+        (art_cavern, "A LAMP, A LONG WAY DOWN", "HOLLOW KNIGHT",
+         "Team Cherry, 2017",
+         "A kingdom under a quiet town, and down is the only way to learn its name."),
+        (art_bells, "BELLS ON RED THREAD", "HOLLOW KNIGHT: SILKSONG",
+         "Team Cherry, 2025",
+         "The long climb this time. Seven years of asking when; then one September."),
+        (art_spiral, "EVERYTHING COMING OUT OF IT", "ENTER THE GUNGEON",
+         "Dodge Roll, 2016",
+         "A fortress where all of it is a gun, and dodging is most of the game."),
+        (art_throne, "AN EMPTY THRONE", "REALM OF THE MAD GOD",
+         "Wild Shadow Studios & Spry Fox, 2011",
+         "Eighty strangers, one life each, and Oryx waiting at the end of the realm."),
+        (art_farm, "THE MINUTE THE SUN IS UP", "STARDEW VALLEY",
+         "ConcernedApe, 2016",
+         "One person made all of it. It is still never too late to water the parsnips."),
+    ]),
+    ("THE NINTENDO WING", "red", [
+        (art_dream, "SOMEWHERE SOFT", "KIRBY: NIGHTMARE IN DREAM LAND",
+         "HAL Laboratory, 2002 - Game Boy Advance",
+         "The 1993 NES adventure, made over. Somebody has stolen everyone's sleep."),
+        (art_mirror, "FOUR SKIES AND NOT YOUR FACE", "KIRBY & THE AMAZING MIRROR",
+         "HAL Laboratory & Flagship, 2004 - Game Boy Advance",
+         "One hero cut into four, and a maze that does not mind which way you go."),
+        (art_grass, "SOMETHING IN THE GRASS", "POKEMON: THE FIRST GENERATION",
+         "Game Freak, 1996 - Game Boy",
+         "A hundred and fifty-one of them, in four shades of one colour."),
+        (art_goldsilver, "NOON AND MIDNIGHT", "POKEMON: THE SECOND GENERATION",
+         "Game Freak, 1999 - Game Boy Color",
+         "It knew what time it was. And when you had finished, there was the rest."),
+        (art_landsea, "WHERE THEY MEET", "POKEMON: THE THIRD GENERATION",
+         "Game Freak, 2002 - Game Boy Advance",
+         "Too much land, or too much water, and a long way up something to settle it."),
+        (art_peak, "THE MOUNTAIN TWICE", "POKEMON: THE FOURTH GENERATION",
+         "Game Freak, 2006 - Nintendo DS",
+         "Snow, two screens, and one mountain down the middle of everything."),
+        (art_tune, "THE TUNE IT REMEMBERS", "THE LEGEND OF ZELDA: OCARINA OF TIME",
+         "Nintendo, 1998 - Nintendo 64",
+         "A field you could see the far side of. Six notes, and it is seven years on."),
+    ]),
+]
+
+
+# --- the game museum: the building, and walking round it -------------------------
+MUSEUM_ODDS = 1400      # one ordinary building on a street in this many is one
+MUSEUM_H = 13.0         # and this high, whatever it was going to be
+MUSEUM_NAMES = ["THE LAST SAVE", "PLAYER TWO", "THE CONTINUE", "ONE MORE GO",
+                "THE ATTRACT MODE", "INSERT COIN HALL"]
+MUSEUM_HUD = " the game museum  -  %s "
+MUSEUM_WALK = 5.5       # indoors, units a second; W hurries
+MUSEUM_BODY = 0.7       # how near a wall you get
+MUSEUM_TALL = 5.2       # the ceiling
+MUSEUM_HALL = 11.0      # how wide a wing is
+MUSEUM_BAY = 8.4        # and how much of it a piece has to itself
+MUSEUM_LOBBY = (-10.0, 0.0, 10.0, 15.0)     # x0, z0, x1, z1: the door is at z = 0
+MUSEUM_PIC = (0.95, 4.05)                   # a piece hangs from here to here
+MUSEUM_WIDE = (MUSEUM_PIC[1] - MUSEUM_PIC[0]) * 1.6     # and is this wide
+MUSEUM_NEAR = 7.5       # near enough to a piece for its plaque, and a closer look
+MUSEUM_SIZES = (20, 32, 48, 72, 104, 150)   # across, in characters, on the wall
+MUSEUM_BUDGET = 0.006   # seconds a frame on drawing the pieces on the walls again
+MUSEUM_HEART = [" ## ## ", "#######", "#######", " ##### ", "  ###  ", "   #   "]
+MUSEUM_GUEST = [["  _  ", " (_) ", " /#\\ ", " |#| ", " / \\ "],
+                ["  _  ", " (_) ", " /#\\|", " |#| ", " | | "]]
+MUSEUM_DESK = ["      _       ", "     (o)      ", "    /|#|\\     ",
+               "==============", "|            |", "|____________|"]
+MUSEUM_BENCH = ["__________", "|_|____|_|"]
+_museum_plan = []
+_museum_art = {}        # (piece, width) -> (Canvas, when it was drawn)
+
+
+def museum_plan():
+    """The rooms, worked out from what is in the wings: walls as (axis, where,
+    from, to, colour), what hangs on them, the floors you can stand on, and
+    what is in the way. The first wing is through the arch on your left, the next
+    on your right, and a third would be straight ahead."""
+    if _museum_plan:
+        return _museum_plan[0]
+    x0, z0, x1, z1 = MUSEUM_LOBBY
+    mid, door = (z0 + z1) * 0.5, 2.2
+    walls, hung, floors, stuff, signs = [], [], [MUSEUM_LOBBY], [], []
+    sides = ["w", "e", "n"][:len(MUSEUM_WINGS)]
+    walls += [("z", z0, x0, -1.6, "grey"), ("z", z0, 1.6, x1, "grey")]
+    for s, wall in (("w", ("x", x0, z0, z1)), ("e", ("x", x1, z0, z1)),
+                    ("n", ("z", z1, x0, x1))):
+        c = mid if s in "we" else 0.0
+        axis, at, lo, hi = wall
+        if s in sides:
+            walls += [(axis, at, lo, c - door, "grey"), (axis, at, c + door, hi, "grey")]
+        else:
+            walls.append((axis, at, lo, hi, "grey"))
+    for n, (name, colour, pieces) in enumerate(MUSEUM_WINGS[:3]):
+        s = sides[n]
+        rows = (len(pieces) - 1 + 1) // 2       # down each side, the last at the end
+        long = 2.0 + max(1, rows) * MUSEUM_BAY
+        half = MUSEUM_HALL * 0.5
+        out = {"w": (-1, 0), "e": (1, 0), "n": (0, 1)}[s]
+        sx, sz = {"w": (x0, mid), "e": (x1, mid), "n": (0.0, z1)}[s]
+        ex, ez = sx + out[0] * long, sz + out[1] * long
+        signs.append((name, colour, sx, sz))
+        if out[0]:
+            a, b = min(sx, ex), max(sx, ex)
+            floors += [(a, sz - half, b, sz + half),
+                       (sx - 1.0, sz - door, sx + 1.0, sz + door)]
+            walls += [("z", sz - half, a, b, colour), ("z", sz + half, a, b, colour),
+                      ("x", ex, sz - half, sz + half, colour),
+                      ("x", sx + out[0] * 0.01, sz - half, sz - door, colour),
+                      ("x", sx + out[0] * 0.01, sz + door, sz + half, colour)]
+        else:
+            a, b = min(sz, ez), max(sz, ez)
+            floors += [(sx - half, a, sx + half, b),
+                       (sx - door, sz - 1.0, sx + door, sz + 1.0)]
+            walls += [("x", sx - half, a, b, colour), ("x", sx + half, a, b, colour),
+                      ("z", ez, sx - half, sx + half, colour),
+                      ("z", sz + 0.01, sx - half, sx - door, colour),
+                      ("z", sz + 0.01, sx + door, sx + half, colour)]
+        for k, piece in enumerate(pieces):
+            if k == len(pieces) - 1:
+                px, pz, fx, fz = ex, ez, -out[0], -out[1]       # the end wall
+            else:
+                along = 1.2 + (k // 2 + 0.5) * MUSEUM_BAY
+                side = 1 if k % 2 else -1
+                nx, nz = out[1] * side, out[0] * side
+                px, pz = (sx + out[0] * along + nx * half,
+                          sz + out[1] * along + nz * half)
+                fx, fz = -nx, -nz
+            hung.append({"n": len(hung), "x": px, "z": pz, "fx": fx, "fz": fz,
+                         "wing": name, "colour": colour, "piece": piece})
+        for k in range(max(1, rows)):           # a bench a bay, down the middle
+            along = 1.2 + (k + 0.5) * MUSEUM_BAY
+            stuff.append(("bench", sx + out[0] * along, sz + out[1] * along, 1.1))
+    stuff += [("desk", 0.0, 10.6, 2.0), ("heart", 0.0, 5.4, 1.0)]
+    _museum_plan.append({"walls": walls, "hung": hung, "floors": floors,
+                         "stuff": stuff, "signs": signs})
+    return _museum_plan[0]
+
+
+def museum_open(x, z):
+    """Can you stand here: on a floor, clear of its walls and what is on it."""
+    plan = museum_plan()
+    for x0, z0, x1, z1 in plan["floors"]:
+        thin = x1 - x0 < 2.5 or z1 - z0 < 2.5       # a doorway, through a wall
+        bx = 0.0 if thin and x1 - x0 < 2.5 else MUSEUM_BODY
+        bz = 0.0 if thin and z1 - z0 < 2.5 else MUSEUM_BODY
+        if x0 + bx <= x <= x1 - bx and z0 + bz <= z <= z1 - bz:
+            break
+    else:
+        return abs(x) < 1.0 and -0.2 < z < 1.0      # the way out
+    return all((x - sx) ** 2 + (z - sz) ** 2 > (r + MUSEUM_BODY * 0.4) ** 2
+               for _, sx, sz, r in plan["stuff"])
+
+
+class Museum:
+    """A visit: where you are in it, and the piece you are up close to."""
+
+    def __init__(self, venue, now):
+        self.venue, self.t0, self.clock = venue, now, now
+        self.x, self.z, self.yaw = 0.0, 1.6, 0.0
+        self.fwd = self.side = self.spin = 0.0
+        self.vf = self.vs = 0.0
+        self.f_until = self.s_until = 0.0
+        self.turn, self.turn_t0, self.turn_until = 0, 0.0, 0.0
+        self.close = None       # the piece you have gone up to
+        self.close_at = now
+        self.big = None         # that piece, drawn: (Canvas, when, how long it took)
+
+    def key(self, key, now):
+        """A key. "out" if it takes you back out to the street."""
+        n = len(museum_plan()["hung"])
+        left = key in (curses.KEY_LEFT, ord("a"), ord("A"))
+        right = key in (curses.KEY_RIGHT, ord("d"), ord("D"))
+        back = key in (27, ord("x"), ord("X"))
+        if self.close is not None:
+            if back or key in (10, 13, curses.KEY_ENTER, ord("e"), ord("s"),
+                               curses.KEY_DOWN):
+                self.close = None
+            elif left or right:                 # along to the next
+                self.close = (self.close + (1 if right else -1)) % n
+                self.close_at, self.big = now, None
+                self.stand_at(self.close)
+            return None
+        if back:
+            return "out"
+        hold = now + TURN_FIRST
+        if key in (curses.KEY_UP, ord("w"), ord("W")):
+            self.vf = MUSEUM_WALK * (1.8 if key == ord("W") else 1.0)
+            self.f_until = hold if now > self.f_until else now + KEY_GRACE
+        elif key in (curses.KEY_DOWN, ord("s"), ord("S")):
+            self.vf = -MUSEUM_WALK * (1.4 if key == ord("S") else 0.8)
+            self.f_until = hold if now > self.f_until else now + KEY_GRACE
+        elif key in (ord(","), ord(".")):
+            self.vs = MUSEUM_WALK * (0.8 if key == ord(".") else -0.8)
+            self.s_until = hold if now > self.s_until else now + KEY_GRACE
+        elif left or right:
+            d = 1 if right else -1
+            if d != self.turn or now > self.turn_until:
+                self.turn, self.turn_t0, self.turn_until = d, now, hold
+            else:
+                self.turn_until = max(self.turn_until, now + KEY_GRACE)
+        elif key in (10, 13, curses.KEY_ENTER, ord("e"), ord("E"), ord(" ")):
+            got = self.facing()
+            if got is not None:
+                self.close, self.close_at, self.big = got["n"], now, None
+        return None
+
+    def stand_at(self, n):
+        """In front of a piece, looking at it."""
+        h = museum_plan()["hung"][n]
+        for d in (4.6, 4.2, 3.6, 5.2):
+            x, z = h["x"] + h["fx"] * d, h["z"] + h["fz"] * d
+            if museum_open(x, z):
+                break
+        self.x, self.z, self.yaw = x, z, math.atan2(-h["fx"], -h["fz"])
+
+    def facing(self):
+        """The piece you are stood at, if you are stood at one."""
+        best = None
+        for h in museum_plan()["hung"]:
+            dx, dz = h["x"] - self.x, h["z"] - self.z
+            d = math.hypot(dx, dz)
+            if d > MUSEUM_NEAR or dx * h["fx"] + dz * h["fz"] > 0.0:
+                continue
+            off = abs(_wrap(math.atan2(dx, dz) - self.yaw))
+            if off < 0.5 and (best is None or d + off * 4 < best[0]):
+                best = (d + off * 4, h)
+        return None if best is None else best[1]
+
+    def step(self, now):
+        """A frame of walking about. "out" if you walked out of the door."""
+        dt = max(0.0, min(0.1, now - self.clock))
+        self.clock = now
+        if self.close is not None:
+            self.fwd = self.side = self.spin = 0.0
+            return None
+        want = turn_rate(self.turn, self.turn_t0, self.turn_until, now)
+        if not want:
+            self.turn = 0
+        self.spin += (want - self.spin) * min(1.0, dt * TURN_EASE)
+        self.yaw += self.spin * dt
+        ease = min(1.0, dt * 10.0)
+        self.fwd += ((self.vf if now < self.f_until else 0.0) - self.fwd) * ease
+        self.side += ((self.vs if now < self.s_until else 0.0) - self.side) * ease
+        dx = (math.sin(self.yaw) * self.fwd + math.cos(self.yaw) * self.side) * dt
+        dz = (math.cos(self.yaw) * self.fwd - math.sin(self.yaw) * self.side) * dt
+        if museum_open(self.x + dx, self.z):
+            self.x += dx
+        if museum_open(self.x, self.z + dz):
+            self.z += dz
+        return "out" if self.z < 0.3 and dz < 0.0 else None
+
+    def hint(self):
+        h = self.facing()
+        if self.close is not None:
+            return "a d the next one  -  x steps back"
+        if h is not None:
+            return "enter: a closer look  -  wasd walks  -  x leaves"
+        return "wasd walks, ,. steps  -  x leaves"
+
+
+def museum_exit(mu):
+    """On the pavement in front of the doors, a few steps clear of them."""
+    nx, nz = FACES[mu["door"]]
+    for out in (4.5, 4.0, 5.0, 3.5):
+        p = face_point(mu["i"], mu["j"], mu["door"], mu["u"], out, 0.0)
+        if can_stand(p[0], p[2]):
+            break
+    return p[0], p[2], math.atan2(nx, nz)
+
+
+def museum_canvas(n, width, now, budget):
+    """A piece at one of the sizes it hangs at, drawn again now and then: never
+    two in a frame once there is something to show."""
+    width = min(MUSEUM_SIZES, key=lambda w: abs(w - width))
+    hit = _museum_art.get((n, width))
+    if hit is None or (budget[0] > 0.0 and now - hit[1] > 0.22):
+        if hit is None and budget[0] <= 0.0:
+            for w in MUSEUM_SIZES:              # another size of it, for a moment
+                if (n, w) in _museum_art:
+                    return _museum_art[n, w][0]
+        t = time.perf_counter()
+        c = Canvas(width, max(4, int(width * 0.3125)))
+        museum_plan()["hung"][n]["piece"][0](c, now % 3600.0)
+        _evict(_museum_art, 60)
+        hit = _museum_art[n, width] = (c, now)
+        budget[0] -= time.perf_counter() - t
+    return hit[0]
+
+
+def _museum_sprite(ch, co, v, depth, art, x, z, tall, wide, colour, y0=0.0):
+    """A drawing stood in the room, the size it would be."""
+    top, foot = v.project(x, y0 + tall, z), v.project(x, y0, z)
+    if top is None or foot is None or foot[2] < 0.5:
+        return
+    d = foot[2]
+    ya, yb = int(round(top[1])), int(round(foot[1]))
+    w = wide * v.fx / d
+    xa = int(round(foot[0] - w / 2))
+    cols = max(1, int(round(w)))
+    rows = max(1, yb - ya)
+    for r in range(rows):
+        line = art[min(len(art) - 1, r * len(art) // rows)]
+        first = next((k for k, c in enumerate(line) if c != " "), 0)
+        last = len(line.rstrip())
+        for k in range(cols):
+            sx, sy = xa + k, ya + r
+            if not (0 <= sx < v.width and 0 <= sy < v.height) or depth[sx] < d:
+                continue
+            q = min(len(line) - 1, k * len(line) // cols)
+            if line[q] != " " or first < q < last:
+                ch[sy][sx] = line[q]
+                co[sy][sx] = colour(line[q]) if callable(colour) else colour
+
+
+def _museum_words(ch, co, v, depth, x, y, z, words, colour):
+    """Words put up in the room: in the terminal's own letters, where they are."""
+    pr = v.project(x, y, z)
+    if pr is None or pr[2] > 30.0:
+        return
+    sx, sy = int(round(pr[0])) - len(words) // 2, int(round(pr[1]))
+    for k, c in enumerate(words):
+        if 0 <= sx + k < v.width and 0 <= sy < v.height and (
+                pr[2] < depth[sx + k] + 0.3):
+            ch[sy][sx + k], co[sy][sx + k] = c, colour
+
+
+def render_museum(m, width, height, now):
+    """The galleries: a small raycaster of their own, the pieces on the walls
+    and the light on them. The walls are dark, and the pieces are what is lit."""
+    if m.close is not None:
+        return render_piece(m, width, height, now)
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    if width < 24 or height < 10:
+        _text(ch, co, height // 2, 1, "~ the game museum ~"[:width - 2], GOLD)
+        return ch, co
+    plan = museum_plan()
+    v = View(m.x, m.z, m.yaw, width, height, eye=1.75)
+    v.horizon = int(height * 0.46)
+    x0, z0 = m.x, m.z
+    depth = [1e9] * width
+    budget = [MUSEUM_BUDGET]
+    by_wall = {}
+    for h in plan["hung"]:
+        axis = "x" if h["fx"] else "z"
+        by_wall.setdefault((axis, h["x"] if h["fx"] else h["z"]), []).append(h)
+    low, high = MUSEUM_PIC
+    for sx in range(width):
+        rdx, rdz = v.ray(sx)
+        best, hit = 1e9, None
+        for wall in plan["walls"]:
+            axis, at, lo, hi, _ = wall
+            if axis == "x":
+                if abs(rdx) < 1e-9:
+                    continue
+                t = (at - x0) / rdx
+                if 0.02 < t < best and lo <= z0 + rdz * t <= hi:
+                    best, hit = t, wall
+            else:
+                if abs(rdz) < 1e-9:
+                    continue
+                t = (at - z0) / rdz
+                if 0.02 < t < best and lo <= x0 + rdx * t <= hi:
+                    best, hit = t, wall
+        if hit is None:
+            # The front door, and the night outside it.
+            if rdz < 0.0 and z0 > 0.0:
+                t = -z0 / rdz
+                scale = v.fy / max(0.2, t)
+                top, bot = v.horizon - (3.2 - v.eye) * scale, v.horizon + v.eye * scale
+                for y in range(max(0, int(top)), min(height, int(bot) + 1)):
+                    m_ = _mix(int((x0 + rdx * t) * 9) + 90,
+                              int((y - top) / scale * 5), 7101)
+                    if m_ % 7 == 0:
+                        ch[y][sx], co[y][sx] = ".", NEON[m_ // 7 % len(NEON)][1]
+                if 0 <= int(top) < height:
+                    ch[int(top)][sx], co[int(top)][sx] = "=", BULB
+            continue
+        axis, at, lo, hi, colour = hit
+        depth[sx] = dist = max(0.2, best)
+        u = z0 + rdz * best if axis == "x" else x0 + rdx * best
+        scale = v.fy / dist
+        top = v.horizon - (MUSEUM_TALL - v.eye) * scale
+        bot = v.horizon + v.eye * scale
+        pic = None
+        for h in by_wall.get((axis, at), ()):
+            mid = h["z"] if axis == "x" else h["x"]
+            if abs(u - mid) < MUSEUM_WIDE * 0.5 + 0.28:
+                # From its own side of the wall, and the right way round.
+                pic = h
+                flip = (h["fx"] if axis == "x" else -h["fz"])
+                a = (u - mid) / MUSEUM_WIDE
+                pu = 0.5 + (a if flip > 0 else -a)
+                break
+        edge = abs(u - lo) * v.fx / dist < 1.0 or abs(u - hi) * v.fx / dist < 1.0
+        if pic is not None:
+            c = museum_canvas(pic["n"], MUSEUM_WIDE * v.fx / dist, now, budget)
+        for y in range(max(0, int(top)), min(height - 1, int(bot)) + 1):
+            hh = v.eye + (v.horizon - y) / scale
+            if pic is not None and low - 0.16 < hh < high + 0.16:
+                if 0.0 <= pu < 1.0 and low < hh < high:
+                    cx = min(c.w - 1, int(pu * c.w))
+                    cy = min(c.h - 1, int((high - hh) / (high - low) * c.h))
+                    g = c.ch[cy][cx]
+                    if g != " ":
+                        ch[y][sx], co[y][sx] = g, mus(c.co[cy][cx])
+                elif -0.035 < pu < 1.035:
+                    ch[y][sx], co[y][sx] = "#", GOLD_DIM if dist > 9.0 else GOLD
+                continue
+            if pic is not None and abs(hh - high - 0.42) < 0.5 / scale + 0.03 and (
+                    abs(pu - 0.5) < 0.16):
+                ch[y][sx], co[y][sx] = "=", BULB            # its lamp
+            elif pic is not None and abs(pu - 0.5) < 0.09 and 0.5 < hh < 0.78:
+                ch[y][sx], co[y][sx] = "-", STAR            # and its plaque
+            elif abs(hh - 4.55) < 0.5 / scale:
+                ch[y][sx], co[y][sx] = "-", mus(colour)     # the rail, its wing's colour
+            elif hh < 0.3 and dist < 22.0 and abs(hh - 0.28) < 0.6 / scale:
+                ch[y][sx], co[y][sx] = "_", BARK
+            elif edge:
+                ch[y][sx], co[y][sx] = "|", CURB if dist < 14.0 else CONCRETE
+        for y, g in ((int(top), "_"), (int(bot), "_")):
+            if 0 <= y < height and ch[y][sx] == " ":
+                ch[y][sx], co[y][sx] = g, CURB if dist < 16.0 else CONCRETE
+    museum_floor(ch, co, v, depth, now)
+    museum_things(ch, co, v, depth, plan, now)
+    for name, colour, x, z in plan["signs"]:    # which way is which
+        if math.hypot(x - m.x, z - m.z) > 1.5 and abs(m.x) < MUSEUM_LOBBY[2] + 0.5 and (
+                MUSEUM_LOBBY[1] < m.z < MUSEUM_LOBBY[3] + 0.5):
+            _museum_words(ch, co, v, depth, x, 4.1, z, name, mus(colour))
+    if now - m.t0 < 5.0:
+        _text(ch, co, 2, max(1, width // 2 - 17), "free tonight. please touch nothing.",
+              GOLD_DIM)
+    h = m.facing()
+    if h is not None and math.hypot(h["x"] - m.x, h["z"] - m.z) < MUSEUM_NEAR:
+        _, title, game, made, _ = h["piece"]
+        w = max(len(title), len(game), len(made)) + 4
+        x, y = max(0, width // 2 - w // 2), height - 6
+        if w < width and height > 16:
+            for r in range(5):
+                for k in range(w):
+                    rim = r in (0, 4) or k in (0, w - 1)
+                    ch[y + r][x + k] = ("-" if r in (0, 4) else "|") if rim else " "
+                    co[y + r][x + k] = GOLD_DIM if rim else 0
+            for r, (s, a) in enumerate(((game, FLASH), (title, mus(h["colour"])),
+                                        (made, HUD))):
+                _text(ch, co, y + 1 + r, width // 2 - len(s) // 2, s, a)
+    return ch, co
+
+
+def museum_floor(ch, co, v, depth, now):
+    """Boards, a red runner down each wing and up to the desk, and over it all
+    the ceiling's lamps."""
+    width, height = v.width, v.height
+    rdx0, rdz0 = v.ray(0)
+    rdx1, rdz1 = v.ray(width - 1)
+    mid = (MUSEUM_LOBBY[1] + MUSEUM_LOBBY[3]) * 0.5
+    board = BARK
+    for y in range(v.horizon + 1, height):
+        d = v.eye * v.fy / (y - v.horizon)
+        if d > 30.0:
+            continue
+        wx, wz = v.x + rdx0 * d, v.z + rdz0 * d
+        ax, az = (rdx1 - rdx0) * d / (width - 1), (rdz1 - rdz0) * d / (width - 1)
+        row = ch[y]
+        for sx in range(width):
+            if d < depth[sx] and row[sx] == " ":
+                lobby = abs(wx) < MUSEUM_LOBBY[2]
+                run = abs(wz - mid) if not lobby else abs(wx) if wz < 9.0 else 9.0
+                if run < 1.5:
+                    if int(wx * 2.0 + 800) % 2 == int(wz * 2.0 + 800) % 2:
+                        row[sx], co[y][sx] = ":", EMBER
+                    elif run > 1.3:
+                        row[sx], co[y][sx] = "=", GOLD_DIM
+                elif d < 14.0 and int(wz * 2.2 + 800) % 2 and (
+                        _mix(int(wx * 1.3 + 800), int(wz * 2.2 + 800), 7103) % 4 == 0):
+                    row[sx], co[y][sx] = "-", board
+            wx += ax
+            wz += az
+    for a in range(-9, 10):
+        for b in range(0, 6):
+            px, pz = a * 4.2, 1.4 + b * 3.1
+            pr = v.project(px, MUSEUM_TALL - 0.1, pz)
+            if pr is None or pr[2] > 34.0:
+                continue
+            x, y = int(round(pr[0])), int(round(pr[1]))
+            if 0 <= x < width and 0 <= y < height and pr[2] < depth[x] and (
+                    any(f[0] < px < f[2] and f[1] < pz < f[3]
+                        for f in museum_plan()["floors"])):
+                ch[y][x], co[y][x] = "o" if pr[2] < 12.0 else ".", BULB
+
+
+def museum_things(ch, co, v, depth, plan, now):
+    """What is stood in it: the desk and who is on it, the heart that turns on
+    its stand, the benches, and a few people looking, who move along."""
+    put = []
+    for kind, x, z, _ in plan["stuff"]:
+        put.append((kind, x, z, 0))
+    hung = plan["hung"]
+    for n in range(4):                          # the other visitors
+        m = _mix(n, 7, 7105)
+        each = 26.0 + m % 17
+        t = now + m % 400
+        k = int(t // each)
+        a = hung[_mix(k, n, 7107) % len(hung)]
+        b = hung[_mix(k + 1, n, 7107) % len(hung)]
+        stay = (2.6 if m >> 9 & 1 else -2.6)    # to one side, not in the way
+        if a["wing"] != b["wing"] or t % each < each - 6.0:
+            f = 0.0
+        else:
+            f = (t % each - each + 6.0) / 6.0
+        put.append(("guest", (a["x"] + a["fx"] * 3.4 + abs(a["fz"]) * stay) * (1 - f)
+                    + (b["x"] + b["fx"] * 3.4 + abs(b["fz"]) * stay) * f,
+                    (a["z"] + a["fz"] * 3.4 + abs(a["fx"]) * stay) * (1 - f)
+                    + (b["z"] + b["fz"] * 3.4 + abs(b["fx"]) * stay) * f, (n, f > 0.0)))
+    for kind, x, z, how in sorted(
+            put, key=lambda p: -((p[1] - v.x) ** 2 + (p[2] - v.z) ** 2)):
+        if (x - v.x) ** 2 + (z - v.z) ** 2 < 1.2 ** 2:
+            continue
+        if kind == "desk":
+            _museum_sprite(ch, co, v, depth, MUSEUM_DESK, x, z, 2.1, 4.6,
+                           lambda c: STAR if c in "(o)/#\\" else BARK)
+            _museum_words(ch, co, v, depth, x, 0.62, z, "WELCOME", GOLD)
+        elif kind == "bench":
+            _museum_sprite(ch, co, v, depth, MUSEUM_BENCH, x, z, 0.55, 2.4, BARK)
+        elif kind == "heart":
+            _museum_sprite(ch, co, v, depth, ["====", "|  |", "|__|"], x, z, 1.0, 1.0,
+                           CURB)
+            # Cubes of light, turning: the one game they all have in them.
+            spin, bob = now * 0.9, 1.45 + 0.08 * math.sin(now * 2.0)
+            for r, line in enumerate(MUSEUM_HEART):
+                for k, c in enumerate(line):
+                    if c == " ":
+                        continue
+                    for e in (-0.11, 0.0, 0.11):
+                        u = (k - 3) * 0.17
+                        pr = v.project(x + u * math.cos(spin) + e * math.sin(spin),
+                                       bob + (5 - r) * 0.19,
+                                       z - u * math.sin(spin) + e * math.cos(spin))
+                        if pr is None:
+                            continue
+                        px, py = int(round(pr[0])), int(round(pr[1]))
+                        if (0 <= px < v.width and 0 <= py < v.height
+                                and pr[2] < depth[px]):
+                            ch[py][px] = "#"
+                            co[py][px] = mus("hot" if r < 2 and k < 3 else "red")
+        else:
+            n, moving = how
+            art = MUSEUM_GUEST[int(now * 3.0) % 2 if moving else n % 2]
+            coat = mus(("sea", "rust", "leaf", "plum")[n % 4])
+            _museum_sprite(ch, co, v, depth, art, x, z, 1.75, 0.95,
+                           lambda c, coat=coat: STAR_WARM if c in "(_)" else coat)
+
+
+def render_piece(m, width, height, now):
+    """Up close to one: as big as there is room for, in its frame, and what its
+    plaque says. It is drawn again as often as it can be without a pause."""
+    ch = [[" "] * width for _ in range(height)]
+    co = [[0] * width for _ in range(height)]
+    h = museum_plan()["hung"][m.close]
+    art, title, game, made, line = h["piece"]
+    rows = max(4, height - 10)
+    w = min(width - 6, int(rows / 0.3125))
+    rows = max(3, int(w * 0.3125))
+    if width < 30 or height < 14:
+        rows, w = max(3, height - 4), max(10, width - 2)
+    if (m.big is None or m.big[0].w != w or m.big[0].h != rows
+            or now - m.big[1] > max(0.1, m.big[2] * 4.0)):
+        t = time.perf_counter()
+        c = Canvas(w, rows)
+        art(c, now % 3600.0)
+        m.big = (c, now, time.perf_counter() - t)
+    c = m.big[0]
+    x0, y0 = (width - w) // 2, max(1, (height - rows - 7) // 2)
+    for y in range(rows):
+        for x in range(w):
+            if c.ch[y][x] != " " and 0 <= y0 + y < height and 0 <= x0 + x < width:
+                ch[y0 + y][x0 + x] = c.ch[y][x]
+                co[y0 + y][x0 + x] = mus(c.co[y][x])
+    if width >= 30 and height >= 14:
+        for x in range(x0 - 2, x0 + w + 2):     # the frame
+            for y in (y0 - 1, y0 + rows):
+                if 0 <= y < height and 0 <= x < width:
+                    ch[y][x], co[y][x] = "#=" [(x - x0) % 8 != 0], GOLD
+        for y in range(y0, y0 + rows):
+            for x in (x0 - 2, x0 - 1, x0 + w, x0 + w + 1):
+                if 0 <= x < width:
+                    ch[y][x], co[y][x] = "|", GOLD if x in (x0 - 1, x0 + w) else GOLD_DIM
+    y = y0 + rows + 2
+    lines = [(game, FLASH), (title, mus(h["colour"])), (made, HUD)]
+    words = [""]
+    for word in line.split():
+        if len(words[-1]) + len(word) + 1 > max(12, min(width - 6, 84)):
+            words.append("")
+        words[-1] = (words[-1] + " " + word).strip()
+    lines += [(s, STAR_WARM) for s in words]
+    k = big_scale(width, height)
+    if k > 1 and blocks_width(game, 1) < width - 8 and y + 6 + len(lines) < height:
+        _blocks(ch, co, y, (width - blocks_width(game, 1)) // 2, game, FLASH, 1, 1)
+        y += 6
+        lines = lines[1:]
+    for s, a in lines:
+        if y < height:
+            _text(ch, co, y, max(1, (width - len(s)) // 2), s[:width - 2], a)
+        y += 1
+    return ch, co
+
+
+def draw_museum_column(ch, co, v, sx, dist, b, face, u, r_lo, r_hi, edge, cont, now):
+    """One column of the museum: pale stone, pillars up the front, and between
+    them banners the height of the place, each a pattern in squares that moves a
+    row at a time. The doors in the middle of its front, lit."""
+    scale = v.fy / dist
+    mu = b["museum"]
+    stone = FLASH if v.flash > 0.35 else MOON_DIM
+    roof = int(round(v.horizon - (b["height"] - v.eye) * scale))
+    foot = int(round(v.horizon + v.eye * scale))
+    if edge:
+        for y in range(r_lo, r_hi + 1):
+            ch[y][sx], co[y][sx] = "|", stone
+        return roof, None, foot, None, ()
+    prev_roof, _, prev_foot = cont[:3]
+    facade_line(ch, co, sx, roof, prev_roof, r_lo, r_hi, "=", ROOF)
+    cornice = int(round(v.horizon - (b["height"] - 1.4 - v.eye) * scale))
+    facade_line(ch, co, sx, cornice, None, r_lo, r_hi, "=", stone)
+    bay = int(u / (CELL / 3.0))
+    frac = u / (CELL / 3.0) - bay
+    front = face == mu["door"]
+    for y in range(max(r_lo, roof + 1), min(r_hi, foot - 1) + 1):
+        h = v.eye + (v.horizon - y) / scale
+        if h > b["height"] - 1.4:
+            continue
+        if front and abs(u - CELL * 0.5) < 1.15 and h < 3.0:
+            rim = abs(u - CELL * 0.5) > 1.0 or h > 2.8 or abs(u - CELL * 0.5) < 0.06
+            ch[y][sx], co[y][sx] = ("|" if rim else ":"), BULB if rim else BULB_DIM
+        elif frac < 0.12 or frac > 0.88:
+            ch[y][sx], co[y][sx] = "|", stone
+        elif 0.22 < frac < 0.78 and 3.6 < h < b["height"] - 2.0 and not (
+                front and bay == 1):
+            q, r = int((frac - 0.22) * 9), int(h * 1.6 + now * 0.8)
+            q = min(q, 4 - q)                   # the same both sides, as they are
+            if _mix(q + bay * 7 + mu["seed"], r, 7109) % 5 < 2:
+                ch[y][sx] = "#"
+                co[y][sx] = NEON[(bay + mu["seed"] + face) % len(NEON)][0]
+    facade_line(ch, co, sx, foot, prev_foot, r_lo, r_hi, "_", CURB)
+    return roof, None, foot, None, ()
+
+
+def draw_museum_front(ch, co, v, walls, mu, world, now):
+    """Over the doors: GAME MUSEUM, big when you are near enough, the name of
+    this one under it, and a heart in squares that beats. Screen space."""
+    pr = v.project(world[0], world[1], world[2])
+    if pr is None or pr[2] > 90.0:
+        return
+    sx, sy, dist = int(round(pr[0])), int(round(pr[1])), pr[2]
+    word = "GAME MUSEUM"
+    big = dist < ARCADE_BIG and big_width(word) + 26 <= v.width
+    w = max((big_width(word) if big else len(word)) + 4, len(mu["name"]) + 4)
+    rows = 7 if big else 3
+    x0, y0 = sx - w // 2, sy - rows
+    for r in range(rows + 1):
+        for x in range(x0, x0 + w):
+            rim = r in (0, rows) or x in (x0, x0 + w - 1)
+            on = chase((x + r) * 0.3, now)
+            put_cell(ch, co, v, walls, x, y0 + r, dist,
+                     ("#" if on else "+") if rim else " ",
+                     (FLASH if on else CURB) if rim else 0)
+    tube = NEON[mu["seed"] % len(NEON)][0]
+    if big:
+        for dx, dy, kk in big_cells(word):
+            put_cell(ch, co, v, walls, sx - big_width(word) // 2 + dx, y0 + 1 + dy, dist,
+                     "#", FLASH if kk < 4 else tube)
+    else:
+        for kk, c in enumerate(word):
+            put_cell(ch, co, v, walls, sx - len(word) // 2 + kk, y0 + 1, dist, c,
+                     FLASH if kk < 4 else tube)
+    for kk, c in enumerate(mu["name"]):
+        put_cell(ch, co, v, walls, sx - len(mu["name"]) // 2 + kk, y0 + rows - 1, dist,
+                 c, GOLD)
+    if dist < 60.0:
+        beat = 1.0 if now % 1.2 < 0.16 or 0.3 < now % 1.2 < 0.42 else 0.0
+        for r, line in enumerate(MUSEUM_HEART):
+            for kk, c in enumerate(line):
+                if c != " ":
+                    for o in (0, 1):
+                        put_cell(ch, co, v, walls, sx - 7 + kk * 2 + o, y0 - 7 + r, dist,
+                                 "@" if beat else "#", ROU_RED)
+
+
 # --- away from the keyboard: the show ----------------------------------------
 # Asked for on 2026-11-23: "an AFK option and when on idle it does things" -
 # the city showing itself off while nobody is at the keys. Only the idle timer
@@ -44064,6 +45634,7 @@ def main(stdscr):
     flight = None               # at the gate or in the air: {"phase", ...}
     reading = False             # in the library's reading room
     poke = None                 # in a Pokemon Center: {"door", "heal"}
+    museum = None               # walking round the game museum: a Museum
 
     def elsewhere():
         """Somewhere of its own, off the street: down a manhole, in a cab,
@@ -44077,7 +45648,7 @@ def main(stdscr):
                 or vendor is not None or ride is not None or cruise is not None
                 or boat is not None or fishing is not None or shop is not None
                 or trip is not None or sub is not None or rocket is not None
-                or train is not None)
+                or train is not None or museum is not None)
     ledger = {"jumps": 0}       # what the city has seen you do, for the priest
     jackpot_pull = None         # the pull that last paid 777, so it is had once
     table = Blackjack(wallet)   # and the table on the other side
@@ -44293,7 +45864,7 @@ def main(stdscr):
                 elif key == ord("&"):
                     note = ("the power goes in a few seconds"
                             if skip_to_blackout(now) else "no such night near")
-                elif key == ord("z"):
+                elif key == ord("z") and not hidden_next:
                     note = ("lanterns on the river tonight"
                             if skip_to_lanterns(now) else "no such night near")
                 elif key == ord("n"):
@@ -44353,7 +45924,7 @@ def main(stdscr):
                                               fuel=gate_fuel(int(now * 1000.0))),
                                     "last": now}
                             reading = False
-                            poke = None
+                            poke = museum = None
                             ledger["jumps"] += 1
                             street = True
                             note = "-> " + name
@@ -44642,6 +46213,13 @@ def main(stdscr):
                                 ord("D"): "right", ord("p"): "buy", ord("P"): "buy",
                                 10: "buy", 13: "buy", curses.KEY_ENTER: "buy",
                                 ord(" "): "buy"}.get(key, ""), wallet, now)
+            elif museum is not None and key not in (ord("q"), CHEAT_KEY):
+                if key in (ord("z"), ord("Z")):
+                    _big_screens[0] = not _big_screens[0]     # big screens, off and on
+                elif museum.key(key, now) == "out":
+                    cam_x, cam_z, yaw = museum_exit(museum.venue)
+                    museum = None
+                    note, note_at = "out of the doors and back in the street", now
             elif poke is not None and key not in (ord("q"), CHEAT_KEY):
                 if key in (27, ord("x"), ord("X")):
                     # Back out the way you came in, a few steps clear of the
@@ -45489,6 +47067,10 @@ def main(stdscr):
             trip["snags"] = fishing.snags
             if fishing.snags:
                 trip.update(quip=CAP_SNAG[fishing.snags % len(CAP_SNAG)], quip_at=now)
+        if museum is not None and museum.step(now) == "out":
+            cam_x, cam_z, yaw = museum_exit(museum.venue)
+            museum = None
+            note, note_at = "out of the doors and back in the street", now
         if train is not None:
             train.step(now - train.clock, now)
             if train.pay:
@@ -45549,6 +47131,11 @@ def main(stdscr):
         if venue is not None and venue[0] == "center":
             poke = {"door": venue[1]["door"], "heal": None, "nx": math.sin(yaw),
                     "nz": math.cos(yaw)}
+            fwd = side = spin = 0.0
+            autopilot = False
+            venue = None
+        if venue is not None and venue[0] == "museum":
+            museum = Museum(venue[1], now)
             fwd = side = spin = 0.0
             autopilot = False
             venue = None
@@ -45993,6 +47580,9 @@ def main(stdscr):
         elif street and vendor is not None:
             ch, co = render_vending(vendor, width, height, now)
             hud = VEND_HUD
+        elif street and museum is not None:
+            ch, co = render_museum(museum, width, height, now)
+            hud = MUSEUM_HUD % museum.hint()
         elif street and poke is not None:
             ch, co = render_center(width, height, now, poke,
                                    note if now - note_at < 4.0 else "")

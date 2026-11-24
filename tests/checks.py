@@ -12052,5 +12052,161 @@ check("with the sea off, none of the views of it",
               for st_ in ac.Stills(400.0).order))
 ac.COAST = True
 
+# --- the game museum --------------------------------------------------------------
+pl_ = ac.museum_plan()
+pieces_ = [p_ for _, _, ps_ in ac.MUSEUM_WINGS for p_ in ps_]
+bad_, thin_, dead_, odd_ = [], [], [], set()
+for p_ in pieces_:
+    for w_, h_ in ((20, 6), (33, 9), (72, 22), (150, 46), (241, 75)):
+        c_ = ac.Canvas(w_, h_)
+        p_[0](c_, 7.3)
+        full_ = sum(g_ != " " for r_ in c_.ch for g_ in r_) / float(w_ * h_)
+        if full_ < 0.2:
+            thin_.append((p_[1], w_, round(full_, 2)))
+        for r_, q_ in zip(c_.ch, c_.co):
+            for g_, a_ in zip(r_, q_):
+                if len(g_) != 1 or not 32 <= ord(g_) < 127:
+                    bad_.append((p_[1], g_))
+                if g_ != " " and a_ not in ac.MUS_256:
+                    odd_.add(a_)
+    d_ = [ac.Canvas(72, 22) for _ in range(2)]
+    for c_, t_ in zip(d_, (7.3, 9.1)):
+        p_[0](c_, t_)
+    if d_[0].ch == d_[1].ch and d_[0].co == d_[1].co:
+        dead_.append(p_[1])
+check("every piece in the museum draws at any size, in ASCII and its own colours",
+      len(pieces_) == 12 and not bad_ and not thin_ and not odd_,
+      "%s %s %s" % (bad_[:3], thin_[:5], odd_))
+check("and is alive: something in it moves", not dead_, str(dead_))
+check("every piece hangs somewhere, with its game and who made it on a plaque",
+      len(pl_["hung"]) == len(pieces_)
+      and all(h_["piece"] is p_ for h_, p_ in zip(pl_["hung"], pieces_))
+      and all(len(p_) == 5 and all(p_[1:]) and max(map(len, p_[1:4])) < 60
+              for p_ in pieces_))
+# On foot from the door to every one of them, and nowhere a wall is.
+seen_, todo_ = {(0, 3)}, [(0, 3)]
+while todo_:
+    a_, b_ = todo_.pop()
+    for da_, db_ in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        n_ = (a_ + da_, b_ + db_)
+        if n_ not in seen_ and ac.museum_open(n_[0] * 0.5, n_[1] * 0.5):
+            seen_.add(n_)
+            todo_.append(n_)
+mv_ = ac.Museum({"door": 0}, 50.0)
+lost_, wrong_, mirror_ = [], [], []
+for h_ in pl_["hung"]:
+    mv_.close = None
+    mv_.stand_at(h_["n"])
+    if not any(abs(a_ * 0.5 - mv_.x) < 0.8 and abs(b_ * 0.5 - mv_.z) < 0.8
+               for a_, b_ in seen_):
+        lost_.append(h_["n"])
+    if mv_.facing() is not h_:
+        wrong_.append(h_["n"])
+    # The right way round: what is on the wall against the piece, and against
+    # the piece in a mirror.
+    ac._museum_art.clear()
+    g_ = ac.render_museum(mv_, 160, 50, 60.0)[0]
+    (c_, _), = [v_ for k_, v_ in ac._museum_art.items() if k_[0] == h_["n"]]
+    vw_ = ac.View(mv_.x, mv_.z, mv_.yaw, 160, 50, eye=1.75)
+    vw_.horizon = int(50 * 0.46)
+    same_ = flip_ = 0
+    for y_ in range(2, 40):
+        for x_ in range(160):
+            rx_, rz_ = vw_.ray(x_)
+            d_ = math.hypot(h_["x"] - mv_.x, h_["z"] - mv_.z)
+            u_ = 0.5 + (x_ - vw_.cx) * d_ / vw_.fx / ac.MUSEUM_WIDE
+            q_ = (ac.MUSEUM_PIC[1] - 1.75 - (vw_.horizon - y_) * d_ / vw_.fy) / (
+                ac.MUSEUM_PIC[1] - ac.MUSEUM_PIC[0])
+            if 0.02 < u_ < 0.98 and 0.02 < q_ < 0.98:
+                row_ = c_.ch[int(q_ * c_.h)]
+                same_ += g_[y_][x_] == row_[int(u_ * c_.w)]
+                flip_ += g_[y_][x_] == row_[c_.w - 1 - int(u_ * c_.w)]
+    if same_ <= flip_:
+        mirror_.append((h_["n"], same_, flip_))
+check("every piece can be walked to from the door, and stood in front of",
+      not lost_ and not wrong_, "%s %s" % (lost_, wrong_))
+check("and hangs the right way round on whichever wall it is", not mirror_, str(mirror_))
+check("no two pieces hang over each other, and none over an arch",
+      all(math.hypot(a_["x"] - b_["x"], a_["z"] - b_["z"]) > ac.MUSEUM_WIDE + 0.6
+          or a_["fx"] * b_["fx"] + a_["fz"] * b_["fz"] < 0.5
+          for k_, a_ in enumerate(pl_["hung"]) for b_ in pl_["hung"][:k_]))
+# Walked about in at random: never off the floor, and the door lets you out.
+rw_ = random.Random(5)
+mv_ = ac.Museum({"door": 0}, 50.0)
+off_, t_ = 0, 50.0
+for n_ in range(4000):
+    t_ += 1.0 / 30
+    if n_ % 6 == 0:
+        mv_.key(ord(rw_.choice("wwwwadWs,.")), t_)
+    if mv_.step(t_) == "out":
+        mv_.x, mv_.z = 0.0, 4.0
+    off_ += not ac.museum_open(mv_.x, mv_.z)
+check("you cannot walk through its walls, its desk or its benches", off_ == 0, str(off_))
+mv_ = ac.Museum({"door": 0}, 50.0)
+mv_.yaw, out_, t_ = math.pi, None, 50.0
+while out_ is None and t_ < 54.0:
+    t_ += 1.0 / 30
+    mv_.key(ord("w"), t_)
+    out_ = mv_.step(t_)
+check("walking out of the door leaves, and so does x - but from a piece x steps back",
+      out_ == "out" and ac.Museum({"door": 0}, 50.0).key(ord("x"), 51.0) == "out")
+mv_ = ac.Museum({"door": 0}, 50.0)
+mv_.stand_at(3)
+mv_.key(10, 51.0)
+at_ = mv_.close
+mv_.key(ord("d"), 52.0)
+nx_ = mv_.close
+for w_, h_ in ((20, 6), (40, 12), (80, 24), (160, 45), (300, 90), (451, 133)):
+    ac.render_museum(mv_, w_, h_, 60.0)
+txt_ = "\n".join("".join(r_) for r_ in ac.render_museum(mv_, 80, 24, 60.0)[0])
+x_ = mv_.key(ord("x"), 53.0)
+check("a closer look: enter, along to the next with d, its plaque, x steps back",
+      at_ == 3 and nx_ == 4 and x_ is None and mv_.close is None
+      and pieces_[4][2] in txt_ and "ConcernedApe" in txt_, txt_[-300:])
+for w_, h_ in ((20, 6), (24, 10), (81, 24), (160, 45), (301, 91)):
+    for y_ in range(8):
+        mv_.yaw = y_ * 0.8
+        ac.render_museum(mv_, w_, h_, 60.0 + y_)    # any window, any way you look
+# More can be hung: a longer wing, and a third one.
+wings_ = ac.MUSEUM_WINGS
+ac.MUSEUM_WINGS = [(n_, c_, ps_ * 2) for n_, c_, ps_ in wings_] + [
+    ("A THIRD", "cyan", wings_[0][2][:3])]
+ac._museum_plan.clear()
+big_ = ac.museum_plan()
+ok3_ = []
+mv_ = ac.Museum({"door": 0}, 50.0)
+for h_ in big_["hung"]:
+    mv_.stand_at(h_["n"])
+    ok3_.append(mv_.facing() is h_)
+ac.MUSEUM_WINGS = wings_
+ac._museum_plan.clear()
+ac._museum_art.clear()
+check("twice as many pieces and a third wing are only rows in a list",
+      len(ok3_) == 27 and all(ok3_), str(ok3_))
+# Out in the city: ordinary buildings on streets, found, walked into, and left.
+found_, seen2_ = [], set()
+for q_ in ((0, 0), (900, 900), (-2000, 300), (1500, -2000), (-4000, -3000)):
+    sp_ = ac.find_place(q_[0], q_[1], "museum")
+    x_, z_ = sp_[0], sp_[1]
+    got_ = None
+    for _ in range(60):
+        x_, z_ = x_ + math.sin(sp_[2]) * 0.25, z_ + math.cos(sp_[2]) * 0.25
+        got_ = ac.venue_at(x_, z_)
+        if got_ is not None:
+            break
+    back_ = ac.museum_exit(got_[1]) if got_ and got_[0] == "museum" else None
+    found_.append(back_ is not None and ac.can_stand(back_[0], back_[1])
+                  and ac.venue_at(back_[0], back_[1]) is None)
+    seen2_.add((got_[1]["i"], got_[1]["j"]) if got_ else None)
+check("a cab finds one, its door takes you in, and it lets you out clear of it",
+      all(found_) and len(seen2_) >= 4
+      and ("the game museum", "museum") in ac.TAXI_DESTS,
+      "%s %s" % (found_, seen2_))
+sp_ = ac.find_place(0, 0, "museum")
+sg_ = ["".join("".join(r_) for r_ in ac.render_street(ac.View(
+    sp_[0], sp_[1], sp_[2], 160, 45), 300.0 + k_ * 1.3)[0]) for k_ in range(8)]
+check("and its name is up over the door",      # rain can fall in front of a letter
+      any(n_ in g_ for n_ in ac.MUSEUM_NAMES for g_ in sg_))
+
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

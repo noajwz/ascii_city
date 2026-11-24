@@ -147,6 +147,18 @@ def cases(run, report):
         print("    no show, or the street not back after it")
         af_ok = False
     ok &= af_ok
+    # The game museum: in at the door, up to the first piece and close, x back,
+    # x out to the street.
+    gm_st, gm_out = run([(F1, .5), (b"\x01z", 1.2)] + [(b"w", .25)] * 9
+                        + [(b"", 1.5), (b"x", 1.5), (b"a", .5)], cols=160, rows=45)
+    gm_plain = ANSI.sub(b"", gm_out).decode("utf-8", "replace")
+    gm_ok = report("the game museum: in, and out with x", gm_st, gm_out)
+    if gm_ok and gm_out and not ("the game museum" in gm_plain
+                                 and "free tonight" in gm_plain
+                                 and "back in the street" in gm_plain):
+        print("    not in, or not out")
+        gm_ok = False
+    ok &= gm_ok
     # Still scenes: ) on the panel, any key and the street is back.
     sl_st, sl_out = run([(b"w", .5), (F1, .5), (b")", 4.0), (b"w", 2.0)],
                         cols=160, rows=45)
