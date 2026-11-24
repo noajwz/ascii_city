@@ -112,3 +112,7 @@ its window - see The corner store.
 
 **`i`, fly the rocket** (AND THE REST, 2026-11-16): strapped in on the nearest pad - see Flying
 the rocket. The Moon has no key: it is an easter egg, found by flying.
+
+**`)`, still scenes** (VIEWS, 2026-11-24): the screensaver of fixed views, on trial - see Away from
+the keyboard. Only from the street or the skyline. Stands aside for ctrl-a, whose `)` is the
+highway.

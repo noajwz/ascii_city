@@ -147,6 +147,17 @@ def cases(run, report):
         print("    no show, or the street not back after it")
         af_ok = False
     ok &= af_ok
+    # Still scenes: ) on the panel, any key and the street is back.
+    sl_st, sl_out = run([(b"w", .5), (F1, .5), (b")", 4.0), (b"w", 2.0)],
+                        cols=160, rows=45)
+    sl_ok = report("still scenes: ) on the panel, and back", sl_st, sl_out)
+    sl_cut = sl_out.rfind(b"comes back")
+    sl_after = ANSI.sub(b"", sl_out[sl_cut:]).decode("utf-8", "replace")
+    if sl_ok and sl_out and not (sl_cut > 0 and "facing" in sl_after
+                                 and "ws walk" in sl_after):
+        print("    no still scenes, or the street not back after them")
+        sl_ok = False
+    ok &= sl_ok
     # The fortune teller: " on the panel, a few steps up to her table, her
     # fortune, another for $5, x up and away.
     ft_st, ft_out = run([(F1, .5), (b'"', 1.0)] + IN + [(b"", 6.0), (b"p", 1.0),

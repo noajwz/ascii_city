@@ -1,4 +1,4 @@
-# Away from the keyboard: the show
+# Away from the keyboard: the show, and the still scenes
 
 Asked for on 2026-11-23: "some sort of screensaver ... I want it to have an AFK option and when
 on idle it does things". What the owner settled:
@@ -60,3 +60,32 @@ frame. The blit loop is the `blit()` closure in `main()`, shared by both.
 flight: the order, every cab getting there within 3 units, hitting nothing, on the streets, each
 setting off where the ride before ended; the dissolve; and `close()` in the middle of a cruise.
 `pty_checks.py` plays it with `afk=3`: the show, and `x` brings the street HUD back.
+
+## Still scenes
+
+Asked for on 2026-11-24, to try: "put it in the cheat menu behind a button cause I'm not sure
+wether I want it or not but I want to try [a] screensaver with fixed scenes that stand still with
+cool fixed angles of the city". **On trial**: `)` on the panel, under VIEWS, and nothing else
+starts it - the idle timer still starts the journey. If it is dropped, `STILLS`, `still_view()`,
+`Stills`, the key, the panel row and their checks go; `dissolve()` is the journey's too.
+
+`STILLS` is 22 views, a place, a way to face, a height and a horizon, as plain numbers. The city is a
+function of its coordinates and the same for everyone, so there is nothing to search for, and
+a view that was looked at and liked is that view for good. The horizon is the tilt the camera does
+not have: lower down the screen than the street's .44 looks up (the temple's window, the tower
+of the bridge), higher looks down (from the air). Some stand where you cannot: over the river, on
+the sea, over the roofs. **They were picked by looking at them in colour**: `tools/screenshot.py`'s
+`to_svg()`, several to a sheet, rasterised with `qlmanage -t` (which crops to a square, so pad it).
+In characters alone they cannot be judged. Dropped: the suburbs and under the el (too dark), a
+cinema's door and the diner's (a wall in the face), the plane's window (the journey has it).
+
+The camera never moves and the city does: cars, trains, the wheel, the lighthouse, planes landing,
+the weather, the night there is. `STILL_TIME` (40 s) each, in an order shuffled each time, all of
+them before any comes round; `dissolve()` between, and the name on the HUD. The views of the sea are left out with
+the sea off. It is run by `main()` as `afk`, the way the journey is, so any key comes back to
+exactly where you were; only from the street or the skyline, for the same reason the journey does
+not start in a cab. At 300x90 a frame is 11-30 ms; the first of a view up to 0.4 s (the landmark),
+which is a still of the last one.
+
+A change to the generator can move what a view was of; the check that each is full, and not in a
+wall, would not notice a view gone dull. Look at them again after one.

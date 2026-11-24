@@ -32394,7 +32394,7 @@ def draw_cheats(ch, co, note):
     left = (groups["NIGHTLIFE"] + [("/", "closing time")] + gap
             + [("", "MONEY"), ("+", "+$1000"), ("%", "jackpot next"),
                ("g", "big fish next")] + gap
-            + groups["VIEWS"])
+            + groups["VIEWS"] + [(")", "still scenes")])
     middle = [("", "PARTS OF TOWN")] + [(d["key"], d["name"]) for d in DISTRICTS]
     middle += [names[kind] for kind in CHEAT_ZONES if kind in names]
     middle += gap + groups["TRAVEL"]
@@ -43636,6 +43636,28 @@ def afk_stop(kind, x, z, now):
     return None if cell is None else {"kind": kind, "cell": cell, "of": of}
 
 
+def dissolve(prev, ch, co, wide, u):
+    """The frame before, (ch, co, wide), dissolving into this one, u of the way:
+    cell by cell, in the same order whatever is in them. What is wide now."""
+    pch, pco, pwide = prev
+    height, width = len(ch), len(ch[0])
+    if len(pch) != height or len(pch[0]) != width:
+        return wide                     # the window changed size: a cut
+    cut = int(u * u * (3.0 - 2.0 * u) * 1000)
+    for y in range(height):
+        a, ac_, b, bc_ = ch[y], co[y], pch[y], pco[y]
+        for x in range(width):
+            if _mix(x, y, 1937) % 1000 >= cut:
+                a[x], ac_[x] = b[x], bc_[x]
+    out = set()
+    for y, x in sorted(set(wide) | set(pwide)):
+        # A double-width glyph that came through has the next column too.
+        if y < height and x < width - 1 and is_wide(ch[y][x]):
+            ch[y][x + 1] = " "
+            out.add((y, x))
+    return out
+
+
 class Afk:
     """The show: one ride after another and the cab between them, with cameras
     of its own. `nxt` is the cab ride after this one, worked out a little a
@@ -43835,27 +43857,6 @@ class Afk:
                 sc["z"], moved = sc["z"] + dz, True
         sc["blocked"] = not moved and sc["fwd"] > 0.5
 
-    def fade(self, ch, co, wide, u):
-        """The frame before dissolving into this one, u of the way: cell by
-        cell, in the same order whatever is in them."""
-        pch, pco, pwide = self.prev
-        height, width = len(ch), len(ch[0])
-        if len(pch) != height or len(pch[0]) != width:
-            return wide                 # the window changed size: a cut
-        cut = int(u * u * (3.0 - 2.0 * u) * 1000)
-        for y in range(height):
-            a, ac_, b, bc_ = ch[y], co[y], pch[y], pco[y]
-            for x in range(width):
-                if _mix(x, y, 1937) % 1000 >= cut:
-                    a[x], ac_[x] = b[x], bc_[x]
-        out = set()
-        for y, x in sorted(set(wide) | set(pwide)):
-            # A double-width glyph that came through has the next column too.
-            if y < height and x < width - 1 and is_wide(ch[y][x]):
-                ch[y][x + 1] = " "
-                out.add((y, x))
-        return out
-
     def frame(self, width, height, now):
         """(ch, co, wide, hud) for this frame of the show."""
         self.step(now)
@@ -43906,11 +43907,97 @@ class Afk:
         wide = v.wide
         u = (now - self.fade_at) / AFK_FADE
         if u < 1.0 and self.prev is not None:
-            wide = self.fade(ch, co, wide, u)
+            wide = dissolve(self.prev, ch, co, wide, u)
         else:
             self.prev = None
         self.last = ch, co, wide
         hud = " ~ %s ~ " % say
+        if now - self.t0 < AFK_HINT:
+            hud += "   any key comes back "
+        return ch, co, wide, hud
+
+
+# --- still scenes: a screensaver of fixed views --------------------------------
+# Asked for on 2026-11-24 to try out, "behind a button cause I'm not sure wether I
+# want it or not": "a screensaver with fixed scenes that stand still with cool
+# fixed angles of the city". ) on the panel, and apart from the show: the idle
+# timer does not start it. The camera never moves; the city in front of it does.
+# Every view is a place, a way to face, a height, and how far down the screen
+# the horizon is (lower than the street's .44 and you are looking up), found
+# by looking at them in colour. The city is the same for everyone, so they are
+# numbers, and there is nothing to search for.
+STILL_TIME = 40.0      # how long each stands
+STILLS = [
+    # name, x, z, yaw, eye, horizon
+    ("the big bridge", -4104.5, -115.0, 1.91, 3.0, 0.66),
+    ("the lighthouse", -4080.5, -188.5, 2.30, 3.0, 0.86),
+    ("the Midnight Star, alongside", 1938.5, -668.5, -0.19, 5.0, 0.56),
+    ("the pier, from the sea", 2050.0, 325.0, -1.07, 5.0, 0.66),
+    ("the wheel, from the sand", 1838.9, 440.0, 1.95, 2.0, 0.68),
+    ("the launch pad", 1887.0, 1277.5, 1.67, 4.0, 0.76),
+    ("the coast, from the air", 1650.0, 200.0, 0.90, 70.0, 0.25),
+    ("the university", -2631.0, 556.0, 0.0, 1.7, 0.62),
+    ("the Strip", 127.5, 897.5, 0.0, 2.2, 0.62),
+    ("a lit alley", -22.5, 62.5, 0.0, 1.7, 0.50),
+    ("the temple", 328.0, -12.5, -1.571, 1.7, 0.85),
+    ("the lake in the woods", 1202.5, -1187.5, 1.571, 1.7, 0.44),
+    ("the factories", -1162.5, 607.5, 1.571, 1.7, 0.60),
+    ("the carnival", -1192.5, 121.0, -1.571, 1.7, 0.60),
+    ("the end of the runway", 440.0, 1438.0, -0.12, 1.7, 0.76),
+    ("the landmark, over the roofs", -257.5, 199.7, 0.49, 88.0, 0.35),
+    ("the city, from the air", -2.5, 7.5, 0.60, 130.0, 0.18),
+    ("chinatown", -122.5, 364.0, 0.0, 1.7, 0.58),
+    ("neon", 552.5, -542.5, 0.0, 1.7, 0.64),
+    ("downtown", -1477.5, 1772.5, 0.0, 2.2, 0.56),
+    ("the river", 2.5, 77.5, 3.1416, 1.7, 0.55),
+    ("the el, over the water", -62.5, 12.5, -1.571, 1.7, 0.60),
+]
+
+
+def still_view(still, width, height):
+    """The camera of one of STILLS."""
+    _, x, z, yaw, eye, sky = still
+    v = View(x, z, yaw, width, height, eye=eye,
+             reach=ROOF_REACH if eye >= 10.0 else MAX_VIEW)
+    if eye >= 80.0:
+        v.high_walls = WALL_REACH_PLANE
+    v.horizon = max(2, min(height - 3, int(height * sky)))
+    return v
+
+
+class Stills:
+    """The views one after another, in an order of their own each time, each
+    dissolving into the next. main() runs it the way it runs the show."""
+
+    def __init__(self, now):
+        self.order = [s for s in STILLS if COAST or s[1] < COAST_LAND * CELL - 400.0]
+        random.Random(int(now * 1000.0)).shuffle(self.order)
+        self.n = 0
+        self.t0 = self.at = None        # not begun
+        self.last = self.prev = None    # the last frame drawn, and one fading out
+
+    def close(self):
+        """Nothing was borrowed."""
+
+    def frame(self, width, height, now):
+        """(ch, co, wide, hud) for this frame."""
+        if self.t0 is None:
+            self.t0 = self.at = now
+            self.prev = self.last
+        elif now - self.at >= STILL_TIME:
+            self.n, self.at = (self.n + 1) % len(self.order), now
+            self.prev = self.last
+        still = self.order[self.n]
+        v = still_view(still, width, height)
+        ch, co, _ = render_street(v, now)
+        wide = v.wide
+        u = (now - self.at) / AFK_FADE
+        if u < 1.0 and self.prev is not None:
+            wide = dissolve(self.prev, ch, co, wide, u)
+        else:
+            self.prev = None
+        self.last = ch, co, wide
+        hud = " ~ %s ~ " % still[0]
         if now - self.t0 < AFK_HINT:
             hud += "   any key comes back "
         return ch, co, wide, hud
@@ -44171,6 +44258,15 @@ def main(stdscr):
                     _liner_trips.clear()
                     if not can_stand(cam_x, cam_z):
                         cam_x, cam_z = start_position()
+                elif key == ord(")") and not hidden_next:
+                    # Only from the street or the skyline: what is running on
+                    # the clock would carry on, or jump, while it played.
+                    if (elsewhere() or venue is not None or wheel is not None
+                            or lift is not None or booth is not None):
+                        note = "not from in here - out on the street first"
+                    else:
+                        afk = Stills(now)
+                        cheats, note = False, ""
                 elif key == ord("+"):
                     wallet.give(1000)
                     note = "+$1000"

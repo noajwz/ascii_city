@@ -11987,8 +11987,8 @@ pch_[5][10], pch_[5][11] = "酒", " "
 mix_ = []
 for u_ in (0.0, 0.5, 1.0):
     ch_ = [["b"] * 80 for _ in range(24)]
-    a_.prev = (pch_, [[1] * 80 for _ in range(24)], {(5, 10)})
-    wide_ = a_.fade(ch_, [[2] * 80 for _ in range(24)], set(), u_)
+    wide_ = ac.dissolve((pch_, [[1] * 80 for _ in range(24)], {(5, 10)}),
+                        ch_, [[2] * 80 for _ in range(24)], set(), u_)
     mix_.append((sum(r_.count("b") for r_ in ch_), ch_[5][10], ch_[5][11], wide_))
 check("a dissolve goes from all of the last scene to all of the next",
       mix_[0][0] == 0 and 700 < mix_[1][0] < 1220 and mix_[2][0] == 24 * 80
@@ -12007,6 +12007,50 @@ check("the show's cab has no meter",
           for m_ in (None, 3.0) for g_ in [([[" "] * 80 for _ in range(24)],
                                             [[0] * 80 for _ in range(24)])]
           if ac.draw_cab(g_[0], g_[1], 0.0, 0.0, "", m_, "") is None))
+
+# --- still scenes -----------------------------------------------------------------
+# ) on the panel: fixed views, each standing STILL_TIME, dissolving into the next.
+got_ = {}
+for st_ in ac.STILLS:
+    f_ = [ac.render_street(ac.still_view(st_, 160, 45), t_)[0] for t_ in (300.0, 305.0)]
+    lit_ = sum(c_ != " " for r_ in f_[0] for c_ in r_)
+    diff_ = sum(a_ != b_ for p_, q_ in zip(*f_) for a_, b_ in zip(p_, q_))
+    i_, j_ = int(st_[1] // ac.CELL), int(st_[2] // ac.CELL)
+    in_wall_ = st_[4] < 10.0 and not (ac.is_open(i_, j_) or ac.river_at(i_, j_)
+                                      or ac.coast_kind(i_, j_) is not None)
+    got_[st_[0]] = (lit_, diff_, in_wall_)
+check("every still scene is full of city, none of them inside a wall",
+      len(got_) == len(ac.STILLS) >= 20
+      and all(g_[0] > 700 and not g_[2] for g_ in got_.values()), str(got_))
+check("the city in front of every one of them moves",
+      all(g_[1] > 0 for g_ in got_.values()), str(got_))
+cams_, draw_ = [], ac.render_street
+ac.render_street = lambda v_, t_: (cams_.append(
+    (v_.x, v_.z, v_.yaw, v_.eye, v_.horizon)), draw_(v_, t_))[1]
+s_ = ac.Stills(400.0)
+for n_ in range(16):                    # two scenes, every five seconds
+    s_.frame(80, 24, 400.0 + n_ * ac.STILL_TIME / 8.0)
+ac.render_street = draw_
+check("the camera does not move while a scene stands, and then it is the next",
+      len(set(cams_[:8])) == len(set(cams_[8:])) == 1 and cams_[0] != cams_[8],
+      str(sorted(set(cams_))))
+s_ = ac.Stills(400.0)
+s_.last = ([[" "] * 80 for _ in range(24)], [[0] * 80 for _ in range(24)], set())
+seen_ = []
+for n_ in range(len(ac.STILLS) + 1):
+    hud_ = s_.frame(80, 24, 400.0 + n_ * ac.STILL_TIME)[3]
+    seen_.append(hud_.split("~")[1].strip())
+check("all of them once each before any comes round again",
+      sorted(seen_[:-1]) == sorted(st_[0] for st_ in ac.STILLS)
+      and seen_[-1] == seen_[0], str(seen_))
+for w_, h_ in ((20, 6), (40, 12), (301, 91)):
+    s_.frame(w_, h_, 400.0 + w_)        # any size of window, without error
+ac.COAST = False
+check("with the sea off, none of the views of it",
+      0 < len(ac.Stills(400.0).order) < len(ac.STILLS)
+      and all(st_[1] < ac.COAST_LAND * ac.CELL - 400.0
+              for st_ in ac.Stills(400.0).order))
+ac.COAST = True
 
 print("ALL OK" if ok else "FAILURES")
 sys.exit(0 if ok else 1)

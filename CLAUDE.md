@@ -77,7 +77,7 @@ or change something. Notes cross-reference each other by title ("see The univers
 - `corner-store.md` - The corner store
 - `fortune-teller.md` - The fortune teller
 - `walk-round-town.md` - The walk round town (`j`), and the long walk past everything (`J`)
-- `afk-show.md` - Away from the keyboard: the show (cab, plane, ship and train after two idle minutes)
+- `afk-show.md` - Away from the keyboard: the show (after two idle minutes), and the still scenes
 - `vending-machines.md` - Vending machines
 - `manholes.md` - Manholes, and the tunnels under the streets
 - `temple.md` - The temple, and the word of God
@@ -217,7 +217,8 @@ The walk round town.
 **Away from the keys** (`Afk`): two minutes without a key and the city shows itself off -
 one journey, a taxi to the airport, the flight, a taxi to the harbour, the cruise, a taxi to the
 el, a train - with cameras of its own, so any key puts you back exactly where you were. No
-walking, skyline or metro in it, by request. See Away from the keyboard.
+walking, skyline or metro in it, by request. See Away from the keyboard. **Still scenes**
+(`Stills`, `)` on the panel) is a second screensaver on trial: fixed views that stand still.
 
 **Turning by key** goes through `turn_rate()`: a tap turns at `TURN_TAP` of `TURN`, holding
 ramps to `TURN_HELD` over `TURN_RAMP` s, and `main()` eases `spin` to it (`TURN_EASE`) rather than
